@@ -1,3 +1,6 @@
+//! Accepted package mutations outlive request and progress observers.
+//! RPC teardown cancels and joins them before rollback and service shutdown.
+
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -196,7 +199,9 @@ pub async fn install(
             Some(progress_tracker),
         )
         .await?;
-    tokio::spawn(async move { download.await?.await });
+    ctx.spawn_background(async move {
+        async { download.await?.await }.await.log_err();
+    })?;
 
     Ok(())
 }
@@ -254,7 +259,7 @@ pub async fn sideload(
         progress_tracker.add_phase("Uploading".into(), Some(100)),
     )
     .await?;
-    let done = tokio::spawn({
+    let done = ctx.spawn_background_result({
         let ctx = ctx.clone();
         let progress_tracker = progress_tracker.clone();
         async move {
@@ -305,7 +310,7 @@ pub async fn sideload(
             }
             result
         }
-    });
+    })?;
     let source = progress_until_complete(progress_tracker, async move {
         done.await.with_kind(ErrorKind::Cancelled)?
     });
@@ -631,12 +636,12 @@ pub async fn uninstall(
         .uninstall(ctx.clone(), id.clone(), soft, force)
         .await?;
 
-    tokio::spawn(async move {
+    ctx.spawn_background(async move {
         if let Err(e) = fut.await {
             tracing::error!("Error uninstalling service {id}: {e}");
             tracing::debug!("{e:?}");
         }
-    });
+    })?;
 
     Ok(())
 }

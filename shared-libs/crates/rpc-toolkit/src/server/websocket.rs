@@ -9,10 +9,11 @@ use axum::handler::Handler;
 use axum::response::{IntoResponse, Response};
 use futures::future::BoxFuture;
 use futures::stream::Once;
-use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
+use futures::{Future, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use imbl_value::imbl::Vector;
 use imbl_value::Value;
 use serde::Serialize;
+use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tokio_stream::StreamMap;
 use yajrc::{Id, RpcError};
@@ -23,6 +24,46 @@ use crate::{
     Context, DynMiddleware, HttpServer, RpcRequest, RpcResponse, RpcStream, Server,
     RPCSTREAM_VERSION,
 };
+
+/// Request-extension capability retaining upgrade and connection futures through teardown.
+#[derive(Clone)]
+pub struct WebSocketTaskOwner(Arc<dyn Fn(BoxFuture<'static, ()>) + Send + Sync>);
+impl WebSocketTaskOwner {
+    /// The application must retain and join accepted tasks during teardown.
+    pub fn new(spawn: impl Fn(BoxFuture<'static, ()>) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(spawn))
+    }
+}
+
+/// Registers connection ownership before returning the HTTP upgrade response.
+/// Without an owner, Axum retains its ordinary upgrade-task lifecycle.
+pub fn on_websocket_upgrade<F, Fut>(
+    upgrade: WebSocketUpgrade,
+    owner: Option<WebSocketTaskOwner>,
+    callback: F,
+) -> Response
+where
+    F: FnOnce(WebSocket) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    match owner {
+        Some(owner) => {
+            let (send, receive) = oneshot::channel();
+            (owner.0)(
+                async move {
+                    if let Ok(socket) = receive.await {
+                        callback(socket).await;
+                    }
+                }
+                .boxed(),
+            );
+            upgrade.on_upgrade(move |socket| async move {
+                let _ = send.send(socket);
+            })
+        }
+        None => upgrade.on_upgrade(callback),
+    }
+}
 
 /// Connection-wide limits, independent of application authentication policy.
 #[derive(Clone, Debug)]
@@ -176,12 +217,14 @@ impl<C: Context> WebSocketServer<C> {
                 .map_or(options.max_message_size, |upgrader| {
                     upgrader.max_wire_message_size(options.max_message_size)
                 });
-            let mut response = upgrade
+            let task_owner = parts.extensions.get::<WebSocketTaskOwner>().cloned();
+            let upgrade = upgrade
                 .read_buffer_size(2048)
                 .write_buffer_size(0)
                 .max_message_size(wire_limit.get())
-                .max_frame_size(wire_limit.get())
-                .on_upgrade(move |socket| async move {
+                .max_frame_size(wire_limit.get());
+            let mut response =
+                on_websocket_upgrade(upgrade, task_owner, move |socket| async move {
                     let mut connection_server = server.server;
                     let admitted = match server.upgrader {
                         Some(upgrader) => {
@@ -204,6 +247,7 @@ impl<C: Context> WebSocketServer<C> {
                             socket: Box::new(socket),
                         },
                     };
+                    super::requests::preserve_request_reply();
                     let mut connection = Connection::new(
                         admitted.socket,
                         connection_server,
@@ -213,7 +257,8 @@ impl<C: Context> WebSocketServer<C> {
                     );
                     let _ = connection.run().await;
                 });
-            HttpServer::<C>::finish_http_response(&context, &mut middleware, &mut response).await;
+            HttpServer::<C>::finish_http_response(&context, middleware.iter_mut(), &mut response)
+                .await;
             response
         }
         .boxed()

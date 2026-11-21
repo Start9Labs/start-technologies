@@ -426,12 +426,13 @@ pub(super) async fn prepare_external_source(
     let logicalname = BlockDev::new(device).persistent_path().await?;
     if !path.as_os_str().is_empty() {
         let drive = TmpMountGuard::mount(&BlockDev::new(&logicalname), ReadOnly).await?;
-        let root = drive.path().to_owned();
         let relative = path.clone();
-        let existing =
-            tokio::task::spawn_blocking(move || open_beneath(&root, &relative).map(drop))
-                .await
-                .with_kind(ErrorKind::Unknown)?;
+        let (drive, existing) = crate::util::cleanup::run_filesystem_blocking(move || {
+            let existing = open_beneath(drive.path(), &relative).map(drop);
+            (drive, existing)
+        })
+        .await
+        .with_kind(ErrorKind::Unknown)?;
         drive.unmount().await?;
         if let Err(error) = existing {
             if !error
@@ -442,12 +443,13 @@ pub(super) async fn prepare_external_source(
                 return Err(error);
             }
             let drive = TmpMountGuard::mount(&BlockDev::new(&logicalname), ReadWrite).await?;
-            let root = drive.path().to_owned();
             let relative = path.clone();
-            let result =
-                tokio::task::spawn_blocking(move || create_directory_beneath(&root, &relative))
-                    .await
-                    .with_kind(ErrorKind::Unknown)?;
+            let (drive, result) = crate::util::cleanup::run_filesystem_blocking(move || {
+                let result = create_directory_beneath(drive.path(), &relative);
+                (drive, result)
+            })
+            .await
+            .with_kind(ErrorKind::Unknown)?;
             let unmount = drive.unmount().await;
             result?;
             unmount?;

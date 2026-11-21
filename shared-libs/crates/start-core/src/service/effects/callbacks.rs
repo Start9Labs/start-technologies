@@ -317,16 +317,15 @@ impl ServiceCallbacks {
                                         _ => break,
                                     }
                                 }
-                                let Ok(ctx) = ctx.deref() else {
-                                    return Ok(());
-                                };
-
-                                if let Some(cbs) = ctx.seed.ctx.callbacks.mutate(|this| {
-                                    this.get_ssl_certificate
-                                        .remove(&(hostnames, cert, algorithm))
-                                        .and_then(CallbackHandlers::detach_watcher)
-                                }) {
-                                    cbs.call(vector![]).await?;
+                                let callbacks = ctx.deref().ok().and_then(|ctx| {
+                                    ctx.seed.ctx.callbacks.mutate(|this| {
+                                        this.get_ssl_certificate
+                                            .remove(&(hostnames, cert, algorithm))
+                                            .and_then(CallbackHandlers::detach_watcher)
+                                    })
+                                });
+                                if let Some(callbacks) = callbacks {
+                                    callbacks.call(vector![]).await?;
                                 }
                                 Ok::<_, Error>(())
                             }
@@ -470,10 +469,12 @@ impl CallbackHandler {
         }
     }
     pub async fn call(mut self, args: Vector<Value>) -> Result<(), Error> {
-        if let Some(seed) = self.seed.upgrade() {
-            seed.persistent_container
-                .callback(self.handle.take(), args)
-                .await?;
+        let notification = self
+            .seed
+            .upgrade()
+            .map(|seed| seed.persistent_container.callback(self.handle.take(), args));
+        if let Some(notification) = notification {
+            notification.await?;
         }
         Ok(())
     }

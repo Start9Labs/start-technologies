@@ -31,6 +31,7 @@ use crate::service::rpc::{ExitParams, InitKind};
 use crate::service::{LoadDisposition, Service, ServiceRef, get_data_version};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::status::StatusInfo;
+use crate::util::cleanup::spawn_cleanup;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::{Base32, Der64};
 use crate::util::sync::SyncMutex;
@@ -462,7 +463,7 @@ impl ServiceMap {
         .boxed())
     }
 
-    /// This is ran during the cleanup, so when we are uninstalling the service
+    /// Dropping the returned future schedules rollback, even before its first poll.
     #[instrument(skip_all)]
     pub async fn uninstall(
         &self,
@@ -489,8 +490,10 @@ impl ServiceMap {
             })
             .await
             .result?;
+        let reload_guard =
+            ServiceRefReloadCancelGuard::new(ctx.clone(), id.clone(), "Uninstall", None);
         Ok(async move {
-            ServiceRefReloadCancelGuard::new(ctx.clone(), id.clone(), "Uninstall", None)
+            reload_guard
                 .handle_last(async move {
                     if let Some(service) = guard.take() {
                         let res = service
@@ -567,7 +570,7 @@ pub struct ServiceRefReloadCancelGuard(
 impl Drop for ServiceRefReloadCancelGuard {
     fn drop(&mut self) {
         if let Some(info) = self.0.take() {
-            tokio::spawn(async move { info.reload(None).await.log_err() });
+            let _ = info.spawn(None);
         }
     }
 }
@@ -602,9 +605,9 @@ impl ServiceRefReloadCancelGuard {
             Ok(a) => Ok(a),
             Err(e) => {
                 if let Some(info) = self.0.take() {
-                    let task_e = e.clone_output();
+                    let completed = info.spawn(Some(e.clone_output()));
                     Err(e.with_task(tokio::spawn(async move {
-                        info.reload(Some(task_e)).await.log_err();
+                        let _ = completed.await;
                     })))
                 } else {
                     Err(e)
@@ -628,6 +631,13 @@ struct ServiceRefReloadInfo {
     operation: &'static str,
 }
 impl ServiceRefReloadInfo {
+    fn spawn(self, error: Option<Error>) -> oneshot::Receiver<()> {
+        let tasks = self.ctx.cleanup_tasks.clone();
+        spawn_cleanup(&tasks, async move {
+            self.reload(error).await.log_err();
+        })
+    }
+
     async fn reload(self, error: Option<Error>) -> Result<(), Error> {
         if let Some(error) = error {
             // Rolling back can take minutes, so the notification goes out before it starts.

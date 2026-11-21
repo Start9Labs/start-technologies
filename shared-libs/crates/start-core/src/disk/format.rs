@@ -43,6 +43,7 @@ pub struct FormatDiskParams {
 rpc_toolkit::reflect_ts!(FormatDiskParams);
 
 /// Erases a whole drive into one Btrfs partition and returns that partition's node.
+/// Daemon shutdown joins accepted work independently of its result observer.
 pub async fn format(
     ctx: RpcContext,
     FormatDiskParams { disk, label }: FormatDiskParams,
@@ -61,13 +62,12 @@ pub async fn format(
         ))
     })?;
 
-    // Detached from the request: a dropped connection does not stop it mid-way.
     let disk_updates = ctx.disk_updates.clone();
-    tokio::spawn(async move {
+    ctx.spawn_background_result(async move {
         let result = erase_and_partition(disk, capacity, block_size, label).await;
         disk_updates.send_replace(());
         result
-    })
+    })?
     .await
     .with_kind(ErrorKind::Unknown)?
 }
@@ -85,7 +85,7 @@ async fn erase_and_partition(
         .await?;
     let gpt_disk = disk.clone();
     let name = label.clone();
-    tokio::task::spawn_blocking(move || {
+    crate::util::cleanup::run_filesystem_blocking(move || {
         let device: Device = Box::new(
             std::fs::File::options()
                 .read(true)

@@ -232,14 +232,16 @@ pub fn registry_router(ctx: RegistryContext) -> Router {
     let server = registry_server(ctx.clone());
     let continuation = get({
         let ctx = ctx.clone();
-        move |x::Path(path): x::Path<String>, ws: axum::extract::ws::WebSocketUpgrade| async move {
+        move |x::Path(path): x::Path<String>,
+              owner: Option<axum::Extension<rpc_toolkit::WebSocketTaskOwner>>,
+              ws: axum::extract::ws::WebSocketUpgrade| async move {
             match Guid::from(&path) {
                 None => {
                     tracing::debug!("No Guid Path");
                     bad_request()
                 }
                 Some(guid) => match ctx.rpc_continuations.get_ws_handler(&guid).await {
-                    Some(cont) => cont.on_upgrade(ws, guid),
+                    Some(cont) => cont.on_upgrade(ws, guid, owner.map(|owner| owner.0)),
                     _ => not_found(),
                 },
             }

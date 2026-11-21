@@ -136,7 +136,7 @@ impl PreparedSource {
     }
 
     pub async fn open(guard: TmpMountGuard, subpath: Option<PathBuf>) -> Result<Self, Error> {
-        tokio::task::spawn_blocking(move || {
+        crate::util::cleanup::run_filesystem_blocking(move || {
             let directory =
                 PinnedDirectory::open(guard.path(), subpath.as_deref().unwrap_or(Path::new("")))?;
             Ok(Self {
@@ -153,7 +153,7 @@ impl PreparedSource {
         let Some(subpath) = subpath else {
             return Ok(self);
         };
-        tokio::task::spawn_blocking(move || {
+        crate::util::cleanup::run_filesystem_blocking(move || {
             let directory = PinnedDirectory::open(self.path(), &subpath)?;
             Ok(Self {
                 directory,

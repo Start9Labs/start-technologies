@@ -19,14 +19,16 @@ use crate::auth::LoginContext;
 use crate::backup::os::OsBackup;
 use crate::backup::{BackupReport, ServerBackupReport, volume};
 use crate::context::RpcContext;
+use crate::context::rpc::{BackgroundTasks, spawn_background};
 use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::BackupWrite;
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::prelude::*;
-use crate::progress::{FullProgress, FullProgressTracker, PhaseProgressTrackerHandle};
+use crate::progress::{
+    FullProgress, FullProgressTracker, PhaseProgressTrackerHandle, run_with_progress_sync,
+};
 use crate::shared_volumes::SharedVolumeId;
-use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{AtomicFile, dir_copy};
 use crate::util::serde::IoFormat;
 use crate::version::VersionT;
@@ -56,14 +58,21 @@ rpc_toolkit::ts_export!(BackupParams, namespaces = [""]);
 
 struct BackupStatusGuard {
     db: Option<TypedPatchDb<Database>>,
+    tasks: Arc<BackgroundTasks>,
     target_id: BackupTargetId,
     target_name: String,
     started_at: chrono::DateTime<chrono::Utc>,
 }
 impl BackupStatusGuard {
-    fn new(db: TypedPatchDb<Database>, target_id: BackupTargetId, target_name: String) -> Self {
+    fn new(
+        db: TypedPatchDb<Database>,
+        tasks: Arc<BackgroundTasks>,
+        target_id: BackupTargetId,
+        target_name: String,
+    ) -> Self {
         Self {
             db: Some(db),
+            tasks,
             target_id,
             target_name,
             started_at: chrono::Utc::now(),
@@ -118,7 +127,7 @@ fn clear_backup_progress(db: &mut DatabaseModel) -> Result<(), Error> {
 impl Drop for BackupStatusGuard {
     fn drop(&mut self) {
         if let Some(db) = self.db.take() {
-            tokio::spawn(async move {
+            let _ = spawn_background(&self.tasks, async move {
                 db.mutate(clear_backup_progress).await.result.log_err();
             });
         }
@@ -178,7 +187,12 @@ pub async fn backup_all(
         })
         .await
         .result?;
-    let status_guard = BackupStatusGuard::new(ctx.db.clone(), target_id.clone(), fs.name.clone());
+    let status_guard = BackupStatusGuard::new(
+        ctx.db.clone(),
+        ctx.background_tasks.clone(),
+        target_id.clone(),
+        fs.name.clone(),
+    );
 
     let disk_guard = fs.mount(BackupWrite).await?;
     let disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
@@ -201,7 +215,7 @@ pub async fn backup_all(
         }
     })?;
 
-    let progress_db_sync = NonDetachingJoinHandle::from(tokio::spawn(progress.clone().sync_to_db(
+    let progress_db_sync = progress.sync_to_db(
         ctx.db.clone(),
         |db| {
             db.as_public_mut()
@@ -211,36 +225,42 @@ pub async fn backup_all(
                 .transpose_mut()
         },
         Some(Duration::from_millis(300)),
-    )));
+    );
 
-    tokio::task::spawn(async move {
+    let owner = ctx.clone();
+    owner.spawn_background(async move {
         let _disk_refresh = disk_refresh;
-        let _progress_db_sync = progress_db_sync;
-        let result = async {
-            let mut backup_guard =
-                BackupMountGuard::mount(disk_guard.clone(), &server_id, &old_password_decrypted)
-                    .await?;
-            if old_password.is_some() {
-                backup_guard.change_password(&password)?;
-            }
-            perform_backup(
-                &ctx,
-                progress,
-                init_phase,
-                backup_guard,
-                disk_guard,
-                &package_ids,
-                &shared_volume_ids,
-                &fs,
-            )
-            .await
-        }
+        let result = run_with_progress_sync(
+            async {
+                let mut backup_guard = BackupMountGuard::mount(
+                    disk_guard.clone(),
+                    &server_id,
+                    &old_password_decrypted,
+                )
+                .await?;
+                if old_password.is_some() {
+                    backup_guard.change_password(&password)?;
+                }
+                perform_backup(
+                    &ctx,
+                    progress,
+                    init_phase,
+                    backup_guard,
+                    disk_guard,
+                    &package_ids,
+                    &shared_volume_ids,
+                    &fs,
+                )
+                .await
+            },
+            progress_db_sync,
+        )
         .await;
         super::target::catalog::refresh(&ctx.db, &target_id)
             .await
             .log_err();
         status_guard.handle_result(result).await.log_err();
-    });
+    })?;
     Ok(())
 }
 

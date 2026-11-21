@@ -119,10 +119,11 @@ impl RegisteredSource {
         server_id: String,
     ) -> Result<DirectoryContents, Error> {
         let relative = self.definition.subpath().unwrap_or_default();
-        let directory =
-            tokio::task::spawn_blocking(move || PinnedDirectory::open(&root, &relative))
-                .await
-                .with_kind(ErrorKind::Unknown)??;
+        let directory = crate::util::cleanup::run_filesystem_blocking(move || {
+            PinnedDirectory::open(&root, &relative)
+        })
+        .await
+        .with_kind(ErrorKind::Unknown)??;
         if self.needs_contents() {
             Ok(DirectoryContents::Target(
                 catalog::read_contents(directory.path(), &server_id).await?,

@@ -1,8 +1,7 @@
 //! Bounded-memory streaming writes for large s9pk transfers.
 //!
-//! Replaces O_DIRECT on the download/sideload/install path. Writes stay
-//! buffered — so the file remains seekable for mirror-resume and the
-//! concurrent archive reader keeps hitting the page cache — but writeback is
+//! Buffered writes keep the file seekable for mirror resume and concurrent
+//! archive reads. Writeback is
 //! paced with `sync_file_range` so dirty pages never accumulate into a
 //! multi-gigabyte final `fdatasync` that locks up the box. Paired with
 //! [`preallocate`] and [`set_no_cow`] to keep the file contiguous on CoW
@@ -18,13 +17,16 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 #[cfg(target_os = "linux")]
+use futures::FutureExt;
+#[cfg(target_os = "linux")]
 use tokio::process::Command;
-use tokio::task::JoinHandle;
 
 #[cfg(target_os = "linux")]
 use crate::prelude::*;
 #[cfg(target_os = "linux")]
 use crate::util::Invoke;
+#[cfg(target_os = "linux")]
+use crate::util::cleanup::run_filesystem_blocking;
 
 /// Issue asynchronous writeback once this many bytes have piled up unkicked.
 #[cfg(target_os = "linux")]
@@ -37,13 +39,15 @@ const DIRTY_WINDOW: u64 = 64 << 20;
 ///
 /// Drive it either with [`pace`](Self::pace) after each write, or from an
 /// `AsyncWrite` impl via [`poll_pace`](Self::poll_pace).
-// Fields drive the linux `sync_file_range` path; elsewhere pacing is a no-op.
+/// The caller must keep the source file open while using this pacer.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub struct WritebackPacer {
     fd: RawFd,
     kicked: u64,
     written_back: u64,
-    pending: Option<JoinHandle<std::io::Result<u64>>>,
+    pending: Option<
+        futures::future::BoxFuture<'static, Result<std::io::Result<u64>, tokio::task::JoinError>>,
+    >,
 }
 impl WritebackPacer {
     pub fn new(fd: RawFd) -> Self {
@@ -55,8 +59,7 @@ impl WritebackPacer {
         }
     }
 
-    /// Reset offsets after the file is truncated back to empty (mirror restart).
-    /// Detaching an in-flight flush is harmless: its range no longer has pages.
+    /// Restarts pacing offsets after the file is truncated for a mirror restart.
     pub fn reset(&mut self) {
         self.kicked = 0;
         self.written_back = 0;
@@ -89,30 +92,36 @@ impl WritebackPacer {
         if written.saturating_sub(self.kicked) < KICK_EVERY {
             return Poll::Ready(Ok(()));
         }
-        let fd = self.fd;
+        let fd = match duplicate_descriptor(self.fd) {
+            Ok(fd) => fd,
+            Err(error) => return Poll::Ready(Err(error)),
+        };
         let kick_from = self.kicked;
         let wait_from = self.written_back;
         let wait_to = written.saturating_sub(DIRTY_WINDOW);
         self.kicked = written;
-        self.pending = Some(tokio::task::spawn_blocking(move || {
-            sync_range(
-                fd,
-                kick_from,
-                written - kick_from,
-                libc::SYNC_FILE_RANGE_WRITE,
-            )?;
-            if wait_to > wait_from {
+        self.pending = Some(
+            run_filesystem_blocking(move || {
                 sync_range(
-                    fd,
-                    wait_from,
-                    wait_to - wait_from,
-                    libc::SYNC_FILE_RANGE_WAIT_BEFORE
-                        | libc::SYNC_FILE_RANGE_WRITE
-                        | libc::SYNC_FILE_RANGE_WAIT_AFTER,
+                    fd.as_raw_fd(),
+                    kick_from,
+                    written - kick_from,
+                    libc::SYNC_FILE_RANGE_WRITE,
                 )?;
-            }
-            Ok(wait_to)
-        }));
+                if wait_to > wait_from {
+                    sync_range(
+                        fd.as_raw_fd(),
+                        wait_from,
+                        wait_to - wait_from,
+                        libc::SYNC_FILE_RANGE_WAIT_BEFORE
+                            | libc::SYNC_FILE_RANGE_WRITE
+                            | libc::SYNC_FILE_RANGE_WAIT_AFTER,
+                    )?;
+                }
+                Ok(wait_to)
+            })
+            .boxed(),
+        );
         Poll::Ready(Ok(()))
     }
 
@@ -122,9 +131,25 @@ impl WritebackPacer {
     }
 }
 
+#[cfg(all(test, target_os = "linux"))]
+mod tests;
+
+#[cfg(target_os = "linux")]
+fn duplicate_descriptor(fd: RawFd) -> std::io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+
+    let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+    if duplicate < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        // SAFETY: successful F_DUPFD_CLOEXEC returns a newly owned descriptor.
+        Ok(unsafe { OwnedFd::from_raw_fd(duplicate) })
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn sync_range(fd: RawFd, offset: u64, nbytes: u64, flags: libc::c_uint) -> std::io::Result<()> {
-    // SAFETY: fd is owned by the caller's File for the duration of this call.
+    // SAFETY: the caller retains this descriptor throughout the syscall.
     let ret = unsafe {
         libc::sync_file_range(fd, offset as libc::off64_t, nbytes as libc::off64_t, flags)
     };
@@ -217,9 +242,10 @@ pub async fn preallocate(fd: RawFd, len: u64) -> std::io::Result<()> {
     if len == 0 {
         return Ok(());
     }
-    tokio::task::spawn_blocking(move || {
-        // SAFETY: fd is a valid open file descriptor owned by the caller.
-        let ret = unsafe { libc::fallocate(fd, libc::FALLOC_FL_KEEP_SIZE, 0, len) };
+    let fd = duplicate_descriptor(fd)?;
+    run_filesystem_blocking(move || {
+        // SAFETY: the callback owns this valid descriptor.
+        let ret = unsafe { libc::fallocate(fd.as_raw_fd(), libc::FALLOC_FL_KEEP_SIZE, 0, len) };
         if ret == -1 {
             Err(std::io::Error::last_os_error())
         } else {
@@ -249,11 +275,12 @@ pub async fn release_beyond(fd: RawFd, written: u64, reserved: u64) -> std::io::
     ) else {
         return Ok(());
     };
-    tokio::task::spawn_blocking(move || {
-        // SAFETY: fd is a valid open file descriptor owned by the caller.
+    let fd = duplicate_descriptor(fd)?;
+    run_filesystem_blocking(move || {
+        // SAFETY: the callback owns this valid descriptor.
         let ret = unsafe {
             libc::fallocate(
-                fd,
+                fd.as_raw_fd(),
                 libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
                 offset,
                 len,

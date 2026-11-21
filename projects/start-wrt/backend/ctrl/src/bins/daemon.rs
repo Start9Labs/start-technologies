@@ -40,6 +40,7 @@ async fn ws_continuation_handler(
     axum::extract::Path(guid): axum::extract::Path<String>,
     ws: axum::extract::ws::WebSocketUpgrade,
     Extension(continuations): Extension<Arc<RpcContinuations>>,
+    owner: Option<Extension<rpc_toolkit::WebSocketTaskOwner>>,
 ) -> axum::response::Response {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
@@ -48,7 +49,7 @@ async fn ws_continuation_handler(
         return StatusCode::NOT_FOUND.into_response();
     };
     match continuations.get_ws_handler(&guid).await {
-        Some(handler) => handler.on_upgrade(ws, guid),
+        Some(handler) => handler.on_upgrade(ws, guid, owner.map(|owner| owner.0)),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }

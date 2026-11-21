@@ -5,9 +5,10 @@ use std::time::Duration;
 
 use clap::Parser;
 use color_eyre::eyre::eyre;
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use rust_i18n::t;
 use tokio::signal::unix::signal;
+use tokio::sync::oneshot;
 use tracing::instrument;
 
 use crate::context::config::ServerConfig;
@@ -16,13 +17,69 @@ use crate::context::{DiagnosticContext, InitContext, RpcContext};
 use crate::net::dns::DnsController;
 use crate::net::gateway::WildcardListener;
 use crate::net::static_server::refresher;
-use crate::net::web_server::{Acceptor, WebServer};
+use crate::net::web_server::{Accept, Acceptor, ExtensionVisitor, WebServer};
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::system::launch_metrics_task;
+use crate::util::cleanup::wait_for_filesystem_cleanup;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::append_file;
 use crate::util::logger::LOGGER;
+
+#[cfg(test)]
+mod wait_tests;
+
+/// Joins metrics cancellation before background and service teardown can unmount storage.
+async fn wait_for_shutdown(
+    mut requests: oneshot::Receiver<Option<Shutdown>>,
+    mut metrics_task: NonDetachingJoinHandle<()>,
+) -> Result<Option<Shutdown>, Error> {
+    tokio::select! {
+        shutdown = &mut requests => {
+            let _ = metrics_task.wait_for_abort().await;
+            shutdown
+        }
+        result = &mut metrics_task => {
+            result.map_err(|e| Error::new(
+                eyre!("{}", e).wrap_err(t!("bins.startd.metrics-daemon-panicked").to_string()),
+                ErrorKind::Unknown,
+            ))?;
+            tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown"));
+            requests.await
+        }
+    }
+    .with_kind(ErrorKind::Unknown)
+}
+
+/// Must stop request producers before cleanup while preserving shutdown waits through service teardown.
+async fn teardown_runtime<A, T>(
+    server: &mut WebServer<A>,
+    teardown: impl std::future::Future<Output = T>,
+) -> T
+where
+    A: Accept + Send + Sync + 'static,
+    for<'a> A::Metadata: visit_rs::Visit<ExtensionVisitor<'a>> + Send + Sync + 'static,
+{
+    server.quiesce().await;
+    let result = teardown.await;
+    server.reset_router(refresher()).await;
+    result
+}
+
+/// Runtime RPCs remain unavailable until shutdown handling and fallible startup are ready.
+async fn activate_runtime<A, T>(
+    server: &mut WebServer<A>,
+    startup: impl Future<Output = Result<T, Error>>,
+    router: impl FnOnce() -> axum::Router,
+) -> Result<T, Error>
+where
+    A: Accept + Send + Sync + 'static,
+    for<'a> A::Metadata: visit_rs::Visit<ExtensionVisitor<'a>> + Send + Sync + 'static,
+{
+    let runtime = startup.await?;
+    server.serve_router(router());
+    Ok(runtime)
+}
 
 #[instrument(skip_all)]
 async fn inner_main(
@@ -43,7 +100,6 @@ async fn inner_main(
         };
         tokio::fs::write("/run/startos/initialized", "").await?;
 
-        server.serve_ui_for(ctx.clone());
         LOGGER.set_logfile(None);
         handle.complete();
 
@@ -78,76 +134,65 @@ async fn inner_main(
         init_ctx
             .complete_and_retire(result.as_ref().map(|_| ()).map_err(Error::clone_output))
             .await;
-        let ctx = result?;
-
-        server.serve_ui_for(ctx.clone());
-
-        ctx
+        result?
     };
 
-    let (rpc_ctx, shutdown) = async {
-        crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone())).await?;
+    let requests = rpc_ctx
+        .shutdown_recv
+        .replace(None)
+        .expect("startd owns the shutdown receiver");
+    let result = async {
+        let (sig_handler, metrics_task) = activate_runtime(
+            server,
+            async {
+                crate::hostname::sync_hostname(&rpc_ctx.account.peek(|a| a.hostname.clone()))
+                    .await?;
 
-        let mut shutdown_recv = rpc_ctx.shutdown.subscribe();
+                let shutdown_send = rpc_ctx.shutdown.clone();
+                let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
+                    use tokio::signal::unix::SignalKind;
+                    futures::future::select_all(
+                        [
+                            SignalKind::interrupt(),
+                            SignalKind::quit(),
+                            SignalKind::terminate(),
+                        ]
+                        .iter()
+                        .map(|s| {
+                            async move {
+                                signal(*s)
+                                    .unwrap_or_else(|_| panic!("register {:?} handler", s))
+                                    .recv()
+                                    .await
+                            }
+                            .boxed()
+                        }),
+                    )
+                    .await;
+                    crate::shutdown::send_shutdown(&shutdown_send, None).log_err();
+                }));
 
-        let shutdown_send = rpc_ctx.shutdown.clone();
-        let sig_handler = NonDetachingJoinHandle::from(tokio::spawn(async move {
-            use tokio::signal::unix::SignalKind;
-            futures::future::select_all(
-                [
-                    SignalKind::interrupt(),
-                    SignalKind::quit(),
-                    SignalKind::terminate(),
-                ]
-                .iter()
-                .map(|s| {
-                    async move {
-                        signal(*s)
-                            .unwrap_or_else(|_| panic!("register {:?} handler", s))
-                            .recv()
-                            .await
-                    }
-                    .boxed()
-                }),
-            )
-            .await;
-            shutdown_send
-                .send(None)
-                .map_err(|_| ())
-                .expect("send shutdown signal");
-        }));
+                let metrics_ctx = rpc_ctx.clone();
+                let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async move {
+                    launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db).await
+                }));
 
-        let metrics_ctx = rpc_ctx.clone();
-        let metrics_task = tokio::spawn(async move {
-            launch_metrics_task(&metrics_ctx.metrics_cache, &metrics_ctx.db, || {
-                metrics_ctx.shutdown.subscribe()
-            })
-            .await
-        });
-
-        metrics_task
-            .map_err(|e| {
-                Error::new(
-                    eyre!("{}", e).wrap_err(t!("bins.startd.metrics-daemon-panicked").to_string()),
-                    ErrorKind::Unknown,
-                )
-            })
-            .map_ok(|_| tracing::debug!("{}", t!("bins.startd.metrics-daemon-shutdown")))
-            .await?;
-
-        let shutdown = shutdown_recv
-            .recv()
-            .await
-            .with_kind(crate::ErrorKind::Unknown)?;
-
-        drop(sig_handler);
-
-        Ok::<_, Error>((rpc_ctx, shutdown))
+                Ok((sig_handler, metrics_task))
+            },
+            || crate::net::static_server::ui_router(rpc_ctx.clone()),
+        )
+        .await?;
+        let result = wait_for_shutdown(requests, metrics_task).await;
+        let _ = sig_handler.wait_for_abort().await;
+        result
     }
-    .await?;
-    rpc_ctx.shutdown().await;
-
-    Ok(shutdown)
+    .await;
+    let rejection = rpc_ctx
+        .shutdown
+        .peek(|(_, restarting)| crate::shutdown::in_progress_error(*restarting));
+    server.reject_requests(rejection.into());
+    teardown_runtime(server, rpc_ctx.shutdown()).await;
+    result
 }
 
 pub fn main(args: impl IntoIterator<Item = OsString>) {
@@ -176,11 +221,8 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
             let listener = WildcardListener::new(80)?;
             let dns = Arc::new(DnsController::new(listener.subscribe()));
             let mut server = WebServer::new(Acceptor::new(listener), refresher());
-            match inner_main(&mut server, &dns, &config).await {
-                Ok(a) => {
-                    server.shutdown().await;
-                    Ok(a)
-                }
+            let result = match inner_main(&mut server, &dns, &config).await {
+                Ok(shutdown) => Ok(shutdown),
                 Err(e) => {
                     async {
                         tracing::error!("{e}");
@@ -212,13 +254,14 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
                         let shutdown =
                             shutdown.recv().await.with_kind(crate::ErrorKind::Unknown)?;
 
-                        server.shutdown().await;
-
                         Ok::<_, Error>(Some(shutdown))
                     }
                     .await
                 }
-            }
+            };
+            server.shutdown().await;
+            wait_for_filesystem_cleanup().await;
+            result
         });
         rt.shutdown_timeout(Duration::from_millis(100));
         res
@@ -233,5 +276,233 @@ pub fn main(args: impl IntoIterator<Item = OsString>) {
             drop(e.source);
             std::process::exit(e.kind as i32)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::future::DropSignaling;
+
+    #[tokio::test]
+    async fn startup_power_requests_are_rejected_until_runtime_activation_succeeds() {
+        use rpc_toolkit::{Empty, HandlerArgs, HandlerExt, ParentHandler, Server, from_fn_async};
+
+        use crate::util::sync::{SyncMutex, Watch};
+
+        struct RuntimeContext;
+        impl rpc_toolkit::Context for RuntimeContext {}
+
+        for failed in [false, true] {
+            let dns = Arc::new(DnsController::new(Watch::new(Default::default())));
+            let init = InitContext::init(
+                &ServerConfig::default(),
+                dns,
+                Some(
+                    crate::db::model::private::generate_server_identity_key()
+                        .0
+                        .into(),
+                ),
+            )
+            .await
+            .unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/rpc/v1", listener.local_addr().unwrap());
+            let mut server = WebServer::new(
+                Acceptor::new(listener),
+                crate::net::static_server::ui_router(init),
+            );
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap();
+            let (send, requests) = oneshot::channel();
+            let send = Arc::new(SyncMutex::new((Some(send), false)));
+            let (release, ready) = oneshot::channel();
+            let mut activation = Box::pin(activate_runtime(
+                &mut server,
+                async move {
+                    ready.await.unwrap();
+                    if failed {
+                        Err(Error::new(eyre!("startup failed"), ErrorKind::Filesystem))
+                    } else {
+                        Ok(requests)
+                    }
+                },
+                move || {
+                    let api = ParentHandler::<RuntimeContext>::new().subcommand(
+                        "server",
+                        ParentHandler::<RuntimeContext>::new().subcommand(
+                            "restart",
+                            from_fn_async(move |_: HandlerArgs<RuntimeContext, Empty, Empty>| {
+                                let send = send.clone();
+                                async move {
+                                    crate::shutdown::send_shutdown(
+                                        &send,
+                                        Some(Shutdown {
+                                            disk_guid: None,
+                                            restart: true,
+                                        }),
+                                    )
+                                }
+                            })
+                            .no_cli()
+                            .no_ts(),
+                        ),
+                    );
+                    axum::Router::new().route(
+                        "/rpc/v1",
+                        axum::routing::post(
+                            Server::new(|| async { Ok(RuntimeContext) }, api).for_http(),
+                        ),
+                    )
+                },
+            ));
+            assert!(futures::poll!(&mut activation).is_pending());
+            for method in ["server.shutdown", "server.restart"] {
+                let response: serde_json::Value = client
+                    .post(&url)
+                    .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":method,"params":{}}))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                assert_eq!(response["error"]["code"], -32601, "{response}");
+            }
+            release.send(()).unwrap();
+            let outcome = activation.await;
+            if failed {
+                assert_eq!(outcome.unwrap_err().kind, ErrorKind::Filesystem);
+                let response: serde_json::Value = client.post(&url)
+                    .json(&serde_json::json!({"jsonrpc":"2.0","id":2,"method":"server.restart","params":{}}))
+                    .send().await.unwrap().json().await.unwrap();
+                assert_eq!(response["error"]["code"], -32601, "{response}");
+            } else {
+                let mut requests = outcome.unwrap();
+                assert!(matches!(
+                    requests.try_recv(),
+                    Err(oneshot::error::TryRecvError::Empty)
+                ));
+                let response: serde_json::Value = client.post(&url)
+                    .json(&serde_json::json!({"jsonrpc":"2.0","id":2,"method":"server.restart","params":{}}))
+                    .send().await.unwrap().json().await.unwrap();
+                assert_eq!(
+                    response.get("result"),
+                    Some(&serde_json::Value::Null),
+                    "{response}"
+                );
+                assert!(requests.await.unwrap().unwrap().restart);
+            }
+            server.shutdown().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_does_not_wait_for_metrics_to_observe_the_request() {
+        let (send, requests) = oneshot::channel();
+        send.send(Some(Shutdown {
+            disk_guid: None,
+            restart: true,
+        }))
+        .unwrap();
+        let metrics = DropSignaling::new(std::future::pending::<()>());
+        let mut metrics_stopped = metrics.subscribe();
+        let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(metrics));
+
+        let shutdown = tokio::time::timeout(
+            Duration::from_secs(1),
+            wait_for_shutdown(requests, metrics_task),
+        )
+        .await
+        .expect("shutdown waited for metrics polling")
+        .unwrap()
+        .unwrap();
+
+        assert!(shutdown.restart);
+        assert!(metrics_stopped.wait().now_or_never().is_some());
+    }
+
+    #[tokio::test]
+    async fn runtime_teardown_preserves_waiting_replies_until_services_stop() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::{TcpListener, TcpStream};
+
+        use crate::util::sync::SyncMutex;
+
+        let (services_stopped, mut closed) = tokio::sync::watch::channel(false);
+        let (started, waiting) = oneshot::channel();
+        let reply = DropSignaling::new(async move {
+            started.send(()).unwrap();
+            crate::shutdown::wait_for_services(
+                async move {
+                    closed.wait_for(|closed| *closed).await.unwrap();
+                },
+                true,
+            )
+            .await;
+            http::StatusCode::OK
+        });
+        let mut reply_dropped = reply.subscribe();
+        let reply = Arc::new(SyncMutex::new(Some(reply)));
+        let router = axum::Router::new().route(
+            "/wait",
+            axum::routing::get(move || reply.replace(None).unwrap()),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut server = WebServer::new(Acceptor::new(vec![listener]), router);
+        let mut client = TcpStream::connect(address).await.unwrap();
+        client
+            .write_all(b"GET /wait HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let (stopping, teardown_started) = oneshot::channel();
+        let (release, resume_teardown) = oneshot::channel();
+        let teardown = NonDetachingJoinHandle::from(tokio::spawn(async move {
+            let result = teardown_runtime(&mut server, async move {
+                stopping.send(()).unwrap();
+                resume_teardown.await.unwrap();
+                services_stopped.send_replace(true);
+                Ok::<(), Error>(())
+            })
+            .await;
+            server.shutdown().await;
+            result
+        }));
+        tokio::time::timeout(Duration::from_secs(1), teardown_started)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            reply_dropped.wait().now_or_never().is_none(),
+            "waiting reply was cancelled while service teardown remained pending"
+        );
+
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), teardown)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn metrics_panics_still_fail_the_shutdown_wait() {
+        let (_send, requests) = oneshot::channel();
+        let metrics_task = NonDetachingJoinHandle::from(tokio::spawn(async {
+            panic!("metrics task failed");
+        }));
+
+        let error = wait_for_shutdown(requests, metrics_task).await.unwrap_err();
+
+        assert!(matches!(error.kind, ErrorKind::Unknown));
     }
 }
