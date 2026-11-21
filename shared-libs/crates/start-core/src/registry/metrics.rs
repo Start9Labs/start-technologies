@@ -309,7 +309,8 @@ fn print_counts(heading: &str, entries: &[CountEntry]) -> Result<(), Error> {
     for entry in entries {
         table.add_row(row![&entry.label, entry.count]);
     }
-    print_table(&table)
+    print_table(&table)?;
+    Ok(())
 }
 
 fn print_package_versions(entries: &[PackageVersionCount]) -> Result<(), Error> {
@@ -324,7 +325,8 @@ fn print_package_versions(entries: &[PackageVersionCount]) -> Result<(), Error> 
     for entry in entries {
         table.add_row(row![&entry.pkg_id, &entry.version, entry.count]);
     }
-    print_table(&table)
+    print_table(&table)?;
+    Ok(())
 }
 
 fn print_series(series: &[PeriodCount]) -> Result<(), Error> {
@@ -339,7 +341,8 @@ fn print_series(series: &[PeriodCount]) -> Result<(), Error> {
     for point in series {
         table.add_row(row![&point.period, point.count]);
     }
-    print_table(&table)
+    print_table(&table)?;
+    Ok(())
 }
 
 // --- summary ---
