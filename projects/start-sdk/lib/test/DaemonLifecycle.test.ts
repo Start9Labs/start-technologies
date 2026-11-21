@@ -3,8 +3,10 @@ import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
 import { Daemon } from '../mainFn/Daemon'
 import { EXIT_SUCCESS, HealthDaemon } from '../mainFn/HealthDaemon'
+import { Oneshot } from '../mainFn/Oneshot'
 import { HealthCheckResult } from '../health/checkFns'
 import { cooldownTrigger, onceTrigger, Trigger } from '../trigger'
+import { SubContainer } from '../util/SubContainer'
 import * as T from '@start9labs/start-core/types'
 
 type Manifest = {
@@ -74,7 +76,7 @@ class FakeSub {
 // A JS-only exec that stays running until its CommandController aborts it, so
 // the daemon's run loop parks in `wait()` instead of hot-restarting.
 const blockUntilAborted = {
-  fn: (_sub: unknown, signal: AbortSignal) =>
+  fn: (_sub: SubContainer<Manifest> | null, signal: AbortSignal) =>
     new Promise<null>(resolve => {
       if (signal.aborted) return resolve(null)
       signal.addEventListener('abort', () => resolve(null), { once: true })
@@ -649,5 +651,270 @@ describe('HealthDaemon check loop', () => {
     )
     logged.mockRestore()
     await hd.term()
+  })
+})
+
+describe('Oneshot subcontainer hold lifecycle', () => {
+  const asSubContainer = (sub: FakeSub): SubContainer<Manifest> =>
+    sub as unknown as SubContainer<Manifest>
+
+  it('releases its hold on clean exit without destroying the subcontainer, allowing immediate teardown', async () => {
+    const effects = fakeEffects()
+    const sub = new FakeSub()
+    const oneshot = Oneshot.of<Manifest>()(effects, asSubContainer(sub), {
+      fn: async () => null,
+    })
+    const daemon = Daemon.of<Manifest>()(
+      effects,
+      asSubContainer(sub),
+      blockUntilAborted,
+    )
+
+    const exited = new Promise<boolean>(resolve => oneshot.onExit(resolve))
+    await oneshot.start()
+    expect(await exited).toBe(true)
+    await tick()
+
+    expect(sub.holdCount).toBe(0)
+    expect(sub.destroyed).toBe(false)
+    expect(sub.destroyFsCount).toBe(0)
+
+    await daemon.start()
+    await tick()
+    expect(sub.holdCount).toBe(1)
+
+    await daemon.term()
+    expect(sub.holdCount).toBe(0)
+    expect(sub.destroyed).toBe(true)
+    expect(sub.destroyFsCount).toBe(1)
+  })
+
+  it('triggers pending subcontainer destruction when a oneshot exits cleanly', async () => {
+    const effects = fakeEffects()
+    const sub = new FakeSub()
+    let finishOneshot: () => void = () => {}
+    const oneshot = Oneshot.of<Manifest>()(effects, asSubContainer(sub), {
+      fn: () =>
+        new Promise<null>(resolve => {
+          finishOneshot = () => resolve(null)
+        }),
+    })
+
+    const exited = new Promise<boolean>(resolve => oneshot.onExit(resolve))
+    await oneshot.start()
+    await tick()
+    expect(sub.holdCount).toBe(1)
+
+    await sub.destroy()
+    expect(sub.destroyed).toBe(false)
+    expect(sub.destroyFsCount).toBe(0)
+
+    finishOneshot()
+    expect(await exited).toBe(true)
+    await tick()
+
+    expect(sub.holdCount).toBe(0)
+    expect(sub.destroyed).toBe(true)
+    expect(sub.destroyFsCount).toBe(1)
+  })
+
+  describe('with fake timers', () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    it('retains its hold across failing retries until a clean exit', async () => {
+      const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const effects = fakeEffects()
+        const sub = new FakeSub()
+        let attempts = 0
+        const oneshot = Oneshot.of<Manifest>()(effects, asSubContainer(sub), {
+          fn: async () => {
+            attempts++
+            if (attempts < 3) throw new Error(`attempt ${attempts} failed`)
+            return null
+          },
+        })
+
+        const exits: Array<{ success: boolean; holdCount: number }> = []
+        oneshot.onExit(success => {
+          exits.push({ success, holdCount: sub.holdCount })
+        })
+
+        await oneshot.start()
+        await jest.advanceTimersByTimeAsync(0)
+        expect(exits).toEqual([
+          { success: false, holdCount: 1 },
+          { success: false, holdCount: 1 },
+        ])
+        expect(sub.holdCount).toBe(1)
+
+        await jest.advanceTimersByTimeAsync(1_000)
+        expect(attempts).toBe(3)
+        expect(exits).toEqual([
+          { success: false, holdCount: 1 },
+          { success: false, holdCount: 1 },
+          { success: true, holdCount: 0 },
+        ])
+        expect(sub.holdCount).toBe(0)
+        expect(sub.destroyed).toBe(false)
+      } finally {
+        logged.mockRestore()
+      }
+    })
+
+    it('retains a non-oneshot daemon hold on clean exit across restarts until stopped', async () => {
+      const effects = fakeEffects()
+      const sub = new FakeSub()
+      let runs = 0
+      const daemon = Daemon.of<Manifest>()(effects, asSubContainer(sub), {
+        fn: async () => {
+          runs++
+          return null
+        },
+      })
+
+      const exits: Array<{ success: boolean; holdCount: number }> = []
+      daemon.onExit(success => {
+        exits.push({ success, holdCount: sub.holdCount })
+      })
+
+      await daemon.start()
+      await jest.advanceTimersByTimeAsync(3_000)
+
+      expect(runs).toBeGreaterThanOrEqual(3)
+      expect(exits.length).toBeGreaterThanOrEqual(3)
+      expect(exits.filter(e => !(e.success && e.holdCount === 1))).toEqual([])
+      expect(sub.holdCount).toBe(1)
+
+      await daemon.stop()
+      expect(sub.holdCount).toBe(0)
+      expect(sub.destroyed).toBe(false)
+    })
+  })
+
+  it('re-takes and re-releases the hold across stop/start and destroys once on term()', async () => {
+    const effects = fakeEffects()
+    const sub = new FakeSub()
+    let releaseCalls = 0
+    const origHold = sub.hold.bind(sub)
+    sub.hold = () => {
+      const release = origHold()
+      return async () => {
+        releaseCalls++
+        await release()
+      }
+    }
+
+    let finishRun: () => void = () => {}
+    const oneshot = Oneshot.of<Manifest>()(effects, asSubContainer(sub), {
+      fn: () =>
+        new Promise<null>(resolve => {
+          finishRun = () => resolve(null)
+        }),
+    })
+
+    const firstExit = new Promise<boolean>(resolve => oneshot.onExit(resolve))
+    await oneshot.start()
+    await tick()
+    expect(sub.holdCount).toBe(1)
+
+    finishRun()
+    expect(await firstExit).toBe(true)
+    await tick()
+    expect(sub.holdCount).toBe(0)
+    expect(releaseCalls).toBe(1)
+    expect(sub.destroyed).toBe(false)
+
+    await oneshot.stop()
+    expect(sub.holdCount).toBe(0)
+    expect(releaseCalls).toBe(1)
+    expect(sub.destroyed).toBe(false)
+
+    const secondExit = new Promise<boolean>(resolve => oneshot.onExit(resolve))
+    await oneshot.start()
+    await tick()
+    expect(sub.holdCount).toBe(1)
+
+    finishRun()
+    expect(await secondExit).toBe(true)
+    await tick()
+    expect(sub.holdCount).toBe(0)
+    expect(releaseCalls).toBe(2)
+    expect(sub.destroyed).toBe(false)
+
+    await oneshot.term()
+    expect(sub.holdCount).toBe(0)
+    expect(releaseCalls).toBe(2)
+    expect(sub.destroyed).toBe(true)
+    expect(sub.destroyFsCount).toBe(1)
+
+    await oneshot.term()
+    expect(releaseCalls).toBe(2)
+    expect(sub.destroyFsCount).toBe(1)
+  })
+
+  it('waits for pending async hold release and suppresses onExit on concurrent stop()', async () => {
+    class AsyncReleaseSub extends FakeSub {
+      releaseStarted = false
+      private finishRelease: () => void = () => {}
+      private readonly gate = new Promise<void>(resolve => {
+        this.finishRelease = resolve
+      })
+
+      override hold(): () => Promise<void> {
+        const inner = super.hold()
+        let released = false
+        return async () => {
+          if (released) return
+          released = true
+          this.releaseStarted = true
+          await this.gate
+          await inner()
+        }
+      }
+
+      unblockRelease() {
+        this.finishRelease()
+      }
+    }
+
+    const effects = fakeEffects()
+    const sub = new AsyncReleaseSub()
+    let markFnDone: () => void = () => {}
+    const fnDone = new Promise<void>(resolve => {
+      markFnDone = resolve
+    })
+    const oneshot = Oneshot.of<Manifest>()(effects, asSubContainer(sub), {
+      fn: async () => {
+        markFnDone()
+        return null
+      },
+    })
+    const onExit = jest.fn()
+    oneshot.onExit(onExit)
+
+    await oneshot.start()
+    await fnDone
+    await tick()
+    expect(sub.releaseStarted).toBe(true)
+    expect(sub.holdCount).toBe(1)
+
+    let stopResolved = false
+    const stopping = oneshot.stop().then(() => {
+      stopResolved = true
+    })
+    const lateOnExit = jest.fn()
+    oneshot.onExit(lateOnExit)
+    await tick()
+    expect(stopResolved).toBe(false)
+    expect(sub.holdCount).toBe(1)
+
+    sub.unblockRelease()
+    await stopping
+    expect(stopResolved).toBe(true)
+    expect(sub.holdCount).toBe(0)
+    expect(onExit).not.toHaveBeenCalled()
+    expect(lateOnExit).not.toHaveBeenCalled()
   })
 })
