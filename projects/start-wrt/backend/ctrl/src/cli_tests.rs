@@ -125,7 +125,7 @@ async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() 
     assert_eq!(upgrades.load(Ordering::Relaxed), 0);
     let response = <CliContext as CallRemote<ServerContext>>::call_remote(
         &ctx,
-        "auth.session.list",
+        "auth.key.list",
         Default::default(),
         imbl_value::json!({}),
         rpc_toolkit::Empty {},
@@ -136,7 +136,7 @@ async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() 
     use startos::middleware::auth::signature::SignatureAuthorizationContext;
     server.unenroll([key]).await.unwrap();
     assert_eq!(
-        ctx.call("auth.session.list", imbl_value::json!({}))
+        ctx.call("auth.key.list", imbl_value::json!({}))
             .await
             .unwrap_err()
             .code,
@@ -157,7 +157,7 @@ async fn absent_identity_uses_unenrolled_admission_but_malformed_identity_never_
         startos::ErrorKind::Uninitialized
     );
     assert_eq!(
-        ctx.call("auth.session.list", imbl_value::json!({}))
+        ctx.call("auth.key.list", imbl_value::json!({}))
             .await
             .unwrap_err()
             .code,
@@ -178,7 +178,7 @@ async fn absent_identity_uses_unenrolled_admission_but_malformed_identity_never_
         .is_empty());
     std::fs::write(path, "not a private key").unwrap();
     assert!(ctx
-        .call("auth.session.list", imbl_value::json!({}))
+        .call("auth.key.list", imbl_value::json!({}))
         .await
         .is_err());
     assert_eq!(http_calls.load(Ordering::Relaxed), 0);
@@ -212,7 +212,7 @@ async fn refused_admission_never_retries_plaintext_rpc() {
     let ctx = client(host, temp.path().join("identity.pem"));
     ctx.id_key.set(AnySigningKey::generate().into()).unwrap();
     assert!(ctx
-        .call("auth.session.list", imbl_value::json!({}))
+        .call("auth.key.list", imbl_value::json!({}))
         .await
         .is_err());
     assert_eq!(attempts.load(Ordering::Relaxed), 0);

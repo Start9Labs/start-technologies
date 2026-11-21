@@ -126,7 +126,7 @@ async fn http_retains_firmware_header_and_authentication_errors() {
     let (url, _, _task, _, _) = server().await;
     let response = reqwest::Client::new()
         .post(url.join("rpc/v1").unwrap())
-        .json(&json!({"jsonrpc":"2.0", "id":42, "method":"auth.session.list", "params":{}}))
+        .json(&json!({"jsonrpc":"2.0", "id":42, "method":"auth.key.list", "params":{}}))
         .send()
         .await
         .unwrap();
@@ -218,7 +218,7 @@ async fn startup_passwords_use_actual_admission_and_retain_http_jwe_without_enro
             url.join(RpcSessionUpgrader::PATH).unwrap(),
             "router.lan",
             Default::default(),
-            "auth.session.list",
+            "auth.key.list",
             imbl_value::json!({}),
         )
         .await
@@ -351,7 +351,7 @@ async fn flash_uses_typed_terminals_and_the_same_gate_as_legacy_ndjson() {
 async fn call(socket: &mut EncryptedSocket) -> Value {
     socket
         .send(Message::Text(
-            json!({"jsonrpc":"2.0", "id":42, "method":"auth.session.list", "params":{}})
+            json!({"jsonrpc":"2.0", "id":42, "method":"auth.key.list", "params":{}})
                 .to_string()
                 .into(),
         ))

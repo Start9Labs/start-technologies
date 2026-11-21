@@ -441,7 +441,10 @@ export class Value<
      */
     generate?: RandomString | null
   }) {
-    const validator = asRequiredParser(withPatterns(z.string(), a.patterns), a)
+    const validator = asRequiredParser(
+      withPatterns(z.string().min(1), a.patterns),
+      a,
+    )
     return new Value<AsRequired<string, Required>>(
       async () => ({
         spec: {
@@ -507,10 +510,13 @@ export class Value<
             generate: a.generate ?? null,
             ...a,
           },
-          validator: asRequiredParser(withPatterns(z.string(), a.patterns), a),
+          validator: asRequiredParser(
+            withPatterns(z.string().min(1), a.patterns),
+            a,
+          ),
         }
       },
-      z.string().nullable(),
+      z.string().min(1).nullable(),
     )
   }
   /**
@@ -571,7 +577,10 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(withPatterns(z.string(), a.patterns), a)
+    const validator = asRequiredParser(
+      withPatterns(z.string().min(1), a.patterns),
+      a,
+    )
     return new Value<AsRequired<string, Required>>(async () => {
       const built: ValueSpecTextarea = {
         description: null,
@@ -631,10 +640,13 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(withPatterns(z.string(), a.patterns), a),
+          validator: asRequiredParser(
+            withPatterns(z.string().min(1), a.patterns),
+            a,
+          ),
         }
       },
-      z.string().nullable(),
+      z.string().min(1).nullable(),
     )
   }
   /**
@@ -802,7 +814,7 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(z.string(), a)
+    const validator = asRequiredParser(z.string().min(1), a)
     return new Value<AsRequired<string, Required>>(
       () => ({
         spec: {
@@ -848,10 +860,10 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(z.string(), a),
+          validator: asRequiredParser(z.string().min(1), a),
         }
       },
-      z.string().nullable(),
+      z.string().min(1).nullable(),
     )
   }
   /**
@@ -902,7 +914,7 @@ export class Value<
      */
     immutable?: boolean
   }) {
-    const validator = asRequiredParser(z.string(), a)
+    const validator = asRequiredParser(z.string().min(1), a)
     return new Value<AsRequired<string, Required>>(
       () => ({
         spec: {
@@ -957,10 +969,10 @@ export class Value<
             immutable: false,
             ...a,
           },
-          validator: asRequiredParser(z.string(), a),
+          validator: asRequiredParser(z.string().min(1), a),
         }
       },
-      z.string().nullable(),
+      z.string().min(1).nullable(),
     )
   }
   /**

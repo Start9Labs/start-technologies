@@ -4,16 +4,19 @@
 .SH NAME
 start\-tunnel\-auth\-key\-add \- Add a new authorized key
 .SH SYNOPSIS
-\fBstart\-tunnel auth key add\fR [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> <\fIKEY\fR>
+\fBstart\-tunnel auth key add\fR [\fB\-\-name\fR] [\fB\-\-user\-agent\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIKEY\fR>
 .SH DESCRIPTION
 Add a new authorized key
 .SH OPTIONS
 .TP
+\fB\-\-name\fR \fI<NAME>\fR
+Name shown for the key in the key list
+.TP
+\fB\-\-user\-agent\fR \fI<USER_AGENT>\fR
+User agent shown for the key in the key list
+.TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
 .TP
-<\fINAME\fR>
-
-.TP
 <\fIKEY\fR>
-
+Device key to enroll, in DER64 or PEM form

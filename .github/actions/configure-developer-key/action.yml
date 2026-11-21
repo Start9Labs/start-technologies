@@ -1,0 +1,18 @@
+name: 'Configure Developer Key'
+description: 'Installs the developer signing key used by start-cli on this runner'
+inputs:
+  key:
+    description: 'Developer signing key in PEM format'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Configure developer signing key
+      env:
+        DEV_KEY: ${{ inputs.key }}
+      run: |
+        umask 077
+        mkdir -p ~/.startos
+        install -m 600 /dev/null ~/.startos/developer.key.pem
+        printf '%s' "$DEV_KEY" > ~/.startos/developer.key.pem
+      shell: bash

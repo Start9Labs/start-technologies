@@ -78,6 +78,25 @@ start-cli registry package promote myservice 1.2.0:0 --from alpha --to productio
 
 At least one endpoint is required; an omitted endpoint uses the configured registry selected by `-r` or the `default` profile. `start-cli registry os promote <VERSION>` accepts the same endpoint options for OS versions.
 
+Promoting a private s9pk keeps it private on the destination with the same keystream and readers, adding any reader key the destination lacks with its label. Promote reads the version from the source with `start-cli registry package version export <PACKAGE_ID> <VERSION>`, which returns the version as JSON with the s9pks you can see and their keystreams; admins and the package's publishers also get each s9pk's reader keys. Registering reader keys on the destination requires admin rights there. A private s9pk promoted by someone who cannot see its readers arrives with none, with a warning; add them on the destination afterwards.
+
+### Private packages
+
+A private s9pk is hosted encrypted, and only admins, the package's publishers, and the reader keys it lists can see it or decrypt it. Publishers also see which reader keys each s9pk lists. Admins register reader keys, typically StartOS server keys, with a label:
+
+```sh
+start-cli registry admin reader add <LABEL> <KEY>
+start-cli registry admin reader list
+```
+
+Publish an s9pk as private, listing each reader key:
+
+```sh
+start-cli s9pk publish myservice_1.2.0_x86_64.s9pk --private --reader <KEY>
+```
+
+To host the ciphertext yourself, write it with `start-cli s9pk encrypt <FILE>`, upload the output, then index it with `start-cli registry package add <FILE> --url <URL> --private --reader <KEY>`. Both commands derive the same key from your identity and the archive. `--private` without `--reader` leaves the s9pk visible to admins and publishers only.
+
 ### Removing a package
 
 Remove a specific version:
