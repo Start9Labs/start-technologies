@@ -32,7 +32,8 @@ pub const DEVICE_INFO_HEADER: &str = "X-StartOS-Device-Info";
 const PASSKEY_SIGNATURES_HEADER: &str = "x-start-webauthn-signatures";
 const PASSKEY_SIGNATURES_VALUE: &str = "true";
 
-pub(crate) fn advertise_signature_capabilities(headers: &mut http::HeaderMap) {
+/// Advertises P-256 key and WebAuthn signature support for registry responses.
+pub fn advertise_signature_capabilities(headers: &mut http::HeaderMap) {
     headers.insert(
         PASSKEY_SIGNATURES_HEADER,
         HeaderValue::from_static(PASSKEY_SIGNATURES_VALUE),
@@ -249,8 +250,10 @@ impl WireCompatibility {
         Self::for_client(false, Some(version))
     }
 
+    /// Explicit passkey capability overrides legacy signature profiles.
     pub(crate) fn with_passkey_signatures(mut self) -> Self {
         self.legacy_passkeys = false;
+        self.legacy_signatures = false;
         self
     }
 
@@ -686,11 +689,18 @@ mod tests {
         for (header, startwrt, advertised, passkeys) in [
             (None, false, false, false),
             (None, false, true, true),
+            (None, true, true, true),
             (
                 Some("os.version=0.4.0.2&os.compat=*&os.platform=x86_64"),
                 false,
                 false,
                 false,
+            ),
+            (
+                Some("os.version=0.4.0.2&os.compat=*&os.platform=x86_64"),
+                false,
+                true,
+                true,
             ),
             (
                 Some("os.version=0.4.2.1&os.compat=*&os.platform=x86_64"),
@@ -715,6 +725,12 @@ mod tests {
                 true,
                 false,
                 false,
+            ),
+            (
+                Some("os.version=1.4.0&os.compat=*&os.platform=spacemit,k1-x_muse-pi-pro"),
+                true,
+                true,
+                true,
             ),
         ] {
             let mut middleware = DeviceInfoMiddleware::new();
@@ -750,6 +766,12 @@ mod tests {
                 "{header:?}"
             );
             assert!(signatures.contains_key(&ed));
+            if advertised {
+                assert!(matches!(
+                    signatures.get(&ed),
+                    Some(AnySignature::Ed25519ph(_))
+                ));
+            }
         }
         let mut headers = http::HeaderMap::new();
         advertise_signature_capabilities(&mut headers);

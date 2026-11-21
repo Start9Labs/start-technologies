@@ -138,6 +138,7 @@ async fn mirror() -> (reqwest::Url, NonDetachingJoinHandle<()>) {
                         headers[crate::registry::device_info::DEVICE_INFO_HEADER],
                         "fixture"
                     );
+                    assert_eq!(headers["x-start-webauthn-signatures"], "true");
                     (
                         [(
                             axum::http::header::CONTENT_TYPE,

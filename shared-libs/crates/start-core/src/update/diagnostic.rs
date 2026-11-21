@@ -237,10 +237,12 @@ async fn get_versions(
     target: &VersionRange,
 ) -> Result<BTreeMap<Version, OsVersionInfo>, Error> {
     let registry = crate::registry::package::promote::registry_rpc_url(&registry)?;
+    let mut headers = HeaderMap::new();
+    crate::registry::device_info::advertise_signature_capabilities(&mut headers);
     let res = signature::call_http(
         client.clone(),
         registry,
-        HeaderMap::new(),
+        headers,
         "os.version.get",
         json!({
             "sourceVersion": source,
@@ -296,6 +298,7 @@ mod tests {
             axum::routing::post(
                 |headers: HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| async move {
                     assert!(headers.get(signature::AUTH_SIG_HEADER).is_none());
+                    assert_eq!(headers["x-start-webauthn-signatures"], "true");
                     assert_eq!(body["method"], "os.version.get");
                     assert_eq!(body["params"]["sourceVersion"], "0.4.2");
                     axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":{}}))
