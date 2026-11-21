@@ -836,6 +836,12 @@ export type EffectsRunActionParams = z.output<
 export type EffectsRunActionParamsInput = z.input<
   typeof schemas.EffectsRunActionParams
 >
+export type ExportPackageVersionParams = z.output<
+  typeof schemas.ExportPackageVersionParams
+>
+export type ExportPackageVersionParamsInput = z.input<
+  typeof schemas.ExportPackageVersionParams
+>
 export type ExportRangeServiceInterfaceParams = z.output<
   typeof schemas.ExportRangeServiceInterfaceParams
 >
@@ -1592,6 +1598,18 @@ export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
 export type PackageRelease = z.output<typeof schemas.PackageRelease>
 export type PackageReleaseInput = z.input<typeof schemas.PackageRelease>
+
+/**
+ * A package version as stored, for promotion to another registry.
+ */
+export type PackageVersionExport = z.output<typeof schemas.PackageVersionExport>
+
+/**
+ * A package version as stored, for promotion to another registry.
+ */
+export type PackageVersionExportInput = z.input<
+  typeof schemas.PackageVersionExport
+>
 
 /**
  * A contiguous binding keyed by its internal start port in [`BindingRanges`].

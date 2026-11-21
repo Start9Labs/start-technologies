@@ -276,7 +276,7 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
 }
 
 #[tokio::test]
-async fn private_s9pks_reach_only_their_readers_and_promotion_carries_them() {
+async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_them() {
     use crate::context::config::{ClientConfig, Profiles};
     use crate::developer::write_signing_key;
     use crate::registry::package::add::{cli_add_package_impl, derive_keystream};
@@ -290,10 +290,15 @@ async fn private_s9pks_reach_only_their_readers_and_promotion_carries_them() {
         |seed: u8| Signer::Key(AnySigningKey::Ed25519(SigningKey::from_bytes(&[seed; 32])));
     let uploader_key = SigningKey::from_bytes(&[13; 32]);
     let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
-    let (reader, stranger) = (identity(14), identity(15));
+    let publisher = identity(13);
+    let (reader, stranger, source_admin) = (identity(14), identity(15), identity(20));
     let reader_key = reader.verifying_key().await.unwrap();
     let temp = tempfile::tempdir().unwrap();
-    let source = context(temp.path().join("source"), uploader.clone()).await;
+    let source = context(
+        temp.path().join("source"),
+        source_admin.verifying_key().await.unwrap(),
+    )
+    .await;
     let target = context(temp.path().join("target"), uploader.clone()).await;
     source
         .db
@@ -301,7 +306,20 @@ async fn private_s9pks_reach_only_their_readers_and_promotion_carries_them() {
             db.as_index_mut().as_readers_mut().add_reader(&ReaderKey {
                 label: "Reader".into(),
                 key: reader_key.clone(),
-            })
+            })?;
+            let signer = db.as_index_mut().as_signers_mut().add_signer(&SignerInfo {
+                name: "Publisher".into(),
+                contact: vec![],
+                keys: [uploader.clone()].into(),
+                gpg_exports: Default::default(),
+            })?;
+            db.as_index_mut().as_package_mut().as_packages_mut().insert(
+                &"trust-fixture".parse().unwrap(),
+                &crate::registry::package::index::PackageInfo {
+                    authorized: [(signer, exver::VersionRange::any())].into(),
+                    ..Default::default()
+                },
+            )
         })
         .await
         .result
@@ -379,14 +397,11 @@ async fn private_s9pks_reach_only_their_readers_and_promotion_carries_them() {
     .unwrap();
 
     let version = "1.0.0:0";
-    let assert_visibility = |url: Url| {
-        let (reader, stranger, key) = (reader.clone(), stranger.clone(), key.clone());
+    let assert_visibility = |url: Url, identities: Vec<(Option<Signer>, bool, bool)>| {
+        let (key, reader_key) = (key.clone(), reader_key.clone());
         async move {
-            for (identity, visible) in [
-                (None, false),
-                (Some(&stranger), false),
-                (Some(&reader), true),
-            ] {
+            for (identity, visible, sees_readers) in identities {
+                let identity = identity.as_ref();
                 let package = rpc(
                     &url,
                     "package.get",
@@ -399,18 +414,78 @@ async fn private_s9pks_reach_only_their_readers_and_promotion_carries_them() {
                 if visible {
                     let asset = &best[version]["s9pks"][0][1];
                     assert_eq!(asset["private"], to_value(&key).unwrap());
-                    assert!(asset.get("readers").is_none(), "{asset}");
+                    assert_eq!(asset.get("readers").is_some(), sees_readers, "{asset}");
                 }
                 let index = rpc(&url, "package.index", imbl_value::json!({}), identity).await;
-                assert_eq!(
-                    !index["result"]["packages"]["trust-fixture"].is_null(),
-                    visible,
-                    "{index}"
-                );
+                let indexed = &index["result"]["packages"]["trust-fixture"];
+                assert_eq!(!indexed.is_null(), visible, "{index}");
+                if visible {
+                    assert_eq!(
+                        indexed["versions"][version]["s9pks"][0][1]
+                            .get("readers")
+                            .is_some(),
+                        sees_readers,
+                        "{index}"
+                    );
+                }
+                let export = rpc(
+                    &url,
+                    "package.version.export",
+                    imbl_value::json!({"id": "trust-fixture", "version": version}),
+                    identity,
+                )
+                .await;
+                if sees_readers {
+                    let exported = &export["result"];
+                    let asset = &exported["info"]["s9pks"][0][1];
+                    assert_eq!(asset["private"], to_value(&key).unwrap(), "{export}");
+                    let reader_id = asset["readers"][0].clone();
+                    assert_eq!(
+                        from_value::<AnyVerifyingKey>(
+                            exported["readers"][reader_id.as_str().unwrap()]["key"].clone()
+                        )
+                        .unwrap(),
+                        reader_key,
+                        "{export}"
+                    );
+                    let missing = rpc(
+                        &url,
+                        "package.version.export",
+                        imbl_value::json!({"id": "trust-fixture", "version": "9.9.9:0"}),
+                        identity,
+                    )
+                    .await;
+                    assert_eq!(
+                        missing["error"]["code"],
+                        imbl_value::json!(ErrorKind::NotFound as i32),
+                        "{missing}"
+                    );
+                } else {
+                    let expected = if visible {
+                        ErrorKind::Authorization
+                    } else {
+                        ErrorKind::NotFound
+                    };
+                    assert_eq!(
+                        export["error"]["code"],
+                        imbl_value::json!(expected as i32),
+                        "{export}"
+                    );
+                }
             }
         }
     };
-    assert_visibility(source_url.clone()).await;
+    assert_visibility(
+        source_url.clone(),
+        vec![
+            (None, false, false),
+            (Some(stranger.clone()), false, false),
+            (Some(reader.clone()), true, false),
+            (Some(publisher.clone()), true, true),
+            (Some(source_admin.clone()), true, true),
+        ],
+    )
+    .await;
     let stored = source.db.peek().await.as_index().de().unwrap();
     let asset =
         &stored.package.packages["trust-fixture"].versions[&version.parse().unwrap()].s9pks[0].1;
@@ -441,7 +516,16 @@ async fn private_s9pks_reach_only_their_readers_and_promotion_carries_them() {
         }]
     );
     assert_eq!(asset.readers, promoted.readers.keys().cloned().collect());
-    assert_visibility(target_url.clone()).await;
+    assert_visibility(
+        target_url.clone(),
+        vec![
+            (None, false, false),
+            (Some(stranger.clone()), false, false),
+            (Some(reader.clone()), true, false),
+            (Some(publisher.clone()), true, true),
+        ],
+    )
+    .await;
 
     cli_promote(
         cli.clone(),

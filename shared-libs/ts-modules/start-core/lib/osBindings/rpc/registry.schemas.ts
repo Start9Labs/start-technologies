@@ -1005,6 +1005,14 @@ export const EditVersionParams: z.ZodObject<{
   description:
     'Edits an existing release; omitted fields, assets and authorized signers remain unchanged.',
 })
+export const ExportPackageVersionParams: z.ZodIntersection<
+  z.ZodObject<{ id: typeof PackageId; version: typeof Version }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(object({ id: PackageId, version: Version }), ReaderParams)
+  .meta({
+    id: 'ExportPackageVersionParams',
+  })
 export const GetPackageParams: z.ZodIntersection<
   z.ZodObject<{
     id: z.ZodCodec<
@@ -1839,6 +1847,37 @@ export const PackageInfo: z.ZodObject<{
 }).meta({
   id: 'PackageInfo',
 })
+
+/**
+ * A package version as stored, for promotion to another registry.
+ */
+export const PackageVersionExport: z.ZodObject<{
+  /**
+   * Unprojected: every s9pk with its keystream and reader ids.
+   */
+  info: typeof PackageVersionInfo
+  /**
+   * The reader directory entries the s9pks list.
+   */
+  readers: z.ZodRecord<z.ZodString, typeof ReaderKey>
+}> = /* @__PURE__ */ object({
+  /**
+   * Unprojected: every s9pk with its keystream and reader ids.
+   */
+  info: PackageVersionInfo.meta({
+    description: 'Unprojected: every s9pk with its keystream and reader ids.',
+  }),
+  /**
+   * The reader directory entries the s9pks list.
+   */
+  readers: z.record(z.string(), ReaderKey).meta({
+    description: 'The reader directory entries the s9pks list.',
+  }),
+}).meta({
+  id: 'PackageVersionExport',
+  description:
+    'A package version as stored, for promotion to another registry.',
+})
 export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
   /* @__PURE__ */ object({ id: z.int(), patch: DiffPatch }).meta({
     id: 'Revision',
@@ -2594,6 +2633,28 @@ export const Api = {
             remove: {
               _PARAMS: /* @__PURE__ */ RemovePackageSignerParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
+        version: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            export: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                ExportPackageVersionParams,
+              ),
+              _RETURN: /* @__PURE__ */ PackageVersionExport,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },

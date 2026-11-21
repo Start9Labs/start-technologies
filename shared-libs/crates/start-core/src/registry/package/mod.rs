@@ -13,6 +13,7 @@ pub mod index;
 pub mod promote;
 pub mod sign;
 pub mod signer;
+pub mod version;
 
 pub fn package_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -108,6 +109,10 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "signer",
             signer::signer_api::<C>().with_about("about.add-remove-list-package-signers"),
+        )
+        .subcommand(
+            "version",
+            version::version_api::<C>().with_about("about.commands-package-version"),
         )
         .subcommand(
             "get",

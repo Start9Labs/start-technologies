@@ -3090,6 +3090,14 @@ export const EffectsRunActionParams: z.ZodObject<{
 }).meta({
   id: 'EffectsRunActionParams',
 })
+export const ExportPackageVersionParams: z.ZodIntersection<
+  z.ZodObject<{ id: typeof PackageId; version: typeof Version }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(object({ id: PackageId, version: Version }), ReaderParams)
+  .meta({
+    id: 'ExportPackageVersionParams',
+  })
 export const ExportRangeServiceInterfaceParams: z.ZodObject<{
   hostId: typeof HostId
   internalStartPort: z.ZodInt
@@ -7304,6 +7312,37 @@ export const PackageRelease: z.ZodIntersection<
   .meta({
     id: 'PackageRelease',
   })
+
+/**
+ * A package version as stored, for promotion to another registry.
+ */
+export const PackageVersionExport: z.ZodObject<{
+  /**
+   * Unprojected: every s9pk with its keystream and reader ids.
+   */
+  info: typeof PackageVersionInfo
+  /**
+   * The reader directory entries the s9pks list.
+   */
+  readers: z.ZodRecord<z.ZodString, typeof ReaderKey>
+}> = /* @__PURE__ */ object({
+  /**
+   * Unprojected: every s9pk with its keystream and reader ids.
+   */
+  info: PackageVersionInfo.meta({
+    description: 'Unprojected: every s9pk with its keystream and reader ids.',
+  }),
+  /**
+   * The reader directory entries the s9pks list.
+   */
+  readers: z.record(z.string(), ReaderKey).meta({
+    description: 'The reader directory entries the s9pks list.',
+  }),
+}).meta({
+  id: 'PackageVersionExport',
+  description:
+    'A package version as stored, for promotion to another registry.',
+})
 
 /**
  * A contiguous binding keyed by its internal start port in [`BindingRanges`].

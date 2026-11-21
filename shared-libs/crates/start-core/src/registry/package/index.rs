@@ -133,7 +133,8 @@ impl S9pkAccess {
 }
 
 impl Model<PackageVersionInfo> {
-    /// Drops the s9pks the requester cannot see, and reader lists for non-admins.
+    /// Drops the s9pks the requester cannot see, and reader lists for everyone but admins and
+    /// publishers.
     ///
     /// False when the version had s9pks and none remain.
     fn retain_visible(&mut self, reader: Option<&Reader>, publisher: bool) -> Result<bool, Error> {
@@ -146,7 +147,7 @@ impl Model<PackageVersionInfo> {
         let mut visible = imbl::Vector::new();
         for mut entry in std::mem::take(s9pks) {
             if Reader::sees(reader, publisher, &S9pkAccess::of(&entry)?) {
-                if !Reader::is_admin(reader) {
+                if !(publisher || Reader::is_admin(reader)) {
                     if let Some(asset) = entry[1].as_object_mut() {
                         asset.remove("readers");
                     }
@@ -183,6 +184,11 @@ impl Model<PackageInfo> {
             Some(signer) => self.as_authorized().contains_key(signer),
             None => Ok(false),
         }
+    }
+
+    /// Whether the requester administers the registry or publishes this package.
+    pub fn is_managed_by(&self, reader: Option<&Reader>) -> Result<bool, Error> {
+        Ok(Reader::is_admin(reader) || self.is_publisher(reader)?)
     }
 
     /// Drops what the requester cannot see. False when versions existed and none remain.
@@ -237,7 +243,7 @@ impl Model<PackageIndex> {
     }
 
     /// Drops the s9pks, versions, and packages the requester cannot see, and reader lists for
-    /// non-admins.
+    /// everyone but admins and each package's publishers.
     pub fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<(), Error> {
         self.as_packages_mut()
             .retain(|_, info| info.retain_visible(reader))
@@ -713,7 +719,7 @@ pub(crate) mod tests {
             ]
         );
         let as_publisher = summary(Some(reader(false, Some(&publisher), &[])));
-        assert_eq!(as_publisher["secret"], [("1.0.0:0".into(), vec![0])]);
+        assert_eq!(as_publisher["secret"], [("1.0.0:0".into(), vec![1])]);
         assert_eq!(as_publisher["mixed"], anonymous["mixed"]);
         let as_admin = summary(Some(reader(true, Some(&Guid::new()), &[])));
         assert_eq!(as_admin["secret"], [("1.0.0:0".into(), vec![1])]);

@@ -161,11 +161,14 @@ directory of labeled keys. A null keystream means plaintext hosting and public v
 visibility primitive in `registry/package/index.rs` admits a private s9pk to admins, the package's
 authorized publishers, and its readers; versions left without s9pks and packages left without
 versions are hidden. Browsing endpoints, mirrors, and stored-icon references use it, and
-non-admin projections drop reader lists and the reader directory. `package.add` decrypts each URL
+projections drop reader lists for everyone but admins and the package's publishers, and the reader
+directory for non-admins. `package.add` decrypts each URL
 with the submitted keystream before verifying it; `add-mirror` uses the stored keystream.
 `RegistryAsset` download helpers decrypt through `KeyStreamSource`. StartOS keeps keystreams in its
-private synced index and strips them from the UI-readable registry cache. Promotion forwards each
-keystream and registers missing reader keys on the destination with their labels. Migration
+private synced index and strips them from the UI-readable registry cache. `package.version.export` returns a
+stored version unprojected, with the reader-directory entries it lists, to admins and the package's
+publishers. Promotion reads it, forwards each keystream, and registers missing reader keys on the
+destination with their labels. Migration
 `m_05_s9pk_access` removes the earlier package-level policy. Invalid resource proofs retain
 anonymous access to public icons; inaccessible private-only icons return 404.
 Signed public browsing retains the verified identity without adding admin audit records.

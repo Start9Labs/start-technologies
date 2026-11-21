@@ -250,6 +250,9 @@ export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
  * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
  */
 export type EditVersionParamsInput = z.input<typeof schemas.EditVersionParams>
+export type ExportPackageVersionParamsInput = z.input<
+  typeof schemas.ExportPackageVersionParams
+>
 export type GetPackageParamsInput = z.input<typeof schemas.GetPackageParams>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
 export type ListPackageSignersParamsInput = z.input<
@@ -330,6 +333,11 @@ export type GetPackageResponseFull = z.output<
   typeof schemas.GetPackageResponseFull
 >
 export type PackageInfo = z.output<typeof schemas.PackageInfo>
+
+/**
+ * A package version as stored, for promotion to another registry.
+ */
+export type PackageVersionExport = z.output<typeof schemas.PackageVersionExport>
 export type Revision = z.output<typeof schemas.Revision>
 export type GetPackageResult = z.output<typeof schemas.GetPackageResult>
 export type PackageIndex = z.output<typeof schemas.PackageIndex>

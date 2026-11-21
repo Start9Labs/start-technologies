@@ -3204,19 +3204,34 @@ registry.package.promote.need-from-or-to:
   fr_FR: "Au moins --from ou --to doit être spécifié"
   pl_PL: "Należy podać przynajmniej --from lub --to"
 
-registry.package.promote.source-readers-required:
-  en_US: "Promoting a private s9pk requires admin access to the source registry's readers: %{error}"
-  de_DE: "Das Übertragen eines privaten s9pk erfordert Administratorzugriff auf die Leser der Quell-Registry: %{error}"
-  es_ES: "Promover un s9pk privado requiere acceso de administrador a los lectores del registro de origen: %{error}"
-  fr_FR: "La promotion d'un s9pk privé nécessite un accès administrateur aux lecteurs du registre source : %{error}"
-  pl_PL: "Promowanie prywatnego s9pk wymaga dostępu administratora do czytelników rejestru źródłowego: %{error}"
-
 registry.package.promote.version-not-found:
   en_US: "Version %{version} of %{id} not found on source registry"
   de_DE: "Version %{version} von %{id} nicht in der Quell-Registry gefunden"
   es_ES: "Versión %{version} de %{id} no encontrada en el registro de origen"
   fr_FR: "Version %{version} de %{id} introuvable dans le registre source"
   pl_PL: "Wersja %{version} pakietu %{id} nie znaleziona w rejestrze źródłowym"
+
+registry.package.promote.export-required:
+  en_US: "The source registry cannot export private s9pks; upgrade it to promote %{id}@%{version}"
+  de_DE: "Die Quell-Registry kann keine privaten s9pks exportieren; aktualisieren Sie sie, um %{id}@%{version} zu übertragen"
+  es_ES: "El registro de origen no puede exportar s9pk privados; actualícelo para promover %{id}@%{version}"
+  fr_FR: "Le registre source ne peut pas exporter de s9pk privés ; mettez-le à jour pour promouvoir %{id}@%{version}"
+  pl_PL: "Rejestr źródłowy nie może eksportować prywatnych s9pk; zaktualizuj go, aby promować %{id}@%{version}"
+
+registry.package.promote.destination-admin-required:
+  en_US: "Promoting a private s9pk with readers requires admin access to the destination registry's readers: %{error}"
+  de_DE: "Das Übertragen eines privaten s9pk mit Lesern erfordert Administratorzugriff auf die Leser der Ziel-Registry: %{error}"
+  es_ES: "Promover un s9pk privado con lectores requiere acceso de administrador a los lectores del registro de destino: %{error}"
+  fr_FR: "La promotion d'un s9pk privé avec des lecteurs nécessite un accès administrateur aux lecteurs du registre de destination : %{error}"
+  pl_PL: "Promowanie prywatnego s9pk z czytelnikami wymaga dostępu administratora do czytelników rejestru docelowego: %{error}"
+
+# registry/package/version.rs
+registry.package.version.export-unauthorized:
+  en_US: "Only admins and publishers of %{id} can export its versions"
+  de_DE: "Nur Administratoren und Herausgeber von %{id} können dessen Versionen exportieren"
+  es_ES: "Solo los administradores y publicadores de %{id} pueden exportar sus versiones"
+  fr_FR: "Seuls les administrateurs et les éditeurs de %{id} peuvent exporter ses versions"
+  pl_PL: "Tylko administratorzy i wydawcy %{id} mogą eksportować jego wersje"
 
 registry.package.cannot-remove-last-mirror:
   en_US: "Cannot remove last mirror from an s9pk"
@@ -6826,6 +6841,13 @@ about.commands-registry-readers:
   fr_FR: "Commandes pour ajouter, lister, modifier ou supprimer les clés de lecteur du registre"
   pl_PL: "Polecenia do dodawania, wyświetlania, edytowania lub usuwania kluczy czytelników rejestru"
 
+about.commands-package-version:
+  en_US: "Commands for a single version of a package"
+  de_DE: "Befehle für eine einzelne Version eines Pakets"
+  es_ES: "Comandos para una sola versión de un paquete"
+  fr_FR: "Commandes pour une seule version d'un paquet"
+  pl_PL: "Polecenia dla pojedynczej wersji pakietu"
+
 about.commands-remove-assets:
   en_US: "Commands to remove image, iso, or squashfs files"
   de_DE: "Befehle zum Entfernen von Image-, ISO- oder Squashfs-Dateien"
@@ -7561,6 +7583,13 @@ about.list-registry-readers:
   es_ES: "Listar las claves de lector del registro"
   fr_FR: "Lister les clés de lecteur du registre"
   pl_PL: "Wyświetl klucze czytelników rejestru"
+
+about.export-package-version:
+  en_US: "Export a package version as stored, with its private keystreams and reader keys, for promotion"
+  de_DE: "Eine Paketversion wie gespeichert exportieren, mit ihren privaten Schlüsselströmen und Leserschlüsseln, zum Übertragen"
+  es_ES: "Exportar una versión de un paquete tal como está almacenada, con sus flujos de clave privados y claves de lector, para promoverla"
+  fr_FR: "Exporter une version de paquet telle que stockée, avec ses flux de clés privés et ses clés de lecteur, pour la promotion"
+  pl_PL: "Eksportuj wersję pakietu w postaci zapisanej, z jej prywatnymi strumieniami kluczy i kluczami czytelników, do promowania"
 
 about.list-signers:
   en_US: "List signers"

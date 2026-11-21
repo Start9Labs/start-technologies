@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use clap::Parser;
 use http::HeaderMap;
 use imbl_value::InternedString;
+use rpc_toolkit::yajrc::{METHOD_NOT_FOUND_ERROR, RpcError};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -12,6 +13,8 @@ use crate::context::config::resolve_profile;
 use crate::prelude::*;
 use crate::registry::package::add::AddPackageRequest;
 use crate::registry::package::get::{GetPackageResponseFull, PackageDetailLevel};
+use crate::registry::package::index::PackageVersionInfo;
+use crate::registry::package::version::PackageVersionExport;
 use crate::registry::reader::ReaderKey;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -55,6 +58,17 @@ pub async fn call_registry(
     method: &str,
     params: Value,
 ) -> Result<Value, Error> {
+    call_registry_rpc(ctx, url, method, params)
+        .await
+        .map_err(Error::from)
+}
+
+async fn call_registry_rpc(
+    ctx: &CliContext,
+    url: Url,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
     let sig_context = url.host().as_ref().map(InternedString::from_display);
     crate::registry::context::call_cli(
         ctx,
@@ -65,7 +79,69 @@ pub async fn call_registry(
         params,
     )
     .await
-    .map_err(Error::from)
+}
+
+fn is_method_not_found(error: &RpcError) -> bool {
+    error.code == METHOD_NOT_FOUND_ERROR.code
+}
+
+/// None when the source registry predates `package.version.export`.
+async fn export_version(
+    ctx: &CliContext,
+    url: Url,
+    id: &PackageId,
+    version: &VersionString,
+) -> Result<Option<PackageVersionExport>, Error> {
+    match call_registry_rpc(
+        ctx,
+        url,
+        "package.version.export",
+        imbl_value::json!({ "id": id, "version": version }),
+    )
+    .await
+    {
+        Ok(export) => Ok(Some(from_value(export)?)),
+        Err(e) if is_method_not_found(&e) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn listed_version(
+    ctx: &CliContext,
+    url: Url,
+    id: &PackageId,
+    version: &VersionString,
+) -> Result<PackageVersionInfo, Error> {
+    let mut response: GetPackageResponseFull = from_value(
+        call_registry(
+            ctx,
+            url,
+            "package.get",
+            imbl_value::json!({
+                "id": id,
+                "otherVersions": PackageDetailLevel::Full,
+                "allRevisions": true,
+            }),
+        )
+        .await?,
+    )?;
+    response
+        .best
+        .remove(version)
+        .or_else(|| response.other_versions.remove(version))
+        .ok_or_else(|| {
+            Error::new(
+                eyre!(
+                    "{}",
+                    t!(
+                        "registry.package.promote.version-not-found",
+                        id = id,
+                        version = version
+                    )
+                ),
+                ErrorKind::NotFound,
+            )
+        })
 }
 
 pub async fn cli_promote(
@@ -87,71 +163,49 @@ pub async fn cli_promote(
     let from_url = resolve_registry_url(from.as_deref(), &ctx)?;
     let to_url = resolve_registry_url(to.as_deref(), &ctx)?;
 
-    let res: Value = call_registry(
-        &ctx,
-        from_url.clone(),
-        "package.get",
-        imbl_value::json!({
-            "id": &id,
-            "otherVersions": PackageDetailLevel::Full,
-            "allRevisions": true,
-        }),
-    )
-    .await?;
-
-    let response: GetPackageResponseFull = from_value(res)?;
-
-    let version_info = response
-        .best
-        .get(&version)
-        .or_else(|| response.other_versions.get(&version))
-        .ok_or_else(|| {
-            Error::new(
-                eyre!(
-                    "{}",
-                    t!(
-                        "registry.package.promote.version-not-found",
-                        id = &id,
-                        version = &version
-                    )
-                ),
-                ErrorKind::NotFound,
-            )
-        })?;
-
-    let source_readers = if version_info
-        .s9pks
-        .iter()
-        .any(|(_, asset)| asset.private.is_some())
-    {
-        Some(list_readers(&ctx, from_url).await.map_err(|e| {
-            Error::new(
-                eyre!(
-                    "{}",
-                    t!(
-                        "registry.package.promote.source-readers-required",
-                        error = e
-                    )
-                ),
-                ErrorKind::Authorization,
-            )
-        })?)
-    } else {
-        None
-    };
+    let (s9pks, source_readers) =
+        match export_version(&ctx, from_url.clone(), &id, &version).await? {
+            Some(export) => (export.info.s9pks, export.readers),
+            None => {
+                let info = listed_version(&ctx, from_url, &id, &version).await?;
+                if info.s9pks.iter().any(|(_, asset)| asset.private.is_some()) {
+                    return Err(Error::new(
+                        eyre!(
+                            "{}",
+                            t!(
+                                "registry.package.promote.export-required",
+                                id = &id,
+                                version = &version
+                            )
+                        ),
+                        ErrorKind::InvalidRequest,
+                    ));
+                }
+                (info.s9pks, BTreeMap::new())
+            }
+        };
     let mut destination_readers = None;
 
-    for (_, asset) in &version_info.s9pks {
+    for (_, asset) in &s9pks {
         let mut readers = Vec::new();
-        if let Some(source_readers) = &source_readers {
-            for id in &asset.readers {
-                readers.push(source_readers.get(id).or_not_found(id)?.clone());
-            }
+        for id in &asset.readers {
+            readers.push(source_readers.get(id).or_not_found(id)?.clone());
         }
         if !readers.is_empty() {
             let mut registered = match destination_readers.take() {
                 Some(registered) => registered,
-                None => list_readers(&ctx, to_url.clone()).await?,
+                None => list_readers(&ctx, to_url.clone()).await.map_err(|e| {
+                    Error::new(
+                        eyre!(
+                            "{}",
+                            t!(
+                                "registry.package.promote.destination-admin-required",
+                                error = e
+                            )
+                        ),
+                        ErrorKind::Authorization,
+                    )
+                })?,
             };
             for reader in &readers {
                 if !registered.values().any(|r| r.key == reader.key) {
@@ -208,6 +262,37 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn only_a_missing_export_method_selects_the_listing_fallback() {
+        use crate::registry::context::test_utils::{context as registry_context, registry_server};
+        use crate::sign::{AnySigningKey, Signer};
+
+        let temp = tempfile::tempdir().unwrap();
+        let key = AnySigningKey::generate();
+        let registry = registry_context(temp.path().join("registry"), key.verifying_key()).await;
+        let (url, _task) = registry_server(registry).await;
+        let cli = CliContext::init(ClientConfig {
+            id_key_path: Some(temp.path().join("identity.pem")),
+            ..Default::default()
+        })
+        .unwrap();
+        cli.id_key.set(Signer::from(key)).unwrap();
+        let url = registry_rpc_url(&url).unwrap();
+        let missing_method = call_registry_rpc(
+            &cli,
+            url.clone(),
+            "package.version.absent",
+            imbl_value::json!({}),
+        )
+        .await
+        .unwrap_err();
+        assert!(is_method_not_found(&missing_method), "{missing_method:?}");
+        let id: PackageId = "absent".parse().unwrap();
+        let version: VersionString = "1.0.0:0".parse().unwrap();
+        let missing_package = export_version(&cli, url, &id, &version).await.unwrap_err();
+        assert_eq!(missing_package.kind, ErrorKind::NotFound);
     }
 
     #[test]
