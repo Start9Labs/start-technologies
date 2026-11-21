@@ -207,7 +207,6 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
         },
       },
       categories: ['bitcoin'],
-      private: false,
       otherVersions: {
         '26.1.0:0.1.0': {
           releaseNotes: 'Even better support for Bitcoin and wallets!',
@@ -259,7 +258,6 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
         },
       },
       categories: ['bitcoin', 'finance'],
-      private: false,
       otherVersions: {
         '0.17.5:0': {
           releaseNotes: 'Upstream release to 0.17.5',
@@ -347,7 +345,6 @@ For the full changelog, see https://github.com/bitcoin/bitcoin/blob/v27.0.0/doc/
         },
       },
       categories: ['bitcoin', 'networking'],
-      private: false,
       otherVersions: {
         '0.3.2.7:0': {
           releaseNotes: 'Upstream release and minor fixes.',

@@ -24,6 +24,8 @@ use crate::s9pk::S9pk;
 use crate::s9pk::git_hash::GitHash;
 use crate::s9pk::manifest::{Description, HardwareRequirements, LocaleString, current_version};
 use crate::s9pk::merkle_archive::source::FileSource;
+#[cfg(test)]
+use crate::s9pk::merkle_archive::source::encrypted::KeyStreamInfo;
 use crate::service::effects::plugin::PluginId;
 #[cfg(test)]
 use crate::sign::AnySignature;
@@ -59,31 +61,22 @@ pub struct PackageInfo {
     pub authorized: BTreeMap<Guid, VersionRange>,
     pub versions: BTreeMap<VersionString, PackageVersionInfo>,
     pub categories: BTreeSet<InternedString>,
-    #[serde(flatten)]
-    pub access: PackageAccessControl,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, HasModel, VisitFields)]
-#[serde(rename_all = "camelCase")]
-#[model = "Model<Self>"]
-pub struct PackageAccessControl {
-    #[serde(default)]
-    pub private: bool,
-    #[serde(default)]
-    pub readers: BTreeSet<Guid>,
-}
-
-rpc_toolkit::reflect_ts!(PackageAccessControl);
 rpc_toolkit::reflect_ts!(PackageInfo);
 rpc_toolkit::ts_export!(PackageInfo, namespaces = [""]);
 
-#[derive(Clone, Debug)]
+/// The identities a request's key holds on this registry.
+#[derive(Clone, Debug, Default)]
 pub struct Reader {
-    pub signer: Guid,
     pub admin: bool,
+    pub signer: Option<Guid>,
+    /// Entries of `FullIndex.readers` holding the key.
+    pub reader_ids: BTreeSet<Guid>,
 }
 
 impl Reader {
+    /// None for a missing key or one the registry does not know.
     pub fn resolve(
         db: &Model<RegistryDatabase>,
         key: Option<&AnyVerifyingKey>,
@@ -91,32 +84,122 @@ impl Reader {
         let Some(key) = key else {
             return Ok(None);
         };
-        let Some(signer) = db.as_index().as_signers().find_signer(key)? else {
+        let signer = db.as_index().as_signers().find_signer(key)?;
+        let reader_ids = db.as_index().as_readers().ids_for(key)?;
+        if signer.is_none() && reader_ids.is_empty() {
             return Ok(None);
-        };
+        }
         Ok(Some(Self {
-            admin: db.as_admins().de()?.contains(&signer),
+            admin: match &signer {
+                Some(signer) => db.as_admins().de()?.contains(signer),
+                None => false,
+            },
             signer,
+            reader_ids,
         }))
     }
+
+    fn is_admin(reader: Option<&Self>) -> bool {
+        reader.is_some_and(|reader| reader.admin)
+    }
+
+    /// Publishers see every s9pk of their package.
+    fn sees(reader: Option<&Self>, publisher: bool, access: &S9pkAccess) -> bool {
+        !access.private
+            || publisher
+            || reader.is_some_and(|reader| {
+                reader.admin || !reader.reader_ids.is_disjoint(&access.readers)
+            })
+    }
 }
 
-impl Model<PackageInfo> {
-    pub fn is_visible_to(&self, reader: Option<&Reader>) -> Result<bool, Error> {
-        let access = self.as_access().de()?;
-        if !access.private {
+/// The access fields of a stored `RegistryAsset`.
+#[derive(Deserialize)]
+struct S9pkAccess {
+    #[serde(default, deserialize_with = "is_present")]
+    private: bool,
+    #[serde(default)]
+    readers: BTreeSet<Guid>,
+}
+
+fn is_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    Ok(!Value::deserialize(deserializer)?.is_null())
+}
+
+impl S9pkAccess {
+    fn of(entry: &Value) -> Result<Self, Error> {
+        from_value(entry[1].clone())
+    }
+}
+
+impl Model<PackageVersionInfo> {
+    /// Drops the s9pks the requester cannot see, and reader lists for non-admins.
+    ///
+    /// False when the version had s9pks and none remain.
+    fn retain_visible(&mut self, reader: Option<&Reader>, publisher: bool) -> Result<bool, Error> {
+        let Some(s9pks) = ModelExt::as_value_mut(self.as_s9pks_mut()).as_array_mut() else {
+            return Ok(true);
+        };
+        if s9pks.is_empty() {
             return Ok(true);
         }
-        let Some(reader) = reader else {
-            return Ok(false);
-        };
-        Ok(reader.admin
-            || access.readers.contains(&reader.signer)
-            || self.as_authorized().contains_key(&reader.signer)?)
+        let mut visible = imbl::Vector::new();
+        for mut entry in std::mem::take(s9pks) {
+            if Reader::sees(reader, publisher, &S9pkAccess::of(&entry)?) {
+                if !Reader::is_admin(reader) {
+                    if let Some(asset) = entry[1].as_object_mut() {
+                        asset.remove("readers");
+                    }
+                }
+                visible.push_back(entry);
+            }
+        }
+        *s9pks = visible;
+        Ok(!s9pks.is_empty())
+    }
+
+    pub fn is_visible_to(&self, reader: Option<&Reader>, publisher: bool) -> Result<bool, Error> {
+        self.clone().retain_visible(reader, publisher)
+    }
+
+    fn grants_private_access(&self, reader: &Reader, publisher: bool) -> Result<bool, Error> {
+        for entry in ModelExt::as_value(self.as_s9pks())
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let access = S9pkAccess::of(entry)?;
+            if access.private && Reader::sees(Some(reader), publisher, &access) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
 impl Model<PackageInfo> {
+    pub fn is_publisher(&self, reader: Option<&Reader>) -> Result<bool, Error> {
+        match reader.and_then(|reader| reader.signer.as_ref()) {
+            Some(signer) => self.as_authorized().contains_key(signer),
+            None => Ok(false),
+        }
+    }
+
+    /// Drops what the requester cannot see. False when versions existed and none remain.
+    fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<bool, Error> {
+        let publisher = self.is_publisher(reader)?;
+        let versions = self.as_versions_mut();
+        if versions.keys()?.is_empty() {
+            return Ok(true);
+        }
+        versions.retain(|_, version| version.retain_visible(reader, publisher))?;
+        Ok(!versions.keys()?.is_empty())
+    }
+
+    pub fn is_visible_to(&self, reader: Option<&Reader>) -> Result<bool, Error> {
+        self.clone().retain_visible(reader)
+    }
+
     pub(crate) fn for_each_locale_string(
         &mut self,
         f: &mut impl FnMut(&mut LocaleString),
@@ -140,27 +223,44 @@ impl Model<PackageIndex> {
         }
     }
 
+    /// Whether the requester sees any private s9pk.
     pub fn grants_private_access(&self, reader: &Reader) -> Result<bool, Error> {
         for (_, info) in self.as_packages().as_entries()? {
-            if info.as_access().de()?.private && info.is_visible_to(Some(reader))? {
-                return Ok(true);
+            let publisher = info.is_publisher(Some(reader))?;
+            for (_, version) in info.as_versions().as_entries()? {
+                if version.grants_private_access(reader, publisher)? {
+                    return Ok(true);
+                }
             }
         }
         Ok(false)
     }
 
-    /// Filters package visibility and redacts reader lists for non-admins.
+    /// Drops the s9pks, versions, and packages the requester cannot see, and reader lists for
+    /// non-admins.
     pub fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<(), Error> {
         self.as_packages_mut()
-            .retain(|_, info| info.is_visible_to(reader))?;
-        if !reader.is_some_and(|reader| reader.admin) {
-            for (_, info) in self.as_packages_mut().as_entries_mut()? {
-                info.as_access_mut()
-                    .as_readers_mut()
-                    .ser(&BTreeSet::new())?;
+            .retain(|_, info| info.retain_visible(reader))
+    }
+
+    pub fn s9pks_with(
+        &self,
+        commitment: &MerkleArchiveCommitment,
+    ) -> Result<Vec<RegistryAsset<MerkleArchiveCommitment>>, Error> {
+        let mut found = Vec::new();
+        for (_, package) in self.as_packages().as_entries()? {
+            for (_, version) in package.as_versions().as_entries()? {
+                found.extend(
+                    version
+                        .as_s9pks()
+                        .de()?
+                        .into_iter()
+                        .map(|(_, asset)| asset)
+                        .filter(|asset| &asset.commitment == commitment),
+                );
             }
         }
-        Ok(())
+        Ok(found)
     }
 
     pub fn de_visible_to(&self, reader: Option<&Reader>) -> Result<PackageIndex, Error> {
@@ -332,6 +432,8 @@ impl PackageVersionInfo {
                     urls,
                     commitment: s9pk.as_archive().commitment().await?,
                     signatures: s9pk.signatures().await?,
+                    private: None,
+                    readers: BTreeSet::new(),
                 },
             )],
         })
@@ -343,6 +445,8 @@ impl PackageVersionInfo {
             asset.signatures.retain(|key, _| keys.contains(key));
         }
     }
+    /// A matching s9pk takes the other's URLs and access when replacing URLs, and keeps its own
+    /// access otherwise.
     pub fn merge_with(&mut self, other: Self, replace_urls: bool) -> Result<(), Error> {
         if self.metadata != other.metadata {
             return Err(Error::new(
@@ -374,6 +478,8 @@ impl PackageVersionInfo {
                 matching.merge_signatures(&asset.commitment, asset.signatures);
                 if replace_urls {
                     matching.urls = asset.urls;
+                    matching.private = asset.private;
+                    matching.readers = asset.readers;
                 } else {
                     for url in asset.urls {
                         if matching.urls.contains(&url) {
@@ -393,6 +499,13 @@ impl PackageVersionInfo {
         }
         self.s9pks.sort_by_key(|(h, _)| h.specificity_desc());
         Ok(())
+    }
+    /// Removes every s9pk's keystream and reader list.
+    pub fn strip_access(&mut self) {
+        for (_, asset) in &mut self.s9pks {
+            asset.private = None;
+            asset.readers.clear();
+        }
     }
     pub fn table(self, version: &VersionString) -> prettytable::Table {
         use prettytable::*;
@@ -508,67 +621,124 @@ pub async fn get_package_index(
 pub(crate) mod tests {
     use super::*;
 
+    fn private_asset(readers: &[&Guid]) -> Value {
+        let (_, mut info) = version_info_signed_by(1);
+        let asset = &mut info.s9pks[0].1;
+        asset.private = Some(KeyStreamInfo {
+            key: crate::util::serde::Base64([1; 32]),
+            iv: crate::util::serde::Base64([2; 16]),
+        });
+        asset.readers = readers.iter().map(|r| (*r).clone()).collect();
+        to_value(&asset).unwrap()
+    }
+
+    fn reader(admin: bool, signer: Option<&Guid>, reader_ids: &[&Guid]) -> Reader {
+        Reader {
+            admin,
+            signer: signer.cloned(),
+            reader_ids: reader_ids.iter().map(|r| (*r).clone()).collect(),
+        }
+    }
+
     #[test]
-    fn private_packages_admit_admins_publishers_and_readers() {
-        let reader = Guid::new();
+    fn private_s9pks_admit_admins_publishers_and_readers() {
+        let reader_id = Guid::new();
         let publisher = Guid::new();
+        let (_, public) = version_info_signed_by(1);
+        let public = to_value(&public).unwrap();
+        let mut private = public.clone();
+        private["s9pks"][0][1] = private_asset(&[&reader_id]);
+        let mut mixed = public.clone();
+        mixed["s9pks"] = imbl_value::json!([
+            public["s9pks"][0].clone(),
+            [{ "arch": ["aarch64"] }, private_asset(&[&reader_id])],
+        ]);
+        let mut empty = public.clone();
+        empty["s9pks"] = imbl_value::json!([]);
         let index: Model<PackageIndex> = imbl_value::json!({
             "categories": {}, "packages": {
-                "public": {"authorized": {}, "categories": [], "versions": {}, "readers": [reader]},
+                "public": {"authorized": {}, "categories": [], "versions": {"1.0.0:0": public}},
+                "mixed": {"authorized": {}, "categories": [], "versions": {
+                    "1.0.0:0": mixed, "2.0.0:0": private.clone(), "3.0.0:0": empty,
+                }},
                 "secret": {"authorized": {publisher.as_ref(): "*"}, "categories": [],
-                    "versions": {}, "private": true, "readers": [reader]}
+                    "versions": {"1.0.0:0": private}},
+                "unreleased": {"authorized": {}, "categories": [], "versions": {}},
             }
         })
         .into();
         let visible =
             |reader: Option<Reader>| index.de_visible_to(reader.as_ref()).unwrap().packages;
-        assert_eq!(visible(None).len(), 1);
-        let listed = |admin| {
-            visible(Some(Reader {
-                signer: reader.clone(),
-                admin,
-            }))["secret"]
-                .access
-                .readers
-                .len()
+        let summary = |reader: Option<Reader>| {
+            visible(reader)
+                .into_iter()
+                .map(|(id, package)| {
+                    let versions = package
+                        .versions
+                        .into_iter()
+                        .map(|(v, info)| {
+                            let readers = info
+                                .s9pks
+                                .iter()
+                                .map(|(_, a)| a.readers.len())
+                                .collect::<Vec<_>>();
+                            (v.to_string(), readers)
+                        })
+                        .collect::<Vec<_>>();
+                    (id.to_string(), versions)
+                })
+                .collect::<BTreeMap<_, _>>()
         };
-        assert_eq!(listed(false), 0);
-        assert_eq!(listed(true), 1);
+        let anonymous = summary(None);
         assert_eq!(
-            visible(Some(Reader {
-                signer: Guid::new(),
-                admin: false
-            }))
-            .len(),
-            1
+            anonymous.keys().collect::<Vec<_>>(),
+            ["mixed", "public", "unreleased"]
         );
-        for reader in [
-            Reader {
-                signer: reader,
-                admin: false,
-            },
-            Reader {
-                signer: publisher,
-                admin: false,
-            },
-            Reader {
-                signer: Guid::new(),
-                admin: true,
-            },
+        assert_eq!(
+            anonymous["mixed"],
+            [("1.0.0:0".into(), vec![0]), ("3.0.0:0".into(), vec![])]
+        );
+        assert_eq!(
+            summary(Some(reader(false, None, &[&Guid::new()]))),
+            anonymous
+        );
+        let as_reader = summary(Some(reader(false, None, &[&reader_id])));
+        assert_eq!(as_reader.len(), 4);
+        assert_eq!(
+            as_reader["mixed"],
+            [
+                ("1.0.0:0".into(), vec![0, 0]),
+                ("2.0.0:0".into(), vec![0]),
+                ("3.0.0:0".into(), vec![]),
+            ]
+        );
+        let as_publisher = summary(Some(reader(false, Some(&publisher), &[])));
+        assert_eq!(as_publisher["secret"], [("1.0.0:0".into(), vec![0])]);
+        assert_eq!(as_publisher["mixed"], anonymous["mixed"]);
+        let as_admin = summary(Some(reader(true, Some(&Guid::new()), &[])));
+        assert_eq!(as_admin["secret"], [("1.0.0:0".into(), vec![1])]);
+        assert_eq!(as_admin["mixed"][0].1, vec![0, 1]);
+
+        let secret = &visible(Some(reader(false, None, &[&reader_id])))["secret"];
+        assert!(
+            secret.versions.values().next().unwrap().s9pks[0]
+                .1
+                .private
+                .is_some()
+        );
+
+        assert!(
+            !index
+                .grants_private_access(&reader(false, None, &[&Guid::new()]))
+                .unwrap()
+        );
+        for grantee in [
+            reader(false, None, &[&reader_id]),
+            reader(false, Some(&publisher), &[]),
+            reader(true, Some(&Guid::new()), &[]),
         ] {
-            let packages = visible(Some(reader.clone()));
-            assert_eq!(packages.len(), 2);
-            for package in packages.values() {
-                assert_eq!(package.access.readers.len(), usize::from(reader.admin));
-            }
+            assert!(index.grants_private_access(&grantee).unwrap());
         }
-        assert_eq!(
-            index.de().unwrap().packages["public"].access.readers.len(),
-            1
-        );
-        let public = &visible(None)["public"];
-        assert!(!public.access.private);
-        assert!(public.access.readers.is_empty());
     }
 
     pub(crate) fn version_info_signed_by(seed: u8) -> (AnyVerifyingKey, PackageVersionInfo) {
@@ -619,6 +789,26 @@ pub(crate) mod tests {
             info.s9pks[0].1.signatures.keys().collect::<BTreeSet<_>>(),
             [&developer, &cosigner].into()
         );
+    }
+
+    #[test]
+    fn re_adding_an_s9pk_replaces_its_access_and_mirroring_keeps_it() {
+        let reader_id = Guid::new();
+        let (_, mut stored) = version_info_signed_by(1);
+        stored.s9pks[0].1 = from_value(private_asset(&[&reader_id])).unwrap();
+        let (_, public) = version_info_signed_by(1);
+
+        let (_, mut mirrored) = version_info_signed_by(1);
+        mirrored.s9pks[0].1.urls = vec!["https://mirror.example.com/test.s9pk".parse().unwrap()];
+        let mut info = from_value::<PackageVersionInfo>(to_value(&stored).unwrap()).unwrap();
+        info.merge_with(mirrored, false).unwrap();
+        assert!(info.s9pks[0].1.private.is_some());
+        assert_eq!(info.s9pks[0].1.readers, [reader_id].into());
+        assert_eq!(info.s9pks[0].1.urls.len(), 2);
+
+        info.merge_with(public, true).unwrap();
+        assert!(info.s9pks[0].1.private.is_none());
+        assert!(info.s9pks[0].1.readers.is_empty());
     }
 
     pub(crate) fn signers_with(

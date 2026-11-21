@@ -8,6 +8,7 @@ use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tracing::warn;
 
 use crate::PackageId;
@@ -21,7 +22,7 @@ use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::util::VersionString;
-use crate::util::io::{TrackingIO, to_tmp_path};
+use crate::util::io::{TrackingIO, create_file, delete_file, rename, to_tmp_path};
 use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::util::tui::{choose, choose_custom_display};
 
@@ -102,8 +103,6 @@ pub struct GetPackageResponse {
     /// When this registry first published any version it still carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_published_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub private: bool,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
@@ -154,8 +153,6 @@ pub struct GetPackageResponseFull {
     /// When this registry first published any version it still carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_published_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub private: bool,
     pub best: BTreeMap<VersionString, PackageVersionInfo>,
     pub other_versions: BTreeMap<VersionString, PackageVersionInfo>,
 }
@@ -374,15 +371,6 @@ fn categories(
         .map(Option::unwrap_or_default)
 }
 
-fn is_private(index: &Model<PackageIndex>, id: &PackageId) -> Result<bool, Error> {
-    index
-        .as_packages()
-        .as_idx(id)
-        .map(|p| p.as_access().as_private().de())
-        .transpose()
-        .map(Option::unwrap_or_default)
-}
-
 fn first_published_at(
     index: &Model<PackageIndex>,
     id: &PackageId,
@@ -481,7 +469,6 @@ pub(crate) fn select_packages(
 ) -> Result<Value, Error> {
     let categories_for = |id: &PackageId| categories(index, id);
     let first_published_for = |id: &PackageId| first_published_at(index, id);
-    let private_for = |id: &PackageId| is_private(index, id);
     let (mut best, mut other) = partition_best(get_matching_models(index, params)?);
     if !params.all_revisions {
         for (id, package_other) in &mut other {
@@ -491,7 +478,6 @@ pub(crate) fn select_packages(
     if let Some(id) = &params.id {
         let categories = categories_for(id)?;
         let first_published_at = first_published_for(id)?;
-        let private = private_for(id)?;
         let best: BTreeMap<VersionString, PackageVersionInfo> = best
             .remove(id)
             .unwrap_or_default()
@@ -503,14 +489,12 @@ pub(crate) fn select_packages(
             PackageDetailLevel::None => to_value(&GetPackageResult::Package(GetPackageResponse {
                 first_published_at,
                 categories,
-                private,
                 best,
                 other_versions: None,
             })),
             PackageDetailLevel::Short => to_value(&GetPackageResult::Package(GetPackageResponse {
                 first_published_at,
                 categories,
-                private,
                 best,
                 other_versions: Some(
                     other
@@ -523,7 +507,6 @@ pub(crate) fn select_packages(
                 to_value(&GetPackageResult::PackageFull(GetPackageResponseFull {
                     first_published_at,
                     categories,
-                    private,
                     best,
                     other_versions: other
                         .into_iter()
@@ -539,13 +522,11 @@ pub(crate) fn select_packages(
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
                         let first_published_at = first_published_for(&id)?;
-                        let private = private_for(&id)?;
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
                                 first_published_at,
                                 categories,
-                                private,
                                 best: best
                                     .into_iter()
                                     .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
@@ -561,14 +542,12 @@ pub(crate) fn select_packages(
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
                         let first_published_at = first_published_for(&id)?;
-                        let private = private_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
                             GetPackageResponse {
                                 first_published_at,
                                 categories,
-                                private,
                                 best: best
                                     .into_iter()
                                     .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
@@ -589,14 +568,12 @@ pub(crate) fn select_packages(
                     .map(|(id, best)| {
                         let categories = categories_for(&id)?;
                         let first_published_at = first_published_for(&id)?;
-                        let private = private_for(&id)?;
                         let other = other.remove(&id).unwrap_or_default();
                         Ok::<_, Error>((
                             id,
                             GetPackageResponseFull {
                                 first_published_at,
                                 categories,
-                                private,
                                 best: best
                                     .into_iter()
                                     .map(|(k, i)| Ok::<_, Error>((k, i.de()?)))
@@ -816,14 +793,32 @@ pub async fn cli_download(
         verify_progress.set_total(size);
     }
     verify_progress.set_units(Some(ProgressUnits::Bytes));
-    let mut progress_sink = verify_progress.writer(tokio::io::sink());
+    let plaintext = if source.is_encrypted() {
+        Some(to_tmp_path(&dest_tmp)?)
+    } else {
+        None
+    };
+    let out: Box<dyn AsyncWrite + Unpin + Send> = match &plaintext {
+        Some(path) => Box::new(create_file(path).await?),
+        None => Box::new(tokio::io::sink()),
+    };
+    let mut progress_sink = verify_progress.writer(out);
     parsed
         .serialize(&mut TrackingIO::new(0, &mut progress_sink), true)
         .await?;
-    progress_sink.into_inner().1.complete();
+    let (mut out, mut verify_progress) = progress_sink.into_inner();
+    out.shutdown().await?;
+    verify_progress.complete();
 
-    source.wait_for_buffered().await?;
-    tokio::fs::rename(dest_tmp, dest).await?;
+    source.inner().wait_for_buffered().await?;
+    match plaintext {
+        Some(path) => {
+            drop((parsed, source));
+            delete_file(&dest_tmp).await?;
+            rename(path, dest).await?;
+        }
+        None => rename(dest_tmp, dest).await?,
+    }
 
     progress_tracker.complete();
     progress.await.unwrap();
@@ -1142,13 +1137,9 @@ fn check_matching_info_short() {
 
 #[test]
 fn rpc_result_surrogate_preserves_all_package_selection_shapes() {
-    let minimal = serde_json::json!({ "categories": ["tools"], "private": false, "best": {} });
-    let with_versions = serde_json::json!({
-        "categories": ["tools"],
-        "private": true,
-        "best": {},
-        "otherVersions": {},
-    });
+    let minimal = serde_json::json!({ "categories": ["tools"], "best": {} });
+    let with_versions =
+        serde_json::json!({ "categories": ["tools"], "best": {}, "otherVersions": {} });
     for fixture in [minimal, with_versions.clone()] {
         let package = serde_json::from_value::<GetPackageResponse>(fixture.clone()).unwrap();
         assert_eq!(

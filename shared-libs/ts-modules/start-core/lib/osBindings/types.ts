@@ -196,6 +196,20 @@ export type ImageId = z.output<typeof schemas.ImageId>
 export type ImageIdInput = z.input<typeof schemas.ImageId>
 export type ImageMetadata = z.output<typeof schemas.ImageMetadata>
 export type ImageMetadataInput = z.input<typeof schemas.ImageMetadata>
+
+/**
+ * An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.
+ *
+ * Ciphertext has the plaintext's length, and any byte range decrypts on its own.
+ */
+export type KeyStreamInfo = z.output<typeof schemas.KeyStreamInfo>
+
+/**
+ * An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.
+ *
+ * Ciphertext has the plaintext's length, and any byte range decrypts on its own.
+ */
+export type KeyStreamInfoInput = z.input<typeof schemas.KeyStreamInfo>
 export type KeyboardOptions = z.output<typeof schemas.KeyboardOptions>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
 export type LegacyHealthCheckResultKind = z.output<
@@ -652,6 +666,8 @@ export type AddPublicDomainParams = z.output<
 export type AddPublicDomainParamsInput = z.input<
   typeof schemas.AddPublicDomainParams
 >
+export type AddReaderParams = z.output<typeof schemas.AddReaderParams>
+export type AddReaderParamsInput = z.input<typeof schemas.AddReaderParams>
 export type AddTunnelParams = z.output<typeof schemas.AddTunnelParams>
 export type AddTunnelParamsInput = z.input<typeof schemas.AddTunnelParams>
 export type AddVersionParams = z.output<typeof schemas.AddVersionParams>
@@ -800,6 +816,8 @@ export type DownloadsResponse = z.output<typeof schemas.DownloadsResponse>
 export type DownloadsResponseInput = z.input<typeof schemas.DownloadsResponse>
 export type EditGatewayParams = z.output<typeof schemas.EditGatewayParams>
 export type EditGatewayParamsInput = z.input<typeof schemas.EditGatewayParams>
+export type EditReaderParams = z.output<typeof schemas.EditReaderParams>
+export type EditReaderParamsInput = z.input<typeof schemas.EditReaderParams>
 export type EditSignerParams = z.output<typeof schemas.EditSignerParams>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
 
@@ -869,12 +887,6 @@ export type GetOutboundGatewayParams = z.output<
 >
 export type GetOutboundGatewayParamsInput = z.input<
   typeof schemas.GetOutboundGatewayParams
->
-export type GetPackageAccessParams = z.output<
-  typeof schemas.GetPackageAccessParams
->
-export type GetPackageAccessParamsInput = z.input<
-  typeof schemas.GetPackageAccessParams
 >
 export type GetPackageParams = z.output<typeof schemas.GetPackageParams>
 export type GetPackageParamsInput = z.input<typeof schemas.GetPackageParams>
@@ -992,10 +1004,6 @@ export type NutSettings = z.output<typeof schemas.NutSettings>
 export type NutSettingsInput = z.input<typeof schemas.NutSettings>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
 export type OsVersionInfoInput = z.input<typeof schemas.OsVersionInfo>
-export type PackageAccessControl = z.output<typeof schemas.PackageAccessControl>
-export type PackageAccessControlInput = z.input<
-  typeof schemas.PackageAccessControl
->
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 export type PackageBackupInfoInput = z.input<typeof schemas.PackageBackupInfo>
 
@@ -1010,10 +1018,6 @@ export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
-export type PackageReaderParams = z.output<typeof schemas.PackageReaderParams>
-export type PackageReaderParamsInput = z.input<
-  typeof schemas.PackageReaderParams
->
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PassthroughInfoInput = z.input<typeof schemas.PassthroughInfo>
 export type PasswordType = z.output<typeof schemas.PasswordType>
@@ -1086,6 +1090,16 @@ export type RangeServiceInterface = z.output<
 export type RangeServiceInterfaceInput = z.input<
   typeof schemas.RangeServiceInterface
 >
+
+/**
+ * A key allowed to read the private s9pks that list it.
+ */
+export type ReaderKey = z.output<typeof schemas.ReaderKey>
+
+/**
+ * A key allowed to read the private s9pks that list it.
+ */
+export type ReaderKeyInput = z.input<typeof schemas.ReaderKey>
 export type RebuildParams = z.output<typeof schemas.RebuildParams>
 export type RebuildParamsInput = z.input<typeof schemas.RebuildParams>
 export type RegistryIdentity = z.output<typeof schemas.RegistryIdentity>
@@ -1112,6 +1126,8 @@ export type RemovePackageSignerParams = z.output<
 export type RemovePackageSignerParamsInput = z.input<
   typeof schemas.RemovePackageSignerParams
 >
+export type RemoveReaderParams = z.output<typeof schemas.RemoveReaderParams>
+export type RemoveReaderParamsInput = z.input<typeof schemas.RemoveReaderParams>
 export type RemoveSignerParams = z.output<typeof schemas.RemoveSignerParams>
 export type RemoveSignerParamsInput = z.input<typeof schemas.RemoveSignerParams>
 export type RemoveTunnelParams = z.output<typeof schemas.RemoveTunnelParams>
@@ -1171,12 +1187,6 @@ export type SetOutboundGatewayParams = z.output<
 >
 export type SetOutboundGatewayParamsInput = z.input<
   typeof schemas.SetOutboundGatewayParams
->
-export type SetPackagePrivateParams = z.output<
-  typeof schemas.SetPackagePrivateParams
->
-export type SetPackagePrivateParamsInput = z.input<
-  typeof schemas.SetPackagePrivateParams
 >
 export type SetStaticDnsParams = z.output<typeof schemas.SetStaticDnsParams>
 export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
@@ -1382,8 +1392,6 @@ export type OsUpdateCache = z.output<typeof schemas.OsUpdateCache>
 export type OsUpdateCacheInput = z.input<typeof schemas.OsUpdateCache>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
 export type OsVersionInfoMapInput = z.input<typeof schemas.OsVersionInfoMap>
-export type PackageAccess = z.output<typeof schemas.PackageAccess>
-export type PackageAccessInput = z.input<typeof schemas.PackageAccess>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 export type PackageMetadataInput = z.input<typeof schemas.PackageMetadata>
 export type PackagePlugin = z.output<typeof schemas.PackagePlugin>

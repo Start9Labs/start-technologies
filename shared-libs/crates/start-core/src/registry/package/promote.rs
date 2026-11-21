@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use clap::Parser;
 use http::HeaderMap;
@@ -10,12 +10,9 @@ use crate::PackageId;
 use crate::context::CliContext;
 use crate::context::config::resolve_profile;
 use crate::prelude::*;
-use crate::registry::admin::AddSignerParams;
-use crate::registry::package::access::{
-    PackageAccess, list_registry_signers, restrict_package_to_signers,
-};
+use crate::registry::package::add::AddPackageRequest;
 use crate::registry::package::get::{GetPackageResponseFull, PackageDetailLevel};
-use crate::registry::package::index::PackageIndex;
+use crate::registry::reader::ReaderKey;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::util::VersionString;
@@ -102,7 +99,7 @@ pub async fn cli_promote(
     )
     .await?;
 
-    let response: GetPackageResponseFull = from_value(res.clone())?;
+    let response: GetPackageResponseFull = from_value(res)?;
 
     let version_info = response
         .best
@@ -122,11 +119,52 @@ pub async fn cli_promote(
             )
         })?;
 
-    if source_package_is_private(&ctx, from_url.clone(), &id, &res).await? {
-        carry_private_access(&ctx, from_url, to_url.clone(), &id).await?;
-    }
+    let source_readers = if version_info
+        .s9pks
+        .iter()
+        .any(|(_, asset)| asset.private.is_some())
+    {
+        Some(list_readers(&ctx, from_url).await.map_err(|e| {
+            Error::new(
+                eyre!(
+                    "{}",
+                    t!(
+                        "registry.package.promote.source-readers-required",
+                        error = e
+                    )
+                ),
+                ErrorKind::Authorization,
+            )
+        })?)
+    } else {
+        None
+    };
+    let mut destination_readers = None;
 
     for (_, asset) in &version_info.s9pks {
+        let mut readers = Vec::new();
+        if let Some(source_readers) = &source_readers {
+            for id in &asset.readers {
+                readers.push(source_readers.get(id).or_not_found(id)?.clone());
+            }
+        }
+        if !readers.is_empty() {
+            let mut registered = match destination_readers.take() {
+                Some(registered) => registered,
+                None => list_readers(&ctx, to_url.clone()).await?,
+            };
+            for reader in &readers {
+                if !registered.values().any(|r| r.key == reader.key) {
+                    let id: Guid = from_value(
+                        call_registry(&ctx, to_url.clone(), "admin.reader.add", to_value(reader)?)
+                            .await?,
+                    )?;
+                    registered.insert(id, reader.clone());
+                }
+            }
+            destination_readers = Some(registered);
+        }
+        let reader_keys: Vec<_> = readers.into_iter().map(|r| r.key).collect();
         let commitment = &asset.commitment;
         let signature = ctx
             .id_key()?
@@ -137,12 +175,14 @@ pub async fn cli_promote(
             &ctx,
             to_url.clone(),
             "package.add",
-            imbl_value::json!({
-                "urls": &asset.urls,
-                "signature": signature,
-                "signatures": &asset.signatures,
-                "commitment": commitment,
-            }),
+            to_value(&AddPackageRequest {
+                urls: &asset.urls,
+                signature,
+                signatures: &asset.signatures,
+                commitment,
+                private: asset.private.as_ref(),
+                readers: &reader_keys,
+            })?,
         )
         .await?;
     }
@@ -150,68 +190,8 @@ pub async fn cli_promote(
     Ok(())
 }
 
-async fn source_package_is_private(
-    ctx: &CliContext,
-    from: Url,
-    id: &PackageId,
-    response: &Value,
-) -> Result<bool, Error> {
-    if let Some(private) = response
-        .as_object()
-        .and_then(|response| response.get("private"))
-    {
-        return from_value(private.clone());
-    }
-    // Registries before 1.7.0 omit `private` from `package.get`.
-    let index: PackageIndex =
-        from_value(call_registry(ctx, from, "package.index", imbl_value::json!({})).await?)?;
-    Ok(index.packages.get(id).or_not_found(id)?.access.private)
-}
-
-/// Existing reader signers match by shared keys; their records stay unchanged.
-async fn carry_private_access(
-    ctx: &CliContext,
-    from: Url,
-    to: Url,
-    id: &PackageId,
-) -> Result<(), Error> {
-    let access: PackageAccess = from_value(
-        call_registry(
-            ctx,
-            from,
-            "package.access.get",
-            imbl_value::json!({ "id": id }),
-        )
-        .await?,
-    )?;
-    let registered = list_registry_signers(ctx, to.clone()).await?;
-    let mut readers = BTreeSet::new();
-    for reader in access.readers.values() {
-        let matching: BTreeSet<Guid> = registered
-            .iter()
-            .filter(|(_, signer)| !signer.keys.is_disjoint(&reader.keys))
-            .map(|(id, _)| id.clone())
-            .collect();
-        if matching.is_empty() {
-            readers.insert(from_value::<Guid>(
-                call_registry(
-                    ctx,
-                    to.clone(),
-                    "admin.signer.add",
-                    to_value(&AddSignerParams {
-                        name: reader.name.clone(),
-                        contact: reader.contact.clone(),
-                        keys: reader.keys.iter().map(ToString::to_string).collect(),
-                        gpg_exports: reader.gpg_exports.clone(),
-                    })?,
-                )
-                .await?,
-            )?);
-        } else {
-            readers.extend(matching);
-        }
-    }
-    restrict_package_to_signers(ctx, to, id, &readers).await
+async fn list_readers(ctx: &CliContext, url: Url) -> Result<BTreeMap<Guid, ReaderKey>, Error> {
+    from_value(call_registry(ctx, url, "admin.reader.list", imbl_value::json!({})).await?)
 }
 
 #[cfg(test)]
@@ -228,67 +208,6 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
-    }
-
-    #[tokio::test]
-    async fn legacy_selection_privacy_comes_from_the_source_index() {
-        use ed25519_dalek::SigningKey;
-
-        use crate::developer::write_signing_key;
-        use crate::registry::context::test_utils::{context as registry_context, registry_server};
-        use crate::registry::package::access::{SetPackagePrivateParams, set_package_private};
-        use crate::sign::AnyVerifyingKey;
-
-        let temp = tempfile::tempdir().unwrap();
-        let key = SigningKey::from_bytes(&[19; 32]);
-        let registry = registry_context(
-            temp.path().join("registry"),
-            AnyVerifyingKey::Ed25519(key.verifying_key()),
-        )
-        .await;
-        let id: PackageId = "private-fixture".parse().unwrap();
-        let (url, task) = registry_server(registry.clone()).await;
-        let key_path = temp.path().join("identity.pem");
-        write_signing_key(&key, &key_path).await.unwrap();
-        let cli = CliContext::init(ClientConfig {
-            id_key_path: Some(key_path),
-            ..Default::default()
-        })
-        .unwrap();
-        let url = registry_rpc_url(&url).unwrap();
-        let legacy = imbl_value::json!({
-            "categories": [], "best": {}, "otherVersions": {},
-        });
-        for private in [true, false] {
-            set_package_private(
-                registry.clone(),
-                SetPackagePrivateParams {
-                    id: id.clone(),
-                    private,
-                },
-            )
-            .await
-            .unwrap();
-            assert_eq!(
-                source_package_is_private(&cli, url.clone(), &id, &legacy)
-                    .await
-                    .unwrap(),
-                private,
-            );
-        }
-        assert_eq!(
-            source_package_is_private(
-                &cli,
-                url.clone(),
-                &"missing-fixture".parse().unwrap(),
-                &legacy,
-            )
-            .await
-            .unwrap_err()
-            .kind,
-            ErrorKind::NotFound,
-        );
-        task.abort();
     }
 
     #[test]

@@ -1,10 +1,12 @@
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
 
 use clap::Parser;
 use rpc_toolkit::{Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use url::Url;
 
@@ -12,12 +14,16 @@ use crate::ImageId;
 use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
 use crate::registry::device_info::DeviceInfo;
+use crate::registry::package::add::{cli_add_package_impl, derive_keystream};
 use crate::s9pk::manifest::{HardwareRequirements, Manifest};
+use crate::s9pk::merkle_archive::source::ArchiveSource;
+use crate::s9pk::merkle_archive::source::encrypted::{KeyStreamInfo, KeyStreamSource};
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::s9pk::v2::pack::ImageConfig;
+use crate::sign::AnyVerifyingKey;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
-use crate::util::io::{TmpDir, create_file, open_file};
+use crate::util::io::{TmpDir, create_file, open_file, to_tmp_path};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 use crate::util::{Apply, Invoke};
 
@@ -91,6 +97,13 @@ pub fn s9pk() -> ParentHandler<CliContext> {
                 .no_ts()
                 .no_display()
                 .with_about("about.publish-s9pk"),
+        )
+        .subcommand(
+            "encrypt",
+            from_fn_async(encrypt)
+                .no_ts()
+                .no_display()
+                .with_about("about.encrypt-s9pk"),
         )
         .subcommand(
             "sign",
@@ -348,7 +361,35 @@ async fn convert(ctx: CliContext, S9pkPath { s9pk: s9pk_path }: S9pkPath) -> Res
     Ok(())
 }
 
-async fn publish(ctx: CliContext, S9pkPath { s9pk: s9pk_path }: S9pkPath) -> Result<(), Error> {
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
+struct PublishParams {
+    #[arg(help = "help.arg.s9pk-file-path")]
+    s9pk: PathBuf,
+    #[arg(long, help = "help.arg.private-s9pk")]
+    #[serde(default)]
+    private: bool,
+    #[arg(
+        long = "reader",
+        requires = "private",
+        help = "help.arg.s9pk-reader-key",
+        allow_hyphen_values = true
+    )]
+    #[serde(default)]
+    readers: Vec<AnyVerifyingKey>,
+}
+
+/// A private s9pk is uploaded as ciphertext.
+async fn publish(
+    ctx: CliContext,
+    PublishParams {
+        s9pk: s9pk_path,
+        private,
+        readers,
+    }: PublishParams,
+) -> Result<(), Error> {
     let filename = s9pk_path.file_name().unwrap().to_string_lossy();
     let s9pk = super::S9pk::open(&s9pk_path, None).await?;
     let manifest = s9pk.as_manifest();
@@ -395,15 +436,107 @@ async fn publish(ctx: CliContext, S9pkPath { s9pk: s9pk_path }: S9pkPath) -> Res
         })?
         .pop_if_empty()
         .extend(path);
-    Command::new("s3cmd")
-        .arg("put")
-        .arg("-P")
-        .arg(s9pk_path)
-        .arg(s3dest.as_str())
-        .capture(false)
-        .invoke(ErrorKind::Network)
-        .await?;
-    crate::registry::package::add::cli_add_package_impl(ctx, s9pk, vec![s3url], false).await
+    let private = if private {
+        Some(derive_keystream(&ctx, &s9pk).await?)
+    } else {
+        None
+    };
+    s3_put(&s9pk_path, private.clone(), &s3dest).await?;
+    cli_add_package_impl(ctx, s9pk, vec![s3url], false, private, readers).await
+}
+
+/// Uploads the file, streaming its ciphertext from the keystream when given one.
+async fn s3_put(file: &Path, key: Option<KeyStreamInfo>, dest: &Url) -> Result<(), Error> {
+    let mut cmd = Command::new("s3cmd");
+    cmd.arg("put").arg("-P");
+    if key.is_none() {
+        return cmd
+            .arg(file)
+            .arg(dest.as_str())
+            .capture(false)
+            .invoke(ErrorKind::Network)
+            .await
+            .map(|_| ());
+    }
+    let mut child = cmd
+        .arg("-")
+        .arg(dest.as_str())
+        .stdin(Stdio::piped())
+        .spawn()?;
+    let mut stdin = child.stdin.take().or_not_found("s3cmd stdin")?;
+    let copied = keystream_file(file, key)
+        .await?
+        .copy_all_to(&mut stdin)
+        .await;
+    drop(stdin);
+    let status = child.wait().await?;
+    copied?;
+    if !status.success() {
+        return Err(Error::new(
+            eyre!("s3cmd put exited with {status}"),
+            ErrorKind::Network,
+        ));
+    }
+    Ok(())
+}
+
+async fn keystream_file(
+    file: &Path,
+    key: Option<KeyStreamInfo>,
+) -> Result<KeyStreamSource<MultiCursorFile>, Error> {
+    Ok(KeyStreamSource::new(
+        MultiCursorFile::from(open_file(file).await?),
+        key,
+    ))
+}
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
+struct EncryptParams {
+    #[arg(help = "help.arg.s9pk-file-path")]
+    s9pk: PathBuf,
+    #[arg(help = "help.arg.encrypted-s9pk-output-path")]
+    output: Option<PathBuf>,
+}
+
+/// Writes the ciphertext `registry package add --private` expects to be hosted.
+async fn encrypt(
+    ctx: CliContext,
+    EncryptParams { s9pk: path, output }: EncryptParams,
+) -> Result<(), Error> {
+    let s9pk = super::S9pk::open(&path, None).await?;
+    let source = keystream_file(&path, Some(derive_keystream(&ctx, &s9pk).await?)).await?;
+    let output = match output {
+        Some(output) if output == Path::new("-") => {
+            let mut stdout = tokio::io::stdout();
+            source.copy_all_to(&mut stdout).await?;
+            return Ok(stdout.flush().await?);
+        }
+        Some(output) => output,
+        None => encrypted_path(&path)?,
+    };
+    let tmp = to_tmp_path(&output)?;
+    let mut file = create_file(&tmp).await?;
+    source.copy_all_to(&mut file).await?;
+    file.sync_all().await?;
+    drop(file);
+    tokio::fs::rename(&tmp, &output).await?;
+    Ok(())
+}
+
+fn encrypted_path(path: &Path) -> Result<PathBuf, Error> {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("invalid path: {}", path.display()),
+                ErrorKind::Filesystem,
+            )
+        })?;
+    Ok(path.with_file_name(format!("{stem}.encrypted.s9pk")))
 }
 
 #[derive(Deserialize, Serialize, Parser)]

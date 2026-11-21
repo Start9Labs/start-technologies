@@ -5,7 +5,6 @@ use crate::prelude::*;
 use crate::registry::upstream::WRITES_INDEX;
 use crate::util::serde::HandlerExtSerde;
 
-pub mod access;
 pub mod add;
 pub mod category;
 pub mod get;
@@ -109,10 +108,6 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "signer",
             signer::signer_api::<C>().with_about("about.add-remove-list-package-signers"),
-        )
-        .subcommand(
-            "access",
-            access::access_api::<C>().with_about("about.commands-package-access"),
         )
         .subcommand(
             "get",
