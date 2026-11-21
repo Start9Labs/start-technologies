@@ -669,6 +669,15 @@ impl PortForwardController {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn failing_for_test() -> Self {
+        let (req, _) = mpsc::unbounded_channel();
+        Self {
+            req,
+            _thread: NonDetachingJoinHandle::from(tokio::spawn(async {})),
+        }
+    }
+
     pub async fn add_forward(
         &self,
         source: SocketAddrV4,

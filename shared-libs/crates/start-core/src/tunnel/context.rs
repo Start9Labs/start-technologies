@@ -257,6 +257,50 @@ impl TunnelContext {
         self.1 = Some(Arc::new(session));
         self
     }
+    #[cfg(test)]
+    pub(in crate::tunnel) async fn for_test(initial: TunnelDatabase) -> (tempfile::TempDir, Self) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("tunnel.db");
+        let db =
+            TypedPatchDb::<TunnelDatabase>::load_unchecked(PatchDb::open(&db_path).await.unwrap());
+        db.put(&ROOT, &initial).await.unwrap();
+        let (shutdown, _) = tokio::sync::broadcast::channel(1);
+        let ctx = Self(
+            Arc::new(TunnelContextSeed {
+                listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+                db,
+                datadir: dir.path().to_path_buf(),
+                rpc_continuations: RpcContinuations::new(),
+                open_authed_continuations: OpenAuthedContinuations::new(),
+                auth_sig_nonce_cache: SyncMutex::new(Default::default()),
+                server_identity: crate::sign::AnySigningKey::generate().into(),
+                net_iface: Watch::new(OrdMap::new()),
+                forward: PortForwardController::failing_for_test(),
+                dns_proxy: DnsProxyController::new(),
+                sni: crate::tunnel::forward::sni::SniDemux::new(),
+                dns_injector: DnsInjector::new(
+                    Vec::new(),
+                    |_| false,
+                    |_| None,
+                    |_| {},
+                    |_, _, _| async { hickory_server::proto::op::ResponseCode::Refused },
+                ),
+                dns_allowed: Arc::new(SyncMutex::new(BTreeSet::new())),
+                dns_keys: Arc::new(SyncMutex::new(BTreeMap::new())),
+                active_forwards: SyncMutex::new(BTreeMap::new()),
+                forward_write_lock: tokio::sync::Mutex::new(()),
+                leases: SyncMutex::new(BTreeMap::new()),
+                lease_wake: tokio::sync::Notify::new(),
+                forward_ifindex: tokio::sync::watch::channel(0).0,
+                egress_lock: tokio::sync::Mutex::new(()),
+                v6_proxy: SyncMutex::new(BTreeMap::new()),
+                v6_lock: tokio::sync::Mutex::new(()),
+                shutdown,
+            }),
+            None,
+        );
+        (dir, ctx)
+    }
 }
 impl TunnelContext {
     #[instrument(skip_all)]
@@ -665,6 +709,7 @@ impl TunnelContext {
 
     /// Moves forwards to each target's active WAN address.
     pub async fn resync_forward_keys(&self) -> Result<(), Error> {
+        let _guard = self.forward_write_lock.lock().await;
         let old = self.db.peek().await.as_port_forwards().de()?.0;
 
         let mut want: BTreeMap<ForwardAddress, PortForward> = BTreeMap::new();
