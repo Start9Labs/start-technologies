@@ -8,7 +8,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::Empty;
-use crate::auth::{AuthKeys, LoginContext, Session};
+use crate::auth::{AuthKeys, Session};
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
@@ -309,6 +309,7 @@ mod tests {
 
     use super::*;
     use crate::account::AccountInfo;
+    use crate::auth::LoginContext;
 
     const PASSWORD: &str = "passkey-test";
 
