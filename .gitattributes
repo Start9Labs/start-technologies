@@ -1,0 +1,4 @@
+# Append-only log. Two branches appending different rows conflict on every merge
+# without this; union keeps both sides, which is always the right answer for a
+# file whose lines are independent records.
+build/complexity/history.tsv merge=union
