@@ -101,6 +101,7 @@ fn image_for_name<'a>(
     advertised_images(index).find(|asset| crate::update::image_checksum(&asset.commitment) == name)
 }
 
+/// Older retained images rely on existing `SeedCatalog` records.
 async fn discover_images(ctx: &RpcContext) -> Result<(), Error> {
     let index = {
         let peek = ctx.db.peek().await;

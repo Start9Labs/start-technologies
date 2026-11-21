@@ -110,6 +110,7 @@ pub struct GetPackageResponse {
     pub other_versions: Option<BTreeMap<VersionString, PackageInfoShort>>,
 }
 
+/// Returns the exact installed revision’s asset, including superseded revisions.
 pub(crate) fn advertised_asset(
     db: &DatabaseModel,
     registry: &reqwest::Url,
@@ -1114,15 +1115,15 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-fn fixture_info() -> PackageVersionInfo {
+#[test]
+fn check_matching_info_short() {
     use crate::registry::package::index::PackageMetadata;
     use crate::s9pk::manifest::Description;
 
     let lang_map =
         |s: &str| LocaleString::LanguageMap([("en".into(), s.into())].into_iter().collect());
 
-    PackageVersionInfo {
+    let info = PackageVersionInfo {
         metadata: PackageMetadata {
             title: "Test Package".into(),
             default_locale: None,
@@ -1153,12 +1154,8 @@ fn fixture_info() -> PackageVersionInfo {
         dependency_metadata: BTreeMap::new(),
         source_version: None,
         s9pks: Vec::new(),
-    }
-}
-
-#[test]
-fn check_matching_info_short() {
-    from_value::<PackageInfoShort>(to_value(&fixture_info()).unwrap()).unwrap();
+    };
+    from_value::<PackageInfoShort>(to_value(&info).unwrap()).unwrap();
 }
 
 #[test]

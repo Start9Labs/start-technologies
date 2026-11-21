@@ -458,6 +458,10 @@ fn cached_assets_keep_ordered_mirrors_and_peer_metadata() {
         .is_none()
     );
     let mut index = index();
+    let commitment = crate::sign::commitment::merkle_archive::MerkleArchiveCommitment {
+        root_sighash: crate::util::serde::Base64([7; 32]),
+        root_maxsize: 1024,
+    };
     let asset = crate::registry::asset::RegistryAsset {
         published_at: chrono::Utc::now(),
         urls: vec![
@@ -465,22 +469,16 @@ fn cached_assets_keep_ordered_mirrors_and_peer_metadata() {
             "https://second.test/package.s9pk".parse().unwrap(),
         ],
         torrent: Some("https://first.test/package.torrent".parse().unwrap()),
-        commitment: crate::sign::commitment::merkle_archive::MerkleArchiveCommitment {
-            root_sighash: crate::util::serde::Base64([7; 32]),
-            root_maxsize: 1024,
-        },
+        commitment,
         signatures: Default::default(),
     };
-    index
-        .package
-        .packages
-        .get_mut("test")
-        .unwrap()
-        .versions
-        .get_mut(&"1.0.0:0".parse().unwrap())
-        .unwrap()
-        .s9pks
-        .push((Default::default(), asset));
+    let versions = &mut index.package.packages.get_mut("test").unwrap().versions;
+    let installed = versions.get_mut(&"1.0.0:0".parse().unwrap()).unwrap();
+    installed.s9pks.push((Default::default(), asset));
+    let mut revision: crate::registry::package::index::PackageVersionInfo =
+        from_value(to_value(&*installed).unwrap()).unwrap();
+    revision.s9pks[0].1.commitment.root_sighash = crate::util::serde::Base64([8; 32]);
+    versions.insert("1.0.0:1".parse().unwrap(), revision);
     publish_snapshot(
         &mut db,
         &Subscription::Index(url()),
@@ -497,6 +495,7 @@ fn cached_assets_keep_ordered_mirrors_and_peer_metadata() {
     )
     .unwrap()
     .unwrap();
+    assert_eq!(advertised.commitment, commitment);
     assert_eq!(
         advertised
             .urls
