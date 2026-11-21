@@ -207,7 +207,21 @@ impl RegistryContext {
                 );
                 CREATE INDEX IF NOT EXISTS idx_user_activity_created_at ON user_activity(created_at);
                 CREATE INDEX IF NOT EXISTS idx_package_request_created_at ON package_request(created_at);
-                CREATE INDEX IF NOT EXISTS idx_package_request_pkg_id ON package_request(pkg_id);",
+                CREATE INDEX IF NOT EXISTS idx_package_request_pkg_id ON package_request(pkg_id);
+                CREATE TABLE IF NOT EXISTS package_install (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    pkg_id TEXT NOT NULL,
+                    version TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_package_install_created_at ON package_install(created_at);
+                CREATE INDEX IF NOT EXISTS idx_package_install_pkg_id ON package_install(pkg_id);
+                CREATE TABLE IF NOT EXISTS index_subscription (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    os_version TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_index_subscription_created_at ON index_subscription(created_at);",
             )
             .with_kind(ErrorKind::Database)?;
         let metrics_db = SyncMutex::new(metrics_db);
@@ -661,12 +675,13 @@ mod tests {
 
         let registry = crate::registry::registry_api::<RegistryContext>();
         let server = crate::main_api::<RpcContext>();
-        let public: [&[&str]; 13] = [
+        let public: [&[&str]; 14] = [
             &["index"],
             &["info"],
             &["db", "subscribe"],
             &["package", "index"],
             &["package", "get"],
+            &["package", "record-install"],
             &["package", "category", "list"],
             &["package", "signer", "list"],
             &["os", "index"],

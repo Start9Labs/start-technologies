@@ -193,12 +193,23 @@ pub async fn install(
         .install(
             ctx.clone(),
             || asset.deserialize_s9pk_buffered(ctx.client.get(), download_progress),
-            Some(registry),
+            Some(registry.clone()),
             None::<Never>,
             Some(progress_tracker),
         )
         .await?;
-    tokio::spawn(async move { download.await?.await });
+    tokio::spawn(async move {
+        download.await?.await?;
+        let _ = ctx
+            .call_remote_with::<RegistryContext, _>(
+                "package.record-install",
+                Default::default(),
+                json!({ "id": id, "version": version }),
+                RegistryUrlParams { registry },
+            )
+            .await;
+        Ok::<_, Error>(())
+    });
 
     Ok(())
 }

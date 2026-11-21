@@ -4974,6 +4974,13 @@ help.arg.metrics-before:
   fr_FR: "Fin de la plage temporelle (horodatage RFC 3339)"
   pl_PL: "Koniec zakresu czasu (znacznik czasu RFC 3339)"
 
+help.arg.metrics-interval:
+  en_US: "Also count each day, week (from Monday) or month in the range, in UTC"
+  de_DE: "Zusätzlich jeden Tag, jede Woche (ab Montag) oder jeden Monat im Zeitraum zählen, in UTC"
+  es_ES: "Contar además cada día, semana (desde el lunes) o mes del rango, en UTC"
+  fr_FR: "Compter aussi chaque jour, semaine (à partir du lundi) ou mois de la plage, en UTC"
+  pl_PL: "Zlicz też każdy dzień, tydzień (od poniedziałku) lub miesiąc w zakresie, w UTC"
+
 help.arg.metrics-pkg-id:
   en_US: "Filter by package ID"
   de_DE: "Nach Paket-ID filtern"
@@ -7282,11 +7289,25 @@ about.get-listen-address-for-webserver:
   pl_PL: "Pobierz adres nasłuchiwania serwera internetowego"
 
 about.get-metrics-downloads:
-  en_US: "Count package download requests with optional filters"
-  de_DE: "Paket-Download-Anfragen mit optionalen Filtern zählen"
-  es_ES: "Contar solicitudes de descarga de paquetes con filtros opcionales"
-  fr_FR: "Compter les demandes de téléchargement de paquets avec filtres optionnels"
-  pl_PL: "Zlicz żądania pobrania pakietów z opcjonalnymi filtrami"
+  en_US: "Count requests for a specific package version that reached the registry, with optional filters"
+  de_DE: "Anfragen nach einer bestimmten Paketversion zählen, die die Registry erreicht haben, mit optionalen Filtern"
+  es_ES: "Contar las solicitudes de una versión concreta de un paquete que llegaron al registro, con filtros opcionales"
+  fr_FR: "Compter les demandes d'une version précise d'un paquet parvenues au registre, avec filtres optionnels"
+  pl_PL: "Zlicz żądania konkretnej wersji pakietu, które dotarły do rejestru, z opcjonalnymi filtrami"
+
+about.get-metrics-installs:
+  en_US: "Count package installs and updates reported by StartOS, with optional filters"
+  de_DE: "Von StartOS gemeldete Paketinstallationen und -aktualisierungen zählen, mit optionalen Filtern"
+  es_ES: "Contar las instalaciones y actualizaciones de paquetes notificadas por StartOS, con filtros opcionales"
+  fr_FR: "Compter les installations et mises à jour de paquets signalées par StartOS, avec filtres optionnels"
+  pl_PL: "Zlicz instalacje i aktualizacje pakietów zgłoszone przez StartOS, z opcjonalnymi filtrami"
+
+about.get-metrics-subscriptions:
+  en_US: "Count package index subscriptions by StartOS version within a time range"
+  de_DE: "Abonnements des Paketindex nach StartOS-Version in einem Zeitraum zählen"
+  es_ES: "Contar las suscripciones al índice de paquetes por versión de StartOS dentro de un rango de tiempo"
+  fr_FR: "Compter les abonnements à l'index des paquets par version de StartOS dans une plage temporelle"
+  pl_PL: "Zlicz subskrypcje indeksu pakietów według wersji StartOS w zakresie czasu"
 
 about.get-metrics-summary:
   en_US: "Get a summary of registry usage metrics"
