@@ -1704,8 +1704,7 @@ async fn watcher(
     }
 }
 
-/// Sentinel key used to rate-limit the per-interface UPnP WAN-IP probe inside
-/// the echoip rate-limit map (it is not a real echoip URL and is never fetched).
+/// Rate-limit sentinel for the per-interface UPnP WAN-IP probe; never fetched.
 fn upnp_probe_key() -> Url {
     Url::parse("upnp://get-external-ip-address").unwrap()
 }
@@ -1713,6 +1712,176 @@ fn upnp_probe_key() -> Url {
 /// Rate-limit sentinel for the per-interface PCP/NAT-PMP capability probe.
 fn pcp_probe_key() -> Url {
     Url::parse("pcp://capability-probe").unwrap()
+}
+
+/// Seconds before a gateway's first echoip probe, and after its addresses change.
+const ECHOIP_FIRST_DELAY: std::ops::RangeInclusive<u64> = 0..=180;
+/// Seconds between a gateway's later echoip probes.
+const ECHOIP_RECHECK_DELAY: std::ops::RangeInclusive<u64> = 0..=900;
+
+fn random_delay(secs: std::ops::RangeInclusive<u64>) -> Duration {
+    Duration::from_secs(rand::random_range(secs))
+}
+
+/// What an echoip probe of a gateway needs.
+#[derive(Clone, Debug, PartialEq)]
+struct EchoipTarget {
+    index: u32,
+    local_ipv4: Ipv4Addr,
+    dns_servers: VecDeque<SocketAddr>,
+}
+
+impl EchoipTarget {
+    fn of(info: Option<&NetworkInterfaceInfo>) -> Option<Self> {
+        let info = info?;
+        let ip_info = info.ip_info.as_ref()?;
+        let forwardable = !ip_info.subnets.is_empty()
+            && !matches!(
+                ip_info.device_type,
+                Some(NetworkInterfaceType::Bridge | NetworkInterfaceType::Loopback)
+            );
+        forwardable.then(|| Self {
+            index: ip_info.scope_id,
+            local_ipv4: ip_info
+                .subnets
+                .iter()
+                .find_map(|s| match s.addr() {
+                    IpAddr::V4(v4) => Some(v4),
+                    _ => None,
+                })
+                .unwrap_or(Ipv4Addr::UNSPECIFIED),
+            dns_servers: info.dns.servers.clone(),
+        })
+    }
+}
+
+/// Probes one gateway's public IPv4 address at random times, independently of
+/// every other gateway. A change of the gateway's addresses restarts the first
+/// delay. Each probe waits for the gateway's first UPnP answer, and is skipped
+/// while UPnP supplies the address.
+async fn probe_wan_ipv4<F, Fut>(
+    iface: GatewayId,
+    mut interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    db: Option<TypedPatchDb<Database>>,
+    mut upnp_supplies_wan: Watch<Option<bool>>,
+    probe: F,
+) where
+    F: Fn(GatewayId, EchoipTarget, Vec<Url>) -> Fut,
+    Fut: Future<Output = Option<Ipv4Addr>>,
+{
+    let addresses = |interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>| {
+        interfaces
+            .get(&iface)
+            .and_then(|i| i.ip_info.as_ref())
+            .map(|ip| (ip.scope_id, ip.subnets.clone()))
+    };
+    let mut seen = interfaces.peek_and_mark_seen(addresses);
+    let mut delay = random_delay(ECHOIP_FIRST_DELAY);
+    loop {
+        let sleep = tokio::time::sleep(delay);
+        tokio::pin!(sleep);
+        loop {
+            tokio::select! {
+                _ = &mut sleep => break,
+                _ = interfaces.changed() => {
+                    let now = interfaces.peek(addresses);
+                    if now != seen {
+                        seen = now;
+                        sleep
+                            .as_mut()
+                            .reset(tokio::time::Instant::now() + random_delay(ECHOIP_FIRST_DELAY));
+                    }
+                }
+            }
+        }
+        delay = random_delay(ECHOIP_RECHECK_DELAY);
+        upnp_supplies_wan.wait_for(Option::is_some).await;
+        if upnp_supplies_wan.peek(|s| *s == Some(true)) {
+            continue;
+        }
+        let Some(target) = interfaces.peek(|i| EchoipTarget::of(i.get(&iface))) else {
+            continue;
+        };
+        let mut urls = echoip_servers(db.as_ref()).await;
+        if urls.is_empty() {
+            continue;
+        }
+        {
+            use rand::seq::SliceRandom;
+            urls.shuffle(&mut rand::rng());
+        }
+        if let Some(ip) = probe(iface.clone(), target, urls).await {
+            record_wan_ipv4(&interfaces, &iface, ip);
+        }
+    }
+}
+
+/// The echoip servers that a probe may ask. An empty list skips the probe.
+async fn echoip_servers(db: Option<&TypedPatchDb<Database>>) -> Vec<Url> {
+    match db {
+        Some(db) => db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_echoip_urls()
+            .de()
+            .unwrap_or_else(|_| crate::db::model::public::default_echoip_urls()),
+        None => crate::db::model::public::default_echoip_urls(),
+    }
+}
+
+/// Asks each echoip server in turn until one answers.
+async fn probe_wan_ipv4_via_echoip(
+    iface: GatewayId,
+    target: EchoipTarget,
+    urls: Vec<Url>,
+) -> Option<Ipv4Addr> {
+    let mut err = None;
+    for url in urls {
+        match get_wan_ipv4(
+            &iface,
+            target.index,
+            &target.dns_servers,
+            &url,
+            target.local_ipv4,
+        )
+        .await
+        {
+            Ok(Some(ip)) => return Some(ip),
+            Ok(None) => (),
+            Err(e) => err = Some(e),
+        }
+    }
+    if let Some(e) = err {
+        tracing::error!(
+            "{}",
+            t!(
+                "net.gateway.failed-to-determine-wan-ip",
+                iface = iface.to_string(),
+                error = e.to_string()
+            )
+        );
+        tracing::debug!("{e:?}");
+    }
+    None
+}
+
+fn record_wan_ipv4(
+    interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    iface: &GatewayId,
+    wan_ip: Ipv4Addr,
+) {
+    interfaces.send_if_modified(|m| {
+        let Some(ip_info) = m.get_mut(iface).and_then(|entry| entry.ip_info.as_mut()) else {
+            return false;
+        };
+        if ip_info.wan_ip == Some(wan_ip) {
+            return false;
+        }
+        Arc::make_mut(ip_info).wan_ip = Some(wan_ip);
+        true
+    });
 }
 
 async fn get_wan_ipv4(
@@ -2235,7 +2404,16 @@ async fn watch_ip(
             .fuse()
         });
 
-    let mut echoip_ratelimit_state: BTreeMap<Url, Instant> = BTreeMap::new();
+    let mut probe_ratelimit_state: BTreeMap<Url, Instant> = BTreeMap::new();
+    let upnp_supplies_wan = Watch::new(None);
+    let _echoip: NonDetachingJoinHandle<()> = tokio::spawn(probe_wan_ipv4(
+        iface.clone(),
+        write_to.clone(),
+        db.cloned(),
+        upnp_supplies_wan.clone(),
+        probe_wan_ipv4_via_echoip,
+    ))
+    .into();
 
     loop {
         until
@@ -2341,8 +2519,8 @@ async fn watch_ip(
                                         &dhcp4_proxy,
                                         &policy_guard,
                                         &iface,
-                                        &mut echoip_ratelimit_state,
-                                        db,
+                                        &mut probe_ratelimit_state,
+                                        &upnp_supplies_wan,
                                         write_to,
                                         device_type,
                                         &name,
@@ -2691,8 +2869,8 @@ async fn poll_ip_info(
     dhcp4_proxy: &Option<Dhcp4ConfigProxy<'_>>,
     policy_guard: &Option<PolicyRoutingGuard>,
     iface: &GatewayId,
-    echoip_ratelimit_state: &mut BTreeMap<Url, Instant>,
-    db: Option<&TypedPatchDb<Database>>,
+    probe_ratelimit_state: &mut BTreeMap<Url, Instant>,
+    upnp_supplies_wan: &Watch<Option<bool>>,
     write_to: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     device_type: Option<NetworkInterfaceType>,
     name: &InternedString,
@@ -2835,19 +3013,7 @@ async fn poll_ip_info(
 
     // Now fetch the WAN IP in a second pass.  Even if this is slow or
     // gets cancelled, the gateway already has valid ip_info above.
-    let echoip_urls = if let Some(db) = db {
-        db.peek()
-            .await
-            .as_public()
-            .as_server_info()
-            .as_echoip_urls()
-            .de()
-            .unwrap_or_else(|_| crate::db::model::public::default_echoip_urls())
-    } else {
-        crate::db::model::public::default_echoip_urls()
-    };
     let mut wan_ip = None;
-    let mut err = None;
     let local_ipv4 = subnets.iter().find_map(|s| match s.addr() {
         IpAddr::V4(v4) => Some(v4),
         _ => None,
@@ -2861,18 +3027,16 @@ async fn poll_ip_info(
     // Capability verdicts collected this poll, written back at the end.
     let mut probed_caps: Option<GatewayPortMapCapabilities> = None;
 
-    // Ask the gateway's own UPnP IGD first. This works for a home router and
-    // for a StartTunnel gateway, which answers GetExternalIPAddress over the
-    // WireGuard link (see crate::tunnel::forward::igd). Rate-limited like echoip below,
-    // keyed by a sentinel URL in the shared rate-limit map. One SSDP discovery
+    // Ask the gateway's own UPnP IGD, which spares an echoip probe. A
+    // StartTunnel gateway answers over the WireGuard link. One SSDP discovery
     // doubles as the UPnP capability verdict.
     if let Some(local_ipv4) = local_ipv4.filter(|_| forwardable) {
         let upnp_probe_key = upnp_probe_key();
-        if echoip_ratelimit_state
+        if probe_ratelimit_state
             .get(&upnp_probe_key)
             .map_or(true, |i| i.elapsed() > Duration::from_secs(300))
         {
-            echoip_ratelimit_state.insert(upnp_probe_key, Instant::now());
+            probe_ratelimit_state.insert(upnp_probe_key, Instant::now());
             match crate::net::port_map::upnp::discover(local_ipv4).await {
                 Ok(upnp_gw) => {
                     probed_caps
@@ -2891,6 +3055,9 @@ async fn poll_ip_info(
                             crate::dev_log!(debug, "UPnP WAN IP probe on {iface} failed: {e}")
                         }
                     }
+                    upnp_supplies_wan.send_if_modified(|s| {
+                        s.replace(wan_ip.is_some()) != Some(wan_ip.is_some())
+                    });
                 }
                 Err(e) => {
                     probed_caps
@@ -2902,70 +3069,17 @@ async fn poll_ip_info(
                                 .unwrap_or_default()
                         })
                         .upnp = CapabilityVerdict::supported(false);
+                    upnp_supplies_wan.send_if_modified(|s| s.replace(false) != Some(false));
                     crate::dev_log!(debug, "UPnP WAN IP probe on {iface} failed: {e}");
                 }
             }
         }
+    } else {
+        upnp_supplies_wan.send_if_modified(|s| s.replace(false) != Some(false));
     }
 
-    let dns_servers = write_to
-        .peek(|m| m.get(iface).map(|i| i.dns.servers.clone()))
-        .unwrap_or_default();
-    for echoip_url in echoip_urls {
-        if wan_ip.is_some() {
-            break;
-        }
-        if echoip_ratelimit_state
-            .get(&echoip_url)
-            .map_or(true, |i| i.elapsed() > Duration::from_secs(300))
-            && forwardable
-        {
-            let local_ipv4 = local_ipv4.unwrap_or(Ipv4Addr::UNSPECIFIED);
-            match get_wan_ipv4(iface, scope_id, &dns_servers, &echoip_url, local_ipv4).await {
-                Ok(a) => {
-                    wan_ip = a;
-                }
-                Err(e) => {
-                    err = Some(e);
-                }
-            };
-            echoip_ratelimit_state.insert(echoip_url, Instant::now());
-            if wan_ip.is_some() {
-                break;
-            }
-        };
-    }
-    if wan_ip.is_none()
-        && let Some(e) = err
-    {
-        tracing::error!(
-            "{}",
-            t!(
-                "net.gateway.failed-to-determine-wan-ip",
-                iface = iface.to_string(),
-                error = e.to_string()
-            )
-        );
-        tracing::debug!("{e:?}");
-    }
-
-    // Update with WAN IP if we obtained one
-    if wan_ip.is_some() {
-        write_to.send_if_modified(|m: &mut OrdMap<GatewayId, NetworkInterfaceInfo>| {
-            let Some(entry) = m.get_mut(iface) else {
-                return false;
-            };
-            let Some(ref existing_ip) = entry.ip_info else {
-                return false;
-            };
-            if existing_ip.wan_ip == wan_ip {
-                return false;
-            }
-            let mut updated = (**existing_ip).clone();
-            updated.wan_ip = wan_ip;
-            entry.ip_info = Some(Arc::new(updated));
-            true
-        });
+    if let Some(ip) = wan_ip {
+        record_wan_ipv4(write_to, iface, ip);
     }
 
     // Probe the interface's candidate port-map gateways for PCP/NAT-PMP (and
@@ -2990,7 +3104,7 @@ async fn poll_ip_info(
             .unwrap_or_default();
         if stale && forwardable && !candidates.is_empty() {
             let pcp_probe_key = pcp_probe_key();
-            if echoip_ratelimit_state
+            if probe_ratelimit_state
                 .get(&pcp_probe_key)
                 .map_or(true, |i| i.elapsed() > Duration::from_secs(300))
             {
@@ -3014,7 +3128,7 @@ async fn poll_ip_info(
                     pcp_hostname |= probe.pcp_hostname;
                     nat_pmp |= probe.nat_pmp;
                 }
-                echoip_ratelimit_state.insert(pcp_probe_key, Instant::now());
+                probe_ratelimit_state.insert(pcp_probe_key, Instant::now());
                 let caps = probed_caps.get_or_insert(caps_now);
                 caps.pcp = CapabilityVerdict::supported(pcp);
                 caps.pcp_hostname = CapabilityVerdict::supported(pcp_hostname);
@@ -4830,5 +4944,160 @@ mod wg_config_tests {
         assert!(!parsed.to_nm_settings("wg0", None).unwrap()["connection"].contains_key("uuid"));
         let updated = parsed.to_nm_settings("wg0", Some("uuid-x")).unwrap();
         assert_eq!(as_str(&updated["connection"]["uuid"]), "uuid-x");
+    }
+}
+
+#[cfg(test)]
+mod echoip_schedule_tests {
+    use tokio::sync::mpsc;
+    use tokio::time::Instant;
+
+    use super::*;
+    use crate::db::model::public::GatewayType;
+
+    /// The first probe comes up to 3 minutes after the gateway appears.
+    const FIRST: std::ops::RangeInclusive<u64> = 0..=180;
+    /// Later probes come up to 15 minutes apart.
+    const RECHECK: std::ops::RangeInclusive<u64> = 0..=900;
+
+    fn gateway(gateway_type: GatewayType, subnet: &str) -> NetworkInterfaceInfo {
+        NetworkInterfaceInfo {
+            wireguard_endpoint_domains: Default::default(),
+            dns: Default::default(),
+            name: None,
+            secure: None,
+            ip_info: Some(Arc::new(IpInfo {
+                name: InternedString::intern("wg0"),
+                scope_id: 7,
+                device_type: Some(NetworkInterfaceType::Wireguard),
+                subnets: [subnet.parse::<IpNet>().unwrap()].into_iter().collect(),
+                lan_ip: Default::default(),
+                wan_ip: None,
+                ntp_servers: Default::default(),
+                dns_servers: Default::default(),
+                default_route_v4: None,
+                default_route_v6: None,
+            })),
+            gateway_type,
+            port_map: Default::default(),
+            dns_update: Default::default(),
+        }
+    }
+
+    fn wg0() -> GatewayId {
+        InternedString::intern("wg0").into()
+    }
+
+    /// Runs the schedule for wg0 and reports when each probe starts.
+    fn schedule(
+        interfaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+        upnp_supplies_wan: &Watch<Option<bool>>,
+    ) -> (NonDetachingJoinHandle<()>, mpsc::UnboundedReceiver<Instant>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(probe_wan_ipv4(
+            wg0(),
+            interfaces.clone(),
+            None,
+            upnp_supplies_wan.clone(),
+            move |_, _, _| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(Instant::now()).unwrap();
+                    Some(Ipv4Addr::new(203, 0, 113, 1))
+                }
+            },
+        ));
+        (task.into(), rx)
+    }
+
+    fn within(elapsed: Duration, secs: std::ops::RangeInclusive<u64>) -> bool {
+        Duration::from_secs(*secs.start()) <= elapsed && elapsed <= Duration::from_secs(*secs.end())
+    }
+
+    #[test]
+    fn every_gateway_but_a_bridge_is_probed() {
+        for gateway_type in [GatewayType::InboundOutbound, GatewayType::OutboundOnly] {
+            assert!(EchoipTarget::of(Some(&gateway(gateway_type, "10.0.0.2/24"))).is_some());
+        }
+        let mut bridge = gateway(GatewayType::InboundOutbound, "10.0.0.2/24");
+        Arc::make_mut(bridge.ip_info.as_mut().unwrap()).device_type =
+            Some(NetworkInterfaceType::Bridge);
+        assert!(EchoipTarget::of(Some(&bridge)).is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn probes_come_at_random_times_within_their_ranges() {
+        let mut first_delays = BTreeSet::new();
+        for run in 0..8 {
+            let gateway_type = if run % 2 == 0 {
+                GatewayType::InboundOutbound
+            } else {
+                GatewayType::OutboundOnly
+            };
+            let interfaces = Watch::new(OrdMap::from_iter([(
+                wg0(),
+                gateway(gateway_type, "10.0.0.2/24"),
+            )]));
+            let start = Instant::now();
+            let (_task, mut probes) = schedule(&interfaces, &Watch::new(Some(false)));
+            let mut last = start;
+            for n in 0..3 {
+                let at = probes.recv().await.unwrap();
+                let range = if n == 0 { FIRST } else { RECHECK };
+                assert!(within(at - last, range), "probe {n} after {:?}", at - last);
+                if n == 0 {
+                    first_delays.insert(at - start);
+                }
+                last = at;
+            }
+            assert_eq!(
+                interfaces.peek(|i| i[&wg0()].ip_info.as_ref().unwrap().wan_ip),
+                Some(Ipv4Addr::new(203, 0, 113, 1))
+            );
+        }
+        assert!(first_delays.len() > 1, "first delays never varied");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_address_change_restarts_the_first_delay() {
+        let interfaces = Watch::new(OrdMap::from_iter([(
+            wg0(),
+            gateway(GatewayType::InboundOutbound, "10.0.0.2/24"),
+        )]));
+        let (_task, mut probes) = schedule(&interfaces, &Watch::new(Some(false)));
+        let first = probes.recv().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let changed = Instant::now();
+        interfaces.send_modify(|i| {
+            i.insert(wg0(), gateway(GatewayType::InboundOutbound, "10.9.0.2/24"));
+        });
+        let next = probes.recv().await.unwrap();
+        assert!(within(next - changed, FIRST), "{:?}", next - first);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_echoip_probe_while_upnp_supplies_the_address() {
+        let interfaces = Watch::new(OrdMap::from_iter([(
+            wg0(),
+            gateway(GatewayType::InboundOutbound, "10.0.0.2/24"),
+        )]));
+        let (_task, mut probes) = schedule(&interfaces, &Watch::new(Some(true)));
+        tokio::time::sleep(Duration::from_secs(4 * 3600)).await;
+        assert!(probes.try_recv().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_first_probe_waits_for_the_first_upnp_answer() {
+        let interfaces = Watch::new(OrdMap::from_iter([(
+            wg0(),
+            gateway(GatewayType::InboundOutbound, "10.0.0.2/24"),
+        )]));
+        let upnp = Watch::new(None);
+        let (_task, mut probes) = schedule(&interfaces, &upnp);
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        assert!(probes.try_recv().is_err());
+        let answered = Instant::now();
+        upnp.send(Some(false));
+        assert_eq!(probes.recv().await.unwrap(), answered);
     }
 }
