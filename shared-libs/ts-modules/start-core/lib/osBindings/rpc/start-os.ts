@@ -556,6 +556,9 @@ export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
  * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
  */
 export type EditVersionParamsInput = z.input<typeof schemas.EditVersionParams>
+export type EnrollPasskeySessionParamsInput = z.input<
+  typeof schemas.EnrollPasskeySessionParams
+>
 export type EppInfo = z.output<typeof schemas.EppInfo>
 export type EppParamsInput = z.input<typeof schemas.EppParams>
 export type ExecParamsInput = z.input<typeof schemas.ExecParams>

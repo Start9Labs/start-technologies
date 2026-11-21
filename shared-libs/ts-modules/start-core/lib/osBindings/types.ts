@@ -830,6 +830,12 @@ export type EffectsRunActionParams = z.output<
 export type EffectsRunActionParamsInput = z.input<
   typeof schemas.EffectsRunActionParams
 >
+export type EnrollPasskeySessionParams = z.output<
+  typeof schemas.EnrollPasskeySessionParams
+>
+export type EnrollPasskeySessionParamsInput = z.input<
+  typeof schemas.EnrollPasskeySessionParams
+>
 export type ExportRangeServiceInterfaceParams = z.output<
   typeof schemas.ExportRangeServiceInterfaceParams
 >

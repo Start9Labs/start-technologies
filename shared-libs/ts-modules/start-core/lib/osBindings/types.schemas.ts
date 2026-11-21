@@ -1558,8 +1558,8 @@ export const ServiceInterfaceType: z.ZodEnum<{
 })
 export const Session: z.ZodObject<{
   /**
-   * A friendly name for the key, if one was assigned at enrollment (e.g.
-   * tunnel device keys). UI-enrolled keys are unnamed.
+   * A friendly name assigned at enrollment: a tunnel device's name, or the
+   * name of the passkey that enrolled the key. Password logins are unnamed.
    */
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1573,12 +1573,12 @@ export const Session: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * A friendly name for the key, if one was assigned at enrollment (e.g.
-   * tunnel device keys). UI-enrolled keys are unnamed.
+   * A friendly name assigned at enrollment: a tunnel device's name, or the
+   * name of the passkey that enrolled the key. Password logins are unnamed.
    */
   name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
     description:
-      'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
+      "A friendly name assigned at enrollment: a tunnel device's name, or the\nname of the passkey that enrolled the key. Password logins are unnamed.",
   }),
   loggedIn: wire(z.string().optional(), z.string()),
   lastActive: wire(z.string().optional(), z.string()),
@@ -3071,6 +3071,32 @@ export const EffectsRunActionParams: z.ZodObject<{
   input: z.unknown(),
 }).meta({
   id: 'EffectsRunActionParams',
+})
+export const EnrollPasskeySessionParams: z.ZodObject<{
+  /**
+   * The browser's unpersisted session key.
+   */
+  pubkey: typeof AnyVerifyingKey
+  /**
+   * A stable random label for the browser; its previous session key for this passkey is revoked.
+   */
+  device: z.ZodString
+}> = /* @__PURE__ */ object({
+  /**
+   * The browser's unpersisted session key.
+   */
+  pubkey: AnyVerifyingKey.meta({
+    description: "The browser's unpersisted session key.",
+  }),
+  /**
+   * A stable random label for the browser; its previous session key for this passkey is revoked.
+   */
+  device: z.string().meta({
+    description:
+      'A stable random label for the browser; its previous session key for this passkey is revoked.',
+  }),
+}).meta({
+  id: 'EnrollPasskeySessionParams',
 })
 export const ExportRangeServiceInterfaceParams: z.ZodObject<{
   hostId: typeof HostId

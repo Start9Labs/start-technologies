@@ -472,8 +472,8 @@ export const RemoveDnsRecordParams: z.ZodObject<{
 })
 export const Session: z.ZodObject<{
   /**
-   * A friendly name for the key, if one was assigned at enrollment (e.g.
-   * tunnel device keys). UI-enrolled keys are unnamed.
+   * A friendly name assigned at enrollment: a tunnel device's name, or the
+   * name of the passkey that enrolled the key. Password logins are unnamed.
    */
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -487,12 +487,12 @@ export const Session: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * A friendly name for the key, if one was assigned at enrollment (e.g.
-   * tunnel device keys). UI-enrolled keys are unnamed.
+   * A friendly name assigned at enrollment: a tunnel device's name, or the
+   * name of the passkey that enrolled the key. Password logins are unnamed.
    */
   name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
     description:
-      'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
+      "A friendly name assigned at enrollment: a tunnel device's name, or the\nname of the passkey that enrolled the key. Password logins are unnamed.",
   }),
   loggedIn: wire(z.string().optional(), z.string()),
   lastActive: wire(z.string().optional(), z.string()),

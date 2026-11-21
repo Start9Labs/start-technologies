@@ -783,8 +783,8 @@ pub async fn logout<C: LoginContext>(
 #[derive(Debug, Clone, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
-    /// A friendly name for the key, if one was assigned at enrollment (e.g.
-    /// tunnel device keys). UI-enrolled keys are unnamed.
+    /// A friendly name assigned at enrollment: a tunnel device's name, or the
+    /// name of the passkey that enrolled the key. Password logins are unnamed.
     #[serde(default)]
     pub name: Option<InternedString>,
     #[serde(default)]

@@ -8,7 +8,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::Empty;
-use crate::auth::{AuthKeys, LoginContext};
+use crate::auth::{AuthKeys, LoginContext, Session};
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
@@ -17,6 +17,12 @@ use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::AnyVerifyingKey;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::util::sync::SyncMutex;
+
+/// The session key each passkey enrolled per device, keyed by the passkey's canonical DER64.
+pub type PasskeySessions = BTreeMap<InternedString, BTreeMap<InternedString, InternedString>>;
+
+/// Bound on the browser-chosen device label.
+const MAX_DEVICE_ID_LEN: usize = 64;
 
 /// WebAuthn's limit on credential ID length.
 const MAX_CREDENTIAL_ID_BYTES: usize = 1023;
@@ -60,6 +66,14 @@ pub fn passkey<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add)
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_cli(),
+        )
+        .subcommand(
+            "enroll",
+            from_fn_async(enroll)
+                .with_metadata("get_signer", Value::Bool(true))
+                .with_metadata("get_user_agent", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),
         )
@@ -175,7 +189,82 @@ pub struct RemovePasskeyParams {
 rpc_toolkit::reflect_ts!(RemovePasskeyParams);
 rpc_toolkit::ts_export!(RemovePasskeyParams, namespaces = [""]);
 
-/// Revokes the passkey's open connections and continuations with it.
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollPasskeySessionParams {
+    /// The browser's unpersisted session key.
+    pub pubkey: AnyVerifyingKey,
+    /// A stable random label for the browser; its previous session key for this passkey is revoked.
+    pub device: InternedString,
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
+    signer: AnyVerifyingKey,
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_userAgent")]
+    user_agent: Option<String>,
+}
+
+rpc_toolkit::reflect_ts!(EnrollPasskeySessionParams);
+rpc_toolkit::ts_export!(EnrollPasskeySessionParams, namespaces = [""]);
+
+/// Enrolls a session key in memory only, on a connection a registered passkey signed.
+pub async fn enroll(
+    ctx: RpcContext,
+    EnrollPasskeySessionParams {
+        pubkey,
+        device,
+        signer,
+        user_agent,
+    }: EnrollPasskeySessionParams,
+) -> Result<(), Error> {
+    if device.is_empty() || device.len() > MAX_DEVICE_ID_LEN {
+        return Err(Error::new(
+            eyre!("{}", t!("auth.passkey.invalid-device")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    let passkey = signer.interned_der64();
+    let peek = ctx.db.peek().await;
+    let Some(registered) = peek.as_private().as_passkeys().as_idx(&passkey) else {
+        return Err(Error::new(
+            eyre!("{}", t!("auth.passkey.not-a-passkey")),
+            ErrorKind::Authorization,
+        ));
+    };
+    let now = Utc::now();
+    let session = Session {
+        name: Some(registered.as_name().de()?.into()),
+        logged_in: now,
+        last_active: now,
+        user_agent,
+    };
+    let key = pubkey.interned_der64();
+    ctx.ephemeral_auth_keys
+        .mutate(|keys| keys.0.insert(key.clone(), session));
+    let replaced = ctx
+        .passkey_sessions
+        .mutate(|sessions| record_session(sessions, passkey, device, key));
+    if let Some(replaced) = replaced {
+        ctx.unenroll([replaced]).await?;
+    }
+    Ok(())
+}
+
+/// Returns the device's previous, distinct session key for the passkey.
+fn record_session(
+    sessions: &mut PasskeySessions,
+    passkey: InternedString,
+    device: InternedString,
+    key: InternedString,
+) -> Option<InternedString> {
+    sessions
+        .entry(passkey)
+        .or_default()
+        .insert(device, key.clone())
+        .filter(|previous| *previous != key)
+}
+
+/// Revokes the passkey, the session keys it enrolled, and their open connections and continuations.
 pub async fn remove(
     ctx: RpcContext,
     RemovePasskeyParams { public_key }: RemovePasskeyParams,
@@ -183,8 +272,9 @@ pub async fn remove(
     let key = public_key.interned_der64();
     let continuations = ctx.open_authed_continuations();
     let ephemeral = ctx.ephemeral_auth_keys();
+    let sessions = &ctx.passkey_sessions;
     ctx.db
-        .mutate(|db| revoke(continuations, ephemeral, db, key))
+        .mutate(|db| revoke(continuations, ephemeral, sessions, db, key))
         .await
         .result
 }
@@ -192,11 +282,20 @@ pub async fn remove(
 fn revoke(
     continuations: &OpenAuthedContinuations<Option<InternedString>>,
     ephemeral: Option<&SyncMutex<AuthKeys>>,
+    sessions: &SyncMutex<PasskeySessions>,
     db: &mut Model<Database>,
     key: InternedString,
 ) -> Result<(), Error> {
     db.as_private_mut().as_passkeys_mut().remove(&key)?;
-    HasUnenrolledKeys::unenroll::<RpcContext>(continuations, ephemeral, db, [key])?;
+    let enrolled = sessions
+        .mutate(|sessions| sessions.remove(&key))
+        .unwrap_or_default();
+    HasUnenrolledKeys::unenroll::<RpcContext>(
+        continuations,
+        ephemeral,
+        db,
+        enrolled.into_values().chain([key]),
+    )?;
     Ok(())
 }
 
@@ -249,7 +348,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn passkeys_survive_logout_until_revoked() {
+    async fn passkeys_survive_logout_until_revoked_with_their_session_keys() {
         let db = database().await;
         let (public_key, passkey) = passkey();
         let id = public_key.interned_der64();
@@ -276,11 +375,47 @@ mod tests {
         .unwrap();
         assert!(is_registered(&db.peek().await, &id));
 
-        db.mutate(|db| revoke(&continuations, None, db, id.clone()))
+        let ephemeral = SyncMutex::new(AuthKeys::new());
+        let session = InternedString::intern("session-key");
+        ephemeral.mutate(|keys| {
+            let now = Utc::now();
+            keys.0.insert(
+                session.clone(),
+                Session {
+                    name: None,
+                    logged_in: now,
+                    last_active: now,
+                    user_agent: None,
+                },
+            )
+        });
+        let mut recorded = PasskeySessions::new();
+        record_session(&mut recorded, id.clone(), "device".into(), session.clone());
+        let sessions = SyncMutex::new(recorded);
+        db.mutate(|db| revoke(&continuations, Some(&ephemeral), &sessions, db, id.clone()))
             .await
             .result
             .unwrap();
         assert!(!is_registered(&db.peek().await, &id));
+        assert!(ephemeral.peek(|keys| keys.0.is_empty()));
+        assert!(sessions.peek(|sessions| sessions.is_empty()));
+    }
+
+    #[test]
+    fn a_device_replaces_only_its_own_session_key() {
+        let mut sessions = PasskeySessions::new();
+        let passkey = InternedString::intern("passkey");
+        let record = |sessions: &mut PasskeySessions, device: &str, key: &str| {
+            record_session(sessions, passkey.clone(), device.into(), key.into())
+        };
+        assert_eq!(record(&mut sessions, "laptop", "a"), None);
+        assert_eq!(record(&mut sessions, "phone", "b"), None);
+        assert_eq!(record(&mut sessions, "laptop", "a"), None);
+        assert_eq!(record(&mut sessions, "laptop", "c"), Some("a".into()));
+        assert_eq!(
+            sessions[&passkey],
+            BTreeMap::from([("laptop".into(), "c".into()), ("phone".into(), "b".into())])
+        );
     }
 
     #[tokio::test]

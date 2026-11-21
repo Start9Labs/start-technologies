@@ -4261,6 +4261,20 @@ auth.passkey.invalid-credential-id:
   fr_FR: "Identifiant d’identification de clé d’accès invalide"
   pl_PL: "Nieprawidłowy identyfikator poświadczenia klucza dostępu"
 
+auth.passkey.invalid-device:
+  en_US: "Invalid passkey device ID"
+  de_DE: "Ungültige Passkey-Geräte-ID"
+  es_ES: "ID de dispositivo de llave de acceso no válido"
+  fr_FR: "Identifiant d’appareil de clé d’accès invalide"
+  pl_PL: "Nieprawidłowy identyfikator urządzenia klucza dostępu"
+
+auth.passkey.not-a-passkey:
+  en_US: "Only a registered passkey can enroll a passkey session"
+  de_DE: "Nur ein registrierter Passkey kann eine Passkey-Sitzung anmelden"
+  es_ES: "Solo una llave de acceso registrada puede inscribir una sesión de llave de acceso"
+  fr_FR: "Seule une clé d’accès enregistrée peut inscrire une session de clé d’accès"
+  pl_PL: "Tylko zarejestrowany klucz dostępu może zarejestrować sesję klucza dostępu"
+
 auth.prompt-new-password:
   en_US: "New Password: "
   de_DE: "Neues Passwort: "

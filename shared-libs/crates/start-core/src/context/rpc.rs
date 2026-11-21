@@ -66,6 +66,8 @@ pub struct RpcContextSeed {
     pub os_partitions: OsPartitionInfo,
     pub disk_guid: InternedString,
     pub ephemeral_auth_keys: SyncMutex<AuthKeys>,
+    /// Session keys each passkey enrolled, revoked with the passkey.
+    pub passkey_sessions: SyncMutex<crate::auth::passkey::PasskeySessions>,
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
@@ -512,6 +514,7 @@ impl RpcContext {
             os_partitions: OsPartitionInfo::from_fstab().await?,
             disk_guid,
             ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
+            passkey_sessions: SyncMutex::new(Default::default()),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             sync_db: watch::Sender::new(db.sequence().await),
             registry_refresh,
