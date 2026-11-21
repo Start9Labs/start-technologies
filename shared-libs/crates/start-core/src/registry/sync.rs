@@ -651,20 +651,32 @@ fn publish_snapshot(
     sync_os_default_locale(db)
 }
 
-fn not_synchronized(registry: &Url) -> Error {
+fn not_saved(registry: &Url) -> Error {
     Error::new(
         eyre!(
             "{}",
-            t!(
-                "registry.sync.not-synchronized",
-                registry = registry.as_str()
-            )
+            t!("registry.sync.not-saved", registry = registry.as_str())
         ),
         ErrorKind::NotFound,
     )
 }
 
+fn unreachable(registry: &Url, error: Option<&str>) -> Error {
+    Error::new(
+        eyre!(
+            "{}",
+            t!(
+                "registry.sync.unreachable",
+                registry = registry.as_str(),
+                error = error.unwrap_or_default()
+            )
+        ),
+        ErrorKind::Network,
+    )
+}
+
 /// Selects packages from a saved registry's synchronized index.
+/// A registry with no index yet selects nothing unless its synchronization failed.
 pub(crate) fn synced_packages(
     db: &DatabaseModel,
     registry: &Url,
@@ -675,29 +687,51 @@ pub(crate) fn synced_packages(
         &db.as_public().as_server_info().as_registries().de()?,
         url.as_str(),
     ) {
-        return Err(not_synchronized(registry));
+        return Err(not_saved(registry));
     }
-    let index = db
-        .as_private()
-        .as_registry_indexes()
-        .as_idx(&url)
-        .ok_or_else(|| not_synchronized(registry))?;
-    select_packages(index.as_package(), params)
+    let empty = Model::new(&PackageIndex::default())?;
+    let index = match db.as_private().as_registry_indexes().as_idx(&url) {
+        Some(index) => index.as_package(),
+        None => {
+            let cache = db
+                .as_public()
+                .as_registry_cache()
+                .as_idx(&url)
+                .map(|cache| cache.de())
+                .transpose()?;
+            if let Some(cache) = cache.filter(|cache| cache.status == RegistryStatus::Error) {
+                return Err(unreachable(registry, cache.error.as_deref()));
+            }
+            &empty
+        }
+    };
+    select_packages(index, params)
 }
 
 /// The selected StartOS update source's synchronized releases for this server.
-/// An empty failed cache is unavailable, not evidence of no updates.
+/// An empty cache whose synchronization failed is unreachable, not evidence of no updates.
 pub(crate) fn synced_os_versions(
     db: &DatabaseModel,
     registry: &Url,
 ) -> Result<BTreeMap<exver::Version, OsVersionInfo>, Error> {
-    db.as_public()
+    let Some(cache) = db
+        .as_public()
         .as_os_update_cache()
         .de()?
-        .filter(|cache| cache.status == RegistryStatus::Connected || !cache.versions.is_empty())
         .filter(|cache| same_registry(cache.registry.as_str(), registry.as_str()))
-        .map(|cache| cache.versions)
-        .ok_or_else(|| not_synchronized(registry))
+    else {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!("update.registry-not-selected", registry = registry.as_str())
+            ),
+            ErrorKind::NotFound,
+        ));
+    };
+    if cache.status == RegistryStatus::Error && cache.versions.is_empty() {
+        return Err(unreachable(registry, cache.error.as_deref()));
+    }
+    Ok(cache.versions)
 }
 
 #[cfg(test)]

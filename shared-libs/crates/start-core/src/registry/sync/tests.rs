@@ -444,8 +444,16 @@ fn synced_package_queries_keep_target_and_source_selection_while_offline() {
 }
 
 #[test]
-fn first_connection_failure_publishes_availability_and_unsynced_queries_fail() {
+fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
     let mut db = database();
+    for subscription in [Subscription::Index(url()), Subscription::Os(url())] {
+        set_status(&mut db, &subscription, RegistryStatus::Connecting, None).unwrap();
+    }
+    assert_eq!(
+        select(&db, &url(), json!({"id":"test"})).unwrap()["best"],
+        json!({})
+    );
+    assert!(synced_os_versions(&db, &url()).unwrap().is_empty());
     set_status(
         &mut db,
         &Subscription::Index(url()),
