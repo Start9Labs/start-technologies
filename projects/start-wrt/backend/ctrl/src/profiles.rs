@@ -3563,16 +3563,21 @@ rpc_toolkit::reflect_ts!(EditArgs);
 #[instrument(skip_all)]
 pub async fn edit<C: CtrlContext>(ctx: C, args: EditArgs) -> Result<ProfileId, Error> {
     if args.create {
+        let owns_lan = list(ctx.clone()).await?.is_empty();
         let template = Profile {
             id: args.get.clone(),
             gateway_ip: std::net::Ipv4Addr::new(192, 168, 1, 1),
             outbound: "wan".to_string(),
-            lan_access: LanAccess::All,
+            lan_access: if owns_lan {
+                LanAccess::All
+            } else {
+                LanAccess::SameProfile
+            },
             wan_access: WanAccess::All,
             dns_override: Vec::new(),
             dns_source: String::new(),
-            access_to_new_profiles: true,
-            owns_lan: list(ctx.clone()).await?.is_empty(),
+            access_to_new_profiles: owns_lan,
+            owns_lan,
         };
         let modified_profile: Profile<ProfileIdOpt> = crate::utils::edit_in_editor(&template)?;
         create(ctx, DeserializeStdin(modified_profile)).await
