@@ -120,12 +120,14 @@ fi
         READER_KEYS: '',
         S3_BASE: '',
         ON_GITHUB: String(forge === 'github'),
+        HAS_PACKAGES_TOKEN: 'false',
         ...env,
       }).status
     assert.equal(status({}), 0)
     assert.equal(status({ READER_KEYS: 'MCowBQYDK2VwAyEA' }), 1)
+    assert.equal(status({ PRIVATE_REPOSITORY: 'true' }), 1)
     assert.equal(
-      status({ PRIVATE_REPOSITORY: 'true' }),
+      status({ PRIVATE_REPOSITORY: 'true', HAS_PACKAGES_TOKEN: 'true' }),
       forge === 'github' ? 1 : 0,
     )
     assert.equal(
