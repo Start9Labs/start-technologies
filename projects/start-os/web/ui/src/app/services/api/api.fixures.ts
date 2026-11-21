@@ -2609,6 +2609,7 @@ PersistentKeepalive = 25`
     s9pk: '/media/startos/data/package-data/archive/installed/bitcoind.s9pk',
     lastBackup: null,
     statusInfo: {
+      forceStopAt: null,
       error: null,
       desired: { main: 'running' },
       started: new Date().toISOString(),
@@ -2891,6 +2892,7 @@ PersistentKeepalive = 25`
     s9pk: '/media/startos/data/package-data/archive/installed/btc-rpc-proxy.s9pk',
     lastBackup: null,
     statusInfo: {
+      forceStopAt: null,
       desired: { main: 'stopped' },
       started: null,
       health: {},
@@ -2923,6 +2925,7 @@ PersistentKeepalive = 25`
     s9pk: '/media/startos/data/package-data/archive/installed/lnd.s9pk',
     lastBackup: null,
     statusInfo: {
+      forceStopAt: null,
       desired: { main: 'stopped' },
       error: null,
       health: {},

@@ -67,6 +67,7 @@ import { getDriveName } from 'src/app/utils/get-drive-name'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
 import { sshKeyRows } from 'src/app/utils/ssh-keys'
 import { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
+import { forceStopAt } from '../force-stop'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
 import {
@@ -1613,6 +1614,7 @@ export class MockApiService extends ApiService implements StartupApiService {
             op: PatchOp.REPLACE,
             path,
             value: {
+              forceStopAt: null,
               error: null,
               desired: { main: 'running' },
               started: new Date().toISOString(),
@@ -1656,6 +1658,7 @@ export class MockApiService extends ApiService implements StartupApiService {
           op: PatchOp.REPLACE,
           path,
           value: {
+            forceStopAt: null,
             desired: { main: 'running' },
             started: null,
             error: null,
@@ -1678,6 +1681,7 @@ export class MockApiService extends ApiService implements StartupApiService {
             op: PatchOp.REPLACE,
             path,
             value: {
+              forceStopAt: null,
               desired: { main: 'running' },
               error: null,
               started: new Date().toISOString(),
@@ -1721,6 +1725,7 @@ export class MockApiService extends ApiService implements StartupApiService {
           op: PatchOp.REPLACE,
           path,
           value: {
+            forceStopAt: null,
             desired: { main: 'restarting', restartAgain: false },
             started: null,
             error: null,
@@ -1743,6 +1748,7 @@ export class MockApiService extends ApiService implements StartupApiService {
             op: PatchOp.REPLACE,
             path: path,
             value: {
+              forceStopAt: null,
               desired: { main: 'stopped' },
               error: null,
               health: {},
@@ -1758,6 +1764,7 @@ export class MockApiService extends ApiService implements StartupApiService {
           op: PatchOp.REPLACE,
           path: path,
           value: {
+            forceStopAt: null,
             desired: { main: 'stopped' },
             error: null,
             health: {},
@@ -1768,6 +1775,27 @@ export class MockApiService extends ApiService implements StartupApiService {
 
       this.mockRevision(patch)
 
+      return null
+    },
+    'package.force-stop': async params => {
+      await pauseFor(2000)
+      const status = this.cache.value.value.packageData[params.id]?.statusInfo
+      if (!status || forceStopAt(status, Date.now()) !== params.forceStopAt) {
+        throw new Error('Service is not eligible for force stop')
+      }
+      this.mockRevision<T.StatusInfo>([
+        {
+          op: PatchOp.REPLACE,
+          path: `/packageData/${params.id}/statusInfo`,
+          value: {
+            desired: { main: 'stopped' },
+            forceStopAt: null,
+            started: null,
+            error: null,
+            health: {},
+          },
+        },
+      ])
       return null
     },
     'package.rebuild': async params => {
