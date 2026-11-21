@@ -255,11 +255,19 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
-    'auth.session.list': async params => {
+    'auth.key.list': async params => {
       await pauseFor(2000)
-      return Mock.Sessions
+      return Mock.Keys
     },
-    'auth.session.kill': async params => {
+    'auth.key.remove': async params => {
+      await pauseFor(2000)
+      return null
+    },
+    'auth.token.list': async params => {
+      await pauseFor(2000)
+      return Mock.Tokens
+    },
+    'auth.token.remove': async params => {
       await pauseFor(2000)
       return null
     },
@@ -2230,6 +2238,11 @@ export class MockApiService extends ApiService implements StartupApiService {
   }
 
   // state
+
+  async checkEnrollment(): Promise<unknown> {
+    await pauseFor(1000)
+    return null
+  }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
     if (url) {

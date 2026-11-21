@@ -53,4 +53,7 @@ export abstract class ApiService {
 
   /** Reaches a foreign server unsigned; rejection never changes local authentication. */
   abstract echo(params: Params<'echo'>, url: string): Promise<string>
+
+  /** Rejects while this browser's key is not enrolled, without signing out. */
+  abstract checkEnrollment(): Promise<unknown>
 }

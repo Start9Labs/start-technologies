@@ -4510,6 +4510,20 @@ help.arg.address:
   pl_PL: "Jeden z adresów powiązania (IP, <nazwa>.local lub domena), z :port, gdy obsługuje kilka portów; przyjmowany jest też HostnameInfo w JSON"
 
 
+help.arg.auth-key:
+  en_US: "Device key to enroll, in DER64 or PEM form"
+  de_DE: "Zu registrierender Geräteschlüssel im DER64- oder PEM-Format"
+  es_ES: "Clave de dispositivo a registrar, en formato DER64 o PEM"
+  fr_FR: "Clé d'appareil à enregistrer, au format DER64 ou PEM"
+  pl_PL: "Klucz urządzenia do zarejestrowania, w formacie DER64 lub PEM"
+
+help.arg.auth-key-name:
+  en_US: "Name shown for the key in the key list"
+  de_DE: "Name des Schlüssels in der Schlüsselliste"
+  es_ES: "Nombre que se muestra para la clave en la lista de claves"
+  fr_FR: "Nom affiché pour la clé dans la liste des clés"
+  pl_PL: "Nazwa klucza wyświetlana na liście kluczy"
+
 help.arg.gua-wan:
   en_US: "Expose the IPv6 GUA to the WAN (false = LAN-only)"
   de_DE: "IPv6-GUA zum WAN freigeben (false = nur LAN)"
@@ -5436,11 +5450,11 @@ help.arg.to-registry-url:
   pl_PL: "URL lub nazwa profilu rejestru docelowego do promowania"
 
 help.arg.token-name:
-  en_US: "Name shown for the token in the session list"
-  de_DE: "Name des Tokens in der Sitzungsliste"
-  es_ES: "Nombre que se muestra para el token en la lista de sesiones"
-  fr_FR: "Nom affiché pour le jeton dans la liste des sessions"
-  pl_PL: "Nazwa tokenu wyświetlana na liście sesji"
+  en_US: "Name shown for the token in the token list"
+  de_DE: "Name des Tokens in der Token-Liste"
+  es_ES: "Nombre que se muestra para el token en la lista de tokens"
+  fr_FR: "Nom affiché pour le jeton dans la liste des jetons"
+  pl_PL: "Nazwa tokenu wyświetlana na liście tokenów"
 
 help.arg.tor-proxy-url:
   en_US: "Tor SOCKS proxy URL"
@@ -5525,6 +5539,13 @@ help.arg.use-efi-boot:
   es_ES: "Usar modo de arranque EFI"
   fr_FR: "Utiliser le mode de démarrage EFI"
   pl_PL: "Użyj trybu rozruchu EFI"
+
+help.arg.user-agent:
+  en_US: "User agent shown for the key in the key list"
+  de_DE: "User-Agent des Schlüssels in der Schlüsselliste"
+  es_ES: "Agente de usuario que se muestra para la clave en la lista de claves"
+  fr_FR: "Agent utilisateur affiché pour la clé dans la liste des clés"
+  pl_PL: "Agent użytkownika wyświetlany dla klucza na liście kluczy"
 
 help.arg.user-name:
   en_US: "User name to run as"
@@ -6524,11 +6545,11 @@ about.commands-add-sign-remove-get-assets:
   pl_PL: "Polecenia dodania, podpisania, usunięcia lub pobrania zasobów rejestru"
 
 about.commands-auth-tokens:
-  en_US: "Create bearer tokens for API clients"
-  de_DE: "Bearer-Tokens für API-Clients erstellen"
-  es_ES: "Crear tokens de portador para clientes de la API"
-  fr_FR: "Créer des jetons porteurs pour les clients de l'API"
-  pl_PL: "Twórz tokeny okaziciela dla klientów API"
+  en_US: "Create, list and revoke bearer tokens for API clients"
+  de_DE: "Bearer-Tokens für API-Clients erstellen, auflisten und widerrufen"
+  es_ES: "Crear, listar y revocar tokens de portador para clientes de la API"
+  fr_FR: "Créer, lister et révoquer des jetons porteurs pour les clients de l'API"
+  pl_PL: "Twórz, wyświetlaj i unieważniaj tokeny okaziciela dla klientów API"
 
 about.commands-authentication:
   en_US: "Commands related to Authentication i.e. login, logout"
@@ -6921,13 +6942,6 @@ about.disable-webserver:
   es_ES: "Desactivar el servidor web"
   fr_FR: "Désactiver le serveur web"
   pl_PL: "Wyłącz serwer internetowy"
-
-about.display-all-auth-sessions:
-  en_US: "Display all auth sessions"
-  de_DE: "Alle Authentifizierungssitzungen anzeigen"
-  es_ES: "Mostrar todas las sesiones de autenticación"
-  fr_FR: "Afficher toutes les sessions d'authentification"
-  pl_PL: "Wyświetl wszystkie sesje uwierzytelniania"
 
 about.display-current-api:
   en_US: "Display the current api specification"
@@ -7378,6 +7392,13 @@ about.list-admin-signers:
   fr_FR: "Lister les signataires administrateurs"
   pl_PL: "Wyświetl sygnatariuszy administratorów"
 
+about.list-auth-tokens:
+  en_US: "List bearer tokens"
+  de_DE: "Bearer-Tokens auflisten"
+  es_ES: "Listar tokens de portador"
+  fr_FR: "Lister les jetons porteurs"
+  pl_PL: "Wyświetl tokeny okaziciela"
+
 about.list-authorized-keys:
   en_US: "List authorized keys"
   de_DE: "Autorisierte Schlüssel auflisten"
@@ -7461,13 +7482,6 @@ about.list-onion-services-with-keys-in-store:
   es_ES: "Listar servicios onion con claves en el almacén"
   fr_FR: "Lister les services onion avec des clés en stockage"
   pl_PL: "Wyświetl usługi onion z kluczami w magazynie"
-
-about.list-or-kill-auth-sessions:
-  en_US: "List or kill auth sessions"
-  de_DE: "Authentifizierungssitzungen auflisten oder beenden"
-  es_ES: "Listar o terminar sesiones de autenticación"
-  fr_FR: "Lister ou terminer les sessions d'authentification"
-  pl_PL: "Wyświetl lub zakończ sesje uwierzytelniania"
 
 about.list-os-versions-index:
   en_US: "List OS versions index"
@@ -7748,6 +7762,13 @@ about.remove-admin-signer:
   es_ES: "Eliminar firmante de administrador"
   fr_FR: "Supprimer le signataire administrateur"
   pl_PL: "Usuń sygnatariusza administratora"
+
+about.remove-auth-tokens:
+  en_US: "Revoke bearer tokens"
+  de_DE: "Bearer-Tokens widerrufen"
+  es_ES: "Revocar tokens de portador"
+  fr_FR: "Révoquer des jetons porteurs"
+  pl_PL: "Unieważnij tokeny okaziciela"
 
 about.remove-authorized-key:
   en_US: "Remove authorized key"
@@ -8379,13 +8400,6 @@ about.teardown-rebuild-containers:
   es_ES: "Desmontar y reconstruir contenedores"
   fr_FR: "Démonter et reconstruire les conteneurs"
   pl_PL: "Rozmontuj i przebuduj kontenery"
-
-about.terminate-auth-sessions:
-  en_US: "Terminate auth sessions"
-  de_DE: "Authentifizierungssitzungen beenden"
-  es_ES: "Terminar sesiones de autenticación"
-  fr_FR: "Terminer les sessions d'authentification"
-  pl_PL: "Zakończ sesje uwierzytelniania"
 
 about.test-dns-configuration-for-domain:
   en_US: "Test DNS configuration for a domain"

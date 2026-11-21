@@ -10,8 +10,6 @@ export type AddPortForwardParamsInput = z.input<
 >
 export type AddSubnetParams = z.output<typeof schemas.AddSubnetParams>
 export type AddSubnetParamsInput = z.input<typeof schemas.AddSubnetParams>
-export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
-export type AnyVerifyingKeyInput = z.input<typeof schemas.AnyVerifyingKey>
 export type Base64 = z.output<typeof schemas.Base64>
 export type Base64Input = z.input<typeof schemas.Base64>
 export type CapabilityVerdict = z.output<typeof schemas.CapabilityVerdict>
@@ -190,8 +188,6 @@ export type WgClientKind = z.output<typeof schemas.WgClientKind>
 export type WgClientKindInput = z.input<typeof schemas.WgClientKind>
 export type AddDeviceParams = z.output<typeof schemas.AddDeviceParams>
 export type AddDeviceParamsInput = z.input<typeof schemas.AddDeviceParams>
-export type AddKeyParams = z.output<typeof schemas.AddKeyParams>
-export type AddKeyParamsInput = z.input<typeof schemas.AddKeyParams>
 
 /**
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
@@ -256,8 +252,6 @@ export type PortForward = z.output<typeof schemas.PortForward>
  * port. Mutually exclusive for a given external address.
  */
 export type PortForwardInput = z.input<typeof schemas.PortForward>
-export type RemoveKeyParams = z.output<typeof schemas.RemoveKeyParams>
-export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
 export type RemovePortForwardParams = z.output<
   typeof schemas.RemovePortForwardParams
 >

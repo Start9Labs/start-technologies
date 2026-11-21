@@ -65,7 +65,7 @@ All methods assembled in `main_api()` → `ParentHandler<C>`:
 auth
   ├─ login              # Enroll the signing key (rate-limited: 3 per 20s)
   ├─ logout             # Revoke the signing key
-  ├─ session list / kill
+  ├─ key add / list / remove
   ├─ verify-password    # Password check without login
   ├─ set-password        # Change password
   ├─ check-initialized  # Has admin password been set?
@@ -173,8 +173,8 @@ Maps physical ports to profiles via bridge VLAN assignments on the LAN bridge (`
 
 The daemon runs `start-core`'s `Auth` middleware with `LocalAuth` and `SignatureAuth`; `auth.rs` supplies the StartWRT side of their context traits.
 
-- The handler tree is `start-core`'s `auth()` (login, logout, session list/kill) with StartWRT's password handlers chained on, the same shape as StartTunnel's.
-- Enrolled keys live in a patch-db at `/etc/startwrt/auth.db`, listed in sysupgrade's `keep.d`. A key's `lastActive` is written at most hourly (`LAST_ACTIVE_RESOLUTION`), so routine requests never write to flash. `lastActive` is shown by `auth session list` and governs nothing. `check_pubkey` refuses a key 24 hours after its `loggedIn` time (`SIGN_IN_LIFETIME`); until `/var/state/dnsmasqsec` marks the clock trusted it judges age alone, and afterwards a `loggedIn` more than `LOGIN_CLOCK_SKEW` ahead also expires. `start-core`'s `reap_idle_keys`, run hourly once the clock is trusted, unenrolls expired keys through `LoginContext::sign_in_expired`.
+- The handler tree is `start-core`'s `auth()` (login, logout, `key add/list/remove`) with StartWRT's password handlers chained on, the same shape as StartTunnel's.
+- Enrolled keys live in a patch-db at `/etc/startwrt/auth.db`, listed in sysupgrade's `keep.d`. A key's `lastActive` is written at most hourly (`LAST_ACTIVE_RESOLUTION`), so routine requests never write to flash. `lastActive` is shown by `auth key list` and governs nothing. `check_pubkey` refuses a key 24 hours after its `loggedIn` time (`SIGN_IN_LIFETIME`); until `/var/state/dnsmasqsec` marks the clock trusted it judges age alone, and afterwards a `loggedIn` more than `LOGIN_CLOCK_SKEW` ahead also expires. `start-core`'s `reap_idle_keys`, run hourly once the clock is trusted, unenrolls expired keys through `LoginContext::sign_in_expired`.
 - Signing identities: `router.lan`, `router.local`, every address on the router's interfaces (loopback and link-local IPv6 excluded; start-core accepts a loopback address from a loopback peer), and the enabled DDNS hostname, re-read only when `/etc/config/ddns` changes.
 - Timestamps are enforced once `/var/state/dnsmasqsec` exists (dnsmasq's ntp hotplug writes it when ntpd reports valid time); before that, only the nonce cache stops replays.
 - Password validated against `/etc/shadow` (or `STARTWRT_DEV_PASSWORD` env var in dev)
