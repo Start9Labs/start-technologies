@@ -3,7 +3,7 @@ import {
   DatabaseUpdate,
   legacyDatabaseSubscription,
 } from '@start9labs/shared'
-import type { RPC, RpcStreamClient } from '@start9labs/start-core'
+import type { RPC, RpcStreamClient, T } from '@start9labs/start-core'
 import type { Revision } from 'patch-db-client'
 import type { DataModel } from '../patch-db/data-model'
 import { Observable } from 'rxjs'
@@ -50,6 +50,11 @@ export abstract class ApiService {
     guid: string,
     config?: WebsocketConfig<T>,
   ): Observable<T>
+
+  /** Enrolls a session key on a connection signed by a registered passkey. */
+  abstract enrollWithPasskey(
+    params: T.EnrollPasskeySessionParams,
+  ): Promise<void>
 
   /** Reaches a foreign server unsigned; rejection never changes local authentication. */
   abstract echo(params: Params<'echo'>, url: string): Promise<string>

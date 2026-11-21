@@ -62,6 +62,16 @@ List all enrolled device keys and bearer tokens.
 
 End one or more sessions. `--pubkey` removes an enrolled device key; `--token` revokes a bearer token by the ID `auth session list` shows.
 
+### `start-cli auth passkey list`
+
+List the passkeys registered for signing in to the UI.
+
+- `--format` — Output format
+
+### `start-cli auth passkey remove <PUBLIC_KEY>`
+
+Remove a passkey and sign out every session it started. Passkeys are added from the UI, under System > Passkeys.
+
 ### `start-cli auth token create --name <NAME>`
 
 Create a bearer token for an API client that cannot sign requests. The token is printed once and is not stored; the client sends it as `Authorization: Bearer <token>`. It appears in `auth session list` under its name and is revoked with `auth session kill --token` or after 30 days unused.

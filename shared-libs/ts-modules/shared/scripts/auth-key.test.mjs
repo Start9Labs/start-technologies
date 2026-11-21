@@ -9,10 +9,13 @@ import './typescript-loader.mjs'
 const { AuthKeyService, AUTH_SIGNING_HOST, AUTH_KEY_STORAGE_KEY } =
   await import('../src/services/auth-key.service.ts')
 
-function keys(cached = null) {
+function keys(cached = null, storage = null) {
   const injector = Injector.create({
     providers: [
-      { provide: WA_WINDOW, useValue: {} },
+      {
+        provide: WA_WINDOW,
+        useValue: { crypto: globalThis.crypto, localStorage: storage },
+      },
       { provide: AUTH_SIGNING_HOST, useValue: 'server.test' },
       { provide: AUTH_KEY_STORAGE_KEY, useValue: 'test' },
     ],
@@ -55,6 +58,43 @@ test('possession admission shares an unpersisted key without changing enrollment
   assert.notEqual(fresh.signer, first.signer)
   assert.equal(fresh.signal.aborted, false)
   assert.equal(writes, 1)
+})
+
+test('a passkey-enrolled key signs from memory and discards the stored key', async () => {
+  const stored = await auth.generateAuthKey()
+  const service = keys(stored)
+  const writes = []
+  service.idb = async (mode, op) => {
+    if (mode === 'readwrite')
+      op({
+        put: () => writes.push('put'),
+        delete: () => writes.push('delete'),
+      })
+  }
+  const before = await service.lease()
+  const adopted = await auth.generateAuthKey()
+  await service.adopt(adopted)
+  assert.deepEqual(writes, ['delete'])
+  assert.equal(before.signal.aborted, true)
+  const lease = await service.lease()
+  assert.equal(lease.key, adopted)
+  assert.equal(await peer(lease), auth.normalizeDer64(adopted.pubkeyPem))
+  await service.clear()
+  assert.equal(lease.signal.aborted, true)
+  assert.equal(await service.lease(), null)
+})
+
+test('the passkey device label is stable per browser storage', () => {
+  const values = new Map()
+  const storage = {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  }
+  const device = keys(null, storage).passkeyDevice()
+  assert.match(device, /^[0-9a-f-]{36}$/)
+  assert.equal(keys(null, storage).passkeyDevice(), device)
+  const empty = { getItem: () => null, setItem: () => {} }
+  assert.notEqual(keys(null, empty).passkeyDevice(), device)
 })
 
 test('enrollment and rollback invalidate their displaced possession leases', async () => {

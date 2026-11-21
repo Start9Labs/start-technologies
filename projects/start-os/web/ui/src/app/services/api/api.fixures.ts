@@ -1422,6 +1422,15 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     },
   ]
 
+  export const Passkeys: Record<string, T.Passkey> = {
+    'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWRq3ceu8/W2cuQlNEGUordGmnUTCwfYn8InsWLnGGt+fTmq/DQRcDGk6PGitfJfKcr5k3vSib+zSY92YqSeA8A==':
+      {
+        name: 'Laptop',
+        credentialId: 'AQIDBA',
+        addedAt: '2026-10-02T15:04:11.000Z',
+      },
+  }
+
   export const Sessions: T.SessionList = {
     current: 'b7b1a9cef4284f00af9e9dda6e676177',
     sessions: {

@@ -1096,4 +1096,11 @@ export default {
   1300: 'Serveur injoignable',
   1301: 'Les listes peuvent ne pas être à jour',
   1302: 'StartOS ne parvient pas à joindre ce registre pour le moment.',
+  1303: 'Clés d’accès',
+  1304: 'Ajouter une clé d’accès',
+  1305: 'Ajoutée',
+  1306: 'Aucune clé d’accès',
+  1307: 'Se connecter avec une clé d’accès',
+  1308: 'La connexion par clé d’accès a été annulée',
+  1309: 'Aucune clé d’accès n’est enregistrée',
 } satisfies i18n

@@ -1096,4 +1096,11 @@ export default {
   1300: 'Server nicht erreichbar',
   1301: 'Einträge sind möglicherweise veraltet',
   1302: 'StartOS kann diese Registry gerade nicht erreichen.',
+  1303: 'Passkeys',
+  1304: 'Passkey hinzufügen',
+  1305: 'Hinzugefügt',
+  1306: 'Keine Passkeys',
+  1307: 'Mit Passkey anmelden',
+  1308: 'Die Passkey-Anmeldung wurde abgebrochen',
+  1309: 'Es sind keine Passkeys registriert',
 } satisfies i18n

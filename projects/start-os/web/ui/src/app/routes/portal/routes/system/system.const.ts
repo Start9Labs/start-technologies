@@ -85,6 +85,11 @@ export const SYSTEM_MENU = [
       link: 'ssh',
     },
     {
+      icon: '@tui.fingerprint',
+      item: 'Passkeys',
+      link: 'passkeys',
+    },
+    {
       icon: '@tui.key',
       item: 'Change Password',
       link: 'password',

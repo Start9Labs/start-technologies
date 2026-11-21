@@ -5,7 +5,7 @@ Identity authentication uses StartOS request commitments, `RequestProof::sign_co
 through `Signer::sign_message`; verification also accepts Ed25519ph and WebAuthn assertions. Existing package and
 storage signature policy stays with its own signing owner. Client and server schemes
 need not match. Adding a signing scheme extends those owners and the browser provider,
-not the transport. WebAuthn enrollment, assertions and user-presence policy are separate.
+not the transport. Passkey registration and in-memory session enrollment belong to `auth/passkey.rs`; assertion policy belongs to `sign/webauthn.rs`.
 
 ## Admission
 

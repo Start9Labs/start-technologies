@@ -44,49 +44,62 @@ export interface RequestSigner {
 }
 
 interface SigningIdentity {
-  publicKey: Uint8Array
-  /** Returns a DER-encoded `AnySignature`. */
-  sign(message: Uint8Array<ArrayBuffer>): Promise<Uint8Array>
+  /** Returns the signer's SPKI DER and a DER-encoded `AnySignature`. */
+  sign(
+    message: Uint8Array<ArrayBuffer>,
+  ): Promise<{ signer: Uint8Array; signature: Uint8Array }>
 }
 
 function webCryptoIdentity(key: AuthKey): SigningIdentity {
+  const signer = base64ToBytes(normalizeDer64(key.pubkeyPem))
   return {
-    publicKey: base64ToBytes(normalizeDer64(key.pubkeyPem)),
-    sign: async message =>
-      concatBytes(
+    sign: async message => ({
+      signer,
+      signature: concatBytes(
         SIGNATURE_PREFIX,
         new Uint8Array(
           await crypto.subtle.sign('Ed25519', key.privateKey, message),
         ),
       ),
+    }),
   }
 }
 
-function passkeyIdentity(passkey: Passkey): SigningIdentity {
+/** Offers every passkey and attributes the signature to the one the user chose. */
+function passkeyIdentity(passkeys: readonly Passkey[]): SigningIdentity {
+  const credentials = passkeys.map(passkey => ({
+    id: new Uint8Array(base64ToBytes(normalizeDer64(passkey.credentialId))),
+    signer: base64ToBytes(normalizeDer64(passkey.pubkeyPem)),
+  }))
   return {
-    publicKey: base64ToBytes(normalizeDer64(passkey.pubkeyPem)),
     sign: async message => {
       const credential = (await navigator.credentials.get({
         publicKey: {
           challenge: new Uint8Array(sha256(message)),
-          allowCredentials: [
-            {
-              type: 'public-key',
-              id: new Uint8Array(
-                base64ToBytes(normalizeDer64(passkey.credentialId)),
-              ),
-            },
-          ],
+          allowCredentials: credentials.map(({ id }) => ({
+            type: 'public-key',
+            id,
+          })),
           userVerification: 'required',
         },
       })) as PublicKeyCredential | null
       if (!credential) throw new Error('Passkey signing was cancelled')
-      const response = credential.response as AuthenticatorAssertionResponse
-      return webAuthnSignature(
-        new Uint8Array(response.authenticatorData),
-        new Uint8Array(response.clientDataJSON),
-        new Uint8Array(response.signature),
+      const rawId = new Uint8Array(credential.rawId)
+      const chosen = credentials.find(
+        ({ id }) =>
+          id.length === rawId.length &&
+          id.every((byte, i) => byte === rawId[i]),
       )
+      if (!chosen) throw new Error('Unknown passkey')
+      const response = credential.response as AuthenticatorAssertionResponse
+      return {
+        signer: chosen.signer,
+        signature: webAuthnSignature(
+          new Uint8Array(response.authenticatorData),
+          new Uint8Array(response.clientDataJSON),
+          new Uint8Array(response.signature),
+        ),
+      }
     },
   }
 }
@@ -136,10 +149,12 @@ export function requestSigner(key: AuthKey): RequestSigner {
 /** Generates an opaque Ed25519 possession signer without WebCrypto or persistence. */
 export async function generateEphemeralRequestSigner(): Promise<RequestSigner> {
   const secret = ed25519.utils.randomPrivateKey()
+  const signer = concatBytes(ED25519_SPKI_PREFIX, ed25519.getPublicKey(secret))
   return commitmentSigner({
-    publicKey: concatBytes(ED25519_SPKI_PREFIX, ed25519.getPublicKey(secret)),
-    sign: async message =>
-      concatBytes(SIGNATURE_PREFIX, ed25519.sign(message, secret)),
+    sign: async message => ({
+      signer,
+      signature: concatBytes(SIGNATURE_PREFIX, ed25519.sign(message, secret)),
+    }),
   })
 }
 
@@ -185,9 +200,11 @@ export async function createPasskey(
   }
 }
 
-/** Uses a passkey for generic request commitments, prompting once per request. */
-export function passkeyRequestSigner(passkey: Passkey): RequestSigner {
-  return commitmentSigner(passkeyIdentity(passkey))
+/** Uses any of the passkeys for generic request commitments, prompting once per request. */
+export function passkeyRequestSigner(
+  passkeys: readonly Passkey[],
+): RequestSigner {
+  return commitmentSigner(passkeyIdentity(passkeys))
 }
 
 /** Produces an HTTP authentication header for the complete resource body. */
@@ -199,13 +216,13 @@ export async function signRequest(
   return authHeader(webCryptoIdentity(key), context, body)
 }
 
-/** Produces an HTTP authentication header, prompting for the passkey. */
+/** Produces an HTTP authentication header, prompting for one of the passkeys. */
 export async function signRequestWithPasskey(
-  passkey: Passkey,
+  passkeys: readonly Passkey[],
   context: string,
   body: Uint8Array,
 ): Promise<string> {
-  return authHeader(passkeyIdentity(passkey), context, body)
+  return authHeader(passkeyIdentity(passkeys), context, body)
 }
 
 async function authHeader(
@@ -271,10 +288,10 @@ async function signTaggedRequest(
     SIGNATURE_PROFILE.requestType,
     requestCommitment(timestamp, nonce, size, hash),
   )
-  const signature = await identity.sign(message)
+  const { signer, signature } = await identity.sign(message)
   return {
     commitment: { timestamp, nonce, size, blake3: new Uint8Array(hash) },
-    signer: new Uint8Array(identity.publicKey),
+    signer: new Uint8Array(signer),
     signature: new Uint8Array(signature),
   }
 }

@@ -1096,4 +1096,11 @@ export default {
   1300: 'Servidor inaccesible',
   1301: 'Es posible que los listados estén desactualizados',
   1302: 'StartOS no puede conectar con este registro en este momento.',
+  1303: 'Llaves de acceso',
+  1304: 'Añadir llave de acceso',
+  1305: 'Añadida',
+  1306: 'No hay llaves de acceso',
+  1307: 'Iniciar sesión con llave de acceso',
+  1308: 'Se canceló el inicio de sesión con llave de acceso',
+  1309: 'No hay llaves de acceso registradas',
 } satisfies i18n

@@ -1097,4 +1097,11 @@ export const ENGLISH: Record<string, number> = {
   "Can't reach server": 1300,
   'Listings may be out of date': 1301,
   "StartOS can't reach this registry right now.": 1302,
+  'Passkeys': 1303,
+  'Add passkey': 1304,
+  'Added': 1305,
+  'No passkeys': 1306,
+  'Login with passkey': 1307,
+  'Passkey sign-in was cancelled': 1308,
+  'No passkeys are registered': 1309,
 }

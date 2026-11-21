@@ -155,6 +155,9 @@ export class MockApiService extends ApiService implements StartupApiService {
   private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
+  private readonly passkeys = new Map<string, T.Passkey>(
+    Object.entries(Mock.Passkeys),
+  )
   private drives?: Map<string, number>
   private history?: BackupRun[]
   private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
@@ -268,6 +271,29 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
+    'auth.passkey.list': async () => {
+      await pauseFor(1000)
+      return Object.fromEntries(this.passkeys)
+    },
+    'auth.passkey.add': async ({ publicKey, name, credentialId }) => {
+      await pauseFor(1000)
+      this.passkeys.set(publicKey, {
+        name,
+        credentialId,
+        addedAt: new Date().toISOString(),
+      })
+      return null
+    },
+    'auth.passkey.remove': async ({ publicKey }) => {
+      await pauseFor(1000)
+      this.passkeys.delete(publicKey)
+      return null
+    },
+    'auth.passkey.credentials': async () =>
+      [...this.passkeys].map(([publicKey, { credentialId }]) => ({
+        publicKey,
+        credentialId,
+      })),
     'diagnostic.error': async () => {
       await pauseFor(1000)
       return {
@@ -2218,6 +2244,10 @@ export class MockApiService extends ApiService implements StartupApiService {
   }
 
   // state
+
+  async enrollWithPasskey(_: T.EnrollPasskeySessionParams): Promise<void> {
+    await pauseFor(1000)
+  }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
     if (url) {

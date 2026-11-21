@@ -1096,4 +1096,11 @@ export default {
   1300: 'Serwer nieosiągalny',
   1301: 'Listy mogą być nieaktualne',
   1302: 'StartOS nie może teraz połączyć się z tym rejestrem.',
+  1303: 'Klucze dostępu',
+  1304: 'Dodaj klucz dostępu',
+  1305: 'Dodano',
+  1306: 'Brak kluczy dostępu',
+  1307: 'Zaloguj się kluczem dostępu',
+  1308: 'Logowanie kluczem dostępu zostało anulowane',
+  1309: 'Nie zarejestrowano żadnych kluczy dostępu',
 } satisfies i18n

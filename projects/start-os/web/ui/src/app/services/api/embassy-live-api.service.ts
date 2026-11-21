@@ -17,7 +17,12 @@ import {
   rpcRequestBody,
   waitForPatchSequence,
 } from '@start9labs/shared'
-import { createRpcClient, createRpcStreamClient } from '@start9labs/start-core'
+import {
+  auth,
+  createRpcClient,
+  createRpcStreamClient,
+  T,
+} from '@start9labs/start-core'
 import type { RpcStreamOptions } from '@start9labs/start-core'
 import { Dump } from 'patch-db-client'
 import { catchError } from 'rxjs'
@@ -154,6 +159,33 @@ export class LiveApiService extends ApiService {
       this.identity,
       since,
     ).pipe(catchError(error => this.raiseError(error)))
+  }
+
+  async enrollWithPasskey(params: T.EnrollPasskeySessionParams): Promise<void> {
+    const credentials = await this.rpc.auth.passkey.credentials({})
+    if (!credentials.length) throw new Error('No passkeys are registered')
+    const lifetime = new AbortController()
+    try {
+      const response = await this.sockets.message<null>(
+        rpcRequestBody({ method: 'auth.passkey.enroll', params }),
+        { openObserver: this.identity.openObserver },
+        {
+          signer: auth.passkeyRequestSigner(
+            credentials.map(({ credentialId, publicKey }) => ({
+              credentialId,
+              pubkeyPem: auth.derToPem(
+                'PUBLIC KEY',
+                auth.base64ToBytes(publicKey),
+              ),
+            })),
+          ),
+          signal: lifetime.signal,
+        },
+      )
+      rpcResponseResult(response)
+    } finally {
+      lifetime.abort()
+    }
   }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {

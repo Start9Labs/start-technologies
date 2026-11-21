@@ -49,6 +49,7 @@ function softwareAuthenticator(origin: string) {
         )
         .toDERRawBytes()
       return {
+        rawId: credentialId.buffer,
         response: {
           authenticatorData: authenticatorData.buffer,
           clientDataJSON: clientDataJSON.buffer,
@@ -95,8 +96,12 @@ test('a passkey signs a request header the authenticator assertion verifies', as
   const body = new TextEncoder().encode(
     '{"jsonrpc":"2.0","id":1,"method":"server.echo","params":{}}',
   )
+  const other = {
+    credentialId: base64Url(new Uint8Array([5, 6])),
+    pubkeyPem: base64Url(p256.getPublicKey(new Uint8Array(32).fill(4))),
+  }
   const header = new URLSearchParams(
-    await signRequestWithPasskey(passkey, 'start-9.local', body),
+    await signRequestWithPasskey([other, passkey], 'start-9.local', body),
   )
   expect(header.get('signer')).toBe(base64Url(spki))
 
