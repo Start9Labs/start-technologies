@@ -62,8 +62,6 @@ pub fn metrics_api<C: Context>() -> ParentHandler<C> {
         )
 }
 
-// --- recording ---
-
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordInstallParams {
@@ -108,7 +106,6 @@ pub(crate) fn record_subscription(ctx: &RegistryContext, os_version: Option<Stri
     );
 }
 
-/// Inserts a row stamped with the current time ahead of `values`.
 fn record(ctx: RegistryContext, sql: &'static str, values: Vec<Option<String>>) {
     tokio::task::spawn_blocking(move || {
         ctx.metrics_db.mutate(|conn| {
@@ -119,8 +116,6 @@ fn record(ctx: RegistryContext, sql: &'static str, values: Vec<Option<String>>) 
         });
     });
 }
-
-// --- shared ---
 
 #[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -182,10 +177,12 @@ struct Filter {
 }
 
 impl Filter {
-    fn range(after: &Option<String>, before: &Option<String>) -> Self {
-        Self::default()
-            .with("created_at >=", after)
-            .with("created_at <", before)
+    fn range(after: &Option<String>, before: &Option<String>) -> Result<Self, Error> {
+        let after = after.as_deref().map(utc_range_key).transpose()?;
+        let before = before.as_deref().map(utc_range_key).transpose()?;
+        Ok(Self::default()
+            .with("created_at >=", &after)
+            .with("created_at <", &before))
     }
 
     fn with(mut self, condition: &str, value: &Option<String>) -> Self {
@@ -204,6 +201,18 @@ impl Filter {
             format!(" WHERE {}", self.conditions.join(" AND "))
         }
     }
+}
+
+/// UTC prefix bounds for stored RFC 3339 timestamps ending in `+00:00`.
+fn utc_range_key(value: &str) -> Result<String, Error> {
+    Ok(chrono::DateTime::parse_from_rfc3339(value)
+        .with_kind(ErrorKind::ParseTimestamp)?
+        .with_timezone(&Utc)
+        .format("%Y-%m-%dT%H:%M:%S%.9f")
+        .to_string()
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_owned())
 }
 
 fn count(conn: &rusqlite::Connection, sql: &str, filter: &Filter) -> Result<u64, Error> {
@@ -345,8 +354,6 @@ fn print_series(series: &[PeriodCount]) -> Result<(), Error> {
     Ok(())
 }
 
-// --- summary ---
-
 #[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricsSummary {
@@ -395,8 +402,6 @@ fn display_summary<T>(params: WithIoFormat<T>, summary: MetricsSummary) -> Resul
     print_counts("ARCHITECTURE", &summary.by_arch)?;
     print_counts("OS VERSION", &summary.by_os_version)
 }
-
-// --- users ---
 
 #[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
@@ -450,7 +455,7 @@ pub async fn get_users(
     }: GetUsersParams,
 ) -> Result<UsersResponse, Error> {
     query(ctx, move |conn| {
-        let filter = Filter::range(&after, &before);
+        let filter = Filter::range(&after, &before)?;
         let series = match interval {
             None => Vec::new(),
             Some(interval) => {
@@ -510,8 +515,6 @@ fn display_users<T>(params: WithIoFormat<T>, response: UsersResponse) -> Result<
     Ok(())
 }
 
-// --- downloads and installs ---
-
 #[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[command(rename_all = "kebab-case")]
@@ -539,10 +542,10 @@ rpc_toolkit::reflect_ts!(GetDownloadsParams);
 rpc_toolkit::ts_export!(GetDownloadsParams, namespaces = [""]);
 
 impl GetDownloadsParams {
-    fn filter(&self) -> Filter {
-        Filter::range(&self.after, &self.before)
+    fn filter(&self) -> Result<Filter, Error> {
+        Ok(Filter::range(&self.after, &self.before)?
             .with("pkg_id =", &self.pkg_id)
-            .with("version =", &self.version)
+            .with("version =", &self.version))
     }
 }
 
@@ -564,7 +567,7 @@ pub async fn get_downloads(
     params: GetDownloadsParams,
 ) -> Result<DownloadsResponse, Error> {
     query(ctx, move |conn| {
-        let filter = params.filter();
+        let filter = params.filter()?;
         Ok(DownloadsResponse {
             total_requests: count(conn, "SELECT COUNT(*) FROM package_request", &filter)?,
             by_package: count_entries(conn, "package_request", "pkg_id", &filter)?,
@@ -607,7 +610,7 @@ pub async fn get_installs(
     params: GetDownloadsParams,
 ) -> Result<InstallsResponse, Error> {
     query(ctx, move |conn| {
-        let filter = params.filter();
+        let filter = params.filter()?;
         Ok(InstallsResponse {
             total_installs: count(conn, "SELECT COUNT(*) FROM package_install", &filter)?,
             by_package: count_entries(conn, "package_install", "pkg_id", &filter)?,
@@ -632,8 +635,6 @@ fn display_installs(
     print_series(&response.series)
 }
 
-// --- subscriptions ---
-
 #[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionsResponse {
@@ -655,7 +656,7 @@ pub async fn get_subscriptions(
     }: GetUsersParams,
 ) -> Result<SubscriptionsResponse, Error> {
     query(ctx, move |conn| {
-        let filter = Filter::range(&after, &before);
+        let filter = Filter::range(&after, &before)?;
         Ok(SubscriptionsResponse {
             total_subscriptions: count(conn, "SELECT COUNT(*) FROM index_subscription", &filter)?,
             by_os_version: count_entries(conn, "index_subscription", "os_version", &filter)?,
@@ -739,8 +740,53 @@ mod tests {
     }
 
     #[test]
+    fn ranges_compare_instants_across_offsets_and_fractional_precisions() {
+        let conn = db();
+        for (after, before, expected) in [
+            (None, Some("2026-11-03T02:00:00+02:00"), 1),
+            (None, Some("2026-11-03T00:00:00Z"), 1),
+            (Some("2026-11-03T00:00:00Z"), None, 4),
+            (None, Some("2026-11-02T23:59:59.999999999Z"), 0),
+            (
+                Some("2026-11-02T23:59:59.999999999Z"),
+                Some("2026-11-03T00:00:00Z"),
+                1,
+            ),
+        ] {
+            let filter =
+                Filter::range(&after.map(str::to_owned), &before.map(str::to_owned)).unwrap();
+            assert_eq!(
+                count(&conn, "SELECT COUNT(*) FROM package_install", &filter).unwrap(),
+                expected,
+            );
+        }
+        for at in [
+            "2026-11-03T00:00:00.123+00:00",
+            "2026-11-03T00:00:00.123000+00:00",
+            "2026-11-03T00:00:00.123000000+00:00",
+        ] {
+            conn.execute(
+                "INSERT INTO package_install (created_at, pkg_id, version) VALUES (?1, 'nextcloud', '1.0:0')",
+                params![at],
+            )
+            .unwrap();
+        }
+        let filter = Filter::range(
+            &Some("2026-11-03T00:00:00.123000Z".into()),
+            &Some("2026-11-03T00:00:00.123000001Z".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM package_install", &filter).unwrap(),
+            3,
+        );
+        assert!(Filter::range(&Some("invalid".into()), &None).is_err());
+    }
+
+    #[test]
     fn filters_combine_range_and_package() {
         let filter = Filter::range(&Some("2026-11-03T00:00:00+00:00".into()), &None)
+            .unwrap()
             .with("pkg_id =", &Some("nextcloud".into()));
         assert_eq!(
             count(&db(), "SELECT COUNT(*) FROM package_install", &filter).unwrap(),

@@ -37,6 +37,8 @@ use crate::util::{FromStrParser, Never, VersionString};
 #[cfg(test)]
 mod progress_tests;
 #[cfg(test)]
+mod report_tests;
+#[cfg(test)]
 mod trust_tests;
 
 pub const PKG_ARCHIVE_DIR: &str = "package-data/archive";
@@ -200,18 +202,39 @@ pub async fn install(
         .await?;
     tokio::spawn(async move {
         download.await?.await?;
-        let _ = ctx
-            .call_remote_with::<RegistryContext, _>(
-                "package.record-install",
-                Default::default(),
-                json!({ "id": id, "version": version }),
-                RegistryUrlParams { registry },
-            )
-            .await;
+        let _ = report_install(
+            &ctx.client,
+            &registry,
+            crate::registry::metrics::RecordInstallParams { id, version },
+        )
+        .await;
         Ok::<_, Error>(())
     });
 
     Ok(())
+}
+
+/// Reports use a fresh signing identity and omit persistent identity and device metadata.
+async fn report_install(
+    client: &crate::context::rpc::ReloadableHttpClient,
+    registry: &Url,
+    report: crate::registry::metrics::RecordInstallParams,
+) -> Result<(), RpcError> {
+    let signer = crate::sign::AnySigningKey::generate().into();
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        crate::registry::context::call(
+            client,
+            &signer,
+            registry,
+            HeaderMap::new(),
+            "package.record-install",
+            to_value(&report)?,
+        ),
+    )
+    .await
+    .with_kind(ErrorKind::Network)?
+    .map(|_| ())
 }
 
 #[derive(Deserialize, Serialize, VisitFields)]
