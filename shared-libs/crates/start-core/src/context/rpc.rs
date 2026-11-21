@@ -1042,10 +1042,14 @@ mod tests {
         let route = ProxyRoute::Tor(tor.clone());
         assert_eq!(route.proxy_for(onion), None);
         tor.set("172.16.0.1:9050".parse().unwrap());
-        assert_eq!(
-            route.proxy_for(onion),
-            Some("socks5h://172.16.0.1:9050".parse::<Url>().unwrap())
-        );
+        for host in [onion.to_owned(), format!("{onion}.")] {
+            let url = format!("http://{host}/").parse::<Url>().unwrap();
+            assert_eq!(url.host_str(), Some(host.as_str()));
+            assert_eq!(
+                route.proxy_for(url.host_str().unwrap()),
+                Some("socks5h://172.16.0.1:9050".parse::<Url>().unwrap())
+            );
+        }
         for host in [
             "registry.start9.com",
             "server.local",

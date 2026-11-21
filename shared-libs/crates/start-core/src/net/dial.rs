@@ -22,8 +22,11 @@ const TOR_SOCKS_ADDRESSES: &str = "/public/packageData/tor/hosts/socks/bindings/
 const CONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 const RESOLUTION_DELAY: Duration = Duration::from_millis(50);
 
+/// Ignores ASCII case and a final DNS root dot.
 pub fn is_onion(host: &str) -> bool {
-    host.ends_with(".onion")
+    host.trim_end_matches('.')
+        .rsplit_once('.')
+        .is_some_and(|(_, suffix)| suffix.eq_ignore_ascii_case("onion"))
 }
 
 fn tor_unavailable(host: &str) -> Error {
@@ -321,6 +324,42 @@ mod test {
     const STALLED_TOO: SocketAddr =
         SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 2), 9));
     const REFUSED: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 3), 9));
+    const ONION_HOSTS: [&str; 4] = [
+        "hidden.onion",
+        "hidden.onion.",
+        "Hidden.OnIoN",
+        "Hidden.OnIoN.",
+    ];
+
+    #[test]
+    fn onion_hosts_include_absolute_names_and_ignore_ascii_case() {
+        for host in ONION_HOSTS {
+            assert!(is_onion(host), "{host}");
+        }
+        for host in ["onion", "hidden.onion.example", "example.org.", "127.0.0.1"] {
+            assert!(!is_onion(host), "{host}");
+        }
+    }
+
+    #[tokio::test]
+    async fn onion_dialing_fails_closed() {
+        for host in ONION_HOSTS {
+            let error = dial(host, 80).await.unwrap_err();
+            assert_eq!(error.to_string(), tor_unavailable(host).to_string());
+        }
+    }
+
+    #[tokio::test]
+    async fn onion_resolution_fails_closed() {
+        use reqwest::dns::Resolve;
+
+        for host in ONION_HOSTS {
+            let Err(error) = OsResolver.resolve(host.parse().unwrap()).await else {
+                panic!("onion host resolved: {host}");
+            };
+            assert_eq!(error.to_string(), tor_unavailable(host).source.to_string());
+        }
+    }
 
     async fn echo_round_trip(
         sock: &mut (impl AsyncRead + AsyncWrite + Unpin),

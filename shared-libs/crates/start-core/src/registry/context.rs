@@ -29,6 +29,7 @@ use crate::middleware::auth::signature::{
     NonceCache, SignatureAuthContext, SignatureAuthMetadata, SignatureAuthorizationContext,
     SigningContext,
 };
+use crate::net::dial::is_onion;
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
@@ -258,7 +259,7 @@ impl RegistryContext {
 /// Proxies `.onion` hosts through Tor and dials everything else directly.
 pub(super) fn client_builder(tor_proxy_url: Url) -> reqwest::ClientBuilder {
     Client::builder().proxy(Proxy::custom(move |url| {
-        if url.host_str().map_or(false, |h| h.ends_with(".onion")) {
+        if url.host_str().is_some_and(is_onion) {
             Some(tor_proxy_url.clone())
         } else {
             None
@@ -486,7 +487,7 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
             return Ok(result);
         }
 
-        let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
+        let onion_registry = registry.host_str().is_some_and(is_onion);
         let mut res = match call(
             &self.client,
             &self.signing_key()?,
@@ -498,7 +499,7 @@ impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
         .await
         {
             Ok(res) => res,
-            Err(e) if is_onion => return Err(onion_tor_hint(self, e).await),
+            Err(e) if onion_registry => return Err(onion_tor_hint(self, e).await),
             Err(e) => return Err(e),
         };
 
