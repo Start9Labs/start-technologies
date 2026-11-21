@@ -11,7 +11,7 @@ use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use imbl::{OrdMap, OrdSet};
 use imbl_value::{InternedString, Value};
-use ipnet::IpNet;
+use ipnet::{IpNet, Ipv6Net};
 use itertools::Itertools;
 use nix::net::if_::if_nametoindex;
 use patch_db::json_ptr::JsonPointer;
@@ -1675,9 +1675,7 @@ async fn watcher(
                         gc_policy_routing(&ifaces).await;
                         reconcile_mangle_rules(&policy_ifaces).await.log_err();
                         if !policy_ifaces.is_empty() {
-                            for v6 in [false, true] {
-                                ensure_main_suppress_rule(v6).await.log_err();
-                            }
+                            reconcile_main_rules(&watch_ip_info).await;
                         }
                         let mut jobs = jobs
                             .into_iter()
@@ -2344,47 +2342,135 @@ fn rule_has(line: &str, key: &str, value: &str) -> bool {
         .any(|w| w[0] == key && w[1] == value)
 }
 
-fn main_suppress_rule(line: &str) -> bool {
-    rule_at_priority(line, MAIN_RULE_PRIORITY).is_some_and(|rule| {
-        rule.split_whitespace().eq([
-            "from",
-            "all",
-            "lookup",
-            "main",
-            "suppress_prefixlength",
-            "0",
-        ])
-    })
+/// IPv4 destinations no gateway reaches the internet through.
+pub(super) const NON_PUBLIC_V4: [&str; 9] = [
+    "0.0.0.0/8",
+    "10.0.0.0/8",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "224.0.0.0/4",
+    "255.255.255.255/32",
+];
+
+/// A priority-50 rule sending destinations to `main`'s specific routes.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct MainRule {
+    /// Inverts the destination match.
+    not: bool,
+    /// Unset matches every destination.
+    to: Option<IpNet>,
 }
 
-/// Specific routes are `main`'s; per-interface tables hold only defaults.
-async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
-    // Reject-type defaults terminate before suppression; `throw` routes fall through.
-    let mut ip = Command::new("ip");
-    if v6 {
-        ip.arg("-6");
+fn parse_main_rule(line: &str) -> Option<MainRule> {
+    let words: Vec<&str> = rule_at_priority(line, MAIN_RULE_PRIORITY)?
+        .split_whitespace()
+        .collect();
+    let (not, words) = match words.split_first() {
+        Some((&"not", rest)) => (true, rest),
+        _ => (false, &words[..]),
+    };
+    let (to, tail) = match words {
+        ["from", "all", "to", to, tail @ ..] => (
+            Some(
+                to.parse::<IpNet>()
+                    .or_else(|_| to.parse::<IpAddr>().map(IpNet::from))
+                    .ok()?,
+            ),
+            tail,
+        ),
+        ["from", "all", tail @ ..] => (None, tail),
+        _ => return None,
+    };
+    (tail == ["lookup", "main", "suppress_prefixlength", "0"]).then_some(MainRule { not, to })
+}
+
+/// Non-public destinations, and the on-link prefix of each gateway's global
+/// IPv6 addresses from /64 to /127.
+fn main_rules(v6: bool, ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>) -> BTreeSet<MainRule> {
+    let rule = |not, to| MainRule { not, to: Some(to) };
+    if !v6 {
+        return NON_PUBLIC_V4
+            .iter()
+            .map(|net| rule(false, net.parse().unwrap()))
+            .collect();
     }
-    let rules = String::from_utf8(
-        ip.arg("rule")
+    let global: Ipv6Net = GLOBAL_UNICAST_V6.parse().unwrap();
+    let on_link = ifaces
+        .values()
+        .filter_map(|info| info.ip_info.as_ref())
+        .flat_map(|ip| ip.subnets.iter())
+        .filter_map(|net| match net {
+            IpNet::V6(net)
+                if global.contains(&net.addr()) && (64..128).contains(&net.prefix_len()) =>
+            {
+                Some(rule(false, IpNet::V6(net.trunc())))
+            }
+            _ => None,
+        });
+    std::iter::once(rule(true, IpNet::V6(global)))
+        .chain(on_link)
+        .collect()
+}
+
+/// Specific routes are `main`'s; per-interface tables hold only defaults. A
+/// public destination outside every rule falls through to the rules for the
+/// selected outbound gateway, or to `main` at priority 1000 under Auto.
+async fn reconcile_main_rules(ifaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>) {
+    static WRITER: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _writer = WRITER.lock().await;
+    let ifaces = ifaces.read();
+    for v6 in [false, true] {
+        reconcile_main_rules_family(v6, &main_rules(v6, &ifaces))
+            .await
+            .log_err();
+    }
+}
+
+/// Adds before it deletes, so no destination loses its rule in between.
+async fn reconcile_main_rules_family(v6: bool, desired: &BTreeSet<MainRule>) -> Result<(), Error> {
+    // Reject-type defaults terminate before suppression; `throw` routes fall through.
+    let ip = || {
+        let mut c = Command::new("ip");
+        if v6 {
+            c.arg("-6");
+        }
+        c
+    };
+    let existing: BTreeSet<MainRule> = String::from_utf8(
+        ip().arg("rule")
             .arg("show")
             .invoke(ErrorKind::Network)
             .await?,
-    )?;
-    if !rules.lines().any(main_suppress_rule) {
-        let mut ip = Command::new("ip");
-        if v6 {
-            ip.arg("-6");
+    )?
+    .lines()
+    .filter_map(parse_main_rule)
+    .collect();
+    let changes = desired
+        .difference(&existing)
+        .map(|rule| ("add", rule))
+        .chain(existing.difference(desired).map(|rule| ("del", rule)));
+    for (verb, rule) in changes {
+        let mut cmd = ip();
+        cmd.arg("rule")
+            .arg(verb)
+            .arg("priority")
+            .arg(MAIN_RULE_PRIORITY.to_string());
+        if rule.not {
+            cmd.arg("not");
         }
-        ip.arg("rule")
-            .arg("add")
-            .arg("lookup")
+        if let Some(to) = &rule.to {
+            cmd.arg("to").arg(to.to_string());
+        }
+        cmd.arg("lookup")
             .arg("main")
             .arg("suppress_prefixlength")
             .arg("0")
-            .arg("priority")
-            .arg(MAIN_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
-            .await?;
+            .await
+            .log_err();
     }
     Ok(())
 }
@@ -2493,17 +2579,31 @@ async fn apply_policy_routing(
         })
         .copied();
 
+    let v4_capable = carries_v4(subnets.iter().filter_map(|n| match n {
+        IpNet::V4(v4n) => Some(v4n.addr()),
+        _ => None,
+    }));
+
+    // A selected outbound gateway without v4 drops v4.
     let mut cmd = Command::new("ip");
-    cmd.arg("route").arg("replace").arg("default");
-    if let Some(gw) = ipv4_gateway {
-        cmd.arg("via").arg(gw.to_string());
-    }
-    cmd.arg("dev")
-        .arg(iface.as_str())
-        .arg("table")
-        .arg(&table_str);
-    if ipv4_gateway.is_none() {
-        cmd.arg("scope").arg("link");
+    cmd.arg("route").arg("replace");
+    if v4_capable {
+        cmd.arg("default");
+        if let Some(gw) = ipv4_gateway {
+            cmd.arg("via").arg(gw.to_string());
+        }
+        cmd.arg("dev")
+            .arg(iface.as_str())
+            .arg("table")
+            .arg(&table_str);
+        if ipv4_gateway.is_none() {
+            cmd.arg("scope").arg("link");
+        }
+    } else {
+        cmd.arg("blackhole")
+            .arg("default")
+            .arg("table")
+            .arg(&table_str);
     }
     cmd.invoke(ErrorKind::Network).await.log_err();
 
@@ -2534,6 +2634,11 @@ async fn apply_policy_routing(
     reconcile_source_rules(false, table_id, &own_v4, &rules_output).await;
 
     Ok(())
+}
+
+/// Sending needs an address of the interface's own beyond link-local.
+fn carries_v4(addrs: impl IntoIterator<Item = Ipv4Addr>) -> bool {
+    addrs.into_iter().any(|addr| !addr.is_link_local())
 }
 
 /// Sending needs an address of the interface's own beyond link-local; without
@@ -2812,6 +2917,9 @@ async fn poll_ip_info(
         .filter(|old| &old.ip_info == &Some(ip_info))
         .is_none()
     });
+    if policy_guard.is_some() {
+        reconcile_main_rules(write_to).await;
+    }
 
     // Now fetch the WAN IP in a second pass.  Even if this is slow or
     // gets cancelled, the gateway already has valid ip_info above.
@@ -3763,16 +3871,71 @@ mod policy_rule_tests {
     use super::*;
 
     #[test]
-    fn main_suppress_rule_requires_the_unrestricted_rule() {
-        assert!(main_suppress_rule(
-            "50: from all lookup main suppress_prefixlength 0"
-        ));
-        assert!(!main_suppress_rule(
-            "50: from 192.0.2.1 lookup main suppress_prefixlength 0"
-        ));
-        assert!(!main_suppress_rule(
-            "50: from all fwmark 0x3e9 lookup main suppress_prefixlength 0"
-        ));
+    fn main_rules_parse_back_from_ip_rule_show() {
+        let rule = |not, to: Option<&str>| MainRule {
+            not,
+            to: to.map(|to| to.parse().unwrap()),
+        };
+        assert_eq!(
+            parse_main_rule("50:\tfrom all lookup main suppress_prefixlength 0"),
+            Some(rule(false, None))
+        );
+        assert_eq!(
+            parse_main_rule("50:\tfrom all to 10.0.0.0/8 lookup main suppress_prefixlength 0"),
+            Some(rule(false, Some("10.0.0.0/8")))
+        );
+        assert_eq!(
+            parse_main_rule("50:\tfrom all to 255.255.255.255 lookup main suppress_prefixlength 0"),
+            Some(rule(false, Some("255.255.255.255/32")))
+        );
+        assert_eq!(
+            parse_main_rule("50:\tnot from all to 2000::/3 lookup main suppress_prefixlength 0"),
+            Some(rule(true, Some("2000::/3")))
+        );
+        assert_eq!(
+            parse_main_rule("50:\tfrom 192.0.2.1 lookup main suppress_prefixlength 0"),
+            None
+        );
+        assert_eq!(
+            parse_main_rule("50:\tfrom all fwmark 0x3e9 lookup main suppress_prefixlength 0"),
+            None
+        );
+        assert_eq!(
+            parse_main_rule("51:\tfrom all fwmark 0x3e9 lookup 1001"),
+            None
+        );
+    }
+
+    #[test]
+    fn main_rules_exempt_only_non_public_and_on_link_global_prefixes() {
+        let net = |s: &str| -> IpNet { s.parse().unwrap() };
+        let mut ifaces = OrdMap::new();
+        let mut info = NetworkInterfaceInfo::default();
+        info.ip_info = Some(Arc::new(IpInfo {
+            subnets: [
+                net("192.168.1.5/24"),
+                net("2001:db8:1::5/64"),
+                net("2001:db8:2::5/48"),
+                net("2001:db8:3::5/128"),
+                net("fd12:3456::5/64"),
+                net("fe80::5/64"),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        }));
+        ifaces.insert(GatewayId::from(InternedString::intern("eth0")), info);
+        let to = |rules: BTreeSet<MainRule>| -> Vec<(bool, String)> {
+            rules
+                .into_iter()
+                .map(|r| (r.not, r.to.unwrap().to_string()))
+                .collect()
+        };
+        assert_eq!(
+            to(main_rules(true, &ifaces)),
+            [(false, "2001:db8:1::/64".into()), (true, "2000::/3".into())]
+        );
+        assert_eq!(main_rules(false, &ifaces).len(), NON_PUBLIC_V4.len());
     }
 
     #[test]
@@ -4177,6 +4340,14 @@ mod carries_v6_tests {
     #[test]
     fn a_ula_address_without_a_router_carries_nothing() {
         assert!(!carries_v6(None, [v6("fd00::5")]));
+    }
+
+    #[test]
+    fn only_a_non_link_local_address_carries_v4() {
+        let v4 = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        assert!(carries_v4([v4("10.59.0.2")]));
+        assert!(!carries_v4([v4("169.254.3.4")]));
+        assert!(!carries_v4([]));
     }
 }
 
