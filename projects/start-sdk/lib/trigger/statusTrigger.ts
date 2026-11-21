@@ -4,6 +4,12 @@ import { delay } from './delay'
 
 type StatusIntervals = { [K in HealthStatus]?: number }
 
+export const isTerminalResult = Symbol('isTerminalResult')
+
+export type TerminalAwareTrigger = Trigger & {
+  [isTerminalResult]?: (result: HealthStatus) => boolean
+}
+
 /**
  * A trigger with per-status polling intervals.
  *
@@ -26,7 +32,7 @@ export function statusTrigger(
   defaultMs: number,
   intervals: StatusIntervals = {},
 ): Trigger {
-  return async function* (getInput) {
+  const trigger: TerminalAwareTrigger = async function* (getInput) {
     while (true) {
       const { lastResult } = getInput()
       const ms = lastResult
@@ -36,4 +42,7 @@ export function statusTrigger(
       yield
     }
   }
+  trigger[isTerminalResult] = result =>
+    (intervals[result] ?? defaultMs) === Infinity
+  return trigger
 }
