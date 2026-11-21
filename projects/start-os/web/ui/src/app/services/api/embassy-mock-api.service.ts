@@ -153,9 +153,7 @@ export class MockApiService extends ApiService implements StartupApiService {
   private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
-  private readonly passkeys = new Map<string, T.Passkey>(
-    Object.entries(Mock.Passkeys),
-  )
+  private passkeyStore?: Map<string, T.Passkey>
   private drives?: Map<string, number>
   private history?: BackupRun[]
   private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
@@ -271,11 +269,11 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'auth.passkey.list': async () => {
       await pauseFor(1000)
-      return Object.fromEntries(this.passkeys)
+      return Object.fromEntries(this.passkeys())
     },
     'auth.passkey.add': async ({ publicKey, name, credentialId }) => {
       await pauseFor(1000)
-      this.passkeys.set(publicKey, {
+      this.passkeys().set(publicKey, {
         name,
         credentialId,
         addedAt: new Date().toISOString(),
@@ -284,11 +282,11 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'auth.passkey.remove': async ({ publicKey }) => {
       await pauseFor(1000)
-      this.passkeys.delete(publicKey)
+      this.passkeys().delete(publicKey)
       return null
     },
     'auth.passkey.credentials': async () =>
-      [...this.passkeys].map(([publicKey, { credentialId }]) => ({
+      [...this.passkeys()].map(([publicKey, { credentialId }]) => ({
         publicKey,
         credentialId,
       })),
@@ -2225,6 +2223,10 @@ export class MockApiService extends ApiService implements StartupApiService {
     } else {
       throw new Error('invalid guid type')
     }
+  }
+
+  private passkeys() {
+    return (this.passkeyStore ??= new Map(Object.entries(Mock.Passkeys)))
   }
 
   async enrollWithPasskey(
