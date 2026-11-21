@@ -764,7 +764,7 @@ fn dir_copy_inner<'a>(
                 )
             })?;
         let tmp_dst_path = dst_path.to_owned();
-        tokio::task::spawn_blocking(move || {
+        crate::util::cleanup::run_filesystem_blocking(move || {
             nix::unistd::chown(
                 &tmp_dst_path,
                 Some(Uid::from_raw(m.uid())),
@@ -820,7 +820,7 @@ fn dir_copy_inner<'a>(
                     drop(dst_file);
                     let permissions = m.permissions();
                     let tmp_dst_path = dst_path.clone();
-                    tokio::task::spawn_blocking(move || {
+                    crate::util::cleanup::run_filesystem_blocking(move || {
                         nix::unistd::chown(
                             &tmp_dst_path,
                             Some(Uid::from_raw(m.uid())),

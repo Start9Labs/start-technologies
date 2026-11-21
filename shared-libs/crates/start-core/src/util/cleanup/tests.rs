@@ -54,9 +54,9 @@ async fn blocking_filesystem_work_retains_resources_after_its_caller_is_cancelle
         });
     });
     let caller = tokio::spawn(run_filesystem_blocking(move || {
-        let _guard = guard;
         started.send(()).unwrap();
         released.recv().unwrap();
+        guard
     }));
     running.await.unwrap();
     caller.abort();
