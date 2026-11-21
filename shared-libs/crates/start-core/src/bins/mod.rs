@@ -294,9 +294,16 @@ pub(crate) fn assert_no_shadowed_args(root: clap::Command) {
     );
 }
 
+/// Replaces every page in the directory, removing pages for deleted commands.
 #[cfg(test)]
 fn export_manpages(command: clap::Command, dir: &str) {
     std::fs::create_dir_all(dir).unwrap();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|ext| ext == "1") {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
     clap_mangen::generate_to(command, dir).unwrap();
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
