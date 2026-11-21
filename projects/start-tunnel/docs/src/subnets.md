@@ -21,6 +21,10 @@ Each subnet resolves domain names through one of three modes, chosen with the **
 
 This chooses the _upstream_ resolver the subnet uses. It is separate from the private DNS _records_ StartTunnel serves for your own hostnames — see [DNS Records](/start-tunnel/dns-records.html) for those.
 
+For **Device** or **Custom** DNS, enable **Pass device addresses to the DNS server** to let a resolver identify each asking device by its IPv4 tunnel address, for example for per-device filtering or query logs. This applies when every configured upstream is an IPv4 address on the same subnet. The setting is off by default; enable it after configuring the resolver to accept queries from the devices' addresses.
+
+If relaying fails, StartTunnel forwards the query from the subnet's server address instead. IPv6-sourced queries also use that address. When the resolver is the only upstream, its own queries use the server address too.
+
 ## Outbound IP
 
 If your VPS has more than one public IPv4 address, you can choose which one a subnet's outbound traffic leaves from — its egress (SNAT) address — with the **WAN IP** field:

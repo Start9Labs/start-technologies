@@ -43,6 +43,8 @@ El bloque de IP privado de esta subred, en formato CIDR: una <code>/24</code> de
 
 Este es el resolutor ascendente de la subred, distinto de los registros DNS que StartTunnel sirve para tus propios nombres de host.
 
+**Pasar las direcciones de los dispositivos al servidor DNS** permite que un resolutor de la subred identifique cada dispositivo por su dirección IPv4 del túnel, para aplicar filtros por dispositivo o registrar consultas. Desactivado de forma predeterminada. Todos los servidores DNS deben tener una dirección IPv4 en esta subred; configura el resolutor para aceptar las direcciones de los dispositivos antes de activarlo. Las consultas con origen IPv6 y los fallos de retransmisión usan la dirección del servidor de la subred.
+
 ### IP de WAN
 
 Desde cuál de las direcciones IPv4 públicas del VPS sale el tráfico saliente de esta subred. **Predeterminado del sistema** deja que StartTunnel elija (la dirección se muestra entre paréntesis). Solo importa si tu VPS tiene más de una IP pública.

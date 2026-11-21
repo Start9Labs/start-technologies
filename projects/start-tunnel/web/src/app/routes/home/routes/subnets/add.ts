@@ -9,7 +9,13 @@ import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import { TaskService } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
-import { TuiButton, TuiDialogContext, TuiError, TuiInput } from '@taiga-ui/core'
+import {
+  TuiButton,
+  TuiCheckbox,
+  TuiDialogContext,
+  TuiError,
+  TuiInput,
+} from '@taiga-ui/core'
 import { TuiChevron, TuiDataListWrapper, TuiSelect } from '@taiga-ui/kit'
 import { TuiForm } from '@taiga-ui/layout'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
@@ -144,6 +150,16 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
         }
       }
 
+      @if (
+        mode() === 'custom' ||
+        (mode() === 'device' && context.data.devices.length)
+      ) {
+        <label tuiLabel>
+          <input tuiCheckbox type="checkbox" formControlName="preserveSource" />
+          {{ 'Pass device addresses to the DNS server' | i18n }}
+        </label>
+      }
+
       <tui-textfield
         tuiChevron
         [identityMatcher]="matchWan"
@@ -181,6 +197,7 @@ const MODE_LABEL: Record<T.Tunnel.DnsMode, string> = {
   imports: [
     ReactiveFormsModule,
     TuiButton,
+    TuiCheckbox,
     TuiChevron,
     TuiDataListWrapper,
     TuiError,
@@ -219,6 +236,7 @@ export class SubnetsAdd {
         s => this.serverControl(s),
       ),
     ),
+    preserveSource: this.fb.control(this.context.data.preserveSource),
     wanIp: this.fb.control<WanItem>({ ip: this.context.data.wanIp }),
     ipv6: this.fb.control(
       this.context.data.ipv6 ?? '',
@@ -296,6 +314,8 @@ export class SubnetsAdd {
               ? (this.form.controls.device.value?.ip ?? null)
               : null,
           servers: mode === 'custom' ? this.servers.getRawValue() : [],
+          preserveSource:
+            mode !== 'default' && this.form.controls.preserveSource.value,
         })
       }
 
@@ -317,6 +337,13 @@ export class SubnetsAdd {
   private dnsChanged(): boolean {
     const mode = this.form.controls.mode.value
     if (mode !== this.context.data.mode) return true
+    if (
+      mode !== 'default' &&
+      this.form.controls.preserveSource.value !==
+        this.context.data.preserveSource
+    ) {
+      return true
+    }
     if (mode === 'device') {
       return (
         (this.form.controls.device.value?.ip ?? null) !==
@@ -347,6 +374,7 @@ interface Data {
   mode: T.Tunnel.DnsMode
   device: MappedDevice | null
   servers: readonly string[]
+  preserveSource: boolean
   devices: readonly MappedDevice[]
   wanIp: string | null
   wanOptions: readonly string[]

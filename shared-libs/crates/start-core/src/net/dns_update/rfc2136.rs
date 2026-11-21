@@ -377,16 +377,15 @@ impl DnsInjector {
     }
 }
 
-/// Wraps a forwarding `Catalog` with injected-record answering and authorized
-/// RFC 2136 UPDATE handling. Non-injected queries fall through to the `Catalog`
-/// (a `ForwardZoneHandler` pointed at upstream / dnsmasq).
-pub struct InjectingHandler {
+/// Wraps a forwarding handler with injected-record answering and authorized
+/// RFC 2136 UPDATE handling. Non-injected queries fall through to the forwarder.
+pub struct InjectingHandler<F = Catalog> {
     injector: Arc<DnsInjector>,
-    forwarder: Catalog,
+    forwarder: F,
 }
 
-impl InjectingHandler {
-    pub fn new(injector: Arc<DnsInjector>, forwarder: Catalog) -> Self {
+impl<F> InjectingHandler<F> {
+    pub fn new(injector: Arc<DnsInjector>, forwarder: F) -> Self {
         Self {
             injector,
             forwarder,
@@ -401,7 +400,7 @@ fn header_with_code(request: &Request, code: ResponseCode) -> Metadata {
     header
 }
 
-fn fallback_info(header: Metadata) -> ResponseInfo {
+pub(crate) fn fallback_info(header: Metadata) -> ResponseInfo {
     Header {
         metadata: header,
         counts: HeaderCounts::default(),
@@ -410,7 +409,7 @@ fn fallback_info(header: Metadata) -> ResponseInfo {
 }
 
 #[async_trait::async_trait]
-impl RequestHandler for InjectingHandler {
+impl<F: RequestHandler> RequestHandler for InjectingHandler<F> {
     async fn handle_request<R: ResponseHandler, T: Time>(
         &self,
         request: &Request,
