@@ -23,6 +23,10 @@ on:
         description: "Proxy URL start-cli uses to reach the registries, e.g. socks5h://proxy.example:9050 for .onion registries. The proxy must already be reachable from the runner. Defaults to the caller's REGISTRY_PROXY variable."
         type: string
         default: ${{ vars.REGISTRY_PROXY }}
+      PACKAGE_READER_KEYS:
+        description: "Public keys of the registered signers who may read the package, one per line, in DER Base64 or PEM. Setting it, or publishing from a private repository, publishes the package as private. Defaults to the caller's PACKAGE_READER_KEYS variable."
+        type: string
+        default: ${{ vars.PACKAGE_READER_KEYS }}
     secrets:
       DEV_KEY:
         description: 'Developer signing key'
@@ -296,6 +300,18 @@ jobs:
           host_bucket = %(bucket)s.${ENDPOINT}
           use_https = True
           EOF
+        shell: bash
+
+      # Must precede every registry write: a private package is never listed publicly.
+      - name: Restrict package access
+        if: ${{ inputs.RELEASE_REGISTRY && (github.event.repository.private || inputs.PACKAGE_READER_KEYS) }}
+        env:
+          READER_KEYS: ${{ inputs.PACKAGE_READER_KEYS }}
+        run: |
+          mapfile -t KEYS < <(printf '%s\n' "$READER_KEYS" | grep -v -e '^-----' | tr -s ' \t\r' '\n' | sed '/^$/d')
+          echo "Publishing ${{ steps.version.outputs.package_id }} as private to ${#KEYS[@]} reader key(s)"
+          start-cli --registry "${{ inputs.RELEASE_REGISTRY }}" registry package access restrict \
+            "${{ steps.version.outputs.package_id }}" "${KEYS[@]}"
         shell: bash
 
       - name: Remove existing version from registry

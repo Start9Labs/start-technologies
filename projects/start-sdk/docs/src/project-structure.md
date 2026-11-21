@@ -197,7 +197,7 @@ jobs:
       contents: write
 ```
 
-The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL` and `REGISTRY_PROXY` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
+The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL`, `REGISTRY_PROXY` and `PACKAGE_READER_KEYS` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
 
 **release.yml** -- publishes on manual tag push, for re-releases or testing. This workflow only triggers on manually pushed tags — tags created by tagAndRelease (via `GITHUB_TOKEN`) do not trigger it:
 
@@ -219,6 +219,8 @@ jobs:
     permissions:
       contents: write
 ```
+
+A package built from a private repository is published as private. Setting `PACKAGE_READER_KEYS` also publishes it as private, readable by the registered signers whose public keys it lists, one per line in DER Base64 or PEM. Before publishing, the workflows run `start-cli registry package access restrict`, which requires `DEV_KEY` to belong to an admin of `RELEASE_REGISTRY`.
 
 To publish to registries served over Tor, run a Tor SOCKS proxy the runners can reach and set `REGISTRY_PROXY` to its URL, such as `socks5h://tor-proxy.example:9050`. The `socks5h` scheme resolves names through the proxy, which `.onion` addresses require. Both workflows then route every `start-cli` registry request through it. The workflows do not start a proxy themselves.
 
