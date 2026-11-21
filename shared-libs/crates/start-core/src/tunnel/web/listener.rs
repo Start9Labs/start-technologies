@@ -2,31 +2,29 @@ use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use futures::future::Either;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc;
 
 use super::ipv4_listener_addr;
 use crate::net::web_server::{Accept, AcceptStream, TcpMetadata};
 use crate::prelude::*;
-use crate::tunnel::forward::sni::{FallbackSource, LocalSink, SniDemux};
-
-const HANDOFF_BACKLOG: usize = 128;
+use crate::tunnel::forward::sni::{FallbackSource, LocalHandoff, LocalSink, SniDemux};
 
 pub(crate) struct UiListener {
-    listeners: Vec<TcpListener>,
+    listeners: Vec<Either<TcpListener, LocalHandoff>>,
     fallback: Option<(Arc<SniDemux>, SocketAddrV4, LocalSink)>,
-    handoff: Option<mpsc::Receiver<(TcpMetadata, AcceptStream)>>,
 }
 
 impl UiListener {
     pub(crate) fn bind(addr: SocketAddr, sni: Arc<SniDemux>) -> Result<Self, Error> {
         let mut listeners = Vec::new();
         if let Some(addr) = direct_ipv6_addr(addr) {
-            listeners.push(crate::net::utils::bind_tokio_listener_v6_only(addr)?);
+            listeners.push(Either::Left(
+                crate::net::utils::bind_tokio_listener_v6_only(addr)?,
+            ));
         }
-        let mut handoff = None;
         let fallback = if let Some(external) = ipv4_listener_addr(addr) {
-            let (sink, connections) = mpsc::channel(HANDOFF_BACKLOG);
+            let (sink, handoff) = LocalHandoff::channel();
             sni.register_local_fallback(
                 *external.ip(),
                 external.port(),
@@ -43,7 +41,7 @@ impl UiListener {
                     ErrorKind::Network,
                 )
             })?;
-            handoff = Some(connections);
+            listeners.push(Either::Right(handoff));
             Some((sni, external, sink))
         } else {
             None
@@ -51,7 +49,6 @@ impl UiListener {
         Ok(Self {
             listeners,
             fallback,
-            handoff,
         })
     }
 
@@ -80,15 +77,7 @@ impl Accept for UiListener {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(Self::Metadata, AcceptStream), Error>> {
-        if let Poll::Ready(accepted) = self.listeners.poll_accept(cx)? {
-            return Poll::Ready(Ok(accepted));
-        }
-        if let Some(Poll::Ready(Some(accepted))) =
-            self.handoff.as_mut().map(|handoff| handoff.poll_recv(cx))
-        {
-            return Poll::Ready(Ok(accepted));
-        }
-        Poll::Pending
+        self.listeners.poll_accept(cx)
     }
 }
 

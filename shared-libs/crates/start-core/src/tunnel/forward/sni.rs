@@ -14,9 +14,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+use crate::Error;
 use crate::net::port_map::pcp::RESULT_NO_RESOURCES;
 use crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN;
-use crate::net::web_server::{AcceptStream, TcpMetadata};
+use crate::net::web_server::{Accept, AcceptStream, TcpMetadata};
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::BackTrackingIO;
 use crate::util::sync::SyncMutex;
@@ -43,8 +44,33 @@ pub enum FallbackSource {
     PrivateOnly,
 }
 
+const LOCAL_HANDOFF_BACKLOG: usize = 128;
+
 /// Receives connections the demux hands to an in-process listener.
 pub type LocalSink = tokio::sync::mpsc::Sender<(TcpMetadata, AcceptStream)>;
+
+/// Accepts the connections sent through its paired [`LocalSink`].
+pub struct LocalHandoff(tokio::sync::mpsc::Receiver<(TcpMetadata, AcceptStream)>);
+
+impl LocalHandoff {
+    pub fn channel() -> (LocalSink, Self) {
+        let (sink, connections) = tokio::sync::mpsc::channel(LOCAL_HANDOFF_BACKLOG);
+        (sink, Self(connections))
+    }
+}
+
+impl Accept for LocalHandoff {
+    type Metadata = TcpMetadata;
+    fn poll_accept(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(Self::Metadata, AcceptStream), Error>> {
+        match self.0.poll_recv(cx) {
+            std::task::Poll::Ready(Some(accepted)) => std::task::Poll::Ready(Ok(accepted)),
+            _ => std::task::Poll::Pending,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 enum FallbackTarget {
