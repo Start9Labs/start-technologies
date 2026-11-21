@@ -12,6 +12,7 @@ use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizati
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
 use crate::registry::context::RegistryContext;
+use crate::registry::reader::reader_api;
 use crate::registry::signer::{ContactInfo, SignerInfo};
 use crate::registry::upstream::WRITES_INDEX;
 use crate::rpc_continuations::Guid;
@@ -24,6 +25,10 @@ pub fn admin_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "signer",
             signers_api::<C>().with_about("about.commands-add-list-signers"),
+        )
+        .subcommand(
+            "reader",
+            reader_api::<C>().with_about("about.commands-registry-readers"),
         )
         .subcommand(
             "add",

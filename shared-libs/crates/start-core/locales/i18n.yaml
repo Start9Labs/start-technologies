@@ -2977,6 +2977,21 @@ registry.admin.signer-already-exists:
   fr_FR: "Un signataire %{guid} (%{name}) existe déjà avec une clé correspondante"
   pl_PL: "Sygnatariusz %{guid} (%{name}) już istnieje z pasującym kluczem"
 
+# registry/reader.rs
+registry.reader.already-exists:
+  en_US: "Reader %{id} already holds key %{key}"
+  de_DE: "Leser %{id} besitzt bereits den Schlüssel %{key}"
+  es_ES: "El lector %{id} ya tiene la clave %{key}"
+  fr_FR: "Le lecteur %{id} détient déjà la clé %{key}"
+  pl_PL: "Czytelnik %{id} posiada już klucz %{key}"
+
+registry.reader.unknown-key:
+  en_US: "No registered reader holds key %{key}"
+  de_DE: "Kein registrierter Leser besitzt den Schlüssel %{key}"
+  es_ES: "Ningún lector registrado tiene la clave %{key}"
+  fr_FR: "Aucun lecteur enregistré ne détient la clé %{key}"
+  pl_PL: "Żaden zarejestrowany czytelnik nie posiada klucza %{key}"
+
 # registry/signer.rs
 registry.signer.not-accepted:
   en_US: "Signer(s) not accepted"
@@ -3132,21 +3147,6 @@ registry.package.remove-not-exist:
   fr_FR: "%{id}%{version}%{sighash} n'existe pas, donc non supprimé"
   pl_PL: "%{id}%{version}%{sighash} nie istnieje, więc nie usunięto"
 
-# registry/package/access.rs
-registry.package.access.not-reader:
-  en_US: "Signer %{signer} is not a reader of %{id}"
-  de_DE: "Unterzeichner %{signer} ist kein Leser von %{id}"
-  es_ES: "El firmante %{signer} no es lector de %{id}"
-  fr_FR: "Le signataire %{signer} n'est pas un lecteur de %{id}"
-  pl_PL: "Sygnatariusz %{signer} nie jest czytelnikiem %{id}"
-
-registry.package.access.private:
-  en_US: "Private"
-  de_DE: "Privat"
-  es_ES: "Privado"
-  fr_FR: "Privé"
-  pl_PL: "Prywatny"
-
 # registry/package/add.rs
 registry.package.add.must-specify-url:
   en_US: "Must specify at least 1 URL"
@@ -3154,6 +3154,13 @@ registry.package.add.must-specify-url:
   es_ES: "Debe especificar al menos 1 URL"
   fr_FR: "Doit spécifier au moins 1 URL"
   pl_PL: "Należy podać co najmniej 1 adres URL"
+
+registry.package.add.readers-require-private:
+  en_US: "Readers apply only to a private s9pk"
+  de_DE: "Leser gelten nur für ein privates s9pk"
+  es_ES: "Los lectores solo se aplican a un s9pk privado"
+  fr_FR: "Les lecteurs ne s'appliquent qu'à un s9pk privé"
+  pl_PL: "Czytelnicy dotyczą wyłącznie prywatnego s9pk"
 
 registry.package.add.unauthorized:
   en_US: "Unauthorized"
@@ -3204,6 +3211,28 @@ registry.package.promote.version-not-found:
   fr_FR: "Version %{version} de %{id} introuvable dans le registre source"
   pl_PL: "Wersja %{version} pakietu %{id} nie znaleziona w rejestrze źródłowym"
 
+registry.package.promote.export-required:
+  en_US: "The source registry cannot export private s9pks; upgrade it to promote %{id}@%{version}"
+  de_DE: "Die Quell-Registry kann keine privaten s9pks exportieren; aktualisieren Sie sie, um %{id}@%{version} zu übertragen"
+  es_ES: "El registro de origen no puede exportar s9pk privados; actualícelo para promover %{id}@%{version}"
+  fr_FR: "Le registre source ne peut pas exporter de s9pk privés ; mettez-le à jour pour promouvoir %{id}@%{version}"
+  pl_PL: "Rejestr źródłowy nie może eksportować prywatnych s9pk; zaktualizuj go, aby promować %{id}@%{version}"
+
+registry.package.promote.destination-admin-required:
+  en_US: "Promoting a private s9pk with readers requires admin access to the destination registry's readers: %{error}"
+  de_DE: "Das Übertragen eines privaten s9pk mit Lesern erfordert Administratorzugriff auf die Leser der Ziel-Registry: %{error}"
+  es_ES: "Promover un s9pk privado con lectores requiere acceso de administrador a los lectores del registro de destino: %{error}"
+  fr_FR: "La promotion d'un s9pk privé avec des lecteurs nécessite un accès administrateur aux lecteurs du registre de destination : %{error}"
+  pl_PL: "Promowanie prywatnego s9pk z czytelnikami wymaga dostępu administratora do czytelników rejestru docelowego: %{error}"
+
+registry.package.promote.readers-unavailable:
+  en_US: "Promoting private s9pk %{commitment} without readers: only admins and the package's publishers can see its reader list"
+  de_DE: "Privates s9pk %{commitment} wird ohne Leser übertragen: Nur Administratoren und Herausgeber des Pakets sehen seine Leserliste"
+  es_ES: "Promoviendo el s9pk privado %{commitment} sin lectores: solo los administradores y publicadores del paquete ven su lista de lectores"
+  fr_FR: "Promotion du s9pk privé %{commitment} sans lecteurs : seuls les administrateurs et les éditeurs du paquet voient sa liste de lecteurs"
+  pl_PL: "Promowanie prywatnego s9pk %{commitment} bez czytelników: tylko administratorzy i wydawcy pakietu widzą jego listę czytelników"
+
+# registry/package/version.rs
 registry.package.cannot-remove-last-mirror:
   en_US: "Cannot remove last mirror from an s9pk"
   de_DE: "Letzter Spiegel kann nicht aus einem s9pk entfernt werden"
@@ -5164,13 +5193,6 @@ help.arg.package-ids-to-backup:
   fr_FR: "IDs de paquets à inclure dans la sauvegarde"
   pl_PL: "Identyfikatory pakietów do uwzględnienia w kopii zapasowej"
 
-help.arg.package-private:
-  en_US: "Whether only admins, the package's signers, and its readers can see it"
-  de_DE: "Ob nur Administratoren, die Unterzeichner des Pakets und seine Leser es sehen können"
-  es_ES: "Si solo los administradores, los firmantes del paquete y sus lectores pueden verlo"
-  fr_FR: "Si seuls les administrateurs, les signataires du paquet et ses lecteurs peuvent le voir"
-  pl_PL: "Czy tylko administratorzy, sygnatariusze pakietu i jego czytelnicy mogą go widzieć"
-
 help.arg.package-url:
   en_US: "URL of the package"
   de_DE: "URL des Pakets"
@@ -6048,6 +6070,55 @@ help.arg.reset-reason:
   fr_FR: "Raison de la réinitialisation"
   pl_PL: "Powód resetowania"
 
+help.arg.reader-id:
+  en_US: "ID of the reader key"
+  de_DE: "ID des Leserschlüssels"
+  es_ES: "ID de la clave de lector"
+  fr_FR: "ID de la clé de lecteur"
+  pl_PL: "Identyfikator klucza czytelnika"
+
+help.arg.reader-key:
+  en_US: "Ed25519 public key of the reader, in PEM or DER Base64 format"
+  de_DE: "Öffentlicher Ed25519-Schlüssel des Lesers im PEM- oder DER-Base64-Format"
+  es_ES: "Clave pública Ed25519 del lector, en formato PEM o DER Base64"
+  fr_FR: "Clé publique Ed25519 du lecteur, au format PEM ou DER Base64"
+  pl_PL: "Klucz publiczny Ed25519 czytelnika w formacie PEM lub DER Base64"
+
+help.arg.reader-label:
+  en_US: "Label identifying the reader key"
+  de_DE: "Bezeichnung des Leserschlüssels"
+  es_ES: "Etiqueta que identifica la clave de lector"
+  fr_FR: "Libellé identifiant la clé de lecteur"
+  pl_PL: "Etykieta identyfikująca klucz czytelnika"
+
+help.arg.private-s9pk:
+  en_US: "Host the s9pk encrypted with a key derived from your identity, visible only to admins, publishers, and the given readers"
+  de_DE: "Das s9pk verschlüsselt mit einem aus Ihrer Identität abgeleiteten Schlüssel hosten, sichtbar nur für Administratoren, Herausgeber und die angegebenen Leser"
+  es_ES: "Alojar el s9pk cifrado con una clave derivada de su identidad, visible solo para administradores, publicadores y los lectores indicados"
+  fr_FR: "Héberger le s9pk chiffré avec une clé dérivée de votre identité, visible uniquement par les administrateurs, les éditeurs et les lecteurs indiqués"
+  pl_PL: "Hostuj s9pk zaszyfrowany kluczem pochodzącym z Twojej tożsamości, widoczny tylko dla administratorów, wydawców i wskazanych czytelników"
+
+help.arg.private-s9pk-mirror:
+  en_US: "Verify ciphertext with the registry's stored s9pk key"
+  de_DE: "Den Chiffretext mit dem im Registry gespeicherten s9pk-Schlüssel überprüfen"
+  es_ES: "Verificar el texto cifrado con la clave s9pk almacenada en el registro"
+  fr_FR: "Vérifier le texte chiffré avec la clé s9pk stockée dans le registre"
+  pl_PL: "Zweryfikuj szyfrogram za pomocą klucza s9pk przechowywanego w rejestrze"
+
+help.arg.s9pk-reader-key:
+  en_US: "Registered reader key allowed to see the private s9pk, in PEM or DER Base64 format"
+  de_DE: "Registrierter Leserschlüssel, der das private s9pk sehen darf, im PEM- oder DER-Base64-Format"
+  es_ES: "Clave de lector registrada que puede ver el s9pk privado, en formato PEM o DER Base64"
+  fr_FR: "Clé de lecteur enregistrée autorisée à voir le s9pk privé, au format PEM ou DER Base64"
+  pl_PL: "Zarejestrowany klucz czytelnika uprawniony do wyświetlania prywatnego s9pk, w formacie PEM lub DER Base64"
+
+help.arg.encrypted-s9pk-output-path:
+  en_US: "Path to write the encrypted s9pk to, or - for stdout; defaults to <stem>.encrypted.s9pk beside the input"
+  de_DE: "Pfad für das verschlüsselte s9pk oder - für die Standardausgabe; standardmäßig <stem>.encrypted.s9pk neben der Eingabe"
+  es_ES: "Ruta donde escribir el s9pk cifrado, o - para la salida estándar; por defecto <stem>.encrypted.s9pk junto a la entrada"
+  fr_FR: "Chemin où écrire le s9pk chiffré, ou - pour la sortie standard ; par défaut <stem>.encrypted.s9pk à côté de l'entrée"
+  pl_PL: "Ścieżka zapisu zaszyfrowanego s9pk lub - dla standardowego wyjścia; domyślnie <stem>.encrypted.s9pk obok pliku wejściowego"
+
 help.arg.s9pk-file-path:
   en_US: "Path to s9pk package file"
   de_DE: "Pfad zur s9pk-Paketdatei"
@@ -6280,13 +6351,6 @@ about.add-package-category:
   fr_FR: "Ajouter un paquet à une catégorie"
   pl_PL: "Dodaj pakiet do kategorii"
 
-about.add-package-reader:
-  en_US: "Allow a signer to see a private package"
-  de_DE: "Einem Unterzeichner erlauben, ein privates Paket zu sehen"
-  es_ES: "Permitir que un firmante vea un paquete privado"
-  fr_FR: "Autoriser un signataire à voir un paquet privé"
-  pl_PL: "Zezwól sygnatariuszowi na widzenie prywatnego pakietu"
-
 about.add-package-registry:
   en_US: "Add package to registry index"
   de_DE: "Paket zum Registry-Index hinzufügen"
@@ -6363,6 +6427,13 @@ about.add-remove-update-backup-target:
   es_ES: "Agregar, eliminar o actualizar un destino de respaldo"
   fr_FR: "Ajouter, supprimer ou mettre à jour une cible de sauvegarde"
   pl_PL: "Dodaj, usuń lub zaktualizuj cel kopii zapasowej"
+
+about.add-registry-reader:
+  en_US: "Register a key that private s9pks can grant read access to"
+  de_DE: "Einen Schlüssel registrieren, dem private s9pks Lesezugriff gewähren können"
+  es_ES: "Registrar una clave a la que los s9pk privados pueden conceder acceso de lectura"
+  fr_FR: "Enregistrer une clé à laquelle des s9pk privés peuvent accorder un accès en lecture"
+  pl_PL: "Zarejestruj klucz, któremu prywatne s9pk mogą przyznać dostęp do odczytu"
 
 about.add-signer:
   en_US: "Add signer"
@@ -6743,13 +6814,6 @@ about.commands-os-assets-versions:
   fr_FR: "Commandes liées aux actifs et versions du système d'exploitation"
   pl_PL: "Polecenia związane z zasobami i wersjami systemu operacyjnego"
 
-about.commands-package-access:
-  en_US: "Commands to manage private package access"
-  de_DE: "Befehle zur Verwaltung des Zugriffs auf private Pakete"
-  es_ES: "Comandos para gestionar el acceso a paquetes privados"
-  fr_FR: "Commandes pour gérer l'accès aux paquets privés"
-  pl_PL: "Polecenia do zarządzania dostępem do prywatnych pakietów"
-
 about.commands-packages:
   en_US: "Commands related to packages"
   de_DE: "Befehle zu Paketen"
@@ -6833,6 +6897,20 @@ about.commands-registry-info:
   es_ES: "Ver o editar información del registro"
   fr_FR: "Afficher ou modifier les informations du registre"
   pl_PL: "Wyświetl lub edytuj informacje rejestru"
+
+about.commands-registry-readers:
+  en_US: "Commands to add, list, edit, or remove registry reader keys"
+  de_DE: "Befehle zum Hinzufügen, Auflisten, Bearbeiten oder Entfernen von Leserschlüsseln der Registry"
+  es_ES: "Comandos para agregar, listar, editar o eliminar claves de lector del registro"
+  fr_FR: "Commandes pour ajouter, lister, modifier ou supprimer les clés de lecteur du registre"
+  pl_PL: "Polecenia do dodawania, wyświetlania, edytowania lub usuwania kluczy czytelników rejestru"
+
+about.commands-package-version:
+  en_US: "Commands for a single version of a package"
+  de_DE: "Befehle für eine einzelne Version eines Pakets"
+  es_ES: "Comandos para una sola versión de un paquete"
+  fr_FR: "Commandes pour une seule version d'un paquet"
+  pl_PL: "Polecenia dla pojedynczej wersji pakietu"
 
 about.commands-remove-assets:
   en_US: "Commands to remove image, iso, or squashfs files"
@@ -7149,6 +7227,13 @@ about.edit-os-version:
   fr_FR: "Modifier les métadonnées d'une version du système ; les champs omis restent inchangés"
   pl_PL: "Edytuj metadane wersji systemu; pominięte pola pozostają bez zmian"
 
+about.edit-registry-reader:
+  en_US: "Change the label of a registry reader key"
+  de_DE: "Die Bezeichnung eines Leserschlüssels der Registry ändern"
+  es_ES: "Cambiar la etiqueta de una clave de lector del registro"
+  fr_FR: "Modifier le libellé d'une clé de lecteur du registre"
+  pl_PL: "Zmień etykietę klucza czytelnika rejestru"
+
 about.edit-s9pk-manifest:
   en_US: "Edit s9pk manifest"
   de_DE: "s9pk-Manifest bearbeiten"
@@ -7162,6 +7247,13 @@ about.edit-signer:
   es_ES: "Editar información del firmante"
   fr_FR: "Modifier les informations du signataire"
   pl_PL: "Edytuj informacje o podpisującym"
+
+about.encrypt-s9pk:
+  en_US: "Write an s9pk encrypted with the key your identity derives for it, for hosting a private s9pk"
+  de_DE: "Ein s9pk schreiben, verschlüsselt mit dem Schlüssel, den Ihre Identität dafür ableitet, um ein privates s9pk zu hosten"
+  es_ES: "Escribir un s9pk cifrado con la clave que su identidad deriva para él, para alojar un s9pk privado"
+  fr_FR: "Écrire un s9pk chiffré avec la clé que votre identité en dérive, pour héberger un s9pk privé"
+  pl_PL: "Zapisz s9pk zaszyfrowany kluczem wyprowadzonym dla niego z Twojej tożsamości, aby hostować prywatny s9pk"
 
 about.enable-disable-wifi:
   en_US: "Enable or disable wifi"
@@ -7359,13 +7451,6 @@ about.get-os-versions-info:
   fr_FR: "Obtenir les informations sur les versions du système d'exploitation"
   pl_PL: "Pobierz informacje o wersjach systemu operacyjnego"
 
-about.get-package-access:
-  en_US: "Show whether a package is private and which signers can see it"
-  de_DE: "Anzeigen, ob ein Paket privat ist und welche Unterzeichner es sehen können"
-  es_ES: "Mostrar si un paquete es privado y qué firmantes pueden verlo"
-  fr_FR: "Indiquer si un paquet est privé et quels signataires peuvent le voir"
-  pl_PL: "Pokaż, czy pakiet jest prywatny i którzy sygnatariusze mogą go widzieć"
-
 about.get-pubkey-from-server:
   en_US: "Get the public key from the server"
   de_DE: "Öffentlichen Schlüssel vom Server abrufen"
@@ -7562,6 +7647,20 @@ about.list-registry-info-packages:
   es_ES: "Listar información del registro y paquetes"
   fr_FR: "Lister les informations du registre et les packages"
   pl_PL: "Wyświetl informacje o rejestrze i pakiety"
+
+about.list-registry-readers:
+  en_US: "List registry reader keys"
+  de_DE: "Leserschlüssel der Registry auflisten"
+  es_ES: "Listar las claves de lector del registro"
+  fr_FR: "Lister les clés de lecteur du registre"
+  pl_PL: "Wyświetl klucze czytelników rejestru"
+
+about.export-package-version:
+  en_US: "Export a package version as stored, with its private keystreams and reader keys, for promotion"
+  de_DE: "Eine Paketversion wie gespeichert exportieren, mit ihren privaten Schlüsselströmen und Leserschlüsseln, zum Übertragen"
+  es_ES: "Exportar una versión de un paquete tal como está almacenada, con sus flujos de clave privados y claves de lector, para promoverla"
+  fr_FR: "Exporter une version de paquet telle que stockée, avec ses flux de clés privés et ses clés de lecteur, pour la promotion"
+  pl_PL: "Eksportuj wersję pakietu w postaci zapisanej, z jej prywatnymi strumieniami kluczy i kluczami czytelników, do promowania"
 
 about.list-signers:
   en_US: "List signers"
@@ -7899,13 +7998,6 @@ about.remove-package-category:
   fr_FR: "Supprimer le package de la catégorie"
   pl_PL: "Usuń pakiet z kategorii"
 
-about.remove-package-reader:
-  en_US: "Revoke a signer's access to a private package"
-  de_DE: "Den Zugriff eines Unterzeichners auf ein privates Paket widerrufen"
-  es_ES: "Revocar el acceso de un firmante a un paquete privado"
-  fr_FR: "Révoquer l'accès d'un signataire à un paquet privé"
-  pl_PL: "Odbierz sygnatariuszowi dostęp do prywatnego pakietu"
-
 about.remove-package-registry:
   en_US: "Remove package from registry"
   de_DE: "Paket aus der Registry entfernen"
@@ -7919,6 +8011,13 @@ about.remove-package-signer:
   es_ES: "Eliminar firmante de paquete"
   fr_FR: "Supprimer le signataire du package"
   pl_PL: "Usuń sygnatariusza pakietu"
+
+about.remove-registry-reader:
+  en_US: "Remove a registry reader key and revoke it from every private s9pk"
+  de_DE: "Einen Leserschlüssel der Registry entfernen und ihn für jedes private s9pk widerrufen"
+  es_ES: "Eliminar una clave de lector del registro y revocarla de cada s9pk privado"
+  fr_FR: "Supprimer une clé de lecteur du registre et la révoquer de chaque s9pk privé"
+  pl_PL: "Usuń klucz czytelnika rejestru i odwołaj go ze wszystkich prywatnych s9pk"
 
 about.remove-signer:
   en_US: "Remove signer and all their authorizations"
@@ -8200,13 +8299,6 @@ about.set-outbound-gateway-package:
   fr_FR: "Définir la passerelle sortante pour un package"
   pl_PL: "Ustaw bramę wychodzącą dla pakietu"
 
-
-about.set-package-private:
-  en_US: "Set whether a package is private"
-  de_DE: "Festlegen, ob ein Paket privat ist"
-  es_ES: "Establecer si un paquete es privado"
-  fr_FR: "Définir si un paquet est privé"
-  pl_PL: "Ustaw, czy pakiet jest prywatny"
 
 about.set-registry-icon:
   en_US: "Set the registry icon"

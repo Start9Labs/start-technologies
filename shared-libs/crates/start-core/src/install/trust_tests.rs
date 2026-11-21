@@ -24,6 +24,8 @@ fn package_commitment_requires_an_enabled_marketplace_signer() {
         urls: vec![],
         commitment,
         signatures: SignatureMap::from([(public.clone(), AnySignature::Ed25519ph(signature))]),
+        private: None,
+        readers: Default::default(),
     };
     let id = public.interned_der64();
     let mut keys = TrustedKeys::from([(
@@ -76,6 +78,8 @@ fn passkey_signed_asset<C: crate::sign::commitment::SignedCommitment>(
         urls: vec![],
         commitment,
         signatures: SignatureMap::from([(public.clone(), signature)]),
+        private: None,
+        readers: Default::default(),
     };
     let keys = TrustedKeys::from([(
         public.interned_der64(),
@@ -216,6 +220,8 @@ async fn package_request_pins_use_update_policy_and_remain_required_with_overrid
         urls: vec![],
         commitment: package.as_archive().commitment().await.unwrap(),
         signatures,
+        private: None,
+        readers: Default::default(),
     };
     let source = std::sync::Arc::<[u8]>::from(tokio::fs::read(&path).await.unwrap());
     for (server, client, expected) in [

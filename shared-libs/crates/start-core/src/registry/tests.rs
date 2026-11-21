@@ -11,8 +11,12 @@ use url::Url;
 
 use super::*;
 use crate::middleware::auth::signature::{AUTH_SIG_HEADER, SignatureHeader};
+use crate::registry::asset::RegistryAsset;
 use crate::registry::context::test_context;
 use crate::registry::package::icon::{icons_dir, store_icon};
+use crate::registry::reader::ReaderKey;
+use crate::s9pk::merkle_archive::source::encrypted::KeyStreamInfo;
+use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::sign::{AnySigningKey, Signer};
 use crate::util::future::NonDetachingJoinHandle;
 
@@ -22,40 +26,115 @@ fn signer(seed: u8) -> Signer {
     ))
 }
 
+/// A registry with a public package and a package whose only s9pk is private to the reader key.
 pub(crate) async fn fixture() -> (tempfile::TempDir, RegistryContext, Signer, Signer, String) {
     let temp = tempfile::tempdir().unwrap();
     let admin = signer(31);
     let reader = signer(32);
     let ctx = test_context(temp.path().into(), admin.verifying_key().await.unwrap()).await;
-    let reader_id = Guid::new();
     let reader_key = reader.verifying_key().await.unwrap();
     let path = store_icon(
         &icons_dir(temp.path()),
         &DataUrl::from_vec("image/png", b"secret".to_vec()),
     )
     .unwrap();
-    let version = json!({
-        "title": "Secret", "description": {"short": "Secret", "long": "Secret"},
-        "releaseNotes": "Private", "license": "MIT", "upstreamRepo": "https://upstream.test",
-        "sourceVersion": "*", "s9pks": [],
-        "dependencyMetadata": { "dependency": {"title": null, "description": null, "optional": false, "icon": path} }
+    let (_, info) = crate::registry::package::index::tests::version_info_signed_by(1);
+    let mut version = to_value(&info).unwrap();
+    version["title"] = json!("Secret");
+    version["sourceVersion"] = json!("*");
+    version["dependencyMetadata"] = json!({
+        "dependency": {"title": null, "description": null, "optional": false, "icon": path}
     });
-    ctx.db.mutate(|db| {
-        db.as_index_mut().as_signers_mut().insert(&reader_id, &SignerInfo {
-            name: "Reader".into(), contact: vec![], keys: [reader_key].into(), gpg_exports: Default::default(),
-        })?;
-        db.as_index_mut().as_package_mut().ser(&from_value(json!({
-            "categories": {},
-            "packages": {
-                "public": { "authorized": {}, "categories": [], "versions": {} },
-                "secret": {
-                    "private": true, "readers": [reader_id], "authorized": {}, "categories": ["hidden"],
-                    "versions": { "1.0.0:0": version }
+    version["s9pks"][0][1]["private"] = to_value(&secret_keystream()).unwrap();
+    let reader_id = ctx
+        .db
+        .mutate(|db| {
+            db.as_index_mut().as_readers_mut().add_reader(&ReaderKey {
+                label: "Reader".into(),
+                key: reader_key.clone(),
+            })
+        })
+        .await
+        .result
+        .unwrap();
+    version["s9pks"][0][1]["readers"] = json!([reader_id]);
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut().as_package_mut().ser(&from_value(json!({
+                "categories": {},
+                "packages": {
+                    "public": { "authorized": {}, "categories": [], "versions": {} },
+                    "secret": {
+                        "authorized": {}, "categories": ["hidden"],
+                        "versions": { "1.0.0:0": version }
+                    }
                 }
-            }
-        }))?)
-    }).await.result.unwrap();
+            }))?)
+        })
+        .await
+        .result
+        .unwrap();
     (temp, ctx, admin, reader, path.to_string())
+}
+
+pub(crate) fn secret_keystream() -> KeyStreamInfo {
+    KeyStreamInfo {
+        key: crate::util::serde::Base64([3; 32]),
+        iv: crate::util::serde::Base64([4; 16]),
+    }
+}
+
+async fn mutate_secret_s9pk(
+    ctx: &RegistryContext,
+    f: impl FnOnce(&mut RegistryAsset<MerkleArchiveCommitment>) + std::panic::UnwindSafe + Send,
+) {
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .as_idx_mut(&"secret".parse().unwrap())
+                .unwrap()
+                .as_versions_mut()
+                .as_idx_mut(&"1.0.0:0".parse().unwrap())
+                .unwrap()
+                .as_s9pks_mut()
+                .mutate(|s9pks| Ok(f(&mut s9pks[0].1)))
+        })
+        .await
+        .result
+        .unwrap();
+}
+
+pub(crate) async fn secret_readers(ctx: &RegistryContext) -> BTreeSet<Guid> {
+    ctx.db
+        .peek()
+        .await
+        .into_index()
+        .into_package()
+        .de()
+        .unwrap()
+        .packages["secret"]
+        .versions[&"1.0.0:0".parse().unwrap()]
+        .s9pks[0]
+        .1
+        .readers
+        .clone()
+}
+
+pub(crate) async fn set_secret_readers(ctx: &RegistryContext, readers: &BTreeSet<Guid>) {
+    let readers = readers.clone();
+    mutate_secret_s9pk(ctx, move |asset| asset.readers = readers).await
+}
+
+/// Removes the reader from the fixture's private s9pk.
+pub(crate) async fn revoke_secret_reader(ctx: &RegistryContext) {
+    set_secret_readers(ctx, &BTreeSet::new()).await
+}
+
+/// Makes the fixture's private s9pk public.
+pub(crate) async fn publish_secret(ctx: &RegistryContext) {
+    mutate_secret_s9pk(ctx, |asset| asset.private = None).await
 }
 
 pub(crate) async fn server(ctx: RegistryContext) -> (Url, NonDetachingJoinHandle<()>) {
@@ -123,7 +202,8 @@ async fn post_json_message(url: &Url, message: &Value) -> Value {
 async fn root_signature_fields_neither_authenticate_nor_override_http_headers() {
     let (_temp, ctx, admin, _reader, _) = fixture().await;
     let (url, _task) = server(ctx).await;
-    let message = json!({"id":u64::MAX,"method":"package.access.get","params":{"id":"secret"},"signature":"untrusted"});
+    let message =
+        json!({"id":u64::MAX,"method":"admin.reader.list","params":{},"signature":"untrusted"});
     let response = post_json_message(&url, &message).await;
     assert_eq!(response["id"], json!(u64::MAX));
     assert_eq!(
@@ -147,7 +227,11 @@ async fn root_signature_fields_neither_authenticate_nor_override_http_headers() 
         .await
         .unwrap();
     assert_eq!(response["id"], json!(u64::MAX));
-    assert_eq!(response["result"]["private"], json!(true));
+    assert_eq!(
+        response["result"].as_object().unwrap().len(),
+        1,
+        "{response}"
+    );
 }
 
 #[tokio::test]
@@ -181,7 +265,7 @@ async fn websocket_upgrade_headers_and_root_fields_cannot_override_an_unknown_en
     .unwrap();
     socket
         .send(LogicalMessage::Text(
-            json!({"jsonrpc":"2.0","id":1,"method":"package.access.get","params":{"id":"secret"}})
+            json!({"jsonrpc":"2.0","id":1,"method":"admin.reader.list","params":{}})
                 .to_string()
                 .into(),
         ))
@@ -298,37 +382,39 @@ async fn browsing_and_access_commands_use_verified_visibility() {
     let (_temp, ctx, admin, reader, _) = fixture().await;
     let (url, _task) = server(ctx.clone()).await;
     let forged = json!({"__Auth_signer": admin.verifying_key().await.unwrap()});
-    for (key, is_admin) in [(None, false), (Some(&reader), false), (Some(&admin), true)] {
-        let visible = key.is_some();
+    let stranger = signer(33);
+    let s9pk = |package: &Value| package["versions"]["1.0.0:0"]["s9pks"][0][1].clone();
+    for (key, visible, is_admin) in [
+        (None, false, false),
+        (Some(&stranger), false, false),
+        (Some(&reader), true, false),
+        (Some(&admin), true, true),
+    ] {
         let index = rpc(&url, "index", forged.clone(), key).await;
         assert!(index.get("error").is_none(), "{index}");
         assert_eq!(
-            index["result"]["package"]["packages"]
-                .get("secret")
-                .is_some(),
-            visible
+            index["result"]["readers"].as_object().unwrap().len(),
+            usize::from(is_admin),
+            "{index}"
         );
+        let secret = &index["result"]["package"]["packages"]["secret"];
+        assert_eq!(!secret.is_null(), visible);
         if visible {
             assert_eq!(
-                index["result"]["package"]["packages"]["secret"]["readers"]
-                    .as_array()
-                    .unwrap()
-                    .len(),
+                s9pk(secret)["private"],
+                to_value(&secret_keystream()).unwrap()
+            );
+            assert_eq!(
+                s9pk(secret)["readers"].as_array().map_or(0, |r| r.len()),
                 usize::from(is_admin)
             );
         }
         let index = rpc(&url, "package.index", forged.clone(), key).await;
-        assert_eq!(
-            index["result"]["packages"].get("secret").is_some(),
-            visible,
-            "{index}"
-        );
+        let secret = &index["result"]["packages"]["secret"];
+        assert_eq!(!secret.is_null(), visible, "{index}");
         if visible {
             assert_eq!(
-                index["result"]["packages"]["secret"]["readers"]
-                    .as_array()
-                    .unwrap()
-                    .len(),
+                s9pk(secret)["readers"].as_array().map_or(0, |r| r.len()),
                 usize::from(is_admin)
             );
         }
@@ -351,61 +437,74 @@ async fn browsing_and_access_commands_use_verified_visibility() {
         assert_eq!(signers.get("error").is_some(), !visible, "{signers}");
     }
     assert!(!ctx.datadir.join("admin.log").exists());
-    let denied = rpc(
+    let stranger_key = stranger.verifying_key().await.unwrap();
+    let add = json!({"label": "Stranger", "key": stranger_key});
+    for method in ["admin.reader.list", "admin.reader.add"] {
+        let denied = rpc(&url, method, add.clone(), Some(&reader)).await;
+        assert_eq!(
+            denied["error"]["code"],
+            json!(ErrorKind::Authorization as i32),
+            "{denied}"
+        );
+    }
+    let added = rpc(&url, "admin.reader.add", add.clone(), Some(&admin)).await;
+    let stranger_id: Guid = from_value(added["result"].clone()).unwrap();
+    let duplicate = rpc(&url, "admin.reader.add", add, Some(&admin)).await;
+    assert!(duplicate.get("error").is_some(), "{duplicate}");
+    let edited = rpc(
         &url,
-        "package.access.set-private",
-        json!({"id": "public", "private": true}),
-        Some(&reader),
-    )
-    .await;
-    assert!(denied.get("error").is_some(), "{denied}");
-    let allowed = rpc(
-        &url,
-        "package.access.set-private",
-        json!({"id": "public", "private": true}),
+        "admin.reader.edit",
+        json!({"id": stranger_id, "label": "Friend"}),
         Some(&admin),
     )
     .await;
-    assert!(allowed.get("error").is_none(), "{allowed}");
-    let access = rpc(
-        &url,
-        "package.access.get",
-        json!({"id": "public"}),
-        Some(&admin),
-    )
-    .await;
-    assert_eq!(access["result"], json!({"private": true, "readers": {}}));
+    assert!(edited.get("error").is_none(), "{edited}");
+    let listed = rpc(&url, "admin.reader.list", json!({}), Some(&admin)).await;
+    assert_eq!(
+        listed["result"][stranger_id.as_ref()]["label"],
+        json!("Friend")
+    );
     let reader_id = ctx
         .db
         .peek()
         .await
         .as_index()
-        .as_signers()
-        .get_signer(&reader.verifying_key().await.unwrap())
+        .as_readers()
+        .ids_for(&reader.verifying_key().await.unwrap())
+        .unwrap()
+        .pop_first()
         .unwrap();
-    for method in ["package.access.add-reader", "package.access.remove-reader"] {
-        let result = rpc(
-            &url,
-            method,
-            json!({"id": "public", "signer": reader_id}),
-            Some(&admin),
-        )
-        .await;
-        assert!(result.get("error").is_none(), "{result}");
+    for id in [&stranger_id, &reader_id] {
+        let removed = rpc(&url, "admin.reader.remove", json!({"id": id}), Some(&admin)).await;
+        assert!(removed.get("error").is_none(), "{removed}");
     }
-    let package = ctx
-        .db
-        .peek()
-        .await
+    let db = ctx.db.peek().await;
+    assert!(db.as_index().as_readers().de().unwrap().is_empty());
+    let secret = db
         .into_index()
         .into_package()
         .de()
         .unwrap()
         .packages
-        .remove("public")
+        .remove("secret")
         .unwrap();
-    assert!(package.access.private && package.access.readers.is_empty());
-    assert!(package.versions.is_empty());
+    assert!(
+        secret.versions[&"1.0.0:0".parse().unwrap()].s9pks[0]
+            .1
+            .readers
+            .is_empty()
+    );
+    assert!(
+        secret.versions[&"1.0.0:0".parse().unwrap()].s9pks[0]
+            .1
+            .private
+            .is_some()
+    );
+    let package = rpc(&url, "package.get", json!({"id": "secret"}), Some(&reader)).await;
+    assert!(
+        package["result"]["best"].as_object().unwrap().is_empty(),
+        "{package}"
+    );
     assert!(ctx.datadir.join("admin.log").exists());
 }
 
@@ -428,7 +527,11 @@ async fn legacy_subscriptions_filter_initial_dumps_and_live_revisions() {
         view["package"]["packages"].get("secret").is_some(),
         "{private}"
     );
-    assert_eq!(view["package"]["packages"]["secret"]["readers"], json!([]));
+    assert!(
+        view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]
+            .get("readers")
+            .is_none()
+    );
     let guid: Guid = from_value(private["result"]["guid"].clone()).unwrap();
     let websocket = url
         .join(&format!("ws/rpc/{guid}"))
@@ -436,20 +539,7 @@ async fn legacy_subscriptions_filter_initial_dumps_and_live_revisions() {
         .to_string()
         .replacen("http:", "ws:", 1);
     let (mut socket, _) = tokio_tungstenite::connect_async(websocket).await.unwrap();
-    ctx.db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_readers_mut()
-                .ser(&BTreeSet::new())
-        })
-        .await
-        .result
-        .unwrap();
+    revoke_secret_reader(&ctx).await;
     let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
         .await
         .unwrap()
@@ -486,20 +576,7 @@ async fn private_dependency_icons_require_a_current_reader_and_disable_caching()
         "private, no-store"
     );
     assert_eq!(response.bytes().await.unwrap(), &b"secret"[..]);
-    ctx.db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_readers_mut()
-                .ser(&BTreeSet::new())
-        })
-        .await
-        .result
-        .unwrap();
+    revoke_secret_reader(&ctx).await;
     assert_eq!(
         client
             .get(icon.clone())
@@ -510,20 +587,7 @@ async fn private_dependency_icons_require_a_current_reader_and_disable_caching()
             .status(),
         404
     );
-    ctx.db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_private_mut()
-                .ser(&false)
-        })
-        .await
-        .result
-        .unwrap();
+    publish_secret(&ctx).await;
     let response = client.get(icon).send().await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -551,20 +615,7 @@ async fn rejected_icon_proofs_fall_back_to_anonymous_access() {
         .await
         .unwrap();
     assert_eq!(response.status(), 404);
-    ctx.db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_private_mut()
-                .ser(&false)
-        })
-        .await
-        .result
-        .unwrap();
+    publish_secret(&ctx).await;
     let response = client
         .get(icon)
         .header(AUTH_SIG_HEADER, wrong_identity().await)
@@ -606,22 +657,13 @@ async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
     }
     let mut view = dumps.remove(&41).unwrap();
     assert!(view["package"]["packages"].get("secret").is_some());
-    assert_eq!(view["package"]["packages"]["secret"]["readers"], json!([]));
+    assert!(
+        view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]
+            .get("readers")
+            .is_none()
+    );
     assert_eq!(dumps[&42], json!({"versions": {}}));
-    ctx.db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_readers_mut()
-                .ser(&BTreeSet::new())
-        })
-        .await
-        .result
-        .unwrap();
+    revoke_secret_reader(&ctx).await;
     socket
         .send(Message::Text(
             json!({"jsonrpc":"2.0", "id":43, "method":"index", "params":{}})
