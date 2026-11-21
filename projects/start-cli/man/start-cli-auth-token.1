@@ -2,11 +2,11 @@
 .el .ds Aq '
 .TH start-cli-auth-token 1  "token "
 .SH NAME
-start\-cli\-auth\-token \- Create bearer tokens for API clients
+start\-cli\-auth\-token \- Create, list and revoke bearer tokens for API clients
 .SH SYNOPSIS
 \fBstart\-cli auth token\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
-Create bearer tokens for API clients
+Create, list and revoke bearer tokens for API clients
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -15,3 +15,9 @@ Print help
 .TP
 start\-cli\-auth\-token\-create(1)
 Create a bearer token that authenticates as a new session
+.TP
+start\-cli\-auth\-token\-list(1)
+List bearer tokens
+.TP
+start\-cli\-auth\-token\-remove(1)
+Revoke bearer tokens

@@ -509,6 +509,11 @@ export class MockApiService extends ApiService {
     ) as WebSocketSubject<T>
   }
 
+  async checkEnrollment(): Promise<unknown> {
+    await pauseFor(1000)
+    return null
+  }
+
   /** The WAN IP a device's traffic egresses (device override > subnet > default). */
   private deviceWan(target: string): string {
     const ip = target.split(':')[0] ?? ''
