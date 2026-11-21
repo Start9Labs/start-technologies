@@ -16,7 +16,6 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
     if !ctx.torrents.downloads_enabled() {
         return Ok(());
     }
-    let device = DeviceInfo::load(ctx).await?;
     let packages = ctx.db.peek().await.as_public().as_package_data().de()?;
     for (id, entry) in packages.0 {
         if !matches!(
@@ -41,6 +40,7 @@ pub(crate) async fn register_existing(ctx: &RpcContext) -> Result<(), Error> {
                 return Ok::<_, Error>(());
             }
             let local = package.as_archive().commitment().await?;
+            let device = DeviceInfo::load(ctx).await?;
             let asset = crate::registry::package::get::advertised_asset(
                 &ctx.db.peek().await,
                 registry,
