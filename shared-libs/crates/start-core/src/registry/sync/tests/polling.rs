@@ -139,7 +139,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
     super::super::polling::poll(&db, &subscriptions, &device(), &client, &signer())
         .await
         .unwrap();
-    assert_eq!(requests.load(Ordering::SeqCst), 4);
+    assert_eq!(requests.load(Ordering::SeqCst), 5);
     let snapshot = db.peek().await;
     let cache = snapshot
         .as_public()
@@ -150,7 +150,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Legacy Registry"));
-    assert!(cache.packages.contains_key("test"));
+    assert!(cache.catalog.contains_key("test"));
     assert_eq!(
         snapshot
             .as_public()
@@ -161,14 +161,11 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
             .status,
         RegistryStatus::Connected
     );
-    let selection = cached_response(
+    let selection = super::select(
         &snapshot,
         &registry,
-        "package.get",
-        &json!({"id":"test", "sourceVersion":"1.0.0:0"}),
-        Some(&device()),
+        json!({"id":"test", "sourceVersion":"1.0.0:0"}),
     )
-    .unwrap()
     .unwrap();
     assert!(selection["best"].get("1.0.0:0").is_some());
     assert!(selection["best"].get("2.0.0:0").is_none());
@@ -230,15 +227,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
         .await
         .unwrap();
     let snapshot = db.peek().await;
-    let selection = cached_response(
-        &snapshot,
-        &registry,
-        "package.get",
-        &json!({"id":"test"}),
-        Some(&device()),
-    )
-    .unwrap()
-    .unwrap();
+    let selection = super::select(&snapshot, &registry, json!({"id":"test"})).unwrap();
     assert_eq!(selection["best"], json!({}));
 }
 
@@ -374,4 +363,43 @@ async fn legacy_json_reply_limit_covers_chunked_responses() {
         .unwrap(),
         json!("x".repeat(64))
     );
+}
+
+#[tokio::test]
+async fn legacy_reply_limit_covers_error_bodies() {
+    use crate::middleware::auth::signature::send_http;
+    let router = Router::new().route(
+        "/rpc/v0",
+        any(|| async {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "registry-failure".repeat(4),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url: Url = format!("http://{}/rpc/v0", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let _server: NonDetachingJoinHandle<()> =
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() }).into();
+    let failure = |limit: usize| {
+        let url = url.clone();
+        async move {
+            format!(
+                "{:?}",
+                send_http(
+                    reqwest::Client::new(),
+                    url,
+                    http::HeaderMap::new(),
+                    "{}".into(),
+                    limit
+                )
+                .await
+                .unwrap_err()
+            )
+        }
+    };
+    assert!(failure(128).await.contains("registry-failure"));
+    assert!(!failure(32).await.contains("registry-failure"));
 }

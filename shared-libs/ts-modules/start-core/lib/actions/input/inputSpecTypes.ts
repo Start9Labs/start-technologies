@@ -17,6 +17,7 @@ export type ValueType =
   | 'datetime'
   | 'toggle'
   | 'triState'
+  | 'acknowledgement'
   | 'select'
   | 'multiselect'
   | 'list'
@@ -36,6 +37,7 @@ export type ValueSpecOf<T extends ValueType> =
   T extends "datetime" ? ValueSpecDatetime :
   T extends "toggle" ? ValueSpecToggle :
   T extends "triState" ? ValueSpecTriState :
+  T extends "acknowledgement" ? ValueSpecAcknowledgement :
   T extends "select" ? ValueSpecSelect :
   T extends "multiselect" ? ValueSpecMultiselect :
   T extends "list" ? ValueSpecList :
@@ -231,6 +233,19 @@ export type ValueSpecTriState = {
   default: boolean | null
   disabled: false | string
   immutable: boolean
+}
+/**
+ * Spec for a checkbox the user must tick before the form submits. It submits `true`, starts
+ * unticked whatever the prefill, and appears only at the top level of a form, after every other field.
+ */
+export type ValueSpecAcknowledgement = {
+  name: string
+  description: string | null
+  warning: string | null
+  /** Optional supplementary text rendered persistently beneath the field. */
+  footnote: string | null
+
+  type: 'acknowledgement'
 }
 /**
  * Spec for a discriminated union field — displays a dropdown for variant selection,

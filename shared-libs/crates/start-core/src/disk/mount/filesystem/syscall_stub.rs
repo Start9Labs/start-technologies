@@ -54,6 +54,10 @@ pub fn open_tree_clone_fd(_source: BorrowedFd, _recursive: bool) -> Result<Owned
     unsupported()
 }
 
+pub fn open_tree_attr_idmap_fd(_source: BorrowedFd, _userns: BorrowedFd) -> Result<OwnedFd, Error> {
+    unsupported()
+}
+
 pub fn open_tree_attr_idmap(
     _path: &Path,
     _recursive: bool,

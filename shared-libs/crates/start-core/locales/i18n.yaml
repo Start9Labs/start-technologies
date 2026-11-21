@@ -2020,6 +2020,14 @@ backup.trash.reclaimed-title:
   fr_FR: "Espace de sauvegarde récupéré"
   pl_PL: "Odzyskano miejsce po kopii zapasowej"
 
+# backup/mod.rs
+backup.prompt-password:
+  en_US: "Backup Password: "
+  de_DE: "Backup-Passwort: "
+  es_ES: "Contraseña de copia de seguridad: "
+  fr_FR: "Mot de passe de sauvegarde : "
+  pl_PL: "Hasło kopii zapasowej: "
+
 # backup/restore.rs
 backup.restore.package-error:
   en_US: "Error restoring package %{id}: %{error}"
@@ -2033,6 +2041,13 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
+
+backup.target.cifs.prompt-password:
+  en_US: "CIFS Password: "
+  de_DE: "CIFS-Passwort: "
+  es_ES: "Contraseña CIFS: "
+  fr_FR: "Mot de passe CIFS : "
+  pl_PL: "Hasło CIFS: "
 
 backup.target.partial-mount:
   en_US: "The base filesystem mounted successfully at %{path}."
@@ -2981,6 +2996,14 @@ migration.initial-balance-failed:
   fr_FR: "Impossible de lancer l’équilibrage Btrfs initial ; le démarrage continue"
   pl_PL: "Nie udało się uruchomić początkowego równoważenia Btrfs; uruchamianie systemu jest kontynuowane"
 
+# version/v0_4_3.rs
+migration.wireguard-mtu-failed:
+  en_US: "Could not set the default MTU on every WireGuard gateway; continuing startup"
+  de_DE: "Die Standard-MTU konnte nicht für alle WireGuard-Gateways festgelegt werden; der Systemstart wird fortgesetzt"
+  es_ES: "No se pudo establecer la MTU predeterminada en todas las puertas de enlace WireGuard; el arranque continúa"
+  fr_FR: "Impossible de définir la MTU par défaut sur toutes les passerelles WireGuard ; le démarrage continue"
+  pl_PL: "Nie udało się ustawić domyślnego MTU na wszystkich bramach WireGuard; uruchamianie systemu jest kontynuowane"
+
 # registry/admin.rs
 registry.admin.unknown-signer:
   en_US: "Unknown signer"
@@ -3019,20 +3042,6 @@ registry.context.missing-hostname:
   es_ES: "Falta configuración requerida: registry-hostname"
   fr_FR: "Configuration requise manquante : registry-hostname"
   pl_PL: "Brak wymaganej konfiguracji: registry-hostname"
-
-registry.context.onion-tor-not-installed:
-  en_US: "Cannot reach this Tor (.onion) registry: the Tor service is not installed. Install and start it to use onion registries."
-  de_DE: "Diese Tor-(.onion-)Registry ist nicht erreichbar: Der Tor-Dienst ist nicht installiert. Installieren und starten Sie ihn, um Onion-Registries zu verwenden."
-  es_ES: "No se puede acceder a este registro Tor (.onion): el servicio Tor no está instalado. Instálalo e inícialo para usar registros onion."
-  fr_FR: "Impossible d'accéder à ce registre Tor (.onion) : le service Tor n'est pas installé. Installez-le et démarrez-le pour utiliser les registres onion."
-  pl_PL: "Nie można połączyć się z tym rejestrem Tor (.onion): usługa Tor nie jest zainstalowana. Zainstaluj ją i uruchom, aby korzystać z rejestrów onion."
-
-registry.context.onion-tor-not-running:
-  en_US: "Cannot reach this Tor (.onion) registry: the Tor service is not running. Start the Tor service to use onion registries."
-  de_DE: "Diese Tor-(.onion-)Registry ist nicht erreichbar: Der Tor-Dienst läuft nicht. Starten Sie den Tor-Dienst, um Onion-Registries zu verwenden."
-  es_ES: "No se puede acceder a este registro Tor (.onion): el servicio Tor no está en ejecución. Inicia el servicio Tor para usar registros onion."
-  fr_FR: "Impossible d'accéder à ce registre Tor (.onion) : le service Tor n'est pas démarré. Démarrez le service Tor pour utiliser les registres onion."
-  pl_PL: "Nie można połączyć się z tym rejestrem Tor (.onion): usługa Tor nie jest uruchomiona. Uruchom usługę Tor, aby korzystać z rejestrów onion."
 
 registry.context.registry-required:
   en_US: "`--registry` required"
@@ -3331,6 +3340,20 @@ registry.sync.closed:
   es_ES: "Conexión con el registro cerrada"
   fr_FR: "Connexion au registre fermée"
   pl_PL: "Połączenie z rejestrem zostało zamknięte"
+
+registry.sync.not-saved:
+  en_US: "%{registry} is not a saved registry"
+  de_DE: "%{registry} ist keine gespeicherte Registry"
+  es_ES: "%{registry} no es un registro guardado"
+  fr_FR: "%{registry} n'est pas un registre enregistré"
+  pl_PL: "%{registry} nie jest zapisanym rejestrem"
+
+registry.sync.unreachable:
+  en_US: "%{registry} is unreachable: %{error}"
+  de_DE: "%{registry} ist nicht erreichbar: %{error}"
+  es_ES: "%{registry} no está accesible: %{error}"
+  fr_FR: "%{registry} est injoignable : %{error}"
+  pl_PL: "%{registry} jest nieosiągalny: %{error}"
 
 # sign/commitment/request.rs
 sign.commitment.request.unsupported-type:
@@ -6067,11 +6090,11 @@ help.arg.ssh-fingerprint:
   pl_PL: "Odcisk palca klucza SSH"
 
 help.arg.ssh-public-key:
-  en_US: "SSH public key"
-  de_DE: "Öffentlicher SSH-Schlüssel"
-  es_ES: "Clave pública SSH"
-  fr_FR: "Clé publique SSH"
-  pl_PL: "Klucz publiczny SSH"
+  en_US: "SSH public key, passed as one quoted argument, e.g. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  de_DE: "Öffentlicher SSH-Schlüssel, als ein Argument in Anführungszeichen übergeben, z. B. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  es_ES: "Clave pública SSH, pasada como un único argumento entre comillas, p. ej. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  fr_FR: "Clé publique SSH, passée comme un seul argument entre guillemets, p. ex. \"$(cat ~/.ssh/id_ed25519.pub)\""
+  pl_PL: "Klucz publiczny SSH, przekazany jako jeden argument w cudzysłowie, np. \"$(cat ~/.ssh/id_ed25519.pub)\""
 
 help.arg.tunnel-ip-address:
   en_US: "Tunnel server IP address"

@@ -92,3 +92,48 @@ async fn test_basic_server() {
     let response: String = imbl_value::from_value(result).unwrap();
     assert_eq!(response, "Thing1 is nested");
 }
+
+#[derive(Clone)]
+struct ProxyContext;
+
+impl Context for ProxyContext {}
+
+impl rpc_toolkit::CallRemote<TestContext> for ProxyContext {
+    async fn call_remote(
+        &self,
+        _: &str,
+        metadata: imbl_value::imbl::OrdMap<&'static str, imbl_value::Value>,
+        _: imbl_value::Value,
+        _: Empty,
+    ) -> Result<imbl_value::Value, RpcError> {
+        Ok(metadata["authenticated"].clone())
+    }
+}
+
+#[tokio::test]
+async fn call_remote_metadata_overrides_reach_the_calling_server_alone() {
+    use imbl_value::Value;
+    use rpc_toolkit::HandlerFor;
+
+    let proxy = rpc_toolkit::CallRemoteHandler::<ProxyContext, TestContext, _>::new(
+        from_fn(|_: TestContext, _: Empty| Ok::<_, RpcError>(Value::Null))
+            .with_metadata("authenticated", Value::Bool(false))
+            .with_metadata("mcp", Value::Bool(false)),
+    )
+    .with_metadata("authenticated", Value::Bool(true));
+    #[cfg(feature = "ts")]
+    let proxy = proxy.no_ts();
+    let root = ParentHandler::<ProxyContext>::new().subcommand("remote", proxy);
+
+    let metadata = root.metadata(vec!["remote"].into());
+    assert_eq!(metadata.get("authenticated"), Some(&Value::Bool(true)));
+    assert_eq!(metadata.get("mcp"), Some(&Value::Bool(false)));
+
+    assert_eq!(
+        Server::new(|| async { Ok(ProxyContext) }, root)
+            .handle_command("remote", Value::Object(Default::default()))
+            .await
+            .unwrap(),
+        Value::Bool(false)
+    );
+}
