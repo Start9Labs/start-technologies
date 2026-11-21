@@ -697,7 +697,9 @@ pub struct FileLock(#[allow(unused)] OwnedMutexGuard<()>, Option<FdLock<File>>);
 impl Drop for FileLock {
     fn drop(&mut self) {
         if let Some(fd_lock) = self.1.take() {
-            tokio::task::spawn_blocking(|| fd_lock.unlock(true).map_err(|(_, e)| e).log_err());
+            let _ = cleanup::run_filesystem_blocking(move || {
+                fd_lock.unlock(true).map_err(|(_, e)| e).log_err()
+            });
         }
     }
 }
@@ -730,7 +732,7 @@ impl FileLock {
                 .with_ctx(|_| (crate::ErrorKind::Filesystem, parent.display().to_string()))?;
         }
         let f = create_file(&path).await?;
-        let file_guard = tokio::task::spawn_blocking(move || {
+        let file_guard = cleanup::run_filesystem_blocking(move || {
             fd_lock_rs::FdLock::lock(f, fd_lock_rs::LockType::Exclusive, blocking)
         })
         .await
@@ -740,7 +742,7 @@ impl FileLock {
     }
     pub async fn unlock(mut self) -> Result<(), Error> {
         if let Some(fd_lock) = self.1.take() {
-            tokio::task::spawn_blocking(|| fd_lock.unlock(true).map_err(|(_, e)| e))
+            cleanup::run_filesystem_blocking(move || fd_lock.unlock(true).map_err(|(_, e)| e))
                 .await
                 .with_kind(crate::ErrorKind::Unknown)?
                 .with_kind(crate::ErrorKind::Filesystem)?;

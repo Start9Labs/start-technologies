@@ -23,15 +23,18 @@ pub(crate) fn spawn_filesystem_cleanup(future: impl Future<Output = ()> + Send +
     let _ = spawn_cleanup(&FILESYSTEM_CLEANUP, future);
 }
 
-/// Caller cancellation cannot release mounts retained by an unfinished blocking operation.
-pub(crate) async fn run_filesystem_blocking<T: Send + 'static>(
+/// Registers immediately; caller cancellation cannot release the callback's retained resources.
+pub(crate) fn run_filesystem_blocking<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, tokio::task::JoinError> {
-    spawn_cleanup(&FILESYSTEM_CLEANUP, async move {
+) -> impl Future<Output = Result<T, tokio::task::JoinError>> + Send + 'static {
+    let completion = spawn_cleanup(&FILESYSTEM_CLEANUP, async move {
         tokio::task::spawn_blocking(work).await
-    })
-    .await
-    .expect("filesystem task retained until cleanup drain")
+    });
+    async move {
+        completion
+            .await
+            .expect("filesystem task retained until cleanup drain")
+    }
 }
 
 pub(crate) async fn wait_for_filesystem_cleanup() {

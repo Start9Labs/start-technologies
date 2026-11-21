@@ -41,35 +41,49 @@ async fn blocking_filesystem_work_retains_resources_after_its_caller_is_cancelle
     let _serial = FILESYSTEM_CLEANUP_TEST_LOCK.lock().await;
     wait_for_filesystem_cleanup().await;
     assert_eq!(run_filesystem_blocking(|| 42).await.unwrap(), 42);
-    let (started, running) = oneshot::channel();
-    let (release, released) = std::sync::mpsc::channel();
-    let (cleanup_started, cleanup_running) = oneshot::channel();
-    let (finish_cleanup, cleanup_finished) = oneshot::channel();
-    let (destroyed, destruction) = oneshot::channel();
-    let guard = crate::util::GeneralBoxedGuard::new(move || {
-        spawn_filesystem_cleanup(async move {
-            cleanup_started.send(()).unwrap();
-            cleanup_finished.await.unwrap();
-            destroyed.send(()).unwrap();
+    for poll_caller in [false, true] {
+        let (started, running) = oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let (cleanup_started, cleanup_running) = oneshot::channel();
+        let (finish_cleanup, cleanup_finished) = oneshot::channel();
+        let (destroyed, destruction) = oneshot::channel();
+        let guard = crate::util::GeneralBoxedGuard::new(move || {
+            spawn_filesystem_cleanup(async move {
+                cleanup_started.send(()).unwrap();
+                cleanup_finished.await.unwrap();
+                destroyed.send(()).unwrap();
+            });
         });
-    });
-    let caller = tokio::spawn(run_filesystem_blocking(move || {
-        let _guard = guard;
-        started.send(()).unwrap();
-        released.recv().unwrap();
-    }));
-    running.await.unwrap();
-    caller.abort();
-    assert!(caller.await.unwrap_err().is_cancelled());
-    let drain = wait_for_filesystem_cleanup();
-    tokio::pin!(drain);
-    assert!(futures::poll!(&mut drain).is_pending());
-    release.send(()).unwrap();
-    cleanup_running.await.unwrap();
-    assert!(futures::poll!(&mut drain).is_pending());
-    finish_cleanup.send(()).unwrap();
-    drain.await;
-    assert!(destruction.now_or_never().unwrap().is_ok());
+        let work = run_filesystem_blocking(move || {
+            started.send(()).unwrap();
+            released.recv().unwrap();
+            guard
+        });
+        if poll_caller {
+            let caller = tokio::spawn(work);
+            tokio::time::timeout(std::time::Duration::from_secs(3), running)
+                .await
+                .unwrap()
+                .unwrap();
+            caller.abort();
+            assert!(caller.await.err().unwrap().is_cancelled());
+        } else {
+            drop(work);
+            tokio::time::timeout(std::time::Duration::from_secs(3), running)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let drain = wait_for_filesystem_cleanup();
+        tokio::pin!(drain);
+        assert!(futures::poll!(&mut drain).is_pending());
+        release.send(()).unwrap();
+        cleanup_running.await.unwrap();
+        assert!(futures::poll!(&mut drain).is_pending());
+        finish_cleanup.send(()).unwrap();
+        drain.await;
+        assert!(destruction.now_or_never().unwrap().is_ok());
+    }
 }
 
 #[tokio::test]

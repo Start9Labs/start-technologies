@@ -14,7 +14,7 @@ const SUBVOL_INO: u64 = 256;
 #[cfg(target_os = "linux")]
 pub async fn is_btrfs(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref().to_owned();
-    tokio::task::spawn_blocking(move || {
+    crate::util::cleanup::run_filesystem_blocking(move || {
         nix::sys::statfs::statfs(&path)
             .map(|s| s.filesystem_type() == nix::sys::statfs::BTRFS_SUPER_MAGIC)
             .unwrap_or(false)
