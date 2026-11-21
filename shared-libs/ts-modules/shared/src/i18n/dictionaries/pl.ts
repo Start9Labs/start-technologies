@@ -685,7 +685,6 @@ export default {
   813: 'System + dane łącznie wymagają co najmniej 38 GB',
   814: 'Ukryć aktualizację?',
   815: 'Ta aktualizacja zostanie ukryta. Nadal możesz zainstalować tę wersję z Marketplace.',
-  816: 'Wyszukiwanie odpowiedniej wersji...',
   817: 'Domena clearnet dostępna z dowolnego miejsca w Internecie.',
   818: 'Idealne dla',
   819: 'Publiczne strony i API',
@@ -1101,4 +1100,7 @@ export default {
   1300: 'Serwer nieosiągalny',
   1301: 'Listy mogą być nieaktualne',
   1302: 'StartOS nie może teraz połączyć się z tym rejestrem.',
+  1304: 'Nowości',
+  1305: 'Ta wersja wymaga nowszej wersji StartOS. Zaktualizuj serwer, aby ją zainstalować.',
+  1306: 'Zainstalowanej wersji nie można zaktualizować bezpośrednio do tej wersji.',
 } satisfies i18n
