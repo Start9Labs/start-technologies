@@ -16,7 +16,7 @@ use crate::middleware::auth::signature::{
 use crate::net::static_server::{bad_request, not_found, server_error};
 use crate::prelude::*;
 use crate::registry::context::RegistryContext;
-use crate::registry::package::index::{PackageIndex, PackageInfo, Reader};
+use crate::registry::package::index::{PackageIndex, PackageVersionInfo, Reader};
 use crate::sign::Signer;
 use crate::util::DataUrl;
 
@@ -252,27 +252,24 @@ pub async fn stored_icon(ctx: &RegistryContext, path: &str, mut request: Request
     }
 }
 
-fn package_icons(package: &Model<PackageInfo>) -> Result<BTreeSet<InternedString>, Error> {
-    let mut paths = BTreeSet::new();
-    for (_, version) in package.as_versions().as_entries()? {
-        let dependencies = version
-            .as_dependency_metadata()
-            .as_entries()?
-            .into_iter()
-            .map(|(_, dependency)| dependency.as_icon().de())
-            .collect::<Result<Vec<_>, _>>()?;
-        for icon in std::iter::once(version.as_icon().de()?)
-            .chain(dependencies)
-            .flatten()
-        {
-            if let PackageIcon::Stored(path) = icon {
-                paths.insert(path);
-            }
-        }
-    }
-    Ok(paths)
+fn version_icons(version: &Model<PackageVersionInfo>) -> Result<BTreeSet<InternedString>, Error> {
+    let dependencies = version
+        .as_dependency_metadata()
+        .as_entries()?
+        .into_iter()
+        .map(|(_, dependency)| dependency.as_icon().de())
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(std::iter::once(version.as_icon().de()?)
+        .chain(dependencies)
+        .flatten()
+        .filter_map(|icon| match icon {
+            PackageIcon::Stored(path) => Some(path),
+            PackageIcon::Inline(_) => None,
+        })
+        .collect())
 }
 
+/// Public for an icon of a version anyone sees, and uncached for one only the requester sees.
 fn icon_cache_control(
     index: &Model<PackageIndex>,
     path: &str,
@@ -280,11 +277,14 @@ fn icon_cache_control(
 ) -> Result<Option<&'static str>, Error> {
     let mut private_access = false;
     for (_, package) in index.as_packages().as_entries()? {
-        if package_icons(package)?.contains(path) {
-            if package.is_visible_to(None)? {
-                return Ok(Some(ICON_CACHE_CONTROL));
+        let publisher = package.is_publisher(reader)?;
+        for (_, version) in package.as_versions().as_entries()? {
+            if version_icons(version)?.contains(path) {
+                if version.is_visible_to(None, false)? {
+                    return Ok(Some(ICON_CACHE_CONTROL));
+                }
+                private_access |= version.is_visible_to(reader, publisher)?;
             }
-            private_access |= package.is_visible_to(reader)?;
         }
     }
     Ok(private_access.then_some("private, no-store"))
@@ -293,7 +293,9 @@ fn icon_cache_control(
 pub fn referenced_icons(index: &Model<PackageIndex>) -> Result<BTreeSet<InternedString>, Error> {
     let mut paths = BTreeSet::new();
     for (_, package) in index.as_packages().as_entries()? {
-        paths.extend(package_icons(package)?);
+        for (_, version) in package.as_versions().as_entries()? {
+            paths.extend(version_icons(version)?);
+        }
     }
     Ok(paths)
 }
@@ -340,22 +342,28 @@ mod tests {
 
     #[test]
     fn icon_references_share_visibility_and_sweep_ownership() {
+        use crate::registry::package::index::tests::version_info_signed_by;
+        use crate::rpc_continuations::Guid;
+
+        let reader_id = Guid::new();
         let reader = Reader {
-            signer: crate::rpc_continuations::Guid::new(),
-            admin: false,
+            reader_ids: [reader_id.clone()].into(),
+            ..Default::default()
         };
-        let public_version =
-            imbl_value::json!({"icon": "blake3/shared.png", "dependencyMetadata": {}});
-        let private_version = imbl_value::json!({
-            "icon": "blake3/secret.png", "dependencyMetadata": {
-                "dependency": {"icon": "blake3/dependency.png"},
-                "shared": {"icon": "blake3/shared.png"}
-            }
+        let (_, info) = version_info_signed_by(1);
+        let mut public_version = to_value(&info).unwrap();
+        public_version["icon"] = imbl_value::json!("blake3/shared.png");
+        let mut private_version = public_version.clone();
+        private_version["icon"] = imbl_value::json!("blake3/secret.png");
+        private_version["dependencyMetadata"] = imbl_value::json!({
+            "dependency": {"icon": "blake3/dependency.png"},
+            "shared": {"icon": "blake3/shared.png"}
         });
+        private_version["s9pks"][0][1]["private"] = imbl_value::json!({"key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "iv": "AgICAgICAgICAgICAgICAg"});
+        private_version["s9pks"][0][1]["readers"] = imbl_value::json!([reader_id]);
         let index: Model<PackageIndex> = imbl_value::json!({"categories": {}, "packages": {
             "public": {"authorized": {}, "versions": {"1.0.0:0": public_version}},
-            "secret": {"private": true, "readers": [reader.signer], "authorized": {},
-                "versions": {"1.0.0:0": private_version}}
+            "secret": {"authorized": {}, "versions": {"1.0.0:0": private_version}}
         }})
         .into();
         assert_eq!(
