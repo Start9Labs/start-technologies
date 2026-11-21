@@ -45,6 +45,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::DisableFlowOffloading,
     Migration::TurnOffRemoteAccess,
     Migration::SplitAutomaticForwardTransports,
+    Migration::UseGenericNtpPool,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +86,8 @@ enum Migration {
     /// Earlier releases defaulted Remote Access to When behind NAT, stored as `default`.
     TurnOffRemoteAccess,
     SplitAutomaticForwardTransports,
+    /// Earlier images queried the OpenWrt zone of the NTP pool.
+    UseGenericNtpPool,
 }
 
 impl Migration {
@@ -111,6 +114,7 @@ impl Migration {
                     .await
                     .map(|_| ())
             }
+            Migration::UseGenericNtpPool => use_generic_ntp_pool(root).await,
         }
     }
 
@@ -150,6 +154,7 @@ impl Migration {
                 "turn off Remote Access if it was still set to When behind NAT"
             }
             Migration::SplitAutomaticForwardTransports => "track automatic TCP and UDP mappings independently",
+            Migration::UseGenericNtpPool => "query time servers that don't identify the router as OpenWrt",
         }
     }
 }
@@ -414,6 +419,37 @@ async fn bind_luci_to_loopback(root: &Path) -> Result<(), Error> {
             if uhttpd.listen_http == ["0.0.0.0:8080", "[::]:8080"] {
                 uhttpd.listen_http = vec!["127.0.0.1:8080".to_string()];
                 section.set(&uhttpd)?;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, TypedSection, Default)]
+#[uci(ty = "timeserver")]
+struct Timeserver {
+    #[uci(default)]
+    server: Vec<String>,
+}
+
+/// An NTP server list other than OpenWrt's stock one was set by the admin user, so shall be left unchanged.
+async fn use_generic_ntp_pool(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["system"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["system"].sections {
+        if let Some(mut timeserver) = section.get_typed::<Timeserver>()? {
+            if timeserver.server
+                == (0..4)
+                    .map(|i| format!("{i}.openwrt.pool.ntp.org"))
+                    .collect::<Vec<_>>()
+            {
+                timeserver.server = (0..4).map(|i| format!("{i}.pool.ntp.org")).collect();
+                section.set(&timeserver)?;
                 changed = true;
             }
         }
@@ -865,6 +901,33 @@ config forwarding
             .position(|m| std::mem::discriminant(m) == std::mem::discriminant(&migration))
             .unwrap();
         format!("{index}\n")
+    }
+
+    #[tokio::test]
+    async fn ntp_uses_generic_pool_unless_changed() {
+        let shipped = include_str!("../../firstboot_config/system")
+            .replace(".pool.ntp.org", ".openwrt.pool.ntp.org");
+        let dir = router(Some(&pending(Migration::UseGenericNtpPool)), true);
+        write(&dir, "etc/config/system", &shipped);
+        run(dir.path()).await.unwrap();
+        run(dir.path()).await.unwrap();
+        assert_eq!(record(&dir), current());
+        let system = read(&dir, "etc/config/system");
+        for i in 0..4 {
+            assert!(
+                system.contains(&format!("list server '{i}.pool.ntp.org'")),
+                "{system}"
+            );
+        }
+        assert!(!system.contains("openwrt"), "{system}");
+        assert!(system.contains("option hostname 'router'"), "{system}");
+        assert!(system.contains("option enable_server '0'"), "{system}");
+
+        let custom = shipped.replace("3.openwrt.pool.ntp.org", "time.example.com");
+        let dir = router(Some(&pending(Migration::UseGenericNtpPool)), true);
+        write(&dir, "etc/config/system", &custom);
+        run(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "etc/config/system"), custom);
     }
 
     #[tokio::test]

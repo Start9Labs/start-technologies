@@ -49,7 +49,7 @@ If your ISP delegates only a single IPv6 prefix (for example, a `/64`), that pre
 
 No. StartWRT has no telemetry, no analytics, and no phone-home behavior. For full transparency, these are the outbound connections the router itself initiates:
 
-- **Time synchronization (NTP)** — Enabled by default. The router keeps its clock accurate by querying the `openwrt.pool.ntp.org` servers.
+- **Time synchronization (NTP)** — Enabled by default. The router keeps its clock accurate by querying the `pool.ntp.org` servers.
 - **Update checks** — Whenever you load the web interface while logged in, it checks for newer firmware releases so it can notify you. _Installing_ an update always requires your explicit action — StartWRT never updates automatically, and you can also update entirely offline by reflashing from a microSD card. See [Updating](updating.md).
 - **Dynamic DNS** — Only if you have configured a [DDNS](ddns.md) provider, the router periodically registers its WAN address with that provider.
 
