@@ -48,13 +48,18 @@ import {
   TuiNavigation,
 } from '@taiga-ui/layout'
 
-import { filterPackages } from '../pipes/filter-packages.pipe'
+import {
+  filterPackages,
+  isNewArrival,
+  NEW_ARRIVALS,
+} from '../pipes/filter-packages.pipe'
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
 import { StoreDataWithUrl } from '../types'
 import { isRegistryLoading } from '../registry-state'
 
 const ICONS: Record<string, string> = {
   all: '@tui.layout-grid',
+  [NEW_ARRIVALS]: '@tui.sparkles',
   ai: '@tui.cpu',
   bitcoin: '@tui.bitcoin',
   crypto: '@tui.coins',
@@ -358,19 +363,27 @@ export class MarketplaceComponent {
     return url ? registryWarning(url) : null
   })
 
-  protected readonly categories = computed(() => {
-    if (this.loading()) return undefined
-    const info = this.current()?.info?.categories
-    if (!info) return undefined
+  protected readonly categories = computed(
+    (): Record<string, T.Category> | undefined => {
+      if (this.loading()) return undefined
+      const info = this.current()?.info?.categories
+      if (!info) return undefined
 
-    const used = new Set(
-      (this.current()?.packages || []).flatMap(p => p.categories || []),
-    )
+      const packages = this.current()?.packages || []
+      const used = new Set(packages.flatMap(p => p.categories || []))
+      const { all, ...listed }: Record<string, T.Category> = Object.fromEntries(
+        Object.entries(info).filter(([key]) => key === 'all' || used.has(key)),
+      )
 
-    return Object.fromEntries(
-      Object.entries(info).filter(([key]) => key === 'all' || used.has(key)),
-    )
-  })
+      return {
+        ...(all && { all }),
+        ...(packages.some(isNewArrival) && {
+          [NEW_ARRIVALS]: { name: this.i18n.transform('New Arrivals') },
+        }),
+        ...listed,
+      }
+    },
+  )
 
   protected readonly effectiveCategory = computed(() => {
     const cats = this.categories()
@@ -379,8 +392,7 @@ export class MarketplaceComponent {
   })
 
   protected readonly name = computed(
-    (c = this.effectiveCategory()) =>
-      this.current()?.info?.categories?.[c]?.name || c,
+    (c = this.effectiveCategory()) => this.categories()?.[c]?.name || c,
   )
 
   protected readonly packages = computed(() =>
