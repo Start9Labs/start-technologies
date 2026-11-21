@@ -120,8 +120,9 @@ export class Daemon<
    *
    * Takes a `hold()` on the daemon's SubContainer (if any) so the container
    * is kept alive while the daemon runs. The hold is released by {@link stop}
-   * (a restartable pause) or {@link term} (teardown). The daemon automatically
-   * restarts on failure with increasing backoff until `stop`/`term` is called.
+   * (a restartable pause) or {@link term} (teardown), and for a oneshot also
+   * when it exits cleanly. The daemon automatically restarts on failure with
+   * increasing backoff until `stop`/`term` is called.
    */
   async start() {
     if (this.loop) {
@@ -133,6 +134,14 @@ export class Daemon<
     const abort = new AbortController()
     const done = this.runLoop(abort.signal)
     this.loop = { abort, done }
+  }
+
+  private async releaseHold() {
+    if (this.releaseSubcontainerHold) {
+      const release = this.releaseSubcontainerHold
+      this.releaseSubcontainerHold = null
+      await release().catch(logErrorOnce)
+    }
   }
 
   private async runLoop(signal: AbortSignal) {
@@ -163,6 +172,11 @@ export class Daemon<
           )
           this.commandController = null
           if (signal.aborted) break
+          if (success && this.oneshot) {
+            await this.releaseHold()
+            if (signal.aborted) break
+            this.exitedSuccess = true
+          }
           for (const fn of this.onExitFns) {
             try {
               fn(success)
@@ -170,10 +184,7 @@ export class Daemon<
               console.error('EXIT handler', e)
             }
           }
-          if (success && this.oneshot) {
-            this.exitedSuccess = true
-            break
-          }
+          if (success && this.oneshot) break
         } catch (e) {
           if (!signal.aborted) logErrorOnce(e)
         }
@@ -235,11 +246,7 @@ export class Daemon<
       await this.loop.done
     }
 
-    if (this.releaseSubcontainerHold) {
-      const release = this.releaseSubcontainerHold
-      this.releaseSubcontainerHold = null
-      await release().catch(logErrorOnce)
-    }
+    await this.releaseHold()
   }
 
   /**
