@@ -24,6 +24,21 @@ To open one particular address instead, open it from its own row in the gateway 
 
 Open the **Interfaces** tab to see every interface the service exposes. Each interface expands to reveal its **addresses** — all the ways that interface can be reached, organized by [gateway](gateways.md). When a service exposes only one interface, it is expanded by default.
 
+### HTTP Proxy Chains
+
+For an HTTP-proxied interface, the waypoints button (**HTTP proxy chain**) appears in each gateway table's header when an HTTP proxy plugin is installed. Choose it to put proxy services, such as bot protection or a web application firewall, in front of the application. Configure profiles through the proxy service's actions, choose **Add proxy** in the dialog, select a profile, and use the arrows to order the stages. **Save** applies the settings; **Cancel** discards edits. Remove every stage and save to clear the chain.
+
+Each binding has a separate chain for each gateway. Its chain covers every address and interface sharing that binding on that gateway, including different URL paths. Changing one gateway leaves the others' settings unchanged. Requests pass through the stages in order. A provider can appear with different profiles, but the same provider/profile pair appears once within a chain.
+
+On a network gateway, **Public only** defaults off. When enabled, clients StartOS classifies as private bypass that chain and its HTTP-version restrictions, even when a selected provider is unavailable. This classification includes on-link clients with globally routable addresses; it is not determined by the URL they use.
+
+URL-plugin gateways, such as Tor, have their own chains and no **Public only** switch. StartOS identifies that gateway from the service container delivering the connection, not an onion hostname or forwarded header. Traffic from a URL plugin with no chain does not fall back to a network gateway's chain. Direct connections to an application's container port bypass these gateway chains.
+
+Unavailable stages remain visible and return HTTP 503 for traffic to which the chain applies. Saved gateway settings remain available even if the gateway or URL plugin disappears. Completing a proxy plugin uninstall automatically removes all its profiles from every chain, preserving other stages and gateway settings. If no stages remain, traffic goes directly to the application. Stopping a provider or withdrawing profiles does not remove its stages. Start or configure the provider, restore the missing profile, or remove its stage to restore access. Applying changed settings disconnects existing clients on the binding, including clients on its other gateways and upgraded WebSockets. A selected profile's supported HTTP versions can also limit which clients can connect.
+
+> [!WARNING]
+> Proxy services can read and modify requests and responses, including credentials and cookies. Select providers you trust. Stopping one blocks traffic selected for its chain until you repair or remove the selection. Uninstalling it removes its protection from every chain.
+
 ### Gateway Tables
 
 Each inbound gateway on your server has its own table. The rows in each table are the addresses available through that gateway. Addresses can be individually enabled or disabled. A LAN IP address you have not switched yourself follows the interface's `.local` address, so an address your server is assigned later starts out the way `.local` is set. On an interface served without TLS the two go together: switching on a LAN IP address switches `.local` on, and switching `.local` off switches its LAN IP addresses off. There, a `.local` address that is on while every IP address in its table is off shows a warning, since those are the addresses the name resolves to. The `.local` address stays in the table while the gateway is disconnected.

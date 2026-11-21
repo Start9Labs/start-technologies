@@ -21,8 +21,26 @@ use tokio_util::io::InspectReader;
 
 use crate::net::host::binding::ProxyAuth;
 use crate::prelude::*;
+use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::{BackTrackingIO, IOHook, ReadWriter};
 use crate::util::serde::MaybeUtf8String;
+use crate::util::sync::SyncMutex;
+
+#[derive(Clone, Default)]
+struct ProxyUpgrades(Arc<SyncMutex<Vec<NonDetachingJoinHandle<()>>>>);
+
+impl ProxyUpgrades {
+    fn spawn(&self, work: impl std::future::Future<Output = ()> + Send + 'static) {
+        self.0.mutate(|tasks| {
+            tasks.retain(|task| !task.is_finished());
+            tasks.push(tokio::spawn(work).into());
+        });
+    }
+
+    async fn finish(&self) {
+        futures::future::join_all(self.0.replace(Vec::new())).await;
+    }
+}
 
 /// Body type returned by the proxy service: either an upstream response body
 /// (`hyper::body::Incoming`) or a synthetic 401 body (`Full<Bytes>`), unified
@@ -226,6 +244,8 @@ fn apply_request_policy<B>(
     for name in forwarded {
         req.headers_mut().remove(name);
     }
+    req.headers_mut().remove("forwarded");
+    req.headers_mut().remove("x-real-ip");
 
     let user = match gate {
         Some(g) => g.check(req.headers())?,
@@ -314,19 +334,9 @@ pub async fn handle_http_on_https(stream: impl ReadWriter + Unpin + 'static) -> 
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const HTTP_HEADER_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Proxies HTTP/1 or prior-knowledge HTTP/2 using the client's framing.
-pub async fn run_plain_http_proxy<F, T>(
-    from: F,
-    to: T,
-    src_ip: Option<IpAddr>,
-    forwarded_headers: ForwardedHeaders,
-    gate: Option<AuthGate>,
-) -> Result<(), Error>
-where
-    F: ReadWriter + Unpin + Send + 'static,
-    T: ReadWriter + Unpin + Send + 'static,
-{
-    let mut from = BackTrackingIO::new(from);
+pub(crate) async fn read_http_protocol<S: ReadWriter + Unpin>(
+    from: &mut BackTrackingIO<S>,
+) -> Result<Option<crate::net::http_proxy::HttpProxyProtocol>, Error> {
     let http2 = match tokio::time::timeout(HTTP_HEADER_TIMEOUT, async {
         for expected in H2_PREFACE {
             if from.read_u8().await? != *expected {
@@ -343,15 +353,61 @@ where
             if error.kind() == std::io::ErrorKind::UnexpectedEof
                 && from.read_buffer().is_empty() =>
         {
-            return Ok(());
+            return Ok(None);
         }
         Err(error) => return Err(Error::new(error, ErrorKind::Network)),
     };
     let _ = from.rewind();
-    if http2 {
-        run_http2_proxy(from, to, src_ip, forwarded_headers, gate).await
+    Ok(Some(if http2 {
+        crate::net::http_proxy::HttpProxyProtocol::Http2
     } else {
-        run_http1_proxy(from, to, src_ip, forwarded_headers, gate).await
+        crate::net::http_proxy::HttpProxyProtocol::Http1
+    }))
+}
+
+pub(crate) fn proxy_status_stream(
+    status: http::StatusCode,
+) -> crate::net::web_server::AcceptStream {
+    let (client, server) = tokio::io::duplex(4096);
+    tokio::spawn(async move {
+        let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+            .serve_connection(
+                TokioIo::new(server),
+                service_fn(move |_| async move {
+                    Ok::<_, Infallible>(
+                        Response::builder()
+                            .status(status)
+                            .body(Full::new(Bytes::new()))
+                            .unwrap(),
+                    )
+                }),
+            )
+            .await;
+    });
+    Box::pin(client)
+}
+
+/// Proxies HTTP/1 or prior-knowledge HTTP/2 using the client's framing.
+pub async fn run_plain_http_proxy<F, T>(
+    from: F,
+    to: T,
+    src_ip: Option<IpAddr>,
+    forwarded_headers: ForwardedHeaders,
+    gate: Option<AuthGate>,
+) -> Result<(), Error>
+where
+    F: ReadWriter + Unpin + Send + 'static,
+    T: ReadWriter + Unpin + Send + 'static,
+{
+    let mut from = BackTrackingIO::new(from);
+    match read_http_protocol(&mut from).await? {
+        Some(crate::net::http_proxy::HttpProxyProtocol::Http2) => {
+            run_http2_proxy(from, to, src_ip, forwarded_headers, gate).await
+        }
+        Some(crate::net::http_proxy::HttpProxyProtocol::Http1) => {
+            run_http1_proxy(from, to, src_ip, forwarded_headers, gate).await
+        }
+        None => Ok(()),
     }
 }
 
@@ -531,7 +587,9 @@ where
     };
     let extended_connect =
         settings.map_err(|message| Error::new(eyre!(message), ErrorKind::Network))?;
+    let upgrades = ProxyUpgrades::default();
     let from = {
+        let tracked_upgrades = upgrades.clone();
         let mut server = hyper::server::conn::http2::Builder::new(TokioExecutor::new());
         server
             .timer(TokioTimer::new())
@@ -546,6 +604,7 @@ where
             service_fn(move |mut req| {
                 let mut client = client.clone();
                 let gate = gate.clone();
+                let upgrades = tracked_upgrades.clone();
                 async move {
                     if let Err(resp) =
                         apply_request_policy(&mut req, src_ip, forwarded_headers, gate.as_ref())
@@ -568,7 +627,7 @@ where
 
                     if let Some(from) = upgrade {
                         let to = hyper::upgrade::on(&mut res);
-                        tokio::task::spawn(async move {
+                        upgrades.spawn(async move {
                             if let Some((from, to)) = futures::future::try_join(from, to).await.ok()
                             {
                                 tokio::io::copy_bidirectional(
@@ -589,7 +648,11 @@ where
     let mut from = Box::pin(from);
     loop {
         tokio::select! {
-            res = from.as_mut() => return Ok(res?),
+            res = from.as_mut() => {
+                res?;
+                upgrades.finish().await;
+                return Ok(());
+            },
             result = to.as_mut() => {
                 if let Err(error) = result {
                     tracing::trace!(?error, "HTTP/2 backend connection failed");
@@ -623,6 +686,8 @@ where
     // Hyper drains its write buffer before flushing the transport.
     from.post_flush(move || flush_progress.did_flush());
     let svc_progress = progress.clone();
+    let upgrades = ProxyUpgrades::default();
+    let tracked_upgrades = upgrades.clone();
     // Hyper disarms `header_read_timeout` during a body or upgrade.
     let from = hyper::server::conn::http1::Builder::new()
         .timer(TokioTimer::new())
@@ -632,6 +697,7 @@ where
             service_fn(move |mut req| {
                 let client = client.clone();
                 let gate = gate.clone();
+                let upgrades = tracked_upgrades.clone();
                 // The upstream driver can finish before `send_request` resumes.
                 let relaying = svc_progress.start();
                 async move {
@@ -668,7 +734,7 @@ where
                             .get(http::header::UPGRADE)
                             .map(|h| h.to_owned());
                         let to = hyper::upgrade::on(&mut res);
-                        tokio::task::spawn(async move {
+                        upgrades.spawn(async move {
                             if let Some((from, to)) = futures::future::try_join(from, to).await.ok()
                             {
                                 if kind
@@ -709,7 +775,11 @@ where
     let mut upstream_result = None;
     loop {
         tokio::select! {
-            res = from.as_mut() => return Ok(res?),
+            res = from.as_mut() => {
+                res?;
+                upgrades.finish().await;
+                return Ok(());
+            },
             res = to.as_mut() => upstream_result = Some(res),
             _ = progress.done.notified(), if upstream_result.is_some() => {}
         }
@@ -961,6 +1031,47 @@ mod tests {
             .await
             .expect("authenticated WebSocket tunnel stalled");
         }
+    }
+
+    #[tokio::test]
+    async fn cancelling_the_proxy_closes_its_upgraded_tunnel() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (mut client, client_facing) = tokio::io::duplex(4096);
+            let (backend_facing, mut backend) = tokio::io::duplex(4096);
+            let proxy = tokio::spawn(run_http1_proxy(client_facing, backend_facing, None, ForwardedHeaders::Disabled, None));
+            client.write_all(b"GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n").await.unwrap();
+            read_head(&mut backend).await;
+            backend.write_all(b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n").await.unwrap();
+            assert!(read_head(&mut client).await.starts_with("http/1.1 101"));
+            client.write_all(b"ping").await.unwrap();
+            let mut ping = [0; 4];
+            backend.read_exact(&mut ping).await.unwrap();
+            assert_eq!(&ping, b"ping");
+            proxy.abort();
+            let _ = proxy.await;
+            assert_eq!(client.read(&mut [0]).await.unwrap(), 0);
+            assert_eq!(backend.read(&mut [0]).await.unwrap(), 0);
+        }).await.expect("upgraded sockets outlived their proxy");
+    }
+
+    #[test]
+    fn alternate_client_address_headers_cannot_spoof_a_proxy_stage() {
+        let mut request = Request::builder()
+            .uri("/")
+            .header("forwarded", "for=127.0.0.1;proto=https")
+            .header("x-real-ip", "127.0.0.1")
+            .body(())
+            .unwrap();
+        apply_request_policy(
+            &mut request,
+            Some("203.0.113.9".parse().unwrap()),
+            ForwardedHeaders::Ssl,
+            None,
+        )
+        .unwrap();
+        assert!(!request.headers().contains_key("forwarded"));
+        assert!(!request.headers().contains_key("x-real-ip"));
+        assert_eq!(request.headers()["x-forwarded-for"], "203.0.113.9");
     }
 
     #[tokio::test]

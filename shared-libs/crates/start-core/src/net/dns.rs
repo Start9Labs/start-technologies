@@ -1014,6 +1014,14 @@ impl DnsController {
         }
     }
 
+    /// Returns the live service owning a source address; retired sources fail closed.
+    pub(crate) fn requester(&self, source: IpAddr) -> Result<Option<PackageId>, Error> {
+        self.resolve
+            .upgrade()
+            .or_not_found("DNS source registry")?
+            .peek(|resolve| resolve.requester(source))
+    }
+
     pub fn add_service(
         &self,
         pkg_id: Option<PackageId>,

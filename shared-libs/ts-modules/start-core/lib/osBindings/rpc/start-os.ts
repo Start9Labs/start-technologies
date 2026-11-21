@@ -495,6 +495,26 @@ export type GovernorInfo = z.output<typeof schemas.GovernorInfo>
 export type GovernorParamsInput = z.input<typeof schemas.GovernorParams>
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type HostnameMetadataInput = z.input<typeof schemas.HostnameMetadata>
+
+/**
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export type HttpProxyGateway = z.output<typeof schemas.HttpProxyGateway>
+
+/**
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export type HttpProxyGatewayInput = z.input<typeof schemas.HttpProxyGateway>
+
+/**
+ * A provider/profile pair occurring once in a gateway's ordered chain.
+ */
+export type HttpProxyStage = z.output<typeof schemas.HttpProxyStage>
+
+/**
+ * A provider/profile pair occurring once in a gateway's ordered chain.
+ */
+export type HttpProxyStageInput = z.input<typeof schemas.HttpProxyStage>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
 export type InitAcmeParamsInput = z.input<typeof schemas.InitAcmeParams>
 export type InstalledVersionParamsInput = z.input<
@@ -645,6 +665,16 @@ export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
 export type HostnameInfoInput = z.input<typeof schemas.HostnameInfo>
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export type HttpProxyChain = z.output<typeof schemas.HttpProxyChain>
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export type HttpProxyChainInput = z.input<typeof schemas.HttpProxyChain>
 export type InstallParamsInput = z.input<typeof schemas.InstallParams>
 
 /**
@@ -708,6 +738,13 @@ export type MetricsFollowResponse = z.output<
   typeof schemas.MetricsFollowResponse
 >
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
+
+/**
+ * Replaces one gateway's chain without changing the binding's other gateways.
+ */
+export type SetHttpProxyChainParamsInput = z.input<
+  typeof schemas.SetHttpProxyChainParams
+>
 
 /**
  * Parameters for replacing the stored NUT configuration.

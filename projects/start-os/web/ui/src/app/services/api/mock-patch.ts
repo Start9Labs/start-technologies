@@ -38,8 +38,33 @@ function mockService(
     outboundDns: null,
     registry: 'https://registry.start9.com/',
     developerKey: 'developer-key',
-    plugin: { url: null },
+    plugin: { url: null, httpProxy: null },
     tasks: {},
+  }
+}
+
+function mockProxyService(
+  id: string,
+  title: string,
+  profiles: T.HttpProxyProfile[],
+): PackageDataEntry<InstalledState> {
+  const service = mockService(id, title, '1.0.0:0', {
+    desired: { main: 'running' },
+    error: null,
+    health: {},
+    started: new Date(Date.now() - 3600000).toISOString(),
+  })
+  return {
+    ...service,
+    stateInfo: {
+      ...service.stateInfo,
+      manifest: {
+        ...service.stateInfo.manifest,
+        defaultLocale: 'en_US',
+        plugins: ['http-proxy-v0'],
+      },
+    },
+    plugin: { url: null, httpProxy: { profiles } },
   }
 }
 
@@ -543,6 +568,7 @@ export const mockPatchData: DataModel = {
               proxy: null,
             },
             interfaces: {},
+            proxyChains: [],
           },
         },
         bindingRanges: {},
@@ -747,6 +773,21 @@ export const mockPatchData: DataModel = {
     // keyboard: null,
   },
   packageData: {
+    anubis: mockProxyService('anubis', 'Anubis', [
+      { id: 'standard', name: 'Standard protection', protocols: ['http1'] },
+    ]),
+    coraza: mockProxyService('coraza', 'Coraza WAF', [
+      {
+        id: 'edge',
+        name: { de_DE: 'Randschutz', en_US: 'Edge protection' },
+        protocols: ['http1', 'http2'],
+      },
+      {
+        id: 'application',
+        name: 'Application protection',
+        protocols: ['http1', 'http2'],
+      },
+    ]),
     'btc-rpc-proxy': structuredClone(Mock.LocalPkgs['btc-rpc-proxy']!),
     lnd: {
       stateInfo: {
@@ -806,7 +847,7 @@ export const mockPatchData: DataModel = {
       outboundDns: null,
       registry: 'https://registry.start9.com/',
       developerKey: 'developer-key',
-      plugin: { url: null },
+      plugin: { url: null, httpProxy: null },
       tasks: {
         config: {
           active: true,
@@ -1144,8 +1185,9 @@ export const mockPatchData: DataModel = {
                   alpn: ['http/1.1', 'h2'],
                 },
                 secure: null,
-                proxy: null,
+                proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
               },
+              proxyChains: [],
               interfaces: {
                 ui: {
                   id: 'ui',
@@ -1355,6 +1397,7 @@ export const mockPatchData: DataModel = {
                 secure: { ssl: false },
                 proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
               },
+              proxyChains: [],
               interfaces: {
                 rpc: {
                   preferredLauncherAddress: null,
@@ -1403,6 +1446,7 @@ export const mockPatchData: DataModel = {
                 secure: { ssl: false },
                 proxy: null,
               },
+              proxyChains: [],
               interfaces: {
                 p2p: {
                   preferredLauncherAddress: null,
@@ -1435,7 +1479,7 @@ export const mockPatchData: DataModel = {
       outboundDns: null,
       registry: 'https://registry.start9.com/',
       developerKey: 'developer-key',
-      plugin: { url: null },
+      plugin: { url: null, httpProxy: null },
       tasks: {
         // 'bitcoind-config': {
         //   task: {
@@ -1516,7 +1560,7 @@ export const mockPatchData: DataModel = {
       outboundDns: null,
       registry: 'https://registry.start9.com/',
       developerKey: 'developer-key',
-      plugin: { url: { tableAction: 'create-onion-service' } },
+      plugin: { url: { tableAction: 'create-onion-service' }, httpProxy: null },
       tasks: {},
     },
     nextcloud: mockService(

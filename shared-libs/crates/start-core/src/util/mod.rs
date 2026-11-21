@@ -42,6 +42,7 @@ pub mod collections;
 pub mod cpupower;
 pub mod crypto;
 pub mod data_url;
+pub(crate) mod directory;
 pub mod env;
 pub mod future;
 pub mod http_reader;
@@ -61,6 +62,7 @@ pub mod serde;
 pub mod squashfs;
 pub mod sync;
 pub mod tui;
+pub(crate) mod unix_socket;
 pub mod version;
 pub mod writeback;
 

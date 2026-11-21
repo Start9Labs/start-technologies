@@ -12,11 +12,7 @@ import {
 import { toAuthorityName } from 'src/app/utils/acme'
 import { getManifest } from 'src/app/utils/get-package-data'
 
-// An IPv6 global-unicast address (GUA) — not loopback / ULA (fc00::/7) /
-// link-local (fe80::/10). Mirrors the backend's `ipv6_is_local` complement, so
-// the UI offers the Local/Public dropdown for exactly the addresses the
-// backend treats as GUAs. A GUA's WAN opt-in lives in its `public` flag
-// (projected from `gua_wan`); enable/disable uses the generic rules.
+// Matches the backend's `ipv6_is_local` complement.
 function isGua(h: T.HostnameInfo): boolean {
   if (h.metadata.kind !== 'ipv6') return false
   const first = h.hostname.split(':')[0]
@@ -55,8 +51,7 @@ function getCertificate(
 ): string {
   if (!h.ssl) return '-'
 
-  // The service holds its own certificate on a binding StartOS does not
-  // terminate, whatever authority a domain on this host names.
+  // Non-terminated TLS uses the service's certificate.
   if (!addSsl) return secure?.ssl ? 'Self signed' : '-'
 
   return toAuthorityName(getAcmeProvider(h, host, addSsl))
@@ -96,15 +91,13 @@ function getAddressType(h: T.HostnameInfo): string {
   }
 }
 
+/** Retains saved gateway policies after gateway or URL-plugin removal. */
 @Injectable({
   providedIn: 'root',
 })
 export class InterfaceService {
   private readonly config = inject(ConfigService)
 
-  // The package's service interfaces, mapped for display: single-port
-  // interfaces first (reached host -> binding -> interface), then port ranges
-  // (host -> bindingRange -> interface, carrying a `portRange` span).
   getServiceInterfaces(
     pkg: PackageDataEntry,
     gateways: GatewayPlus[],
@@ -123,12 +116,14 @@ export class InterfaceService {
       .map<MappedServiceInterface>(iFace => {
         const hostId = iFace.addressInfo.hostId || ''
         const host = hosts[hostId]
+        const binding = host?.bindings[iFace.addressInfo.internalPort]
         const sharedHostNames = all
           .filter(si => si.addressInfo.hostId === hostId && si.id !== iFace.id)
           .map(si => si.name)
 
         return {
           ...iFace,
+          binding,
           gatewayGroups: host
             ? this.getGatewayGroups(iFace, host, gateways)
             : [],
@@ -142,8 +137,7 @@ export class InterfaceService {
           ),
           // This interface's own binding: gates whether port/firewall tests are
           // meaningful while the service is stopped (see MappedServiceInterface).
-          addSsl:
-            !!host?.bindings[iFace.addressInfo.internalPort]?.options.addSsl,
+          addSsl: !!binding?.options.addSsl,
           sharedHostNames,
         }
       })
@@ -209,7 +203,7 @@ export class InterfaceService {
     const binding = host.bindings[serviceInterface.addressInfo.internalPort]
     if (!binding) return []
 
-    return this.buildGatewayGroups(
+    const groups = this.buildGatewayGroups(
       binding.addresses,
       serviceInterface.addressInfo,
       serviceInterface.masked,
@@ -218,6 +212,21 @@ export class InterfaceService {
       host,
       gateways,
     )
+    for (const { gateway } of binding.proxyChains) {
+      if (
+        gateway.kind !== 'network' ||
+        groups.some(group => group.gatewayId === gateway.gatewayId)
+      )
+        continue
+      const info = gateways.find(info => info.id === gateway.gatewayId)
+      groups.push({
+        gatewayId: gateway.gatewayId,
+        gatewayName: info?.name ?? gateway.gatewayId,
+        deviceType: info?.ipInfo?.deviceType ?? 'ethernet',
+        addresses: [],
+      })
+    }
+    return groups
   }
 
   private getRangeGatewayGroups(
@@ -356,12 +365,17 @@ export class InterfaceService {
       })
     }
 
-    // Also include URL plugins that have no addresses yet
     if (allPackageData) {
       for (const [pkgId, pkg] of Object.entries(allPackageData)) {
         if (pkg.plugin?.url && !groupMap.has(pkgId)) {
           groupMap.set(pkgId, [])
         }
+      }
+    }
+
+    for (const { gateway } of binding.proxyChains) {
+      if (gateway.kind === 'url-plugin' && !groupMap.has(gateway.packageId)) {
+        groupMap.set(gateway.packageId, [])
       }
     }
 
@@ -461,6 +475,7 @@ export type PluginAddressGroup = {
 }
 
 export type MappedServiceInterface = T.ServiceInterface & {
+  binding?: T.BindInfo
   gatewayGroups: GatewayAddressGroup[]
   pluginGroups: PluginAddressGroup[]
   // True when any binding on this interface's host adds SSL, not just this
