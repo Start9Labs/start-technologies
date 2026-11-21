@@ -21,8 +21,8 @@ use tokio::sync::broadcast::Sender;
 use tracing::instrument;
 use url::Url;
 
+use crate::context::CliContext;
 use crate::context::config::{CONFIG_PATH, ContextConfig};
-use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
 use crate::middleware::auth::signature::{
@@ -31,7 +31,6 @@ use crate::middleware::auth::signature::{
 };
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
-use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
 use crate::registry::locales::IndexLocaleTracker;
 use crate::registry::migrations::run_migrations;
 use crate::registry::mirror::IndexMirrors;
@@ -294,15 +293,6 @@ impl Deref for RegistryContext {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, VisitFields, Parser)]
-#[group(skip)]
-pub struct RegistryUrlParams {
-    #[arg(help = "help.arg.registry-url")]
-    pub registry: Url,
-}
-
-rpc_toolkit::reflect_ts!(RegistryUrlParams);
-
 pub(crate) async fn call_cli(
     ctx: &CliContext,
     url: Url,
@@ -472,75 +462,6 @@ pub(super) async fn call_legacy(
     .with_kind(ErrorKind::Network)?
 }
 
-impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
-    async fn call_remote(
-        &self,
-        mut method: &str,
-        metadata: OrdMap<&'static str, Value>,
-        mut params: Value,
-        RegistryUrlParams { registry }: RegistryUrlParams,
-    ) -> Result<Value, RpcError> {
-        super::compat::pem_wire(&mut params);
-        let mut headers = HeaderMap::new();
-        let mut device_info = None;
-        if metadata
-            .get("get_device_info")
-            .and_then(|m| m.as_bool())
-            .unwrap_or(false)
-        {
-            let di = DeviceInfo::load(self).await?;
-            headers.insert(DEVICE_INFO_HEADER, di.to_header_value());
-            device_info = Some(di);
-        }
-
-        method = method.strip_prefix("registry.").unwrap_or(method);
-        if let Some(result) =
-            super::sync::cached_call(self, &registry, method, &params, device_info.as_ref()).await?
-        {
-            return Ok(result);
-        }
-
-        let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
-        let mut res = match call(
-            &self.client,
-            &self.signing_key()?,
-            &registry,
-            headers,
-            method,
-            params.clone(),
-        )
-        .await
-        {
-            Ok(res) => res,
-            Err(e) if is_onion => return Err(onion_tor_hint(self, e).await),
-            Err(e) => return Err(e),
-        };
-
-        if let Some(device_info) = device_info {
-            device_info.filter_for_hardware(method, params, &mut res)?;
-        }
-
-        Ok(res)
-    }
-}
-
-/// Onion registries require the Tor service's SOCKS proxy.
-async fn onion_tor_hint(ctx: &RpcContext, original: RpcError) -> RpcError {
-    let running = async {
-        let tor_id = "tor".parse::<crate::PackageId>().ok()?;
-        let peek = ctx.db.peek().await;
-        let entry = peek.as_public().as_package_data().as_idx(&tor_id)?;
-        Some(entry.as_status_info().as_started().de().ok()?.is_some())
-    }
-    .await;
-    let msg = match running {
-        Some(true) => return original,
-        Some(false) => t!("registry.context.onion-tor-not-running"),
-        None => t!("registry.context.onion-tor-not-installed"),
-    };
-    Error::new(eyre!("{msg}"), ErrorKind::Network).into()
-}
-
 #[derive(Deserialize)]
 pub struct RegistryAuthMetadata {
     #[serde(default)]
@@ -670,11 +591,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn server_proxy_requires_authentication_for_public_registry_methods() {
+    fn public_registry_methods_do_not_require_authentication() {
         use rpc_toolkit::HandlerFor;
 
         let registry = crate::registry::registry_api::<RegistryContext>();
-        let server = crate::main_api::<RpcContext>();
         let public: [&[&str]; 14] = [
             &["index"],
             &["info"],
@@ -697,13 +617,6 @@ mod tests {
                     .metadata(method.iter().copied().collect())
                     .get("authenticated"),
                 Some(&Value::Bool(false)),
-                "{method:?}"
-            );
-            assert_eq!(
-                server
-                    .metadata(["registry"].iter().chain(method).copied().collect())
-                    .get("authenticated"),
-                Some(&Value::Bool(true)),
                 "{method:?}"
             );
         }

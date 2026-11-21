@@ -82,7 +82,7 @@ Shut down the server.
 
 ### `start-cli server update`
 
-Check the supplied registry for OS updates and apply if available. See [Trusted Keys](trusted-keys.md) for signer requirements.
+Apply the newest available OS update from the selected update registry. Pass a registry URL to check that registry once instead. See [Trusted Keys](trusted-keys.md) for signer requirements.
 
 - `--trust` — Explicitly accept an untrusted signer while retaining signature and integrity checks
 
