@@ -745,7 +745,7 @@ pub fn root_ca_mobileconfig(cert: &X509, product: &str, host: &str) -> Result<St
     let fingerprint = hex::encode(&*cert.digest(MessageDigest::sha256())?);
     let cert_uuid = format_uuid_from_hex(&fingerprint[..32]);
     let profile_uuid = format_uuid_from_hex(&fingerprint[32..64]);
-    let der_b64 = BASE64.encode(&der);
+    let der_b64 = base64::engine::general_purpose::STANDARD.encode(&der);
 
     Ok(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -1789,5 +1789,160 @@ mod tests {
         ] {
             assert_eq!(status_for_host(host).await, StatusCode::FORBIDDEN, "{host}");
         }
+    }
+
+    const TEST_ROOT_CA_REM0_PEM: &str = "\
+-----BEGIN CERTIFICATE-----
+MIICDzCCAbWgAwIBAgIUDAC0Mqjjw9hxXJEJhqQqtotaFXQwCgYIKoZIzj0EAwIw
+VTEwMC4GA1UEAwwnc2FtcGxlLXNlcnZlci1hYWFhYWFhYWFhYSBMb2NhbCBSb290
+IENBMQ8wDQYDVQQKDAZTdGFydDkxEDAOBgNVBAsMB1N0YXJ0T1MwHhcNMjYxMTIx
+MjIzNzQyWhcNMjcxMTIxMjIzNzQyWjBVMTAwLgYDVQQDDCdzYW1wbGUtc2VydmVy
+LWFhYWFhYWFhYWFhIExvY2FsIFJvb3QgQ0ExDzANBgNVBAoMBlN0YXJ0OTEQMA4G
+A1UECwwHU3RhcnRPUzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABKY8+WKRKUuC
+j3Uuz1nkfw1EVHfNQnQ073yNaBQO39xkTu2KaI37SMG0St2biw5qYbYO7PGsPP1c
+KTCSs5Ef8wOjYzBhMB0GA1UdDgQWBBRsh1fDQuPYWEKEp6zzPNAAmqvfbjAfBgNV
+HSMEGDAWgBRsh1fDQuPYWEKEp6zzPNAAmqvfbjAPBgNVHRMBAf8EBTADAQH/MA4G
+A1UdDwEB/wQEAwIBhjAKBggqhkjOPQQDAgNIADBFAiEAyqloTZNBV/JMwnRK6l02
+X1fK/EpQz5QELbQbjBPwBx4CIA0bcleyzFSByCfuhgviG6EnALj6M0n5m+W9knqx
+1yzz
+-----END CERTIFICATE-----
+";
+
+    const TEST_ROOT_CA_REM1_PEM: &str = "\
+-----BEGIN CERTIFICATE-----
+MIIB+zCCAaGgAwIBAgIUQ0LYzK4XJ+CW4ue7SFLYamOnFZgwCgYIKoZIzj0EAwIw
+SzEmMCQGA1UEAwwdc2FtcGxlLXNlcnZlci1hIExvY2FsIFJvb3QgQ0ExDzANBgNV
+BAoMBlN0YXJ0OTEQMA4GA1UECwwHU3RhcnRPUzAeFw0yNjExMjEyMjM3NDJaFw0y
+NzExMjEyMjM3NDJaMEsxJjAkBgNVBAMMHXNhbXBsZS1zZXJ2ZXItYSBMb2NhbCBS
+b290IENBMQ8wDQYDVQQKDAZTdGFydDkxEDAOBgNVBAsMB1N0YXJ0T1MwWTATBgcq
+hkjOPQIBBggqhkjOPQMBBwNCAATFt1NYAP/yKPYUOkUobL3HHgKgdN/DovTmUITH
+m4CykblF7s2YhLikjzq7CB3tfribLA+mN3yuQAj7nfry6l+Mo2MwYTAdBgNVHQ4E
+FgQUOLWGV7d16MWwpjC2maSRg+eof6wwHwYDVR0jBBgwFoAUOLWGV7d16MWwpjC2
+maSRg+eof6wwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAYYwCgYIKoZI
+zj0EAwIDSAAwRQIhALl/+3e3dwRqkD+CYP4rk27jekOQr6+2Qsc4Z2phMbXIAiBH
+dGZNoZZLWmfXEwZPv9Tq6pY6hS088Lt9/XUysR7Rlg==
+-----END CERTIFICATE-----
+";
+
+    const TEST_ROOT_CA_REM2_PEM: &str = "\
+-----BEGIN CERTIFICATE-----
+MIIB/DCCAaOgAwIBAgIUJbJuxjDEBeEde3aEG/kybbeRAHgwCgYIKoZIzj0EAwIw
+TDEnMCUGA1UEAwwec2FtcGxlLXNlcnZlci1hYSBMb2NhbCBSb290IENBMQ8wDQYD
+VQQKDAZTdGFydDkxEDAOBgNVBAsMB1N0YXJ0T1MwHhcNMjYxMTIxMjIzNzQyWhcN
+MjcxMTIxMjIzNzQyWjBMMScwJQYDVQQDDB5zYW1wbGUtc2VydmVyLWFhIExvY2Fs
+IFJvb3QgQ0ExDzANBgNVBAoMBlN0YXJ0OTEQMA4GA1UECwwHU3RhcnRPUzBZMBMG
+ByqGSM49AgEGCCqGSM49AwEHA0IABI+g5NoSxbob4pMYWbvAbavUR9qftq0HS/HP
+bo7az9bEkJO9/Vx65vKyE2KBr/cuX/LwTuKnNt9LmeLVSl9tTTKjYzBhMB0GA1Ud
+DgQWBBR6riCPvqcqKD2EUap1+BOjEcSxDDAfBgNVHSMEGDAWgBR6riCPvqcqKD2E
+Uap1+BOjEcSxDDAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAKBggq
+hkjOPQQDAgNHADBEAiAStj8F8Hy526Nbe/2QMJOYR+5QexslfE85djJHRZ7zUAIg
+UqTiFM1q937JmYep0ZfMnRULzbwCtB82Ioixx6/Hvqs=
+-----END CERTIFICATE-----
+";
+
+    fn extract_mobileconfig_cert_data(plist: &str) -> String {
+        fn dict_value<'a>(dict: &'a xmltree::Element, key: &str) -> &'a xmltree::Element {
+            let mut children = dict.children.iter().filter_map(|n| n.as_element());
+            while let Some(el) = children.next() {
+                if el.name == "key" && el.get_text().as_deref() == Some(key) {
+                    return children
+                        .next()
+                        .unwrap_or_else(|| panic!("missing value for plist key {key}"));
+                }
+            }
+            panic!("missing plist key {key}");
+        }
+
+        let root = xmltree::Element::parse(plist.as_bytes()).unwrap();
+        assert_eq!(root.name, "plist");
+        let top_dict = root.get_child("dict").unwrap();
+        let payloads = dict_value(top_dict, "PayloadContent");
+        assert_eq!(payloads.name, "array");
+        let cert_dict = payloads.get_child("dict").unwrap();
+        let data = dict_value(cert_dict, "PayloadContent");
+        assert_eq!(data.name, "data");
+        data.get_text().unwrap().into_owned()
+    }
+
+    #[test]
+    fn root_ca_mobileconfig_pads_base64_for_all_der_length_mod_3() {
+        for (pem, expected_rem, expected_padding) in [
+            (TEST_ROOT_CA_REM0_PEM, 0, 0),
+            (TEST_ROOT_CA_REM1_PEM, 1, 2),
+            (TEST_ROOT_CA_REM2_PEM, 2, 1),
+        ] {
+            let cert = X509::from_pem(pem.as_bytes()).unwrap();
+            let der = cert.to_der().unwrap();
+            assert_eq!(der.len() % 3, expected_rem);
+
+            for (product, target_host) in [
+                ("StartOS", "sample-server.local"),
+                ("StartWRT", "router.lan"),
+            ] {
+                let plist = root_ca_mobileconfig(&cert, product, target_host).unwrap();
+                let data_b64 = extract_mobileconfig_cert_data(&plist);
+                assert_eq!(
+                    data_b64.len() % 4,
+                    0,
+                    "{product} DER len {} (mod 3 = {expected_rem}) produced unpadded base64 len {}",
+                    der.len(),
+                    data_b64.len()
+                );
+                assert_eq!(
+                    data_b64.bytes().rev().take_while(|&b| b == b'=').count(),
+                    expected_padding,
+                    "{product} DER len {} (mod 3 = {expected_rem})",
+                    der.len()
+                );
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(&data_b64)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "{product} DER len {} failed strict STANDARD decode: {e}",
+                            der.len()
+                        )
+                    });
+                assert_eq!(decoded, der);
+                let round_tripped = X509::from_der(&decoded).unwrap();
+                assert_eq!(
+                    round_tripped
+                        .digest(MessageDigest::sha256())
+                        .unwrap()
+                        .as_ref(),
+                    cert.digest(MessageDigest::sha256()).unwrap().as_ref()
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn mobileconfig_send_serves_padded_profile_with_matching_headers() {
+        let hostname = ServerHostname::new(InternedString::intern("sample-server")).unwrap();
+        let cert = X509::from_pem(TEST_ROOT_CA_REM1_PEM.as_bytes()).unwrap();
+        let der = cert.to_der().unwrap();
+        assert_eq!(der.len() % 3, 1);
+
+        let response = mobileconfig_send(&cert, &hostname).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            header(&response, CONTENT_TYPE),
+            "application/x-apple-aspen-config"
+        );
+        assert_eq!(
+            header(&response, http::header::CONTENT_DISPOSITION),
+            "attachment; filename=\"sample-server.mobileconfig\""
+        );
+        let content_length: usize = header(&response, CONTENT_LENGTH).parse().unwrap();
+        let raw_body = body(response).await;
+        assert_eq!(raw_body.len(), content_length);
+
+        let plist = std::str::from_utf8(&raw_body).unwrap();
+        let data_b64 = extract_mobileconfig_cert_data(plist);
+        assert_eq!(data_b64.len() % 4, 0);
+        assert!(data_b64.ends_with("=="));
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&data_b64)
+            .unwrap();
+        assert_eq!(decoded, der);
     }
 }
