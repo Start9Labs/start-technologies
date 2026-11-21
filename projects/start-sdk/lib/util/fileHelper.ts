@@ -36,6 +36,31 @@ const exists = (path: string) =>
     () => false,
   )
 
+const WATCH_RETRY_INITIAL_MS = 100
+const WATCH_RETRY_MAX_MS = 30_000
+
+function sleep(ms: number, abort: AbortSignal): Promise<void> {
+  if (abort.aborted) return Promise.resolve()
+  return new Promise<void>(resolve => {
+    const wake = () => {
+      clearTimeout(timer)
+      abort.removeEventListener('abort', wake)
+      resolve()
+    }
+    const timer = setTimeout(wake, ms)
+    timer.unref?.()
+    abort.addEventListener('abort', wake)
+  })
+}
+
+function onLeaveUntil(effects: T.Effects, fn: () => void): () => void {
+  let cb: (() => void) | null = fn
+  effects.onLeaveContext(() => cb?.())
+  return () => {
+    cb = null
+  }
+}
+
 /** Starts watching at once; `fs.watch` defers until its first read. */
 function watchPath(path: string, abort: AbortSignal) {
   const ctrl = new AbortController()
@@ -342,23 +367,50 @@ class FileHelperImpl<A> implements FileHelper<A> {
       protected async *produceRaw(
         abort: AbortSignal,
       ): AsyncGenerator<A | null, void> {
-        while (this.effects.isInContext && !abort.aborted) {
-          if (await exists(filePath)) {
-            const watch = watchPath(filePath, abort)
-            try {
-              yield await doRead()
-              await watch.first.catch(e => {
-                if (!abort.aborted) console.error(asError(e))
-              })
-            } finally {
-              watch.stop()
+        if (!this.effects.isInContext || abort.aborted) return
+        const signalCtrl = new AbortController()
+        let releaseLeave = () => {}
+        const onAbort = () => {
+          releaseLeave()
+          signalCtrl.abort()
+        }
+        abort.addEventListener('abort', onAbort, { once: true })
+        releaseLeave = onLeaveUntil(this.effects, onAbort)
+        const signal = signalCtrl.signal
+        let retryDelayMs = WATCH_RETRY_INITIAL_MS
+        try {
+          while (this.effects.isInContext && !signal.aborted) {
+            let failed = false
+            const onWatchError = (e: unknown) => {
+              if (signal.aborted) return
+              failed = true
+              console.error(asError(e))
             }
-          } else {
-            yield null
-            await onCreated(filePath, abort).catch(e => {
-              if (!abort.aborted) console.error(asError(e))
-            })
+            const present = await exists(filePath)
+            if (signal.aborted) break
+            if (present) {
+              const watch = watchPath(filePath, signal)
+              try {
+                yield await doRead()
+                await watch.first.catch(onWatchError)
+              } finally {
+                watch.stop()
+              }
+            } else {
+              yield null
+              await onCreated(filePath, signal).catch(onWatchError)
+            }
+            if (failed) {
+              await sleep(retryDelayMs, signal)
+              retryDelayMs = Math.min(retryDelayMs * 2, WATCH_RETRY_MAX_MS)
+            } else {
+              retryDelayMs = WATCH_RETRY_INITIAL_MS
+            }
           }
+        } finally {
+          releaseLeave()
+          abort.removeEventListener('abort', onAbort)
+          signalCtrl.abort()
         }
       }
 
