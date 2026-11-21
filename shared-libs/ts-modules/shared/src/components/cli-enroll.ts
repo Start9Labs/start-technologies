@@ -34,7 +34,7 @@ export interface CliEnrollOptions {
       <textarea
         tuiTextarea
         [readonly]="true"
-        [minRows]="4"
+        [minRows]="7"
         [value]="command()"
       ></textarea>
       <tui-icon tuiCopy />
