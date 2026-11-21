@@ -586,16 +586,30 @@ mod tests {
     }
 }
 
-#[derive(Deserialize, Serialize, visit_rs::VisitFields)]
+#[derive(Deserialize, Serialize, clap::Args, visit_rs::VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct Cifs {
+    #[arg(help = "help.arg.cifs-hostname")]
     pub hostname: String,
+    #[arg(help = "help.arg.cifs-path")]
     pub path: PathBuf,
+    #[arg(help = "help.arg.cifs-username")]
     pub username: String,
+    #[arg(skip)]
     pub password: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(Cifs);
+
+/// Reads `CIFS_PASSWORD`, else prompts on the terminal.
+pub fn read_password() -> Result<String, Error> {
+    crate::util::tui::read_password(
+        "CIFS_PASSWORD",
+        &t!("disk.mount.filesystem.cifs.prompt-password"),
+    )
+}
 
 impl std::fmt::Debug for Cifs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

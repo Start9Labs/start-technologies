@@ -1,5 +1,75 @@
 _version: 2
 
+about.commands-shared-volumes:
+  en_US: "Commands for managing shared volumes"
+  de_DE: "Befehle zur Verwaltung gemeinsamer Volumes"
+  es_ES: "Comandos para gestionar volúmenes compartidos"
+  fr_FR: "Commandes pour gérer les volumes partagés"
+  pl_PL: "Polecenia do zarządzania współdzielonymi woluminami"
+
+about.create-cifs-shared-volume:
+  en_US: "Create the volume on a CIFS network share"
+  de_DE: "Das Volume auf einer CIFS-Netzwerkfreigabe erstellen"
+  es_ES: "Crear el volumen en un recurso compartido de red CIFS"
+  fr_FR: "Créer le volume sur un partage réseau CIFS"
+  pl_PL: "Utwórz wolumin w udziale sieciowym CIFS"
+
+about.create-disk-shared-volume:
+  en_US: "Create the volume on an external drive partition"
+  de_DE: "Das Volume auf einer Partition eines externen Laufwerks erstellen"
+  es_ES: "Crear el volumen en una partición de una unidad externa"
+  fr_FR: "Créer le volume sur une partition d'un disque externe"
+  pl_PL: "Utwórz wolumin na partycji dysku zewnętrznego"
+
+about.create-local-shared-volume:
+  en_US: "Create the volume on the data drive"
+  de_DE: "Das Volume auf dem Datenlaufwerk erstellen"
+  es_ES: "Crear el volumen en la unidad de datos"
+  fr_FR: "Créer le volume sur le disque de données"
+  pl_PL: "Utwórz wolumin na dysku danych"
+
+about.create-shared-volume:
+  en_US: "Create a shared volume"
+  de_DE: "Ein gemeinsames Volume erstellen"
+  es_ES: "Crear un volumen compartido"
+  fr_FR: "Créer un volume partagé"
+  pl_PL: "Utwórz współdzielony wolumin"
+
+about.inspect-shared-volume:
+  en_US: "Check a shared volume's availability and free space"
+  de_DE: "Verfügbarkeit und freien Speicher eines gemeinsamen Volumes prüfen"
+  es_ES: "Comprobar la disponibilidad y el espacio libre de un volumen compartido"
+  fr_FR: "Vérifier la disponibilité et l'espace libre d'un volume partagé"
+  pl_PL: "Sprawdź dostępność i wolne miejsce współdzielonego woluminu"
+
+about.list-shared-volumes:
+  en_US: "List shared volumes"
+  de_DE: "Gemeinsame Volumes auflisten"
+  es_ES: "Listar volúmenes compartidos"
+  fr_FR: "Lister les volumes partagés"
+  pl_PL: "Wyświetl współdzielone woluminy"
+
+about.remove-shared-volume:
+  en_US: "Remove a shared volume; deletes the data of a local volume"
+  de_DE: "Ein gemeinsames Volume entfernen; löscht die Daten eines lokalen Volumes"
+  es_ES: "Eliminar un volumen compartido; borra los datos de un volumen local"
+  fr_FR: "Supprimer un volume partagé ; efface les données d'un volume local"
+  pl_PL: "Usuń współdzielony wolumin; usuwa dane woluminu lokalnego"
+
+about.rename-shared-volume:
+  en_US: "Rename a shared volume"
+  de_DE: "Ein gemeinsames Volume umbenennen"
+  es_ES: "Renombrar un volumen compartido"
+  fr_FR: "Renommer un volume partagé"
+  pl_PL: "Zmień nazwę współdzielonego woluminu"
+
+about.set-shared-volume-grant:
+  en_US: "Grant or revoke a package's access to a shared volume"
+  de_DE: "Den Zugriff eines Pakets auf ein gemeinsames Volume gewähren oder entziehen"
+  es_ES: "Conceder o revocar el acceso de un paquete a un volumen compartido"
+  fr_FR: "Accorder ou révoquer l'accès d'un paquet à un volume partagé"
+  pl_PL: "Przyznaj lub odbierz pakietowi dostęp do współdzielonego woluminu"
+
 about.sign-s9pk:
   en_US: "Add a supplemental package signature using the identity key"
   de_DE: "Eine zusätzliche Paketsignatur mit dem Identitätsschlüssel hinzufügen"
@@ -1289,6 +1359,13 @@ disk.mount.filesystem.cifs.no-dns-addresses:
   fr_FR: "DNS n'a renvoyé aucune adresse"
   pl_PL: "DNS nie zwrócił żadnych adresów"
 
+disk.mount.filesystem.cifs.prompt-password:
+  en_US: "CIFS Password: "
+  de_DE: "CIFS-Passwort: "
+  es_ES: "Contraseña CIFS: "
+  fr_FR: "Mot de passe CIFS : "
+  pl_PL: "Hasło CIFS: "
+
 disk.util.missing-filesystem-uuid:
   en_US: "This partition has no persistent filesystem UUID. Format the drive before using it as a volume."
   de_DE: "Diese Partition hat keine dauerhafte Dateisystem-UUID. Das Laufwerk vor der Verwendung als Volume formatieren."
@@ -2041,13 +2118,6 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
-
-backup.target.cifs.prompt-password:
-  en_US: "CIFS Password: "
-  de_DE: "CIFS-Passwort: "
-  es_ES: "Contraseña CIFS: "
-  fr_FR: "Mot de passe CIFS : "
-  pl_PL: "Hasło CIFS: "
 
 backup.target.partial-mount:
   en_US: "The base filesystem mounted successfully at %{path}."
@@ -4933,6 +5003,13 @@ help.arg.json-pointer:
   fr_FR: "Pointeur JSON vers une valeur spécifique"
   pl_PL: "Wskaźnik JSON do konkretnej wartości"
 
+help.arg.keep-cifs-password:
+  en_US: "Keep the stored password instead of prompting for one"
+  de_DE: "Das gespeicherte Passwort beibehalten statt danach zu fragen"
+  es_ES: "Conservar la contraseña guardada en lugar de solicitarla"
+  fr_FR: "Conserver le mot de passe enregistré au lieu de le demander"
+  pl_PL: "Zachowaj zapisane hasło zamiast o nie pytać"
+
 help.arg.keyboard-option:
   en_US: "Additional keyboard option"
   de_DE: "Zusätzliche Tastaturoption"
@@ -5318,6 +5395,48 @@ help.arg.set-signer-name:
   es_ES: "Establecer el nombre del firmante"
   fr_FR: "Définir le nom du signataire"
   pl_PL: "Ustaw nazwę sygnatariusza"
+
+help.arg.shared-volume-disk-path:
+  en_US: "Directory on the partition, created if missing"
+  de_DE: "Verzeichnis auf der Partition, wird bei Bedarf erstellt"
+  es_ES: "Directorio en la partición; se crea si no existe"
+  fr_FR: "Répertoire sur la partition, créé s'il n'existe pas"
+  pl_PL: "Katalog na partycji, tworzony, jeśli nie istnieje"
+
+help.arg.shared-volume-grant-readonly:
+  en_US: "Grant read-only access"
+  de_DE: "Nur-Lese-Zugriff gewähren"
+  es_ES: "Conceder acceso de solo lectura"
+  fr_FR: "Accorder un accès en lecture seule"
+  pl_PL: "Przyznaj dostęp tylko do odczytu"
+
+help.arg.shared-volume-grant-revoke:
+  en_US: "Revoke the package's access"
+  de_DE: "Den Zugriff des Pakets entziehen"
+  es_ES: "Revocar el acceso del paquete"
+  fr_FR: "Révoquer l'accès du paquet"
+  pl_PL: "Odbierz pakietowi dostęp"
+
+help.arg.shared-volume-id:
+  en_US: "Shared volume ID"
+  de_DE: "Gemeinsame Volume-ID"
+  es_ES: "ID del volumen compartido"
+  fr_FR: "Identifiant du volume partagé"
+  pl_PL: "Identyfikator współdzielonego woluminu"
+
+help.arg.shared-volume-logicalname:
+  en_US: "Partition device path, e.g. /dev/sdb1"
+  de_DE: "Gerätepfad der Partition, z. B. /dev/sdb1"
+  es_ES: "Ruta del dispositivo de la partición, p. ej. /dev/sdb1"
+  fr_FR: "Chemin du périphérique de la partition, par ex. /dev/sdb1"
+  pl_PL: "Ścieżka urządzenia partycji, np. /dev/sdb1"
+
+help.arg.shared-volume-name:
+  en_US: "Shared volume name"
+  de_DE: "Name des gemeinsamen Volumes"
+  es_ES: "Nombre del volumen compartido"
+  fr_FR: "Nom du volume partagé"
+  pl_PL: "Nazwa współdzielonego woluminu"
 
 help.arg.signature-hash:
   en_US: "Hash for signature verification"
@@ -8522,6 +8641,13 @@ about.update-categories-registry:
   es_ES: "Actualizar categorías en el registro"
   fr_FR: "Mettre à jour les catégories dans le registre"
   pl_PL: "Zaktualizuj kategorie w rejestrze"
+
+about.update-cifs-shared-volume:
+  en_US: "Update the connection details of a CIFS shared volume"
+  de_DE: "Die Verbindungsdaten eines gemeinsamen CIFS-Volumes aktualisieren"
+  es_ES: "Actualizar los datos de conexión de un volumen compartido CIFS"
+  fr_FR: "Mettre à jour les informations de connexion d'un volume partagé CIFS"
+  pl_PL: "Zaktualizuj dane połączenia współdzielonego woluminu CIFS"
 
 about.update-db-record:
   en_US: "Update a database record"

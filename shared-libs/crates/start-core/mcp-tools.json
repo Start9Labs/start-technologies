@@ -9190,7 +9190,24 @@
     "name": "volumes.inspect",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/SharedVolumeParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "SharedVolumeParams": {
           "type": "object",
           "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
@@ -9202,10 +9219,7 @@
           "description": "A 32-character uppercase base32 volume identity."
         }
       },
-      "type": "object",
-      "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
-      "required": ["id"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9253,6 +9267,140 @@
       },
       "required": ["availability", "available", "error", "checkedAt"],
       "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "$ref": "#/$defs/SharedVolume" },
+      "$defs": {
+        "SharedVolume": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "source": { "$ref": "#/$defs/SharedVolumeSource" },
+                "grants": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/SharedVolumeGrant"
+                  }
+                }
+              },
+              "required": ["name", "source", "grants"],
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/SharedVolumeInspection" }
+          ]
+        },
+        "SharedVolumeSource": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "local",
+                  "description": "Managed Btrfs subvolume on the encrypted data partition."
+                }
+              },
+              "required": ["kind"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "disk" },
+                "logicalname": { "type": "string" },
+                "path": { "type": "string" },
+                "drive": {
+                  "description": "The drive as reported when the source was created, for display.",
+                  "anyOf": [
+                    { "$ref": "#/$defs/SharedVolumeDrive" },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["kind", "logicalname", "path", "drive"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "cifs" },
+                "hostname": { "type": "string" },
+                "path": { "type": "string" },
+                "username": { "type": "string" }
+              },
+              "required": ["kind", "hostname", "path", "username"]
+            }
+          ]
+        },
+        "SharedVolumeDrive": {
+          "type": "object",
+          "properties": {
+            "vendor": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
+            "label": { "type": ["string", "null"] },
+            "capacity": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["vendor", "model", "label", "capacity"],
+          "additionalProperties": true
+        },
+        "SharedVolumeGrant": {
+          "type": "object",
+          "properties": { "readonly": { "type": "boolean" } },
+          "required": ["readonly"],
+          "additionalProperties": true
+        },
+        "SharedVolumeInspection": {
+          "type": "object",
+          "properties": {
+            "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
+            "available": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "error": { "type": ["string", "null"] },
+            "checkedAt": { "type": ["string", "null"] }
+          },
+          "required": ["availability", "available", "error", "checkedAt"],
+          "additionalProperties": true
+        },
+        "SharedVolumeAvailability": {
+          "type": "string",
+          "enum": ["unknown", "available", "unavailable"]
+        }
+      }
     }
   },
   {

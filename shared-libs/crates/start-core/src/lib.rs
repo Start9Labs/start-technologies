@@ -261,7 +261,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             "volumes",
             shared_volumes::handler::<C>()
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .with_about("about.commands-shared-volumes"),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))

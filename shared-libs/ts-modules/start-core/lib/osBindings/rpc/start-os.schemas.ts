@@ -4349,6 +4349,25 @@ export const ServiceInterface: z.ZodObject<{
 }).meta({
   id: 'ServiceInterface',
 })
+export const SharedVolume: z.ZodIntersection<
+  z.ZodObject<{
+    name: z.ZodString
+    source: typeof SharedVolumeSource
+    grants: z.ZodRecord<z.ZodString, typeof SharedVolumeGrant>
+  }>,
+  typeof SharedVolumeInspection
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      name: z.string(),
+      source: SharedVolumeSource,
+      grants: z.record(z.string(), SharedVolumeGrant),
+    }),
+    SharedVolumeInspection,
+  )
+  .meta({
+    id: 'SharedVolume',
+  })
 export const SideloadParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
@@ -7037,8 +7056,36 @@ export const Api = {
           _FINAL: /* @__PURE__ */ z.null(),
         },
         inspect: {
-          _PARAMS: /* @__PURE__ */ SharedVolumeParams,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            SharedVolumeParams,
+          ),
           _RETURN: /* @__PURE__ */ SharedVolumeInspection,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        list: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ z.record(z.string(), SharedVolume),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
