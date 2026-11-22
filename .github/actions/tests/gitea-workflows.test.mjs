@@ -123,13 +123,28 @@ test('nested release jobs use the tag output and all remain gated by the registr
   ])
   const publish = workflow.jobs.tag_Release_Publish
   assert.deepEqual(publish.needs, ['tag_Tag', 'tag_Release_BuildMatrix'])
-  assert.match(JSON.stringify(publish), /secrets\.DEV_KEY/)
-  assert.match(JSON.stringify(publish), /vars\.RELEASE_REGISTRY/)
-  assert.match(JSON.stringify(publish), /vars\.S3_S9PKS_BASE_URL/)
+  for (const reference of [
+    'secrets.DEV_KEY',
+    'secrets.PACKAGES_TOKEN',
+    'vars.RELEASE_REGISTRY',
+    'vars.S3_S9PKS_BASE_URL',
+    'vars.REGISTRY_PROXY',
+    'vars.PACKAGE_READER_KEYS',
+  ])
+    assert.ok(JSON.stringify(publish).includes(reference), reference)
+  for (const reference of ['vars.REFERENCE_REGISTRY', 'vars.REGISTRY_PROXY'])
+    assert.ok(JSON.stringify(workflow.jobs.tag_Tag).includes(reference))
 })
 
 test('Gitea reuses Forgejo-compatible artifact and release primitives', () => {
-  const publish = document('release').jobs.release_Publish
+  const { release_BuildMatrix: build, release_Publish: publish } =
+    document('release').jobs
+  assert.ok(
+    build.steps.some(
+      step =>
+        step.uses === 'https://data.forgejo.org/forgejo/upload-artifact@v4',
+    ),
+  )
   assert.ok(
     publish.steps.some(
       step =>
@@ -140,12 +155,6 @@ test('Gitea reuses Forgejo-compatible artifact and release primitives', () => {
     step.uses?.endsWith('/.github/actions/forgejo-release@master'),
   )
   assert.equal(release.with.token, '${{ github.token }}')
-  assert.ok(
-    publish.steps.some(
-      step =>
-        step.uses === 'https://data.forgejo.org/forgejo/upload-artifact@v4',
-    ),
-  )
 })
 
 test('inlining binds supplied values, omitted secrets, defaults, guards, and scoped outputs', () => {
@@ -171,6 +180,7 @@ test('inlining binds supplied values, omitted secrets, defaults, guards, and sco
               VALUE: { type: 'string' },
               ENABLED: { type: 'boolean', default: false },
               LABEL: { type: 'string', default: "a'b" },
+              PROXY: { type: 'string', default: '${{ vars.PROXY }}' },
             },
           },
         },
@@ -186,7 +196,7 @@ test('inlining binds supplied values, omitted secrets, defaults, guards, and sco
             if: '${{ inputs.ENABLED }}',
             steps: [
               {
-                run: '${{ inputs.VALUE }}|${{ inputs.LABEL }}|${{ secrets.KEY }}|${{ secrets.OMITTED }}|${{ needs.discover.outputs.value }}',
+                run: '${{ inputs.VALUE }}|${{ inputs.LABEL }}|${{ inputs.PROXY }}|${{ secrets.KEY }}|${{ secrets.OMITTED }}|${{ needs.discover.outputs.value }}',
               },
             ],
           },
@@ -201,7 +211,7 @@ test('inlining binds supplied values, omitted secrets, defaults, guards, and sco
   )
   assert.equal(
     result.jobs.package_build.steps[0].run,
-    "${{ (vars.VALUE) }}|${{ ('a''b') }}|${{ (secrets.SIGNING_KEY) }}|${{ ('') }}|${{ needs.package_discover.outputs.value }}",
+    "${{ (vars.VALUE) }}|${{ ('a''b') }}|${{ (vars.PROXY) }}|${{ (secrets.SIGNING_KEY) }}|${{ ('') }}|${{ needs.package_discover.outputs.value }}",
   )
   assert.equal(result.jobs.package_discover.permissions.contents, 'read')
 })
