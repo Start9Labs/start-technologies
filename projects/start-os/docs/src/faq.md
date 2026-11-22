@@ -170,8 +170,6 @@ If a service is running low on space, you have two options today:
 
 - **Keep large files on storage the service can reach over the network.** Some services can use storage outside your server on their own. Nextcloud, for example, can attach an SMB share, a WebDAV server or an S3 bucket through its built-in External Storage app, so a large library can live on a NAS or another computer. Check the service's own instructions for what it supports. Linking one service's files into another, such as NextExplorer into Nextcloud or Immich, does not add space, since those files are on the same data drive.
 
-Support for multiple drives is planned for StartOS 0.4.1. There is no release date yet.
-
 ## What does “Data drive metadata space is low” mean?
 
 Btrfs needs unallocated space for metadata even when the disk metrics show free space inside existing data chunks. The upgrade migration to StartOS 0.4.0.5 starts a filtered balance on both data filesystems in the background after they are mounted; weekly maintenance reclaims unused chunks thereafter. StartOS raises this notification when unallocated space falls below 5% of a filesystem's size, capped at 10 GiB. The notification names the affected filesystem. If the warning persists, free space or [move to a larger data drive](#can-i-add-a-second-drive-to-give-a-service-more-storage).
