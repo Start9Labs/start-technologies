@@ -13,6 +13,6 @@ runs:
       run: |
         umask 077
         mkdir -p ~/.startos
-        install -m 600 /dev/null ~/.startos/developer.key.pem
-        printf '%s' "$DEV_KEY" > ~/.startos/developer.key.pem
+        install -m 600 /dev/null ~/.startos/id.key.pem
+        printf '%s' "$DEV_KEY" > ~/.startos/id.key.pem
       shell: bash

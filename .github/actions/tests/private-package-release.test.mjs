@@ -72,7 +72,7 @@ for (const forge of ['github', 'forgejo']) {
     writeFileSync(
       join(home, 'start-cli'),
       `#!/bin/bash
-if [ -f "$HOME/.startos/developer.key.pem" ] && [ "$(< "$HOME/.startos/developer.key.pem")" = "$DEV_KEY" ]; then
+if [ -f "$HOME/.startos/id.key.pem" ] && [ "$(< "$HOME/.startos/id.key.pem")" = "$DEV_KEY" ]; then
   printf '%s\\n' 'Published private package'
 fi
 `,
@@ -104,6 +104,37 @@ fi
     )
     execFileSync('bash', ['-e', '-o', 'pipefail', '-c', script], { env })
     assert.match(readFileSync(output, 'utf8'), /^skip=true$/m)
+  })
+
+  test(`${forge} permanent-version gate ignores start-cli log output`, t => {
+    const home = mkdtempSync(join(tmpdir(), 'permanent-version-gate-'))
+    t.after(() => rmSync(home, { recursive: true, force: true }))
+    const output = join(home, 'output')
+    writeFileSync(
+      join(home, 'start-cli'),
+      `#!/bin/bash
+echo 'INFO Renamed legacy key file' >&2
+`,
+      { mode: 0o755 },
+    )
+    const check = document('tagAndRelease').jobs.Tag.steps.find(
+      step => step.id === 'check',
+    )
+    const result = runStep(
+      check,
+      {
+        HOME: home,
+        PATH: `${home}:${process.env.PATH}`,
+        GITHUB_OUTPUT: output,
+      },
+      {
+        'steps.extract.outputs.package_id': 'fixture',
+        'steps.extract.outputs.version': '1.0.0:0',
+        'inputs.REFERENCE_REGISTRY': 'https://registry.example',
+      },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(readFileSync(output, 'utf8'), /^skip=false$/m)
   })
 
   test(`${forge} validates private publication before building`, () => {
