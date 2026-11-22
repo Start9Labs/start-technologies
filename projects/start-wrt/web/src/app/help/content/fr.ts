@@ -23,7 +23,7 @@ Les adresses IPv4 et IPv6 attribuées à l’appareil.
 
 ### Données & débit
 
-**Données** correspond au total téléchargé plus envoyé depuis la dernière remise à zéro quotidienne du compteur, à 00:00 UTC (19 h à New York en hiver, 20 h en été). Seul le trafic entre l’appareil et internet est comptabilisé. Le trafic qui reste à l’intérieur de votre réseau ne l’est pas : un appareil qui communique avec un autre chez vous n’ajoute rien ici, même s’ils sont dans des profils de sécurité différents. Un tiret signifie qu’aucun trafic internet n’a été comptabilisé pour cet appareil aujourd’hui. Pour un client VPN, Données comptabilise tout son trafic dans le tunnel depuis le dernier démarrage du VPN.
+**Données** correspond au total téléchargé plus envoyé depuis la dernière remise à zéro quotidienne du compteur, à 00:00 UTC (19 h à New York en hiver, 20 h en été). Les compteurs par défaut couvrent le trafic IPv4 entre l’appareil et internet. Le trafic qui reste à l’intérieur de votre réseau ne l’est pas : un appareil qui communique avec un autre chez vous n’ajoute rien ici, même s’ils sont dans des profils de sécurité différents. Un tiret signifie qu’aucun trafic internet n’a été comptabilisé pour cet appareil aujourd’hui. Pour un client VPN, Données comptabilise tout son trafic dans le tunnel depuis le dernier démarrage du VPN.
 
 **Débit** correspond au taux de transfert actuel de l’appareil.`,
   '/devices/device': `## Appareils
@@ -36,7 +36,7 @@ Affiche l’état actuel de l’appareil, son type de connexion, son profil de s
 
 ### Utilisation des données
 
-Affiche l’historique du trafic internet de cet appareil, comptabilisé par jour UTC (remise à zéro à 00:00 UTC). Seul le trafic entre l’appareil et internet est comptabilisé ; le trafic interne à votre réseau ne l’est pas, même entre profils de sécurité différents. Utilisez le menu déroulant pour consulter différentes périodes. Le téléchargement est indiqué en bleu, l’envoi en vert.
+Affiche l’historique du trafic internet de cet appareil, comptabilisé par jour UTC (remise à zéro à 00:00 UTC). Les compteurs par défaut couvrent le trafic IPv4 entre l’appareil et internet ; le trafic interne à votre réseau ne l’est pas, même entre profils de sécurité différents. Utilisez le menu déroulant pour consulter différentes périodes. Le téléchargement est indiqué en bleu, l’envoi en vert.
 
 ### Nom
 

@@ -985,6 +985,12 @@ struct SpeedData {
 // single `name`.
 ```
 
+LAN data totals and `devices.data-usage` history follow nlbwmon's `local_network`
+configuration. The factory configuration covers private IPv4 ranges. A flow
+contributes when one endpoint is local and the other is not; local-to-local flows
+contribute nothing. VPN peer totals use WireGuard counters independently of that
+configuration.
+
 ### `devices.update`
 
 ```rust

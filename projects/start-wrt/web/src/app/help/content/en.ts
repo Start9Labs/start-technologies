@@ -23,7 +23,7 @@ The device's assigned IPv4 and IPv6 addresses.
 
 ### Data & Speed
 
-**Data** is the total downloaded plus uploaded since the daily counter last reset, at 00:00 UTC (7 pm in New York in winter, 8 pm in summer). Only traffic between the device and the internet is counted. Traffic that stays inside your network is not: a device talking to another device in your home adds nothing here, even if the two are on different security profiles. A dash means no internet traffic was counted for this device today. For a VPN client, Data counts all of its tunnel traffic since the VPN last started.
+**Data** is the total downloaded plus uploaded since the daily counter last reset, at 00:00 UTC (7 pm in New York in winter, 8 pm in summer). The default counters cover IPv4 traffic between the device and the internet. Traffic that stays inside your network is not: a device talking to another device in your home adds nothing here, even if the two are on different security profiles. A dash means no internet traffic was counted for this device today. For a VPN client, Data counts all of its tunnel traffic since the VPN last started.
 
 **Speed** is the device's current transfer rate.`,
   '/devices/device': `## Devices
@@ -36,7 +36,7 @@ Displays the device's current status, connection type, security profile, and IP 
 
 ### Data Usage
 
-Shows historical internet traffic for this device, counted by UTC day (resetting at 00:00 UTC). Only traffic between the device and the internet is counted; traffic that stays inside your network is not, even if two devices are on different security profiles. Use the dropdown to view different time periods. Download is shown in blue, upload in green.
+Shows historical internet traffic for this device, counted by UTC day (resetting at 00:00 UTC). The default counters cover IPv4 traffic between the device and the internet; traffic that stays inside your network is not, even if two devices are on different security profiles. Use the dropdown to view different time periods. Download is shown in blue, upload in green.
 
 ### Name
 
