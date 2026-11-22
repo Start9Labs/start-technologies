@@ -622,40 +622,76 @@ describe('atomic database dump staging', () => {
     expect(outcome.backupEntries).toEqual([pgCase.dumpFileName])
   })
 
-  test('preserves pre-existing sibling files matching staging name patterns on both failure and success', async () => {
-    const pgCase = BUILDERS[0]!
-    const legacyData = Buffer.from('package-owned-legacy-file')
-    const matchingData = Buffer.from('package-owned-matching-tmp-file')
-    const legacyName = `.${pgCase.dumpFileName}.tmp`
-    const matchingName = `.${pgCase.dumpFileName}.0123456789abcdef01234567.tmp`
+  test.each(BUILDERS)(
+    '$name removes interrupted staging files and preserves other siblings on both failure and success',
+    async testCase => {
+      const siblingData = Buffer.from('package-owned-sibling')
+      const orphanName = `.${testCase.dumpFileName}.0123456789abcdef01234567.tmp`
+      const orphanLink = `.${testCase.dumpFileName}.abcdef0123456789abcdef01.tmp`
+      const untouchedNames = [
+        `.${testCase.dumpFileName}.tmp`,
+        `.${testCase.dumpFileName}.0123456789abcdef0123456.tmp`,
+        `.${testCase.dumpFileName}.0123456789abcdef012345678.tmp`,
+        `.${testCase.dumpFileName}.ABCDEF0123456789ABCDEF01.tmp`,
+        `.${testCase.dumpFileName}.0123456789abcdef01234567.tmp.extra`,
+        `.${testCase.dumpFileName}-other.0123456789abcdef01234567.tmp`,
+        '.other-db.dump.0123456789abcdef01234567.tmp',
+      ]
+      const decode = testCase.decode ?? ((buf: Buffer) => buf)
 
-    for (const failSync of [true, false]) {
-      let legacyAfter: Buffer | null = null
-      let matchingAfter: Buffer | null = null
-      const outcome = await runPreBackup(pgCase, {
-        failSync,
-        beforeRun: ({ backupDir }) => {
-          writeFileSync(join(backupDir, legacyName), legacyData)
-          writeFileSync(join(backupDir, matchingName), matchingData)
-        },
-        afterRun: ({ backupDir }) => {
-          legacyAfter = readFileSync(join(backupDir, legacyName))
-          matchingAfter = readFileSync(join(backupDir, matchingName))
-        },
-      })
-      expect(outcome.backupEntries).toEqual(
-        [legacyName, matchingName, pgCase.dumpFileName].sort(),
-      )
-      expect(legacyAfter).toEqual(legacyData)
-      expect(matchingAfter).toEqual(matchingData)
-      if (failSync) {
-        expect(outcome.error).toBeInstanceOf(Error)
-        expect(outcome.finalTargetBytes?.equals(OLD_DUMP)).toBe(true)
-      } else {
-        expect(outcome.error).toBeNull()
-        expect(outcome.finalTargetBytes?.equals(NEW_DUMP)).toBe(true)
+      for (const failSync of [true, false]) {
+        const outcome = await runPreBackup(testCase, {
+          failSync,
+          beforeRun: ({ root, backupDir }) => {
+            writeFileSync(join(backupDir, orphanName), OLD_DUMP)
+            const outside = join(root, 'outside')
+            writeFileSync(outside, siblingData)
+            symlinkSync(outside, join(backupDir, orphanLink))
+            for (const name of untouchedNames) {
+              writeFileSync(join(backupDir, name), siblingData)
+            }
+          },
+          afterRun: ({ root, backupDir }) => {
+            expect(readFileSync(join(root, 'outside'))).toEqual(siblingData)
+            for (const name of untouchedNames) {
+              expect(readFileSync(join(backupDir, name))).toEqual(siblingData)
+            }
+          },
+        })
+        expect(outcome.backupEntries).toEqual(
+          [...untouchedNames, testCase.dumpFileName].sort(),
+        )
+        if (failSync) {
+          expect(outcome.error).toBeInstanceOf(Error)
+          expect(outcome.finalTargetBytes?.equals(OLD_DUMP)).toBe(true)
+        } else {
+          expect(outcome.error).toBeNull()
+          expect(decode(outcome.finalTargetBytes!).equals(NEW_DUMP)).toBe(true)
+        }
       }
-    }
+    },
+  )
+
+  test('preserves the previous dump and aborts before staging when orphan removal fails', async () => {
+    const pgCase = BUILDERS[0]!
+    const orphanName = `.${pgCase.dumpFileName}.0123456789abcdef01234567.tmp`
+    const outcome = await runPreBackup(pgCase, {
+      failCleanupRm: true,
+      beforeRun: ({ backupDir }) => {
+        writeFileSync(join(backupDir, orphanName), OLD_DUMP)
+      },
+    })
+
+    expect(outcome.error).toBeInstanceOf(Error)
+    expect((outcome.error as Error).message).toContain(
+      'simulated cleanup rm failure',
+    )
+    expect(outcome.events).toEqual([])
+    expect(outcome.renameCalled).toBe(false)
+    expect(outcome.finalTargetBytes?.equals(OLD_DUMP)).toBe(true)
+    expect(outcome.backupEntries).toEqual(
+      [orphanName, pgCase.dumpFileName].sort(),
+    )
   })
 
   test('fails with EISDIR and leaves the directory empty if a directory occupies the live dump path', async () => {
