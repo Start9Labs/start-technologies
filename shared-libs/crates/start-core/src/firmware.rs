@@ -262,14 +262,18 @@ async fn pending_flash_records(directory: &Path) -> Result<Vec<(PathBuf, FlashRe
     let mut records = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
-        if path.extension().is_some_and(|extension| extension == "json") {
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
             if let Some(contents) = maybe_read_file_to_string(&path).await? {
-                let record =
+                let record: FlashRecord =
                     serde_json::from_str(&contents).with_kind(ErrorKind::Deserialization)?;
                 records.push((path, record));
             }
         }
     }
+    records.sort_by_key(|(_, record)| record.started_at);
     Ok(records)
 }
 
@@ -368,12 +372,15 @@ mod tests {
 
         let records = pending_flash_records(directory.path()).await.unwrap();
         assert_eq!(records.len(), 3);
+        assert!(records.is_sorted_by_key(|(_, record)| record.started_at));
         assert!(records.iter().any(|(path, record)| {
             path == &failed && record.error.as_deref() == Some("flashrom exited 1")
         }));
-        assert!(records.iter().any(|(path, record)| {
-            path == &interrupted && record.finished_at.is_none()
-        }));
+        assert!(
+            records
+                .iter()
+                .any(|(path, record)| { path == &interrupted && record.finished_at.is_none() })
+        );
         assert!(records.iter().any(|(path, record)| {
             path == &retry && record.finished_at.is_some() && record.error.is_none()
         }));
