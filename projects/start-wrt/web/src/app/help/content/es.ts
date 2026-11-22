@@ -23,7 +23,7 @@ Las direcciones IPv4 e IPv6 asignadas al dispositivo.
 
 ### Datos y velocidad
 
-**Datos** es el total descargado más subido desde el último reinicio diario del contador, a las 00:00 UTC (19:00 en Nueva York en invierno, 20:00 en verano). Solo se cuenta el tráfico entre el dispositivo e internet. El tráfico que permanece dentro de tu red no se cuenta: un dispositivo que se comunica con otro en tu hogar no suma nada aquí, aunque ambos estén en perfiles de seguridad diferentes. Un guion significa que hoy no se ha contado tráfico de internet para este dispositivo. Para un cliente VPN, Datos cuenta todo su tráfico por el túnel desde el último inicio de la VPN.
+**Datos** es el total descargado más subido desde el último reinicio diario del contador, a las 00:00 UTC (19:00 en Nueva York en invierno, 20:00 en verano). Los contadores predeterminados registran el tráfico IPv4 entre el dispositivo e internet. El tráfico que permanece dentro de tu red no se cuenta: un dispositivo que se comunica con otro en tu hogar no suma nada aquí, aunque ambos estén en perfiles de seguridad diferentes. Un guion significa que hoy no se ha contado tráfico de internet para este dispositivo. Para un cliente VPN, Datos cuenta todo su tráfico por el túnel desde el último inicio de la VPN.
 
 **Velocidad** es la tasa de transferencia actual del dispositivo.`,
   '/devices/device': `## Dispositivos
@@ -36,7 +36,7 @@ Muestra el estado actual del dispositivo, el tipo de conexión, el perfil de seg
 
 ### Uso de datos
 
-Muestra el historial de tráfico de internet de este dispositivo, contado por día UTC (se reinicia a las 00:00 UTC). Solo se cuenta el tráfico entre el dispositivo e internet; el tráfico dentro de tu red no se cuenta, aunque dos dispositivos estén en perfiles de seguridad distintos. Usa el desplegable para ver distintos periodos de tiempo. La descarga se muestra en azul y la subida en verde.
+Muestra el historial de tráfico de internet de este dispositivo, contado por día UTC (se reinicia a las 00:00 UTC). Los contadores predeterminados registran el tráfico IPv4 entre el dispositivo e internet; el tráfico dentro de tu red no se cuenta, aunque dos dispositivos estén en perfiles de seguridad distintos. Usa el desplegable para ver distintos periodos de tiempo. La descarga se muestra en azul y la subida en verde.
 
 ### Nombre
 

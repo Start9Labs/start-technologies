@@ -13,7 +13,7 @@ Navigate to `Network > Devices` to see the device list. A search box above the l
 - **Security Profile** — The [Security Profile](security-profiles.md) the device is assigned to.
 - **MAC address** — The device's unique hardware identifier.
 - **IP address** — The device's IPv4 and IPv6 addresses. A lock icon indicates a reserved (static) IPv4 address that the device is using. The IPv6 address is shown only while the device is confirmed to still be using it, so the field is empty for a device that has dropped its IPv6 address or has none.
-- **Data (MB) and Speed** — Total internet data downloaded and uploaded since the daily counter reset at 00:00 UTC (local LAN and inter-profile traffic is not counted; a dash means no internet traffic was counted today), and real-time upload/download speed for online devices. For a VPN client, Data counts all of its tunnel traffic since the VPN last started.
+- **Data (MB) and Speed** — With the default counter settings, total IPv4 internet data downloaded and uploaded since the daily counter reset at 00:00 UTC (local LAN and inter-profile traffic is not counted; a dash means no internet traffic was counted today), and real-time upload/download speed for online devices. For a VPN client, Data counts all of its tunnel traffic since the VPN last started.
 
 ## Device Detail Page
 
@@ -21,7 +21,7 @@ Click a device name to open its detail page:
 
 - **Summary** — Displays the device's current status (online/offline), connection type, [Security Profile](security-profiles.md), IPv4 and IPv6 addresses, and real-time upload/download speed.
 
-- **Data Usage** — A chart showing historical internet upload and download by UTC day. Use the dropdown to select a time period: Last Week (7 days), Last 30 Days, or Last 3 Months (90 days). Usage history survives firmware updates.
+- **Data Usage** — A chart showing historical IPv4 internet upload and download by UTC day with the default counter settings. Use the dropdown to select a time period: Last Week (7 days), Last 30 Days, or Last 3 Months (90 days). Usage history survives firmware updates.
 
 - **Name** — Edit the custom display name for this device. If left empty, the device's own hostname is used, or — for a device that advertises none — the label shown in the field. A name may use letters, digits, and hyphens only, up to 63 characters: the router's DHCP server serves it as the device's hostname. Saving shows a brief spinner and a confirmation, then refreshes from the router so the displayed name always matches the saved state.
 
