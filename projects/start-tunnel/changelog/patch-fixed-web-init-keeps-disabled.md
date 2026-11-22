@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- `start-tunnel web init` no longer re-enables a web interface that was already initialized and disabled.
+- `start-tunnel web init` leaves a disabled web interface disabled.
