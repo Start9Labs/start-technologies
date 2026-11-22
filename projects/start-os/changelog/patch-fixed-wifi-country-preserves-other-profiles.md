@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Changing the Wi-Fi country no longer deletes saved Ethernet, WireGuard, or other non-wireless network profiles.
+- Changing the Wi-Fi country preserves saved Ethernet, WireGuard, and other non-wireless network profiles, and clears saved Wi-Fi networks and selection state.

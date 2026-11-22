@@ -1027,7 +1027,19 @@ impl WpaCli {
         for network_id in self.list_networks_low().await?.into_keys() {
             self.remove_network_low(network_id).await?;
         }
-        self.save_config(db).await?;
+        let new_country = self.get_country_low().await?;
+        db.mutate(|d| {
+            let wifi = d
+                .as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_wifi_mut();
+            wifi.as_ssids_mut().ser(&BTreeSet::new())?;
+            wifi.as_selected_mut().ser(&None)?;
+            wifi.as_last_region_mut().ser(&new_country)
+        })
+        .await
+        .result?;
         Ok(())
     }
 }

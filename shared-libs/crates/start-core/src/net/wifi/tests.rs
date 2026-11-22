@@ -433,18 +433,14 @@ async fn set_country_child() {
             .set_country(db.clone(), isocountry::CountryCode::GBR)
             .await
             .unwrap();
+        let peek = db.peek().await;
+        let wifi = peek.as_public().as_server_info().as_network().as_wifi();
         assert_eq!(
-            db.peek()
-                .await
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_wifi()
-                .as_last_region()
-                .de()
-                .unwrap(),
+            wifi.as_last_region().de().unwrap(),
             Some(isocountry::CountryCode::GBR)
         );
+        assert!(wifi.as_ssids().de().unwrap().is_empty());
+        assert_eq!(wifi.as_selected().de().unwrap(), None);
     }
 }
 
