@@ -24,6 +24,7 @@ pub trait LocalAuthContext: Context {
     const LOCAL_AUTH_COOKIE_PATH: &str;
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str;
     const LOCAL_SERVICE: Option<&str> = None;
+    /// The credential file survives daemon shutdown and is replaced on startup.
     fn init_auth_cookie() -> impl Future<Output = Result<(), Error>> + Send {
         async {
             let mut file = create_file_mod(Self::LOCAL_AUTH_COOKIE_PATH, 0o640).await?;
@@ -87,6 +88,17 @@ pub(crate) enum LocalAuthMissing {
     Invalid(Error),
 }
 
+fn classify_cookie_read_error(error: Error) -> LocalAuthMissing {
+    if error.source.chain().any(|e| {
+        e.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied)
+    }) {
+        LocalAuthMissing::PermissionDenied
+    } else {
+        LocalAuthMissing::Invalid(error)
+    }
+}
+
 fn is_valid_cookie(token: &str) -> bool {
     BASE64
         .decode(token)
@@ -94,8 +106,11 @@ fn is_valid_cookie(token: &str) -> bool {
 }
 
 pub(crate) async fn read_local_auth_header(path: &Path) -> Result<HeaderValue, LocalAuthMissing> {
-    match maybe_read_file_to_string(path).await {
-        Ok(Some(token)) => {
+    match maybe_read_file_to_string(path)
+        .await
+        .map_err(classify_cookie_read_error)?
+    {
+        Some(token) => {
             let invalid = || {
                 LocalAuthMissing::Invalid(Error::new(
                     eyre!(
@@ -113,16 +128,7 @@ pub(crate) async fn read_local_auth_header(path: &Path) -> Result<HeaderValue, L
             header.set_sensitive(true);
             Ok(header)
         }
-        Ok(None) => Err(LocalAuthMissing::NotFound),
-        Err(err)
-            if err.source.chain().any(|e| {
-                e.downcast_ref::<std::io::Error>()
-                    .is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied)
-            }) =>
-        {
-            Err(LocalAuthMissing::PermissionDenied)
-        }
-        Err(err) => Err(LocalAuthMissing::Invalid(err)),
+        None => Err(LocalAuthMissing::NotFound),
     }
 }
 
@@ -457,6 +463,26 @@ mod tests {
             .parse()
             .unwrap();
         assert!(is_loopback(&url));
+    }
+
+    #[test]
+    fn classify_cookie_read_error_recognizes_wrapped_permission_denial() {
+        let wrapped_error = |kind: std::io::ErrorKind| {
+            Err::<(), _>(std::io::Error::from(kind))
+                .with_ctx(|_| (crate::ErrorKind::Filesystem, "open cookie"))
+                .unwrap_err()
+        };
+        assert!(matches!(
+            classify_cookie_read_error(wrapped_error(std::io::ErrorKind::PermissionDenied)),
+            LocalAuthMissing::PermissionDenied
+        ));
+        match classify_cookie_read_error(wrapped_error(std::io::ErrorKind::Other)) {
+            LocalAuthMissing::Invalid(error) => {
+                assert_eq!(error.kind, crate::ErrorKind::Filesystem);
+                assert!(error.source.to_string().contains("open cookie"));
+            }
+            other => panic!("expected Invalid for other I/O errors, got {other:?}"),
+        }
     }
 
     #[tokio::test]

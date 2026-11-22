@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Report clear permission and stopped-service errors when running local `tunnel` or `registry` commands without `--tunnel`, or without `--registry` when no registry hostname is configured.
+- Report permission errors for local `tunnel` and `registry` commands without a configured target, and report when an installed daemon has no authentication token. Registry diagnostics apply when no CLI registry hostname is configured.
