@@ -1572,6 +1572,7 @@ async fn update_forward_label_at(
     label: Option<String>,
     hostname: Option<String>,
 ) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     ctx.db
         .mutate(|db| {
             db.as_port_forwards_mut().mutate(|pf| {
@@ -2545,6 +2546,62 @@ mod tests {
                 "SNI hostname app.example.com on 127.0.0.1:{free_port} is held by another client"
             )
         );
+    }
+
+    #[tokio::test]
+    async fn update_forward_label_serializes_with_staged_sni_changes() {
+        let source: ForwardAddress = "127.0.0.1:443".parse::<SocketAddrV4>().unwrap().into();
+        let hostname = "app.example.com";
+        let mut db = TunnelDatabase::default();
+        db.port_forwards.0.insert(
+            source.clone(),
+            PortForward::Sni {
+                routes: std::collections::BTreeMap::from([(
+                    hostname.to_owned(),
+                    crate::tunnel::db::SniRoute {
+                        target: "10.59.0.2:443".parse().unwrap(),
+                        label: Some("original".to_owned()),
+                        enabled: true,
+                        auto: false,
+                    },
+                )]),
+                fallback: None,
+            },
+        );
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+        let guard = ctx.forward_write_lock.lock().await;
+        let ctx_bg = ctx.clone();
+        let label_source = source.clone();
+        let mut update = tokio::spawn(async move {
+            update_forward_label(
+                ctx_bg,
+                UpdatePortForwardLabelParams {
+                    source: label_source,
+                    label: Some("edited".to_owned()),
+                    hostname: Some(hostname.to_owned()),
+                },
+            )
+            .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut update)
+                .await
+                .is_err()
+        );
+        let pf = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert!(matches!(
+            pf.0.get(&source),
+            Some(PortForward::Sni { routes, .. })
+                if routes[hostname].label.as_deref() == Some("original")
+        ));
+        drop(guard);
+        update.await.unwrap().unwrap();
+        let pf = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert!(matches!(
+            pf.0.get(&source),
+            Some(PortForward::Sni { routes, .. })
+                if routes[hostname].label.as_deref() == Some("edited")
+        ));
     }
 
     #[tokio::test]

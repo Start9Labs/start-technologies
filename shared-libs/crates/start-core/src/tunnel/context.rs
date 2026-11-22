@@ -190,6 +190,7 @@ pub struct TunnelContextSeed {
     /// Per-injector TSIG keys, read live so the injector can verify UPDATEs.
     pub dns_keys: Arc<SyncMutex<BTreeMap<IpAddr, [u8; 32]>>>,
     pub active_forwards: SyncMutex<BTreeMap<ForwardAddress, Arc<()>>>,
+    /// Label edits must serialize with staged-forward rollback.
     pub forward_write_lock: tokio::sync::Mutex<()>,
     /// In-memory leases for auto (PCP-created) forwards/pinholes/SNI routes,
     /// reaped by [`crate::tunnel::forward::lease`] when a client stops renewing.
