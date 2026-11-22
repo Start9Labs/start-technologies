@@ -249,6 +249,22 @@ export class InputSpec<
   }
 
   /**
+   * Builds this InputSpec as the contents of an object, a union variant or a list item.
+   *
+   * @throws when it holds a {@link Value.acknowledgement}
+   */
+  async buildNested<OuterType>(options: LazyBuildOptions<OuterType>) {
+    const built = await this.build(options)
+    for (const [key, spec] of Object.entries<ValueSpec>(built.spec)) {
+      if (spec.type === 'acknowledgement')
+        throw new Error(
+          `acknowledgement "${key}" must be at the top level of an InputSpec, not nested in an object, union or list`,
+        )
+    }
+    return built
+  }
+
+  /**
    * Adds multiple fields to this spec at once, returning a new `InputSpec` with extended types.
    *
    * @param build - A record of {@link Value} entries, or a function receiving typed tools that returns one

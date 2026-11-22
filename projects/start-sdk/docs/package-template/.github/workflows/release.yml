@@ -12,5 +12,6 @@ jobs:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
       S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
     permissions:
       contents: write

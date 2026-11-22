@@ -77,8 +77,6 @@ import {
   FollowServerLogsReq,
   GetActionInputRes,
   GetPackageLogsReq,
-  GetRegistryPackageReq,
-  GetRegistryPackagesReq,
   PkgAddPrivateDomainReq,
   PkgAddPublicDomainReq,
   PkgBindingSetAddressEnabledReq,
@@ -293,11 +291,19 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
-    'auth.session.list': async params => {
+    'auth.key.list': async params => {
       await pauseFor(2000)
-      return Mock.Sessions
+      return Mock.Keys
     },
-    'auth.session.kill': async params => {
+    'auth.key.remove': async params => {
+      await pauseFor(2000)
+      return null
+    },
+    'auth.token.list': async params => {
+      await pauseFor(2000)
+      return Mock.Tokens
+    },
+    'auth.token.remove': async params => {
       await pauseFor(2000)
       return null
     },
@@ -713,14 +719,6 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
 
       return false
-    },
-    'registry.os.version.get': async params => {
-      await pauseFor(2000)
-      return mockOsUpdateCache(params.registry).versions
-    },
-    'registry.info': async params => {
-      await pauseFor(2000)
-      return Mock.RegistryInfo
     },
     'notification.push.key': async () =>
       'BMPJ4K-bgv51B65CU1VyQTEkdx1KpAEwNW1yBT1s1L897jXuwArMYD6evcHvlejf27P-ouK7X_LwifLqyBkL6Hs',
@@ -1460,9 +1458,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       if (existing && existing.stateInfo.state === 'installed') {
         // Updating: preserve the installed manifest so LocalPackagesService
         // keeps the row visible and the item component renders its progress
-        // circle. Previously we always used the 'installing' state here, which
-        // dropped the row out of localPkgs mid-update and left the Updates tab
-        // briefly showing "Finding suitable version..." before the row vanished.
+        // circle.
         const manifest = existing.stateInfo.manifest
         finalManifest = { ...manifest, version: params.version }
         value = {
@@ -2106,10 +2102,6 @@ export class MockApiService extends ApiService implements StartupApiService {
 
       return null
     },
-    'registry.package.get': async params =>
-      params.id
-        ? this.getRegistryPackage(params as GetRegistryPackageReq)
-        : this.getRegistryPackages(params as GetRegistryPackagesReq),
     'kiosk.enable': () => this.toggleKiosk(true),
     'kiosk.disable': () => this.toggleKiosk(false),
   }
@@ -2266,6 +2258,11 @@ export class MockApiService extends ApiService implements StartupApiService {
   }
 
   // state
+
+  async checkEnrollment(): Promise<unknown> {
+    await pauseFor(1000)
+    return null
+  }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
     if (url) {
@@ -3344,30 +3341,6 @@ export class MockApiService extends ApiService implements StartupApiService {
       patch,
     }
     this.mockWsSource$.next(revision)
-  }
-
-  private async getRegistryPackage(params: GetRegistryPackageReq) {
-    await pauseFor(2000)
-
-    const { targetVersion, sourceVersion, id } = params
-
-    if (sourceVersion) {
-      // Mock registry refinement: return a reachable stepping-stone version
-      if (id === 'bitcoind') {
-        return Mock.OtherPackageVersions['bitcoind']!['=26.1.0:0.1.0']!
-      }
-      return Mock.RegistryPackages[id]!
-    }
-
-    if (!targetVersion || targetVersion === '=*') {
-      return Mock.RegistryPackages[id]!
-    } else {
-      return Mock.OtherPackageVersions[id]![targetVersion]!
-    }
-  }
-  private async getRegistryPackages(params: GetRegistryPackagesReq) {
-    await pauseFor(2000)
-    return Mock.RegistryPackages
   }
 
   private async getScheduledBackupJobs(params: {}): Promise<T.BackupJob[]> {

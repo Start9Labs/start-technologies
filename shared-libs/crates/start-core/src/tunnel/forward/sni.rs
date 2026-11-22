@@ -14,9 +14,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+use crate::Error;
 use crate::net::port_map::pcp::RESULT_NO_RESOURCES;
 use crate::net::port_map::pcp::hostname::RESULT_HOSTNAME_TAKEN;
+use crate::net::web_server::{Accept, AcceptStream, TcpMetadata};
 use crate::util::future::NonDetachingJoinHandle;
+use crate::util::io::BackTrackingIO;
 use crate::util::sync::SyncMutex;
 
 /// (external IP, external port).
@@ -41,12 +44,63 @@ pub enum FallbackSource {
     PrivateOnly,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+const LOCAL_HANDOFF_BACKLOG: usize = 128;
+
+/// Receives connections the demux hands to an in-process listener.
+pub type LocalSink = tokio::sync::mpsc::Sender<(TcpMetadata, AcceptStream)>;
+
+/// Accepts the connections sent through its paired [`LocalSink`].
+pub struct LocalHandoff(tokio::sync::mpsc::Receiver<(TcpMetadata, AcceptStream)>);
+
+impl LocalHandoff {
+    pub fn channel() -> (LocalSink, Self) {
+        let (sink, connections) = tokio::sync::mpsc::channel(LOCAL_HANDOFF_BACKLOG);
+        (sink, Self(connections))
+    }
+}
+
+impl Accept for LocalHandoff {
+    type Metadata = TcpMetadata;
+    fn poll_accept(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(Self::Metadata, AcceptStream), Error>> {
+        match self.0.poll_recv(cx) {
+            std::task::Poll::Ready(Some(accepted)) => std::task::Poll::Ready(Ok(accepted)),
+            _ => std::task::Poll::Pending,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum FallbackTarget {
+    /// Relayed with the client's source address preserved.
+    Relay(SocketAddrV4),
+    /// Handed over in-process, with the client's addresses as its metadata.
+    Local(LocalSink),
+}
+
+impl FallbackTarget {
+    fn same_owner(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Relay(a), Self::Relay(b)) => a.ip() == b.ip(),
+            (Self::Local(_), Self::Local(_)) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct Fallback {
-    target: SocketAddrV4,
+    target: FallbackTarget,
     source: FallbackSource,
-    /// Whether upstream connections preserve the client source address.
-    transparent: bool,
+}
+
+/// Where an accepted connection goes.
+#[derive(Debug)]
+enum Route {
+    Relay(SocketAddrV4),
+    Local(LocalSink),
 }
 
 #[derive(Default)]
@@ -64,7 +118,7 @@ impl PortBindings {
         self.hostnames.is_empty() && self.fallback.is_none()
     }
     #[cfg(test)]
-    fn select(&self, sni: Option<&str>, peer: Ipv4Addr) -> Option<(SocketAddrV4, bool)> {
+    fn select(&self, sni: Option<&str>, peer: Ipv4Addr) -> Option<Route> {
         self.select_with_fallback(sni, peer, None)
     }
 
@@ -73,24 +127,27 @@ impl PortBindings {
         sni: Option<&str>,
         peer: Ipv4Addr,
         local_fallback: Option<Fallback>,
-    ) -> Option<(SocketAddrV4, bool)> {
+    ) -> Option<Route> {
         if let Some(name) = sni {
             if let Some(b) = self.hostnames.get(name) {
-                return Some((b.target, true));
+                return Some(Route::Relay(b.target));
             }
             if let Some((_, rest)) = name.split_once('.') {
                 if let Some(b) = self.hostnames.get(&format!("*.{rest}")) {
-                    return Some((b.target, true));
+                    return Some(Route::Relay(b.target));
                 }
             }
         }
-        let f = local_fallback.or(self.fallback)?;
+        let f = local_fallback.or_else(|| self.fallback.clone())?;
         match f.source {
             FallbackSource::Any => {}
             FallbackSource::PrivateOnly if peer.is_private() => {}
             FallbackSource::PrivateOnly => return None,
         }
-        Some((f.target, f.transparent))
+        Some(match f.target {
+            FallbackTarget::Relay(target) => Route::Relay(target),
+            FallbackTarget::Local(sink) => Route::Local(sink),
+        })
     }
 }
 
@@ -100,8 +157,8 @@ fn inherited_local_fallback(
 ) -> Option<Fallback> {
     ports
         .get(&(Ipv4Addr::UNSPECIFIED, key.1))
-        .and_then(|e| e.fallback)
-        .filter(|f| !f.transparent)
+        .and_then(|e| e.fallback.clone())
+        .filter(|f| matches!(f.target, FallbackTarget::Local(_)))
 }
 
 /// One live hostname route, as reported by [`SniDemux::snapshot`].
@@ -332,29 +389,27 @@ impl SniDemux {
             ext_ip,
             ext_port,
             Fallback {
-                target,
+                target: FallbackTarget::Relay(target),
                 source: FallbackSource::Any,
-                transparent: true,
             },
         )
     }
 
-    /// Registers a source-scoped fallback to a gateway-local listener.
+    /// Registers a source-scoped fallback that hands connections to an in-process listener.
     /// An unspecified external address also supplies the fallback to address-specific listeners.
     pub fn register_local_fallback(
         self: &Arc<Self>,
         ext_ip: Ipv4Addr,
         ext_port: u16,
-        target: SocketAddrV4,
+        sink: LocalSink,
         source: FallbackSource,
     ) -> Result<(), u8> {
         self.register_fallback_with(
             ext_ip,
             ext_port,
             Fallback {
-                target,
+                target: FallbackTarget::Local(sink),
                 source,
-                transparent: false,
             },
         )
     }
@@ -370,12 +425,12 @@ impl SniDemux {
             let entry = ports.entry(key).or_default();
             if entry
                 .fallback
-                .is_some_and(|f| f.target.ip() != fallback.target.ip())
+                .as_ref()
+                .is_some_and(|f| !f.target.same_owner(&fallback.target))
             {
                 return Err(RESULT_HOSTNAME_TAKEN);
             }
-            let previous = entry.fallback;
-            entry.fallback = Some(fallback);
+            let previous = entry.fallback.replace(fallback);
             Ok(previous)
         })?;
         if let Err(e) = self.ensure_listener(key) {
@@ -397,10 +452,32 @@ impl SniDemux {
 
     /// Clear the fallback on `(ext_ip, ext_port)`, only if held by `target`.
     pub fn unregister_fallback(&self, ext_ip: Ipv4Addr, ext_port: u16, target: SocketAddrV4) {
+        self.unregister_fallback_if(
+            ext_ip,
+            ext_port,
+            |held| matches!(held, FallbackTarget::Relay(held) if *held == target),
+        );
+    }
+
+    /// Clear the fallback on `(ext_ip, ext_port)`, only if held by `sink`.
+    pub fn unregister_local_fallback(&self, ext_ip: Ipv4Addr, ext_port: u16, sink: &LocalSink) {
+        self.unregister_fallback_if(
+            ext_ip,
+            ext_port,
+            |held| matches!(held, FallbackTarget::Local(held) if held.same_channel(sink)),
+        );
+    }
+
+    fn unregister_fallback_if(
+        &self,
+        ext_ip: Ipv4Addr,
+        ext_port: u16,
+        held_by: impl Fn(&FallbackTarget) -> bool,
+    ) {
         let key = (ext_ip, ext_port);
         self.ports.mutate(|ports| {
             if let Some(entry) = ports.get_mut(&key) {
-                if entry.fallback.is_some_and(|f| f.target == target) {
+                if entry.fallback.as_ref().is_some_and(|f| held_by(&f.target)) {
                     entry.fallback = None;
                 }
             }
@@ -585,7 +662,7 @@ async fn run_listener(
 }
 
 async fn handle_conn(
-    mut conn: TcpStream,
+    conn: TcpStream,
     peer: SocketAddr,
     key: PortKey,
     ports: Arc<SyncMutex<BTreeMap<PortKey, PortBindings>>>,
@@ -597,6 +674,8 @@ async fn handle_conn(
     {
         tracing::error!("Failed to set tcp keepalive: {e}");
     }
+    let local_addr = conn.local_addr();
+    let mut conn = BackTrackingIO::new(conn);
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
     let sni = loop {
@@ -623,11 +702,41 @@ async fn handle_conn(
         p.get(&key)
             .and_then(|e| e.select_with_fallback(sni.as_deref(), *peer.ip(), local_fallback))
     });
-    let Some((target, transparent)) = selected else {
-        return;
-    };
-    let transparent = transparent && !is_hairpin(&local_prefix, *peer.ip(), *target.ip()).await;
-    let mut upstream = if transparent {
+    match selected {
+        None => {}
+        Some(Route::Local(sink)) => {
+            let Ok(local_addr) = local_addr else {
+                return;
+            };
+            let _ = conn.rewind();
+            let metadata = TcpMetadata {
+                peer_addr: SocketAddr::V4(peer),
+                local_addr,
+            };
+            if sink.send((metadata, Box::pin(conn))).await.is_err() {
+                tracing::trace!("SNI demux local listener for {peer} is gone");
+            }
+        }
+        Some(Route::Relay(target)) => relay(conn.unwrap(), &buf, peer, target, &local_prefix).await,
+    }
+}
+
+async fn relay(
+    mut conn: TcpStream,
+    client_hello: &[u8],
+    peer: SocketAddrV4,
+    target: SocketAddrV4,
+    local_prefix: &Option<LocalPrefix>,
+) {
+    let mut upstream = if is_hairpin(local_prefix, *peer.ip(), *target.ip()).await {
+        match TcpStream::connect(SocketAddr::V4(target)).await {
+            Ok(upstream) => upstream,
+            Err(e) => {
+                tracing::warn!("SNI demux hairpin egress to {target} for {peer} failed: {e}");
+                return;
+            }
+        }
+    } else {
         // A failed source-preserving connection must not fall back to gateway source.
         match crate::net::transparent::transparent_connect(
             SocketAddr::V4(peer),
@@ -641,16 +750,8 @@ async fn handle_conn(
                 return;
             }
         }
-    } else {
-        match TcpStream::connect(SocketAddr::V4(target)).await {
-            Ok(upstream) => upstream,
-            Err(e) => {
-                tracing::warn!("SNI demux local egress to {target} for {peer} failed: {e}");
-                return;
-            }
-        }
     };
-    if upstream.write_all(&buf).await.is_err() {
+    if upstream.write_all(client_hello).await.is_err() {
         return;
     }
     let _ = copy_bidirectional(&mut conn, &mut upstream).await;
@@ -712,6 +813,24 @@ impl Default for SniDemux {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn relayed(route: Option<Route>) -> Option<SocketAddrV4> {
+        match route {
+            Some(Route::Relay(target)) => Some(target),
+            _ => None,
+        }
+    }
+
+    fn handed_over(route: Option<Route>) -> bool {
+        matches!(route, Some(Route::Local(_)))
+    }
+
+    fn sink() -> (
+        LocalSink,
+        tokio::sync::mpsc::Receiver<(TcpMetadata, AcceptStream)>,
+    ) {
+        tokio::sync::mpsc::channel(8)
+    }
 
     fn free_port() -> u16 {
         std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
@@ -827,9 +946,10 @@ mod tests {
                     p.get(&(listen_ip, port))
                         .is_none_or(|b| b.fallback.is_none())
                 );
-                assert_eq!(
-                    p[&(*source.ip(), port)].select(None, Ipv4Addr::LOCALHOST),
-                    None
+                assert!(
+                    p[&(*source.ip(), port)]
+                        .select(None, Ipv4Addr::LOCALHOST)
+                        .is_none()
                 );
             });
             let mut ui = UiListener::bind((listen_ip, port).into(), demux.clone()).unwrap();
@@ -890,31 +1010,31 @@ mod tests {
         demux.ports.peek(|p| {
             let pb = p.get(&(ip, port)).unwrap();
             assert_eq!(
-                pb.select(Some("a.example.com"), anywhere),
-                Some((host_target, true))
+                relayed(pb.select(Some("a.example.com"), anywhere)),
+                Some(host_target)
             );
             assert_eq!(
-                pb.select(Some("nope.example.com"), anywhere),
-                Some((fb, true))
+                relayed(pb.select(Some("nope.example.com"), anywhere)),
+                Some(fb)
             );
-            assert_eq!(pb.select(None, anywhere), Some((fb, true)));
+            assert_eq!(relayed(pb.select(None, anywhere)), Some(fb));
         });
 
         demux.unregister_fallback(ip, port, SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 8), 443));
         demux.ports.peek(|p| {
-            assert_eq!(
-                p.get(&(ip, port)).unwrap().fallback.map(|f| f.target),
-                Some(fb)
-            );
+            assert!(matches!(
+                p.get(&(ip, port)).unwrap().fallback,
+                Some(Fallback { target: FallbackTarget::Relay(held), .. }) if held == fb
+            ));
         });
         demux.unregister_fallback(ip, port, fb);
         demux.ports.peek(|p| {
             let pb = p.get(&(ip, port)).unwrap();
-            assert_eq!(pb.fallback, None);
-            assert_eq!(pb.select(None, anywhere), None);
+            assert!(pb.fallback.is_none());
+            assert!(pb.select(None, anywhere).is_none());
             assert_eq!(
-                pb.select(Some("a.example.com"), anywhere),
-                Some((host_target, true))
+                relayed(pb.select(Some("a.example.com"), anywhere)),
+                Some(host_target)
             );
         });
     }
@@ -924,10 +1044,10 @@ mod tests {
         let demux = SniDemux::new();
         let ip = Ipv4Addr::LOCALHOST;
         let port = free_port();
-        let ui = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 443);
+        let (ui, _connections) = sink();
         let host_target = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
         demux
-            .register_local_fallback(ip, port, ui, FallbackSource::PrivateOnly)
+            .register_local_fallback(ip, port, ui.clone(), FallbackSource::PrivateOnly)
             .unwrap();
         demux
             .register(ip, port, &["a.example.com".to_string()], host_target, None)
@@ -937,19 +1057,64 @@ mod tests {
         demux.ports.peek(|p| {
             let pb = p.get(&(ip, port)).unwrap();
             assert_eq!(
-                pb.select(Some("a.example.com"), public),
-                Some((host_target, true))
+                relayed(pb.select(Some("a.example.com"), public)),
+                Some(host_target)
             );
-            assert_eq!(pb.select(None, private), Some((ui, false)));
-            assert_eq!(pb.select(None, public), None);
+            assert!(handed_over(pb.select(None, private)));
+            assert!(pb.select(None, public).is_none());
         });
         demux
             .register_local_fallback(ip, port, ui, FallbackSource::Any)
             .unwrap();
         demux.ports.peek(|p| {
             let pb = p.get(&(ip, port)).unwrap();
-            assert_eq!(pb.select(None, public), Some((ui, false)));
+            assert!(handed_over(pb.select(None, public)));
         });
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn local_fallback_hands_over_the_client_connection_and_addresses() {
+        let demux = SniDemux::new();
+        let port = free_port();
+        let (ui, mut connections) = sink();
+        demux
+            .register_local_fallback(Ipv4Addr::LOCALHOST, port, ui, FallbackSource::Any)
+            .unwrap();
+        let client_ip = Ipv4Addr::new(127, 0, 0, 2);
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind(SocketAddr::new(client_ip.into(), 0)).unwrap();
+        let mut client = timeout(
+            Duration::from_secs(5),
+            socket.connect(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let hello = real_client_hello("ui.example.com");
+        client.write_all(&hello).await.unwrap();
+        let (metadata, mut stream) = timeout(Duration::from_secs(5), connections.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(metadata.peer_addr, client.local_addr().unwrap());
+        assert_eq!(
+            metadata.local_addr,
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)
+        );
+        let mut received = vec![0; hello.len()];
+        timeout(Duration::from_secs(5), stream.read_exact(&mut received))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(received, hello);
+        stream.write_all(b"reply").await.unwrap();
+        let mut reply = [0; 5];
+        timeout(Duration::from_secs(5), client.read_exact(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&reply, b"reply");
     }
 
     #[tokio::test]
@@ -1021,8 +1186,8 @@ mod tests {
             .unwrap();
         demux.ports.peek(|p| {
             assert_eq!(
-                p[&key].select(Some("cloud.example.com"), Ipv4Addr::LOCALHOST),
-                Some((target, true))
+                relayed(p[&key].select(Some("cloud.example.com"), Ipv4Addr::LOCALHOST)),
+                Some(target)
             );
         });
         demux.unregister(key.0, port, &["CLOUD.example.com".to_string()], target);
@@ -1098,11 +1263,10 @@ mod tests {
         pb.hostnames.insert("a.example.com".into(), mk(1));
         pb.hostnames.insert("*.example.com".into(), mk(2));
         pb.fallback = Some(Fallback {
-            target: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 443),
+            target: FallbackTarget::Relay(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 9), 443)),
             source: FallbackSource::Any,
-            transparent: true,
         });
-        let sel = |sni| pb.select(sni, peer).unwrap().0;
+        let sel = |sni| relayed(pb.select(sni, peer)).unwrap();
         assert_eq!(sel(Some("a.example.com")).ip().octets()[3], 1);
         assert_eq!(sel(Some("b.example.com")).ip().octets()[3], 2);
         assert_eq!(sel(Some("other.org")).ip().octets()[3], 9);
@@ -1113,22 +1277,23 @@ mod tests {
     async fn snapshot_reports_live_routes_with_remaining() {
         let demux = SniDemux::new();
         let ip = Ipv4Addr::LOCALHOST;
+        let (port, fallback_port) = (free_port(), free_port());
         let t1 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 443);
         let t2 = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 2), 443);
         demux
-            .register(ip, 44311, &["a.example.com".to_string()], t1, Some(3600))
+            .register(ip, port, &["a.example.com".to_string()], t1, Some(3600))
             .unwrap();
         demux
-            .register(ip, 44311, &["b.example.com".to_string()], t2, None)
+            .register(ip, port, &["b.example.com".to_string()], t2, None)
             .unwrap();
-        demux.register_fallback(ip, 44312, t1).unwrap();
+        demux.register_fallback(ip, fallback_port, t1).unwrap();
 
         let mut snap = demux.snapshot();
         snap.sort_by(|a, b| a.hostname.cmp(&b.hostname));
         assert_eq!(snap.len(), 2);
         assert_eq!(snap[0].hostname, "a.example.com");
         assert_eq!(snap[0].target, t1);
-        assert_eq!((snap[0].ext_ip, snap[0].ext_port), (ip, 44311));
+        assert_eq!((snap[0].ext_ip, snap[0].ext_port), (ip, port));
         let remaining = snap[0].remaining_secs.unwrap();
         assert!(remaining > 3590 && remaining <= 3600, "got {remaining}");
         assert_eq!(snap[1].remaining_secs, None);
@@ -1163,10 +1328,10 @@ mod tests {
         demux.ports.peek(|p| {
             let pb = p.get(&(ip, port)).unwrap();
             assert_eq!(
-                pb.select(Some("a.example.com"), anywhere),
-                Some((mine(9443), true))
+                relayed(pb.select(Some("a.example.com"), anywhere)),
+                Some(mine(9443))
             );
-            assert_eq!(pb.select(None, anywhere), Some((mine(9443), true)));
+            assert_eq!(relayed(pb.select(None, anywhere)), Some(mine(9443)));
         });
     }
 
@@ -1258,9 +1423,11 @@ mod tests {
                 "existing binding at the new key wins the collision"
             );
             assert_eq!(pb.hostnames.get("c.example.com").unwrap().target, t2);
-            assert_eq!(
-                pb.fallback.map(|f| f.target),
-                Some(t1),
+            assert!(
+                matches!(
+                    pb.fallback,
+                    Some(Fallback { target: FallbackTarget::Relay(held), .. }) if held == t1
+                ),
                 "moved fallback fills the empty slot"
             );
         });

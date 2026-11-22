@@ -19,7 +19,7 @@ The Debian package enables Bash tab completion automatically in new shells. `sta
 
 ## Authentication
 
-Manage passwords, enrolled device keys, and authorized SSH keys for remote access.
+Manage passwords and enrolled device keys.
 
 ### `start-tunnel auth login`
 
@@ -41,29 +41,19 @@ Reset the web UI password.
 
 Retrieve the server's public key.
 
-### `start-tunnel auth session list`
+### `start-tunnel auth key add <KEY> [--name <NAME>] [--user-agent <USER_AGENT>]`
 
-List enrolled device keys.
-
-- `--format` — Output format
-
-### `start-tunnel auth session kill [--pubkey <KEY>]...`
-
-Remove enrolled device keys.
-
-### `start-tunnel auth key add <NAME> <KEY>`
-
-Add an authorized SSH key.
+Enroll a device key without a password or the login rate limit. `--name` and `--user-agent` label it in `auth key list`. The web UI shows this command, with its own key and user agent, when too many login attempts block signing in.
 
 ### `start-tunnel auth key list`
 
-List authorized SSH keys.
+List enrolled device keys. The key making the request is highlighted.
 
 - `--format` — Output format
 
-### `start-tunnel auth key remove <KEY>`
+### `start-tunnel auth key remove <KEY>...`
 
-Remove an authorized SSH key.
+Remove one or more enrolled device keys, ending their sessions.
 
 ## Subnets
 

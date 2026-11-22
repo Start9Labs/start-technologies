@@ -142,7 +142,7 @@ async fn session_router_admits_scoped_rpc_and_its_same_peer_continuation() {
     socket
         .send(Message::Text(
             serde_json::json!({"jsonrpc":"2.0", "id":7,
-        "method":"package.access.get", "params":{"id":"secret"}})
+        "method":"admin.reader.list", "params":{}})
             .to_string()
             .into(),
         ))
@@ -150,7 +150,7 @@ async fn session_router_admits_scoped_rpc_and_its_same_peer_continuation() {
         .unwrap();
     let reply = receive(&mut socket).await;
     assert_eq!(reply["id"], 7);
-    assert_eq!(reply["result"]["private"], true);
+    assert_eq!(reply["result"].as_object().unwrap().len(), 1, "{reply}");
     socket
         .send(Message::Text(
             serde_json::json!({"jsonrpc":"2.0", "id":8,

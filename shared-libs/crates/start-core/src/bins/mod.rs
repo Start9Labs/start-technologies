@@ -307,6 +307,12 @@ fn export_manpages(command: clap::Command, product: &str, version: &str) {
         .join(product)
         .join("man");
     std::fs::create_dir_all(&dir).unwrap();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|ext| ext == "1") {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
     clap_mangen::generate_to(command.version(version.to_owned()), &dir).unwrap();
     let normalize = |contents: &str| {
         format!(

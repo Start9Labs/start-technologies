@@ -30,7 +30,18 @@ async fn server(
     )
     .await;
     let mut packages = index().package;
-    packages.packages.get_mut("test").unwrap().access.private = true;
+    let (_, info) = crate::registry::package::index::tests::version_info_signed_by(1);
+    let (hardware, mut asset) = info.s9pks.into_iter().next().unwrap();
+    asset.private = Some(crate::registry::tests::secret_keystream());
+    for version in packages
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .values_mut()
+    {
+        version.s9pks = vec![(hardware.clone(), asset.clone())];
+    }
     ctx.db
         .put(&"/index/package".parse().unwrap(), &packages)
         .await
@@ -139,7 +150,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
     super::super::polling::poll(&db, &subscriptions, &device(), &client, &signer())
         .await
         .unwrap();
-    assert_eq!(requests.load(Ordering::SeqCst), 4);
+    assert_eq!(requests.load(Ordering::SeqCst), 5);
     let snapshot = db.peek().await;
     let cache = snapshot
         .as_public()
@@ -150,7 +161,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Legacy Registry"));
-    assert!(cache.packages.contains_key("test"));
+    assert!(cache.catalog.contains_key("test"));
     assert_eq!(
         snapshot
             .as_public()
@@ -161,14 +172,11 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
             .status,
         RegistryStatus::Connected
     );
-    let selection = cached_response(
+    let selection = super::select(
         &snapshot,
         &registry,
-        "package.get",
-        &json!({"id":"test", "sourceVersion":"1.0.0:0"}),
-        Some(&device()),
+        json!({"id":"test", "sourceVersion":"1.0.0:0"}),
     )
-    .unwrap()
     .unwrap();
     assert!(selection["best"].get("1.0.0:0").is_some());
     assert!(selection["best"].get("2.0.0:0").is_none());
@@ -230,15 +238,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
         .await
         .unwrap();
     let snapshot = db.peek().await;
-    let selection = cached_response(
-        &snapshot,
-        &registry,
-        "package.get",
-        &json!({"id":"test"}),
-        Some(&device()),
-    )
-    .unwrap()
-    .unwrap();
+    let selection = super::select(&snapshot, &registry, json!({"id":"test"})).unwrap();
     assert_eq!(selection["best"], json!({}));
 }
 

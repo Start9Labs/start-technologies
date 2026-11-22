@@ -83,21 +83,7 @@ async fn signed_proxy_fetches_private_dependency_icons_and_observes_revocation()
         to_bytes(response.into_body(), 1024).await.unwrap(),
         b"secret".as_slice()
     );
-    registry
-        .db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_readers_mut()
-                .ser(&std::collections::BTreeSet::new())
-        })
-        .await
-        .result
-        .unwrap();
+    crate::registry::tests::revoke_secret_reader(&registry).await;
     let response = registry_icon_response(client, target, Some(&reader))
         .await
         .unwrap();

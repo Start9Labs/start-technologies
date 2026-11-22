@@ -594,4 +594,6 @@ export default {
   642: 'Pour désactiver ce VPN, modifiez d’abord {vpns} pour qu’ils se connectent via autre chose.',
   643: 'Jamais (par défaut)',
   644: 'Lorsque derrière un NAT',
+  645: 'Se connecter depuis la ligne de commande',
+  646: 'Enregistrer ce navigateur',
 } satisfies i18n

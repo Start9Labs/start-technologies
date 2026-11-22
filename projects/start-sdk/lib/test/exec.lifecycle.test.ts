@@ -103,6 +103,7 @@ test('health checks can terminate while fast commands finish', async () => {
   const { sub } = subject()
   ;(cp.spawn as unknown as jest.Mock).mockImplementation(() => fakeChild())
   let entered!: () => void
+  let commands!: Promise<unknown>
   const started = new Promise<void>(resolve => {
     entered = resolve
   })
@@ -116,10 +117,11 @@ test('health checks can terminate while fast commands finish', async () => {
         yield
       },
       fn: async () => {
-        entered()
-        await Promise.all(
+        commands = Promise.all(
           Array.from({ length: 36 }, () => sub.exec(['true'], { timeout: 25 })),
         )
+        entered()
+        await commands
         return { result: 'success', message: 'All folders found' }
       },
     },
@@ -128,6 +130,7 @@ test('health checks can terminate while fast commands finish', async () => {
   await health.updateStatus()
   await started
   await bounded(health.term())
+  await bounded(commands)
 })
 
 test('the deadline covers a stdin callback that never arrives', async () => {

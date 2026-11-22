@@ -4,13 +4,16 @@
 .SH NAME
 start\-registry\-package\-add\-mirror \- Add a mirror for an s9pk
 .SH SYNOPSIS
-\fBstart\-registry package add\-mirror\fR [\fB\-\-no\-verify\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR> <\fIURL\fR>
+\fBstart\-registry package add\-mirror\fR [\fB\-\-no\-verify\fR] [\fB\-\-private\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR> <\fIURL\fR>
 .SH DESCRIPTION
 Add a mirror for an s9pk
 .SH OPTIONS
 .TP
 \fB\-\-no\-verify\fR
 Skip signature verification
+.TP
+\fB\-\-private\fR
+Verify ciphertext with the registry\*(Aqs stored s9pk key
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
