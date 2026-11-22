@@ -315,15 +315,17 @@ Gitea reports draft readiness as an ordinary edit without previous draft state.
 Retargets share the normal PR build's concurrency group; other edits use a separate
 group and leave an active normal build alone.
 
-Use the isolated `ubuntu-latest` runner environment, registry variables, and
-signing/S3 secrets described in the Forgejo section above. Gitea enforces job
-`permissions:` within the repository/owner token policy; allow the requested
-repository write and pull-request access for release and sync jobs. PR builds
-receive no signing key. The automatic token handles checkout, tag pushes,
-releases, and sync pull requests. Artifact upload/download and in-place release
-asset replacement use the same actions as Forgejo, with the same 2 GiB per-asset
-ceiling and S3 alternative. The Gitea instance's upload limit must also permit the
-release assets.
+Use the isolated `ubuntu-latest` runner environment described in the Forgejo
+section above. The embedded jobs read the registry variables and the `DEV_KEY`,
+S3 and `PACKAGES_TOKEN` secrets described above directly from the repository or
+its owner. Gitea enforces job `permissions:` within the repository/owner token
+policy; allow the requested repository write and pull-request access for release
+and sync jobs. PR builds receive no signing key. The automatic token handles
+checkout, tag pushes, releases, and sync pull requests. Artifact upload/download,
+in-place release asset replacement, and `PACKAGES_TOKEN` uploads to the owner's
+generic package registry work as on Forgejo, as do private repositories'
+encrypted packages and the 2 GiB per-file release-asset ceiling. The Gitea
+instance's upload limits must also permit the release assets and packages.
 
 Gitea restricts reusable-workflow imports to its own instance. These generated
 files therefore embed all shared jobs, including the nested tag-and-release
