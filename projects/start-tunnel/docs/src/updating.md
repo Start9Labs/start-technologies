@@ -1,6 +1,6 @@
 # Updating
 
-Keep StartTunnel up to date using the web UI, CLI, or install script. Run the CLI and install script on your VPS as `root`.
+Keep StartTunnel up to date using the web UI or the CLI. Run the CLI on your VPS as `root`.
 
 ## Web UI
 
@@ -19,13 +19,3 @@ Install the latest version:
 ```bash
 start-tunnel update apply
 ```
-
-## Install script
-
-Re-run the install command:
-
-```bash
-curl -sSL https://start9.com/start-tunnel/install.sh | sh
-```
-
-The installer detects the existing installation, prompts for confirmation, and restarts the service.
