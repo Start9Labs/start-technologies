@@ -200,6 +200,14 @@ impl AuthGate {
     }
 }
 
+fn forbidden() -> Response<ProxyBody> {
+    Response::builder()
+        .status(http::StatusCode::FORBIDDEN)
+        .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(box_full(Bytes::from_static(b"403 Forbidden")))
+        .expect("static 403 response is well-formed")
+}
+
 /// Headers synthesized from the client connection, independently of authentication.
 #[derive(Clone, Copy)]
 pub enum ForwardedHeaders {
@@ -211,6 +219,52 @@ pub enum ForwardedHeaders {
     Ssl,
 }
 
+/// Client-address headers that backends may trust from the proxy.
+const CLIENT_ADDRESS_HEADERS: &[&str] = &[
+    "forwarded",
+    "x-real-ip",
+    "true-client-ip",
+    "cf-connecting-ip",
+];
+
+fn requests_upgrade<B>(req: &Request<B>) -> bool {
+    (req.method() == http::method::Method::CONNECT
+        && req.extensions().get::<hyper::ext::Protocol>().is_some())
+        || req
+            .headers()
+            .get_all(http::header::CONNECTION)
+            .iter()
+            .any(|h| {
+                h.to_str()
+                    .unwrap_or_default()
+                    .split(',')
+                    .any(|s| s.trim().eq_ignore_ascii_case("upgrade"))
+            })
+}
+
+/// A missing `Origin` passes; `null` and unparsable ones do not.
+fn origin_matches_authority<B>(req: &Request<B>) -> bool {
+    let Some(origin) = req.headers().get(http::header::ORIGIN) else {
+        return true;
+    };
+    let Some(origin) = origin
+        .to_str()
+        .ok()
+        .and_then(|o| o.parse::<http::Uri>().ok())
+    else {
+        return false;
+    };
+    let (Some(scheme), Some(origin)) = (origin.scheme(), origin.authority()) else {
+        return false;
+    };
+    let Some(authority) = request_authority(req) else {
+        return false;
+    };
+    let default_port = if *scheme == Scheme::HTTPS { 443 } else { 80 };
+    origin.host().eq_ignore_ascii_case(authority.host())
+        && origin.port_u16().unwrap_or(default_port) == authority.port_u16().unwrap_or(default_port)
+}
+
 fn apply_request_policy<B>(
     req: &mut Request<B>,
     src_ip: Option<IpAddr>,
@@ -220,7 +274,10 @@ fn apply_request_policy<B>(
     let forwarded: Vec<_> = req
         .headers()
         .keys()
-        .filter(|name| name.as_str().starts_with("x-forwarded-"))
+        .filter(|name| {
+            name.as_str().starts_with("x-forwarded-")
+                || CLIENT_ADDRESS_HEADERS.contains(&name.as_str())
+        })
         .cloned()
         .collect();
     for name in forwarded {
@@ -228,7 +285,13 @@ fn apply_request_policy<B>(
     }
 
     let user = match gate {
-        Some(g) => g.check(req.headers())?,
+        Some(g) => {
+            let user = g.check(req.headers())?;
+            if requests_upgrade(req) && !origin_matches_authority(req) {
+                return Err(forbidden());
+            }
+            user
+        }
         None => None,
     };
 
@@ -553,9 +616,7 @@ where
                         return Ok::<_, hyper::Error>(resp);
                     }
 
-                    let upgrade = if req.method() == http::method::Method::CONNECT
-                        && req.extensions().get::<hyper::ext::Protocol>().is_some()
-                    {
+                    let upgrade = if requests_upgrade(&req) {
                         Some(hyper::upgrade::on(&mut req))
                     } else {
                         None
@@ -641,21 +702,11 @@ where
                         return Ok::<_, hyper::Error>(resp.map(|body| relaying.hold(body)));
                     }
 
-                    let upgrade =
-                        if req
-                            .headers()
-                            .get(http::header::CONNECTION)
-                            .map_or(false, |h| {
-                                h.to_str()
-                                    .unwrap_or_default()
-                                    .split(",")
-                                    .any(|s| s.trim().eq_ignore_ascii_case("upgrade"))
-                            })
-                        {
-                            Some(hyper::upgrade::on(&mut req))
-                        } else {
-                            None
-                        };
+                    let upgrade = if requests_upgrade(&req) {
+                        Some(hyper::upgrade::on(&mut req))
+                    } else {
+                        None
+                    };
 
                     let mut res = match client.lock().await.send_request(req).await {
                         Ok(r) => r,
@@ -1548,6 +1599,10 @@ mod tests {
         "X-Forwarded-Port",
         "X-Forwarded-Prefix",
         "X-Forwarded-Custom",
+        "X-Real-IP",
+        "True-Client-IP",
+        "CF-Connecting-IP",
+        "Forwarded",
     ];
 
     fn basic_gate() -> AuthGate {
@@ -1682,6 +1737,62 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn upgrade_request(host: &str, origin: Option<&str>) -> Request<Full<Bytes>> {
+        let mut req = req_with_auth(Some(BASIC_AUTH)).map(|()| Full::new(Bytes::new()));
+        let h = req.headers_mut();
+        h.insert("Host", HeaderValue::from_str(host).unwrap());
+        h.insert("Connection", HeaderValue::from_static("Upgrade"));
+        h.insert("Upgrade", HeaderValue::from_static("websocket"));
+        if let Some(origin) = origin {
+            h.insert("Origin", HeaderValue::from_str(origin).unwrap());
+        }
+        req
+    }
+
+    #[test]
+    fn authenticated_upgrade_requires_a_same_origin_or_absent_origin() {
+        let gate = basic_gate();
+        for (host, origin) in [
+            ("service.test", None),
+            ("service.test", Some("https://service.test")),
+            ("service.test:443", Some("https://SERVICE.test")),
+            ("service.test:8443", Some("https://service.test:8443")),
+            ("192.168.1.5:5959", Some("http://192.168.1.5:5959")),
+            ("[fd00::1]:4443", Some("https://[fd00::1]:4443")),
+        ] {
+            let mut req = upgrade_request(host, origin);
+            apply_request_policy(&mut req, None, ForwardedHeaders::Ssl, Some(&gate))
+                .unwrap_or_else(|_| panic!("{host} {origin:?} refused"));
+        }
+        for (host, origin) in [
+            ("service.test", "https://attacker.test"),
+            ("service.test:8443", "https://service.test"),
+            ("192.168.1.5:5959", "http://192.168.1.5:8080"),
+            ("service.test", "null"),
+            ("[fd00::1]:4443", "https://[fd00::2]:4443"),
+        ] {
+            let mut req = upgrade_request(host, Some(origin));
+            let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Ssl, Some(&gate))
+                .unwrap_err();
+            assert_eq!(
+                resp.status(),
+                http::StatusCode::FORBIDDEN,
+                "{host} {origin}"
+            );
+        }
+    }
+
+    #[test]
+    fn origin_is_not_checked_without_a_gate_or_an_upgrade() {
+        let mut req = upgrade_request("service.test", Some("https://attacker.test"));
+        apply_request_policy(&mut req, None, ForwardedHeaders::Ssl, None).unwrap();
+
+        let mut req = upgrade_request("service.test", Some("https://attacker.test"));
+        req.headers_mut().remove("Connection");
+        req.headers_mut().remove("Upgrade");
+        apply_request_policy(&mut req, None, ForwardedHeaders::Ssl, Some(&basic_gate())).unwrap();
     }
 
     #[test]
