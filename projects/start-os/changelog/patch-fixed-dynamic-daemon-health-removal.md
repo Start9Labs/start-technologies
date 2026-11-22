@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Add the `clear-health` service effect so services can remove stale health check entries without restarting.
+- The Dashboard removes health checks for processes a service removes while running.

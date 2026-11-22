@@ -1,3 +1,4 @@
+import { getEventListeners } from 'node:events'
 import * as T from '@start9labs/start-core/types'
 import { Daemons } from '../mainFn/Daemons'
 import { onceTrigger } from '../trigger'
@@ -301,35 +302,82 @@ describe('Daemons.dynamic health clearing', () => {
     }
   })
 
-  it('logs a rejecting clearHealth without blocking new entries from starting', async () => {
-    const failure = new Error('clear-health failed')
-    const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+  it.each(['rejecting', 'missing'] as const)(
+    'logs a %s clearHealth without blocking new entries from starting',
+    async mode => {
+      const failure = new Error('clear-health failed')
+      const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const rt = makeRuntime()
+      if (mode === 'missing') {
+        delete (rt.effects as Partial<T.Effects>).clearHealth
+      } else {
+        rt.clearHealth.mockRejectedValueOnce(failure)
+      }
+      let workers: Array<'worker-a' | 'worker-b'> = ['worker-a']
+      const reconciler = Daemons.dynamic<Manifest>(rt.effects, ({ effects }) =>
+        Daemons.of<Manifest>({ effects })
+          .addDaemon('worker-a', () =>
+            makeWorker(rt.events, workers, 'worker-a'),
+          )
+          .addDaemon('worker-b', () =>
+            makeWorker(rt.events, workers, 'worker-b'),
+          ),
+      )
+
+      const built = await reconciler.build()
+      try {
+        await settle()
+        workers = ['worker-b']
+        reconciler.scheduleRerun()
+        await settle()
+
+        if (mode === 'rejecting') {
+          expect(rt.clearHealth).toHaveBeenCalledWith({ only: ['worker-a'] })
+        } else {
+          expect(rt.clearHealth).not.toHaveBeenCalled()
+        }
+        expect(logged).toHaveBeenCalledWith(
+          mode === 'missing' ? expect.any(TypeError) : failure,
+        )
+        expect(rt.events).toContain('exec:start:worker-b')
+        expect(rt.health.get('worker-b')?.result).toBe('success')
+      } finally {
+        await built.term()
+        rt.close()
+        logged.mockRestore()
+      }
+    },
+  )
+
+  it('releases teardown listeners after each completed health drain', async () => {
     const rt = makeRuntime()
-    rt.clearHealth.mockRejectedValueOnce(failure)
-    let workers: Array<'worker-a' | 'worker-b'> = ['worker-a']
+    let revision = 0
     const reconciler = Daemons.dynamic<Manifest>(rt.effects, ({ effects }) =>
-      Daemons.of<Manifest>({ effects })
-        .addDaemon('worker-a', () => makeWorker(rt.events, workers, 'worker-a'))
-        .addDaemon('worker-b', () =>
-          makeWorker(rt.events, workers, 'worker-b'),
-        ),
+      Daemons.of<Manifest>({ effects }).addDaemon('worker', {
+        subcontainer: null,
+        exec: blockingExec(rt.events, `worker-${revision}`),
+        uses: revision,
+        ready: ready('Worker'),
+        requires: [],
+      }),
     )
+    const signal = (
+      reconciler as unknown as { termination: AbortController }
+    ).termination.signal
 
     const built = await reconciler.build()
     try {
       await settle()
-      workers = ['worker-b']
-      reconciler.scheduleRerun()
-      await settle()
+      for (revision = 1; revision <= 20; revision++) {
+        reconciler.scheduleRerun()
+        await settle()
 
-      expect(rt.clearHealth).toHaveBeenCalledWith({ only: ['worker-a'] })
-      expect(logged).toHaveBeenCalledWith(failure)
-      expect(rt.events).toContain('exec:start:worker-b')
-      expect(rt.health.get('worker-b')?.result).toBe('success')
+        expect(rt.events).toContain(`exec:start:worker-${revision}`)
+        expect(getEventListeners(signal, 'abort')).toHaveLength(0)
+      }
     } finally {
       await built.term()
       rt.close()
-      logged.mockRestore()
     }
   })
 
@@ -468,7 +516,6 @@ describe('Daemons.dynamic health clearing', () => {
       reconciler.scheduleRerun()
       await settle()
 
-      // clearHealth must wait until the in-flight setHealth settles
       expect(rt.clearHealth).not.toHaveBeenCalled()
 
       releaseParkedWrite()
@@ -557,10 +604,8 @@ describe('Daemons.dynamic health clearing', () => {
       reconciler.scheduleRerun()
       await settle()
 
-      // Reconcile is now waiting on waitForHealthWrites()
       expect(rt.clearHealth).not.toHaveBeenCalled()
 
-      // Whole-service term() must unblock reconcile and resolve promptly
       await built.term()
 
       expect(rt.events).toContain('exec:stop:worker-a')
@@ -639,9 +684,6 @@ describe('Daemons.dynamic health clearing', () => {
       reconciler.scheduleRerun()
       await settle()
 
-      // Same-ID restart keeps display, so clearHealth is not called, and the
-      // replacement daemon must wait until the stopped instance's in-flight
-      // setHealth finishes before starting or publishing new health.
       expect(rt.clearHealth).not.toHaveBeenCalled()
       expect(rt.events).not.toContain('exec:start:worker-a:rev2')
       expect(rt.events).not.toContain('setHealth:worker-a:starting')
