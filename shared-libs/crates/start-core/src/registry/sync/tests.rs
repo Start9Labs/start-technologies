@@ -13,6 +13,7 @@ use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::Guid;
 use crate::util::future::NonDetachingJoinHandle;
 
+mod default_locale;
 mod error_details;
 mod live;
 mod live_legacy;
@@ -32,6 +33,12 @@ fn device() -> DeviceInfo {
         },
         hardware: None,
     }
+}
+
+fn select(db: &DatabaseModel, registry: &Url, params: Value) -> Result<Value, Error> {
+    let mut params: GetPackageParams = from_value(params)?;
+    params.device_info = Some(device());
+    synced_packages(db, registry, &params)
 }
 
 fn database() -> DatabaseModel {
@@ -352,8 +359,8 @@ fn package_and_signer_changes_publish_atomically_without_granting_trust() {
     assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Test Registry"));
     assert!(
-        cache.packages["test"]
-            .best
+        cache.catalog["test"]
+            .versions
             .contains_key(&"2.0.0:0".parse::<crate::util::VersionString>().unwrap())
     );
     let key = db
@@ -396,7 +403,7 @@ fn package_and_signer_changes_publish_atomically_without_granting_trust() {
 }
 
 #[test]
-fn cached_package_queries_keep_target_and_source_selection_while_offline() {
+fn synced_package_queries_keep_target_and_source_selection_while_offline() {
     let mut db = database();
     publish_snapshot(
         &mut db,
@@ -412,14 +419,11 @@ fn cached_package_queries_keep_target_and_source_selection_while_offline() {
         None,
     )
     .unwrap();
-    let result = cached_response(
+    let result = select(
         &db,
         &url(),
-        "package.get",
-        &json!({"id":"test", "sourceVersion":"1.0.0:0", "otherVersions":"short"}),
-        Some(&device()),
+        json!({"id":"test", "sourceVersion":"1.0.0:0", "otherVersions":"short"}),
     )
-    .unwrap()
     .unwrap();
     assert_eq!(
         result["best"]
@@ -429,32 +433,27 @@ fn cached_package_queries_keep_target_and_source_selection_while_offline() {
             .collect::<Vec<_>>(),
         vec!["1.0.0:0"]
     );
-    let result = cached_response(
+    let result = select(
         &db,
         &url(),
-        "package.get",
-        &json!({"id":"test", "targetVersion":"=1.0.0:0"}),
-        Some(&device()),
+        json!({"id":"test", "targetVersion":"=1.0.0:0"}),
     )
-    .unwrap()
     .unwrap();
     assert!(result["best"]["1.0.0:0"].is_object());
-    assert!(
-        cached_response(
-            &db,
-            &"https://unconnected.test".parse().unwrap(),
-            "info",
-            &json!({}),
-            None
-        )
-        .unwrap()
-        .is_none()
-    );
+    assert!(select(&db, &"https://unconnected.test".parse().unwrap(), json!({})).is_err());
 }
 
 #[test]
-fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_queries() {
+fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
     let mut db = database();
+    for subscription in [Subscription::Index(url()), Subscription::Os(url())] {
+        set_status(&mut db, &subscription, RegistryStatus::Connecting, None).unwrap();
+    }
+    assert_eq!(
+        select(&db, &url(), json!({"id":"test"})).unwrap()["best"],
+        json!({})
+    );
+    assert!(synced_os_versions(&db).unwrap().is_empty());
     set_status(
         &mut db,
         &Subscription::Index(url()),
@@ -488,16 +487,16 @@ fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_q
             .status,
         RegistryStatus::Error
     );
-    let result = cached_response(
-        &db,
-        &url(),
-        "package.get",
-        &json!({"id":"test"}),
-        Some(&device()),
+    assert!(select(&db, &url(), json!({"id":"test"})).is_err());
+    assert!(synced_os_versions(&db).is_err());
+    publish_snapshot(
+        &mut db,
+        &Subscription::Os(url()),
+        &to_value(&OsIndex::default()).unwrap(),
+        &device(),
     )
-    .unwrap()
     .unwrap();
-    assert_eq!(result["best"], json!({}));
+    assert!(synced_os_versions(&db).unwrap().is_empty());
     publish_snapshot(
         &mut db,
         &Subscription::Index(url()),
@@ -516,7 +515,7 @@ fn first_connection_failure_publishes_availability_and_does_not_fetch_on_cache_q
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connecting);
     assert_eq!(cache.info.name.as_deref(), Some("Test Registry"));
-    assert!(!cache.packages.is_empty());
+    assert!(!cache.catalog.is_empty());
 }
 
 #[test]
@@ -537,7 +536,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
             .de()
             .unwrap();
         assert_eq!(cache.status, status);
-        assert!(cache.packages.is_empty());
+        assert!(cache.catalog.is_empty());
     }
     publish_snapshot(
         &mut db,
@@ -554,7 +553,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
         .de()
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connected);
-    assert!(cache.packages.is_empty());
+    assert!(cache.catalog.is_empty());
     publish_snapshot(
         &mut db,
         &subscription,
@@ -569,7 +568,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
         .unwrap()
         .de()
         .unwrap()
-        .packages;
+        .catalog;
     assert!(!packages.is_empty());
     for status in [RegistryStatus::Error, RegistryStatus::Connecting] {
         set_status(&mut db, &subscription, status, None).unwrap();
@@ -582,7 +581,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
             .unwrap();
         assert_eq!(cache.status, status);
         assert_eq!(
-            to_value(&cache.packages).unwrap(),
+            to_value(&cache.catalog).unwrap(),
             to_value(&packages).unwrap()
         );
     }
@@ -701,6 +700,46 @@ fn os_cache_excludes_other_platforms_and_incompatible_sources() {
             .0
             .is_empty()
     );
+    assert_eq!(
+        synced_os_versions(&db).unwrap().keys().collect::<Vec<_>>(),
+        cache.versions.keys().collect::<Vec<_>>()
+    );
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_os_registry_mut()
+        .ser(&"https://other.test".parse().unwrap())
+        .unwrap();
+    assert!(synced_os_versions(&db).unwrap().is_empty());
+    db.as_public_mut()
+        .as_server_info_mut()
+        .as_os_registry_mut()
+        .ser(&url())
+        .unwrap();
+    for status in [RegistryStatus::Connecting, RegistryStatus::Error] {
+        set_status(&mut db, &Subscription::Os(url()), status, None).unwrap();
+        assert_eq!(synced_os_versions(&db).unwrap().len(), 1);
+    }
+    let full = |os: OsIndex| FullIndex {
+        os,
+        ..super::tests::index()
+    };
+    for (os, publishes) in [(index, true), (OsIndex::default(), false)] {
+        publish_snapshot(
+            &mut db,
+            &Subscription::Index(url()),
+            &to_value(&full(os)).unwrap(),
+            &device(),
+        )
+        .unwrap();
+        let cache = db
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .de()
+            .unwrap();
+        assert_eq!(cache.publishes_os_updates, publishes);
+    }
 }
 
 #[tokio::test]
@@ -806,4 +845,96 @@ async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
             Some("Renamed")
         );
     }
+}
+
+fn install(db: &mut DatabaseModel, version: &str) {
+    db.as_public_mut()
+        .as_package_data_mut()
+        .as_value_mut()
+        .as_object_mut()
+        .unwrap()
+        .insert(
+            "test".into(),
+            json!({ "stateInfo": { "state": "installed", "manifest": {
+                "id": "test", "title": "Test", "version": version
+            }}}),
+        );
+}
+
+fn update_target(db: &DatabaseModel) -> Option<String> {
+    db.as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap()
+        .catalog
+        .get(&"test".parse::<crate::PackageId>().unwrap())
+        .and_then(|package| package.update_target.as_ref())
+        .map(ToString::to_string)
+}
+
+#[test]
+fn update_targets_follow_the_installed_version_through_migration_and_os_ranges() {
+    let mut db = database();
+    let mut index = index();
+    let mut newer_os: crate::registry::package::index::PackageVersionInfo = serde_json::from_value(
+        serde_json::to_value(
+            &index.package.packages[&"test".parse::<crate::PackageId>().unwrap()].versions
+                [&"2.0.0:0".parse::<crate::util::VersionString>().unwrap()],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    newer_os.metadata.os_version = "0.5.0".parse().unwrap();
+    newer_os.source_version = None;
+    index
+        .package
+        .packages
+        .get_mut(&"test".parse::<crate::PackageId>().unwrap())
+        .unwrap()
+        .versions
+        .insert("3.0.0:0".parse().unwrap(), newer_os);
+    let mut device = device();
+    device.os.compat = "<=0.4.0.5".parse().unwrap();
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&index).unwrap(),
+        &device,
+    )
+    .unwrap();
+    let cache = db
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    assert!(
+        cache.catalog["test"]
+            .versions
+            .contains_key(&"3.0.0:0".parse::<crate::util::VersionString>().unwrap())
+    );
+    let mut strict: GetPackageParams =
+        from_value(json!({"id":"test", "targetVersion":"=3.0.0:0"})).unwrap();
+    strict.device_info = Some(device.clone());
+    let listed = synced_packages(&db, &url(), &strict).unwrap();
+    assert!(listed["best"]["3.0.0:0"].is_null());
+    for (installed, target) in [
+        ("0.9.0:0", Some("1.0.0:0")),
+        ("1.0.0:0", None),
+        ("1.6.0:0", Some("2.0.0:0")),
+        ("#knots:1.6.0:0", None),
+    ] {
+        install(&mut db, installed);
+        refresh_update_targets(&mut db, &device).unwrap();
+        assert_eq!(update_target(&db).as_deref(), target, "{installed}");
+    }
+    db.as_public_mut()
+        .as_package_data_mut()
+        .ser(&Default::default())
+        .unwrap();
+    refresh_update_targets(&mut db, &device).unwrap();
+    assert_eq!(update_target(&db), None);
 }

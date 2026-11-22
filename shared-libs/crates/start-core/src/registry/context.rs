@@ -21,8 +21,8 @@ use tokio::sync::broadcast::Sender;
 use tracing::instrument;
 use url::Url;
 
+use crate::context::CliContext;
 use crate::context::config::{CONFIG_PATH, ContextConfig};
-use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
 use crate::middleware::auth::signature::{
@@ -31,7 +31,7 @@ use crate::middleware::auth::signature::{
 };
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
-use crate::registry::device_info::{DEVICE_INFO_HEADER, DeviceInfo};
+use crate::registry::locales::IndexLocaleTracker;
 use crate::registry::migrations::run_migrations;
 use crate::registry::mirror::IndexMirrors;
 use crate::registry::package::icon::{icons_dir, referenced_icons, sweep_icons};
@@ -111,6 +111,7 @@ pub struct RegistryContextSeed {
     pub listen: SocketAddr,
     pub db: TypedPatchDb<RegistryDatabase>,
     pub index_mirrors: IndexMirrors,
+    pub index_locales: IndexLocaleTracker,
     pub datadir: PathBuf,
     pub startwrt: bool,
     pub rpc_continuations: RpcContinuations,
@@ -228,12 +229,14 @@ impl RegistryContext {
                 ))
             })
             .transpose()?;
+        let index_locales = IndexLocaleTracker::spawn(db.clone()).await?;
         Ok(Self(
             Arc::new(RegistryContextSeed {
                 hostnames: config.registry_hostname.clone(),
                 listen: config.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN),
                 db,
                 index_mirrors: IndexMirrors::default(),
+                index_locales,
                 datadir,
                 startwrt: config.startwrt,
                 rpc_continuations: RpcContinuations::new(),
@@ -276,15 +279,6 @@ impl Deref for RegistryContext {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, VisitFields, Parser)]
-#[group(skip)]
-pub struct RegistryUrlParams {
-    #[arg(help = "help.arg.registry-url")]
-    pub registry: Url,
-}
-
-rpc_toolkit::reflect_ts!(RegistryUrlParams);
-
 pub(crate) async fn call_cli(
     ctx: &CliContext,
     url: Url,
@@ -306,6 +300,13 @@ pub(crate) async fn call_cli(
                 headers,
             )
             .await?;
+        if connection.peer.temporary {
+            return Err(Error::new(
+                eyre!("{}", t!("middleware.auth.invalid-request-signature")),
+                ErrorKind::InvalidSignature,
+            )
+            .into());
+        }
         for warning in super::cli_identity::observe(
             &ctx.id_key_path.with_file_name("registry-identities"),
             &url,
@@ -447,75 +448,6 @@ pub(super) async fn call_legacy(
     .with_kind(ErrorKind::Network)?
 }
 
-impl CallRemote<RegistryContext, RegistryUrlParams> for RpcContext {
-    async fn call_remote(
-        &self,
-        mut method: &str,
-        metadata: OrdMap<&'static str, Value>,
-        mut params: Value,
-        RegistryUrlParams { registry }: RegistryUrlParams,
-    ) -> Result<Value, RpcError> {
-        super::compat::pem_wire(&mut params);
-        let mut headers = HeaderMap::new();
-        let mut device_info = None;
-        if metadata
-            .get("get_device_info")
-            .and_then(|m| m.as_bool())
-            .unwrap_or(false)
-        {
-            let di = DeviceInfo::load(self).await?;
-            headers.insert(DEVICE_INFO_HEADER, di.to_header_value());
-            device_info = Some(di);
-        }
-
-        method = method.strip_prefix("registry.").unwrap_or(method);
-        if let Some(result) =
-            super::sync::cached_call(self, &registry, method, &params, device_info.as_ref()).await?
-        {
-            return Ok(result);
-        }
-
-        let is_onion = registry.host_str().map_or(false, |h| h.ends_with(".onion"));
-        let mut res = match call(
-            &self.client,
-            &self.signing_key()?,
-            &registry,
-            headers,
-            method,
-            params.clone(),
-        )
-        .await
-        {
-            Ok(res) => res,
-            Err(e) if is_onion => return Err(onion_tor_hint(self, e).await),
-            Err(e) => return Err(e),
-        };
-
-        if let Some(device_info) = device_info {
-            device_info.filter_for_hardware(method, params, &mut res)?;
-        }
-
-        Ok(res)
-    }
-}
-
-/// Onion registries require the Tor service's SOCKS proxy.
-async fn onion_tor_hint(ctx: &RpcContext, original: RpcError) -> RpcError {
-    let running = async {
-        let tor_id = "tor".parse::<crate::PackageId>().ok()?;
-        let peek = ctx.db.peek().await;
-        let entry = peek.as_public().as_package_data().as_idx(&tor_id)?;
-        Some(entry.as_status_info().as_started().de().ok()?.is_some())
-    }
-    .await;
-    let msg = match running {
-        Some(true) => return original,
-        Some(false) => t!("registry.context.onion-tor-not-running"),
-        None => t!("registry.context.onion-tor-not-installed"),
-    };
-    Error::new(eyre!("{msg}"), ErrorKind::Network).into()
-}
-
 #[derive(Deserialize)]
 pub struct RegistryAuthMetadata {
     #[serde(default)]
@@ -550,8 +482,8 @@ impl LocalAuthContext for RegistryContext {
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
 }
 impl SignatureAuthContext for RegistryContext {
-    fn server_identity(&self) -> Result<crate::sign::Signer, Error> {
-        RegistryContext::server_identity(self)
+    fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
+        RegistryContext::server_identity(self).map(Into::into)
     }
     fn replay_check(&self) -> crate::middleware::auth::signature::RequestReplayCheck {
         RegistryContext::replay_check(self)
@@ -643,6 +575,37 @@ impl SignatureAuthorizationContext for RegistryContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_registry_methods_do_not_require_authentication() {
+        use rpc_toolkit::HandlerFor;
+
+        let registry = crate::registry::registry_api::<RegistryContext>();
+        let public: [&[&str]; 13] = [
+            &["index"],
+            &["info"],
+            &["db", "subscribe"],
+            &["package", "index"],
+            &["package", "get"],
+            &["package", "category", "list"],
+            &["package", "signer", "list"],
+            &["os", "index"],
+            &["os", "version", "get"],
+            &["os", "version", "signer", "list"],
+            &["os", "asset", "get", "iso"],
+            &["os", "asset", "get", "img"],
+            &["os", "asset", "get", "squashfs"],
+        ];
+        for method in public {
+            assert_eq!(
+                registry
+                    .metadata(method.iter().copied().collect())
+                    .get("authenticated"),
+                Some(&Value::Bool(false)),
+                "{method:?}"
+            );
+        }
+    }
 
     #[test]
     fn startup_preserves_mirror_signatures_and_normalizes_each_return_to_authority() {
@@ -739,12 +702,14 @@ pub(crate) async fn test_context_for_hosts(
         },
     );
     db.put(&ROOT, &database).await.unwrap();
+    let index_locales = IndexLocaleTracker::spawn(db.clone()).await.unwrap();
     RegistryContext(
         Arc::new(RegistryContextSeed {
             hostnames,
             listen: "127.0.0.1:0".parse().unwrap(),
             db,
             index_mirrors: Default::default(),
+            index_locales,
             datadir,
             startwrt: false,
             rpc_continuations: RpcContinuations::new(),

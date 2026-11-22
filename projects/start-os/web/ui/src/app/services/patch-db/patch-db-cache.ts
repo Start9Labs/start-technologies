@@ -5,30 +5,38 @@ import { DataModel } from './data-model'
 
 const VALUES = 'values'
 const META = 'meta'
-const REVISION = 'revision'
+const CURSOR = 'cursor'
+
+type Cursor = { id: number; epoch: string | null }
 
 @Service()
 export class PatchDbCache {
   private readonly win = inject(WA_WINDOW)
   private db?: Promise<IDBDatabase>
-  private saved?: Dump<DataModel>
+  private saved?: Cursor & { value: DataModel }
+  epoch: string | null = null
 
   async read(): Promise<Dump<DataModel>> {
     try {
-      const { keys, values, id } = await this.transaction('readonly', tx => ({
-        keys: tx.objectStore(VALUES).getAllKeys(),
-        values: tx.objectStore(VALUES).getAll(),
-        id: tx.objectStore(META).get(REVISION),
-      }))
-      if (!id.result) {
+      const { keys, values, cursor } = await this.transaction(
+        'readonly',
+        tx => ({
+          keys: tx.objectStore(VALUES).getAllKeys(),
+          values: tx.objectStore(VALUES).getAll(),
+          cursor: tx.objectStore(META).get(CURSOR),
+        }),
+      )
+      const { id, epoch } = (cursor.result ?? {}) as Partial<Cursor>
+      if (!id) {
         this.saved = undefined
         return { id: 0, value: {} as DataModel }
       }
       const value = Object.fromEntries(
         keys.result.map((key, i) => [key, values.result[i]]),
       ) as DataModel
-      this.saved = { id: id.result, value }
-      return { id: id.result, value: { ...value } }
+      this.epoch = epoch ?? null
+      this.saved = { id, epoch: this.epoch, value }
+      return { id, value: { ...value } }
     } catch (e) {
       console.error(e)
       this.saved = undefined
@@ -38,15 +46,18 @@ export class PatchDbCache {
 
   /** Stored revisions describe complete snapshots across browser tabs. */
   async write({ id, value }: Dump<DataModel>): Promise<void> {
+    const { epoch } = this
     const previous = this.saved
-    this.saved = { id, value: { ...value } }
+    this.saved = { id, epoch, value: { ...value } }
     try {
       await this.transaction('readwrite', tx => {
         const meta = tx.objectStore(META)
-        const revision = meta.get(REVISION)
-        revision.onsuccess = () => {
+        const stored = meta.get(CURSOR)
+        stored.onsuccess = () => {
           const baseline =
-            previous && revision.result === previous.id
+            previous &&
+            stored.result?.id === previous.id &&
+            stored.result?.epoch === previous.epoch
               ? previous.value
               : undefined
           const store = tx.objectStore(VALUES)
@@ -60,20 +71,21 @@ export class PatchDbCache {
               if (!(key in value)) store.delete(key)
             })
           }
-          meta.put(id, REVISION)
+          meta.put({ id, epoch }, CURSOR)
         }
       })
     } catch (e) {
       console.error(e)
       this.saved = undefined
       await this.transaction('readwrite', tx =>
-        tx.objectStore(META).delete(REVISION),
+        tx.objectStore(META).delete(CURSOR),
       ).catch(console.error)
     }
   }
 
   async clear(): Promise<void> {
     this.saved = undefined
+    this.epoch = null
     await this.transaction('readwrite', tx => {
       tx.objectStore(VALUES).clear()
       tx.objectStore(META).clear()

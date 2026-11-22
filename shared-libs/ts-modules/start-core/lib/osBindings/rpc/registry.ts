@@ -148,6 +148,20 @@ export type Guid = z.output<typeof schemas.Guid>
 export type GuidInput = z.input<typeof schemas.Guid>
 export type HealthCheckId = z.output<typeof schemas.HealthCheckId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
+
+/**
+ * An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.
+ *
+ * Ciphertext has the plaintext's length, and any byte range decrypts on its own.
+ */
+export type KeyStreamInfo = z.output<typeof schemas.KeyStreamInfo>
+
+/**
+ * An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.
+ *
+ * Ciphertext has the plaintext's length, and any byte range decrypts on its own.
+ */
+export type KeyStreamInfoInput = z.input<typeof schemas.KeyStreamInfo>
 export type ListVersionSignersParamsInput = z.input<
   typeof schemas.ListVersionSignersParams
 >
@@ -194,6 +208,9 @@ export type RemoveVersionParamsInput = z.input<
  * JSON Patch 'replace' operation representation
  */
 export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
+export type SetDefaultLocaleParamsInput = z.input<
+  typeof schemas.SetDefaultLocaleParams
+>
 export type SetNameParamsInput = z.input<typeof schemas.SetNameParams>
 
 /**
@@ -214,6 +231,7 @@ export type AddPackageSignerParamsInput = z.input<
 export type AddPackageToCategoryParamsInput = z.input<
   typeof schemas.AddPackageToCategoryParams
 >
+export type AddReaderParamsInput = z.input<typeof schemas.AddReaderParams>
 export type AddSignerParamsInput = z.input<typeof schemas.AddSignerParams>
 export type AddVersionParamsInput = z.input<typeof schemas.AddVersionParams>
 export type ApplyWithPathParamsInput = z.input<
@@ -225,14 +243,15 @@ export type CurrentDependencyKind = z.output<
 >
 export type Description = z.output<typeof schemas.Description>
 export type DownloadsResponse = z.output<typeof schemas.DownloadsResponse>
+export type EditReaderParamsInput = z.input<typeof schemas.EditReaderParams>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
 
 /**
  * Edits an existing release; omitted fields, assets and authorized signers remain unchanged.
  */
 export type EditVersionParamsInput = z.input<typeof schemas.EditVersionParams>
-export type GetPackageAccessParamsInput = z.input<
-  typeof schemas.GetPackageAccessParams
+export type ExportPackageVersionParamsInput = z.input<
+  typeof schemas.ExportPackageVersionParams
 >
 export type GetPackageParamsInput = z.input<typeof schemas.GetPackageParams>
 export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
@@ -241,22 +260,23 @@ export type ListPackageSignersParamsInput = z.input<
 >
 export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
 export type OsVersionInfo = z.output<typeof schemas.OsVersionInfo>
-export type PackageAccessControl = z.output<typeof schemas.PackageAccessControl>
 
 /**
  * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
  */
 export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
-export type PackageReaderParamsInput = z.input<
-  typeof schemas.PackageReaderParams
->
 
 /**
  * JSON Patch single patch operation
  */
 export type PatchOperation = z.output<typeof schemas.PatchOperation>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
+
+/**
+ * A key allowed to read the private s9pks that list it.
+ */
+export type ReaderKey = z.output<typeof schemas.ReaderKey>
 export type RemoveAdminParamsInput = z.input<typeof schemas.RemoveAdminParams>
 export type RemoveMirrorParamsInput = z.input<typeof schemas.RemoveMirrorParams>
 export type RemovePackageFromCategoryParamsInput = z.input<
@@ -268,14 +288,12 @@ export type RemovePackageParamsInput = z.input<
 export type RemovePackageSignerParamsInput = z.input<
   typeof schemas.RemovePackageSignerParams
 >
+export type RemoveReaderParamsInput = z.input<typeof schemas.RemoveReaderParams>
 export type RemoveSignerParamsInput = z.input<typeof schemas.RemoveSignerParams>
 export type SetDescriptionParamsInput = z.input<
   typeof schemas.SetDescriptionParams
 >
 export type SetIconParamsInput = z.input<typeof schemas.SetIconParams>
-export type SetPackagePrivateParamsInput = z.input<
-  typeof schemas.SetPackagePrivateParams
->
 export type SetTrustSignersParamsInput = z.input<
   typeof schemas.SetTrustSignersParams
 >
@@ -291,7 +309,6 @@ export type VersionSignerParamsInput = z.input<
 >
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
-export type PackageAccess = z.output<typeof schemas.PackageAccess>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 
 /**
@@ -316,6 +333,11 @@ export type GetPackageResponseFull = z.output<
   typeof schemas.GetPackageResponseFull
 >
 export type PackageInfo = z.output<typeof schemas.PackageInfo>
+
+/**
+ * A package version as the requester sees it, for promotion to another registry.
+ */
+export type PackageVersionExport = z.output<typeof schemas.PackageVersionExport>
 export type Revision = z.output<typeof schemas.Revision>
 export type GetPackageResult = z.output<typeof schemas.GetPackageResult>
 export type PackageIndex = z.output<typeof schemas.PackageIndex>

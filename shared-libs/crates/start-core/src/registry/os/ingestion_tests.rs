@@ -80,6 +80,8 @@ async fn os_promotion_preserves_all_asset_signatures_and_destination_endorsement
                     signature(&second, &commitment),
                 ),
             ]),
+            private: None,
+            readers: Default::default(),
         };
     let version: exver::Version = "0.4.0.5".parse().unwrap();
     let info = OsVersionInfo {
@@ -414,7 +416,7 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
             &ctx.index_mirrors,
             &ctx.db,
             None,
-            wire,
+            wire.into(),
             &ctx.datadir,
         )
         .await
@@ -487,6 +489,8 @@ async fn legacy_devices_can_discover_headline_free_releases() {
                     urls: vec!["https://example.com/os.squashfs".parse().unwrap()],
                     commitment: commitment(),
                     signatures: [(key.clone(), signature(&uploader, &commitment()))].into(),
+                    private: None,
+                    readers: Default::default(),
                 },
             )]
             .into(),

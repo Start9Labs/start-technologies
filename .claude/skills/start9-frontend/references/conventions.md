@@ -9,8 +9,9 @@
 - `shared` hosts the dictionaries for ui/setup-wizard/brochure; start-wrt, start-tunnel, and
   support-server's portal keep local copies of the same machinery (consolidation into shared
   is planned — don't grow them further apart). A shared component translates through the shared
-  `I18N` token, not the app's; start-wrt fills it in `i18nService.setLangLocal`, and an app
-  that does not renders shared components in English. ops-server and start9-store are English-only:
+  `I18N` token; start-wrt fills it with the shared dictionaries in `i18nService.setLangLocal`,
+  and start-tunnel fills it with its own and provides their English-to-ID map as `I18N_IDS`,
+  so its dictionaries carry every shared string it renders. ops-server and start9-store are English-only:
   hardcode strings there.
 - Shared-lib services translate centrally: `DialogService`/`TaskService` accept `i18nKey`-typed
   labels, so callers pass English keys and never pre-translate.
@@ -33,7 +34,7 @@
   `@angular/core`, members alphabetized (normalized by hand in review).
 - Umbrella Taiga imports over granular: `TuiDataList, TuiDropdown` — not
   `TuiDataListComponent, TuiDropdownDirective, TuiDropdownOpen, …`.
-- Comments explain the non-obvious present — measured values (`// 1120 = 938px of buttons + …`),
-  deviations (`// Deliberately NOT tui-root._mobile`), honest placeholders. Attributed TODOs
-  mark known debt (`// TODO @Alex refactor this to declarative validation`); divergence from
-  canon gets a named owner, not silence.
+- Comments follow the repo's comment rules (`start-technologies/AGENTS.md` § Code style): none
+  unless a fact can't be recovered from the code, such as a measured value
+  (`// 1120 = 938px of buttons + …`) or a deliberate divergence
+  (`// Deliberately NOT tui-root._mobile`). Known debt goes in an issue, not a TODO.

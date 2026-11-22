@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core'
 import { RPC, RpcClient } from '@start9labs/start-core'
-import { legacyDatabaseSubscription } from '@start9labs/shared'
-import { Update, Revision } from 'patch-db-client'
+import { DatabaseUpdate, legacyDatabaseSubscription } from '@start9labs/shared'
+import { Revision } from 'patch-db-client'
 import { Observable } from 'rxjs'
 import { TunnelData } from '../patch-db/data-model'
 
@@ -21,7 +21,7 @@ export abstract class ApiService {
   /** The server's RPC methods, as generated from its bindings. */
   abstract readonly rpc: ApiClient
 
-  watchDb$(): Observable<Update<TunnelData>> {
+  watchDb$(): Observable<DatabaseUpdate<TunnelData>> {
     return legacyDatabaseSubscription<TunnelData>(
       () => this.rpc.db.subscribe({}),
       guid => this.openWebsocket$<Revision>(guid),
@@ -29,4 +29,7 @@ export abstract class ApiService {
   }
 
   abstract openWebsocket$<T>(guid: string): Observable<T>
+
+  /** Rejects while this browser's key is not enrolled, without signing out. */
+  abstract checkEnrollment(): Promise<unknown>
 }

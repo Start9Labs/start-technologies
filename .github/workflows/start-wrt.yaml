@@ -18,36 +18,10 @@ on:
         type: boolean
         description: Replace S3 objects that already exist for this commit
         default: false
-  # `paths:` below mirror projects/start-wrt/build.mk's build inputs — keep
-  # both in sync (see root AGENTS.md "Coupled changes"). The web is part of the
-  # root Angular workspace, so the workspace inputs (shared-libs/ts-modules/**,
-  # angular.json, package.json, package-lock.json, tsconfig.json) are listed too.
   push:
     branches:
       - master
       - integration/*
-    paths:
-      - 'projects/start-wrt/**'
-      - 'shared-libs/crates/**'
-      - 'shared-libs/ts-modules/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'angular.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'tsconfig.lib.json'
-      - 'build/**'
-      - '.github/workflows/start-wrt.yaml'
-      - '.github/actions/setup-build/**'
-      # Doc-only edits under the allowlisted project trees (e.g.
-      # projects/start-wrt/docs/**) shouldn't trigger a build.
-      - '!**/*.md'
-      - 'projects/start-wrt/release-notes/**'
-      - 'projects/start-wrt/changelog/**'
-      - 'scripts/changelog*.mjs'
-      - 'scripts/manage-release.sh'
-      - '.prettierrc.json'
   pull_request:
     # The jobs below skip drafts, and `ready_for_review` is not a default
     # activity type, so without it a draft marked ready is never checked.
@@ -55,23 +29,6 @@ on:
     branches:
       - master
       - integration/*
-    paths:
-      - 'projects/start-wrt/**'
-      - 'shared-libs/crates/**'
-      - 'shared-libs/ts-modules/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'angular.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'tsconfig.lib.json'
-      - 'build/**'
-      - '.github/workflows/start-wrt.yaml'
-      - '.github/actions/setup-build/**'
-      # Doc-only edits under the allowlisted project trees (e.g.
-      # projects/start-wrt/docs/**) shouldn't trigger a build.
-      - '!**/*.md'
 
 # The group is scoped by event so a master push can't cancel an in-flight
 # dispatched release build. Only pull requests cancel: a push to master
@@ -83,19 +40,47 @@ concurrency:
 
 env:
   NODEJS_VERSION: '24.17.0'
+  # Compiling the riscv64 binary outgrows the RAM of runners without swap.
+  BUILD_SWAP_SIZE: 8G
 
 jobs:
+  changes:
+    name: Detect StartWRT changes
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      start-wrt: ${{ steps.classify.outputs.start-wrt }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          ./.github/scripts/classify-event.sh start-wrt.yaml | tee -a "$GITHUB_OUTPUT"
+
   # Fast path: cross-compile the riscv64 binary (embeds the web UI). Does NOT
   # need the OpenWrt tree.
   compile:
     name: Build riscv64 binary
-    if: github.event.pull_request.draft != true
+    needs: changes
+    if: needs.changes.outputs.start-wrt == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
+          swap-size: ${{ env.BUILD_SWAP_SIZE }}
 
       - name: Make start-wrt
         run: make start-wrt
@@ -129,16 +114,20 @@ jobs:
   #     StartWRT registry to publish to yet.
   image:
     name: Build OpenWrt image
+    needs: changes
     if: >-
       ${{
-        (github.event_name == 'workflow_dispatch' && (github.event.inputs.build-image == 'true' || github.event.inputs.deploy == 'release'))
-        || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.STARTWRT_ALPHA_REGISTRY != '')
-        || (
-          github.event_name == 'pull_request'
-          && github.event.pull_request.draft != true
-          && github.base_ref == 'master'
-          && startsWith(github.head_ref, 'integration/')
-          && github.event.pull_request.head.repo.full_name == github.repository
+        needs.changes.outputs.start-wrt == 'true'
+        && (
+          (github.event_name == 'workflow_dispatch' && (github.event.inputs.build-image == 'true' || github.event.inputs.deploy == 'release'))
+          || (github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.STARTWRT_ALPHA_REGISTRY != '')
+          || (
+            github.event_name == 'pull_request'
+            && github.event.pull_request.draft != true
+            && github.base_ref == 'master'
+            && startsWith(github.head_ref, 'integration/')
+            && github.event.pull_request.head.repo.full_name == github.repository
+          )
         )
       }}
     runs-on: ubuntu-latest
@@ -147,6 +136,7 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           nodejs-version: ${{ env.NODEJS_VERSION }}
+          swap-size: ${{ env.BUILD_SWAP_SIZE }}
 
       # Host deps for the OpenWrt build, restored from the old standalone
       # repo's setup-build action (the monorepo's shared setup-build serves
@@ -179,13 +169,17 @@ jobs:
       - name: Build image
         run: make start-wrt-image
 
-      - uses: actions/upload-artifact@v7
+      - name: Verify the image trust store
+        run: make start-wrt-ca-test
+
+      # Mirrors build.mk's STARTWRT_BASENAME: the image rule renames the raw
+      # OpenWrt outputs to startwrt-<version>-<githash7>_spacemit-k1-*.img.gz.
+      - uses: ./.github/actions/upload-each
         with:
-          name: startwrt-openwrt-image
-          # Mirrors build.mk's STARTWRT_BASENAME: the image rule renames the raw
-          # OpenWrt outputs to startwrt-<version>-<githash7>_spacemit-k1-*.
-          path: results/startwrt-*
+          pattern: results/startwrt-*.img.gz
+          archive: false
           retention-days: 14
+          if-no-files-found: error
 
   # Publish path: upload the built images to shared S3 (the registry CDN serves
   # them from here) and register + index the version into the beta registry,
@@ -261,11 +255,19 @@ jobs:
         run: |
           CHANGELOG_REF="${{ github.sha }}" ./scripts/manage-release.sh registry-notes start-wrt > "$RUNNER_TEMP/release-notes.json"
 
-      - name: Download image artifact
+      - name: Download images
         uses: actions/download-artifact@v8
         with:
-          name: startwrt-openwrt-image
+          pattern: startwrt-*.img.gz
+          merge-multiple: true
           path: artifacts/
+
+      - name: Check downloaded images
+        working-directory: artifacts
+        run: |
+          for file in startwrt-*-sdcard.img.gz startwrt-*-sysupgrade.img.gz; do
+            [ -f "$file" ] || { echo "::error::No $file artifact in this run"; exit 1; }
+          done
 
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
@@ -276,9 +278,9 @@ jobs:
         run: ./scripts/manage-release.sh check-registry-notes-cli start-wrt
 
       - name: Set up developer key
-        run: |
-          mkdir -p ~/.startos
-          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
+        uses: Start9Labs/start-technologies/.github/actions/configure-developer-key@master
+        with:
+          key: ${{ secrets.DEV_KEY }}
 
       - name: Configure S3
         run: |
@@ -292,30 +294,18 @@ jobs:
           use_https = True
           EOF
 
-      # An existing object under one of these keys is a hard stop — basenames are
-      # commit-derived, so the key existing means this commit was already
-      # published, and promotion copies asset URLs through verbatim, so a
-      # beta or production commitment may already point at those exact bytes.
-      # Re-dispatch with force-overwrite to replace one deliberately.
       - name: Upload images to S3
         env:
+          VERSION: ${{ steps.version.outputs.version }}
           FORCE_OVERWRITE: ${{ github.event.inputs.force-overwrite == 'true' }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           cd artifacts
-          conflicts=0
+          status=0
           for file in *.img *.img.gz; do
             [ -f "$file" ] || continue
-            key="${{ env.S3_BUCKET }}/v${VERSION}/$file"
-            if [ "$FORCE_OVERWRITE" != true ] && [ -n "$(s3cmd ls "$key")" ]; then
-              echo "::error::$key already exists — this commit has been published before. Overwriting it would invalidate any beta or production commitment pointing at that URL. Re-dispatch with force-overwrite to replace it deliberately."
-              conflicts=$((conflicts + 1))
-              continue
-            fi
-            echo "Uploading $file..."
-            s3cmd put -P "$file" "$key"
+            "$GITHUB_WORKSPACE/scripts/s3-put-once.sh" "$file" "$S3_BUCKET/v$VERSION/$file" || status=1
           done
-          [ "$conflicts" -eq 0 ] || exit 1
+          exit "$status"
 
       # `registry os asset add` rejects a write whose blake3 differs from the one
       # already committed to that platform slot, so re-indexing a version that

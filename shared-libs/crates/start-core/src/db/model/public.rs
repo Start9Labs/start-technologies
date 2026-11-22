@@ -24,6 +24,7 @@ use crate::net::vhost::PassthroughInfo;
 use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
+use crate::ssh::SshKeys;
 use crate::system::{KeyboardOptions, SmtpValue};
 use crate::trusted_keys::{
     Registries, TrustedKeys, initial_os_registry, initial_registries, initial_trusted_keys,
@@ -41,6 +42,8 @@ pub static DB_UI_SEED_CELL: OnceLock<&'static str> = OnceLock::new();
 pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
+    #[serde(default)]
+    pub ssh_pubkeys: SshKeys,
     #[serde(default)]
     pub registry_cache: BTreeMap<Url, crate::registry::sync::RegistryCache>,
     #[serde(default)]
@@ -70,6 +73,7 @@ impl Public {
             server_info: ServerInfo {
                 id: account.server_id.clone(),
                 version: Current::default().semver(),
+                git_hash: crate::version::commit_hash().into(),
                 hostname: (*account.hostname).clone(),
                 last_backup: None,
                 package_version_compat: Current::default().compat().clone(),
@@ -156,6 +160,7 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            ssh_pubkeys: SshKeys::new(),
             registry_cache: BTreeMap::new(),
             os_update_cache: None,
             disks: Vec::new(),
@@ -181,6 +186,9 @@ pub struct ServerInfo {
     pub id: String,
     pub hostname: InternedString,
     pub version: Version,
+    /// Commit of the running StartOS build, rewritten on every boot.
+    #[serde(default)]
+    pub git_hash: InternedString,
     pub package_version_compat: VersionRange,
     #[visit(ts(type = "z.record(z.string(), z.unknown())"))]
     pub post_init_migration_todos: BTreeMap<Version, Value>,

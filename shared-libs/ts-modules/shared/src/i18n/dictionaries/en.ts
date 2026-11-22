@@ -358,7 +358,6 @@ export const ENGLISH: Record<string, number> = {
   'View details': 419,
   'Services that depend on': 421,
   'will no longer work properly and may crash.': 422,
-  'Request failed': 423,
   'All services are up to date!': 424,
   'Run': 425, // as in, run a piece of software
   'Action can only be executed when service is': 426,
@@ -689,7 +688,6 @@ export const ENGLISH: Record<string, number> = {
   'OS + data combined require at least 38 GB': 813,
   'Hide Update?': 814,
   'This update will be hidden. You can still install this version from the Marketplace.': 815,
-  'Finding suitable version...': 816,
   'A clearnet domain reachable from anywhere on the Internet.': 817,
   'Best for': 818,
   'Public websites & APIs': 819,
@@ -1095,4 +1093,14 @@ export const ENGLISH: Record<string, number> = {
   'Custom': 1297, // as in, a custom registry
   'Enter a domain or URL': 1298,
   'Syncing is taking longer than expected. Refresh to try again.': 1299,
+  "Can't reach server": 1300,
+  'Listings may be out of date': 1301,
+  "StartOS can't reach this registry right now.": 1302,
+  'New Arrivals': 1304,
+  'This version requires a newer version of StartOS. Update your server to install it.': 1305,
+  'Your installed version cannot update directly to this version.': 1306,
+  'Sign in without a password by running this command in a terminal on the server, then select Continue.': 1307,
+  'This browser is not enrolled yet': 1308,
+  'Sign in from the command line': 1309,
+  'Enroll this browser': 1310,
 }

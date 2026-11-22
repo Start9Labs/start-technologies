@@ -1,4 +1,5 @@
 use super::*;
+use crate::registry::locales::IndexLocales;
 use crate::registry::package::icon::store_icon;
 use crate::sign::AnySignature;
 
@@ -29,9 +30,9 @@ async fn fixture() -> Fixture {
         let info = &mut state["index"]["package"]["packages"][name]["versions"]["1.0.0:0"];
         info["icon"] = icon.clone();
         info["dependencyMetadata"] = json!({ "dep": { "icon": icon } });
-        info["s9pks"] = json!([[{}, { "signatures": {
+        info["s9pks"][0][1]["signatures"] = json!({
             key().interned_der64().to_string(): AnySignature::Ed25519ph(signature),
-        } }]]);
+        });
     }
     state["index"]["os"]["versions"] = json!({ "0.4.0.6": {
         "headline": "Stored unused headline",
@@ -56,7 +57,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -65,7 +66,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.1"),
+        wire("0.4.0.1").into(),
         fixture.dir.path(),
     )
     .await
@@ -75,7 +76,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.3.1"),
+        wire("0.4.3.1").into(),
         fixture.dir.path(),
     )
     .await
@@ -84,7 +85,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        WireCompatibility::default(),
+        IndexView::default(),
         fixture.dir.path(),
     )
     .await
@@ -95,7 +96,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.3"),
+        wire("0.4.3").into(),
         fixture.dir.path(),
     )
     .await
@@ -105,7 +106,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.1.3"),
+        wire("0.4.1.3").into(),
         fixture.dir.path(),
     )
     .await
@@ -115,7 +116,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         Some(key()),
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -125,7 +126,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.4"),
+        wire("0.4.0.4").into(),
         fixture.dir.path(),
     )
     .await
@@ -195,15 +196,16 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         own_view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["icon"],
         json!("data:image/png;base64,c2VjcmV0")
     );
-    assert_eq!(
-        own_view["package"]["packages"]["secret"]["readers"],
-        json!([])
+    assert!(
+        own_view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]
+            .get("readers")
+            .is_none()
     );
 
     let mut state = fixture.main.peek().await.into_value();
     state["index"]["os"]["versions"]["0.4.0.6"]["releaseNotes"] =
         json!({ "en_US": "Updated", "pl_PL": "Nowe" });
-    state["index"]["package"]["packages"]["secret"]["readers"] = json!([]);
+    secret_s9pk(&mut state)["readers"] = json!([]);
     fixture
         .main
         .put(&JsonPointer::<&str>::default(), &state)
@@ -264,7 +266,7 @@ async fn inaccessible_private_icons_are_not_loaded_by_legacy_replicas() {
         &IndexMirrors::default(),
         &fixture.main,
         None,
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -283,7 +285,7 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -292,7 +294,7 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
         &mirrors,
         &fixture.main,
         None,
-        WireCompatibility::default(),
+        IndexView::default(),
         fixture.dir.path(),
     )
     .await
@@ -325,7 +327,7 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
         &mirrors,
         &fixture.main,
         None,
-        wire("0.4.0.2"),
+        wire("0.4.0.2").into(),
         fixture.dir.path(),
     )
     .await
@@ -336,5 +338,173 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
     assert_eq!(
         view["index"]["package"]["packages"]["public"]["versions"]["1.0.0:0"]["icon"],
         json!("data:image/png;base64,bmV4dA==")
+    );
+}
+
+fn translated(en: &str, pl: &str) -> Value {
+    json!({ "en_US": en, "pl_PL": pl })
+}
+
+#[tokio::test]
+async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
+    let fixture = fixture().await;
+    let mut state = fixture.main.peek().await.into_value();
+    state["index"]["description"] = translated("Registry", "Rejestr");
+    state["index"]["defaultLocale"] = json!("pl_PL");
+    state["index"]["package"]["categories"] =
+        json!({ "tools": { "name": translated("Tools", "Narzędzia") } });
+    let public = &mut state["index"]["package"]["packages"]["public"]["versions"]["1.0.0:0"];
+    public["description"] = json!({ "short": translated("Short", "Krótki"), "long": "Long" });
+    public["releaseNotes"] = translated("Notes", "Notatki");
+    public["defaultLocale"] = json!("en_US");
+    public["preDownloadAlert"] = json!({
+        "message": translated("Back up", "Zrób kopię"),
+        "when": { "sourceVersion": "*" },
+    });
+    public["dependencyMetadata"]["dep"]["title"] = translated("Dependency", "Zależność");
+    public["dependencyMetadata"]["dep"]["description"] = json!(null);
+    public["dependencyMetadata"]["dep"]["optional"] = json!(false);
+    let secret = &mut state["index"]["package"]["packages"]["secret"]["versions"]["1.0.0:0"];
+    secret["description"] = json!({ "short": "Short", "long": "Long" });
+    secret["releaseNotes"] = json!({ "en_US": "Notes", "ja_JP": "ノート" });
+    secret["dependencyMetadata"]["dep"]["title"] = json!(null);
+    secret["dependencyMetadata"]["dep"]["description"] = json!(null);
+    secret["dependencyMetadata"]["dep"]["optional"] = json!(false);
+    fixture
+        .main
+        .put(&JsonPointer::<&str>::default(), &state)
+        .await
+        .unwrap();
+
+    let snapshot = fixture.main.peek().await;
+    let locales = IndexLocales::of(snapshot.as_index()).unwrap();
+    let mirrors = IndexMirrors::default();
+    let reader_mirror =
+        |key: Option<AnyVerifyingKey>, wire: WireCompatibility, language: Option<&str>| {
+            let view = match language {
+                Some(language) => {
+                    IndexView::localized(&snapshot, &locales, key.as_ref(), wire, language).unwrap()
+                }
+                None => IndexView::from(wire),
+            };
+            index_mirror(&mirrors, &fixture.main, key, view, fixture.dir.path())
+        };
+    let mirror =
+        |wire: WireCompatibility, language: Option<&str>| reader_mirror(None, wire, language);
+    let current = WireCompatibility::default();
+    let polish = mirror(current, Some("pl_PL")).await.unwrap();
+    for related in ["pl_PL", "pl", "pl_XX"] {
+        assert!(Arc::ptr_eq(
+            &polish,
+            &mirror(current, Some(related)).await.unwrap()
+        ));
+    }
+    let canonical = mirror(current, None).await.unwrap();
+    let english = mirror(current, Some("en_US")).await.unwrap();
+    assert!(Arc::ptr_eq(
+        &english,
+        &mirror(current, Some("en_GB")).await.unwrap()
+    ));
+    let default_view = mirror(current, Some("zz_ZZ")).await.unwrap();
+    assert!(!Arc::ptr_eq(&english, &default_view));
+    for absent in ["", "de_DE", "ja_JP"] {
+        assert!(Arc::ptr_eq(
+            &default_view,
+            &mirror(current, Some(absent)).await.unwrap()
+        ));
+    }
+    let japanese = reader_mirror(Some(key()), current, Some("ja_JP"))
+        .await
+        .unwrap();
+    let reader_english = reader_mirror(Some(key()), current, Some("en_US"))
+        .await
+        .unwrap();
+    assert!(!Arc::ptr_eq(&japanese, &reader_english));
+    assert_eq!(
+        japanese.db.dump(&"/index".parse().unwrap()).await.value["package"]["packages"]["secret"]["versions"]
+            ["1.0.0:0"]["releaseNotes"],
+        json!("ノート")
+    );
+    drop((japanese, reader_english));
+    let legacy_polish = mirror(wire("0.4.0.2"), Some("pl_PL")).await.unwrap();
+    for other in [&canonical, &english, &default_view, &legacy_polish] {
+        assert!(!Arc::ptr_eq(&polish, other));
+    }
+    assert_eq!(mirrors.lock().await.len(), 5);
+
+    let pointer: JsonPointer = "/index".parse().unwrap();
+    let (dump, mut sub) = polish.db.dump_and_sub(pointer.clone()).await;
+    let mut polish_view = dump.value;
+    assert_eq!(polish_view["description"], json!("Rejestr"));
+    assert_eq!(
+        polish_view["package"]["categories"]["tools"]["name"],
+        json!("Narzędzia")
+    );
+    let version = &polish_view["package"]["packages"]["public"]["versions"]["1.0.0:0"];
+    assert_eq!(version["description"]["short"], json!("Krótki"));
+    assert_eq!(version["description"]["long"], json!("Long"));
+    assert_eq!(version["releaseNotes"], json!("Notatki"));
+    assert_eq!(version["preDownloadAlert"]["message"], json!("Zrób kopię"));
+    assert_eq!(
+        version["dependencyMetadata"]["dep"]["title"],
+        json!("Zależność")
+    );
+    assert_eq!(
+        polish_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
+        json!("Polski")
+    );
+    let english_view = english.db.dump(&pointer).await.value;
+    assert_eq!(english_view["description"], json!("Registry"));
+    assert_eq!(
+        english_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
+        json!("English")
+    );
+    assert_eq!(
+        english_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["releaseNotes"],
+        json!("Notes")
+    );
+    let default_view = default_view.db.dump(&pointer).await.value;
+    assert_eq!(default_view["description"], json!("Rejestr"));
+    assert_eq!(
+        default_view["package"]["categories"]["tools"]["name"],
+        json!("Narzędzia")
+    );
+    assert_eq!(
+        default_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["releaseNotes"],
+        json!("Notes")
+    );
+    let legacy_view = legacy_polish.db.dump(&pointer).await.value;
+    assert_eq!(
+        legacy_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
+        json!("Polski")
+    );
+    assert_eq!(
+        legacy_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["icon"],
+        json!("data:image/png;base64,cHVibGlj")
+    );
+    let canonical_view = canonical.db.dump(&pointer).await.value;
+    assert_eq!(
+        canonical_view["description"],
+        translated("Registry", "Rejestr")
+    );
+
+    state["index"]["os"]["versions"]["0.4.0.6"]["releaseNotes"] = translated("Updated", "Nowe");
+    fixture
+        .main
+        .put(&JsonPointer::<&str>::default(), &state)
+        .await
+        .unwrap();
+    let revision = tokio::time::timeout(std::time::Duration::from_secs(5), sub.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    patch_db::json_patch::patch(&mut polish_view, &revision.patch).unwrap();
+    assert_eq!(
+        polish_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
+        json!("Nowe")
+    );
+    assert_eq!(
+        fixture.main.peek().await.into_value()["index"]["description"],
+        translated("Registry", "Rejestr")
     );
 }

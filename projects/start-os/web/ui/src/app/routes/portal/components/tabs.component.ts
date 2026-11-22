@@ -45,18 +45,29 @@ const FILTER = ['services', 'system', 'marketplace']
         icon="@tui.settings"
         routerLink="/system"
         routerLinkActive
-        [badge]="badge()"
+        [badge]="warning() ? 0 : badge()"
         (isActiveChange)="update()"
       >
         {{ 'System' | i18n }}
+        @if (warning()) {
+          <tui-icon
+            icon="@tui.triangle-alert"
+            class="warning"
+            role="img"
+            [attr.aria-label]="'Warning' | i18n"
+            [attr.aria-hidden]="false"
+          />
+        }
       </a>
-      <button
-        tuiTabBarItem
-        icon="@tui.ellipsis"
-        (click)="more(content)"
-        [badge]="all()"
-      >
+      <button tuiTabBarItem icon="@tui.ellipsis" (click)="more(content)">
         {{ 'More' | i18n }}
+        @if (status(); as status) {
+          <tui-badge-notification
+            size="xs"
+            class="dot"
+            [style.background]="'var(--tui-status-' + status + ')'"
+          />
+        }
         <ng-template #content let-observer>
           @for (item of menu; track $index) {
             <a
@@ -104,6 +115,22 @@ const FILTER = ['services', 'system', 'marketplace']
       opacity: 0.7;
     }
 
+    /* Occupies the tab badge's position. */
+    .warning {
+      position: absolute;
+      inset-block-start: 0.125rem;
+      inset-inline-start: calc(50% + 1rem);
+      transform: translateX(-50%);
+      font-size: 1.125rem;
+      color: var(--tui-status-warning);
+    }
+
+    .dot {
+      position: absolute;
+      inset-block-start: 0.5rem;
+      inset-inline-start: calc(50% + 0.75rem);
+    }
+
     .item {
       @include taiga.button-clear();
 
@@ -141,10 +168,21 @@ export class TabsComponent {
   readonly badge = toSignal(inject(BadgeService).getCount('system'), {
     initialValue: 0,
   })
+  readonly warning = toSignal(inject(BadgeService).getWarning('system'), {
+    initialValue: false,
+  })
 
-  readonly all = computed(() =>
-    this.menu.reduce((acc, item) => acc + item.badge(), 0),
-  )
+  readonly status = computed(() => {
+    const statuses = this.menu.map(item => {
+      if (item.badge()) {
+        return item.routerLink !== 'updates' ? 'negative' : 'positive'
+      }
+      return item.warning() ? 'warning' : null
+    })
+    return (['negative', 'warning', 'positive'] as const).find(s =>
+      statuses.includes(s),
+    )
+  })
 
   more(content: TemplateRef<any>) {
     this.dialogs.open(content, { label: 'StartOS' }).subscribe({

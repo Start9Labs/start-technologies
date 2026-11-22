@@ -19,7 +19,8 @@ use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfoMiddleware;
 use crate::registry::os::index::OsIndex;
-use crate::registry::package::index::{PackageIndex, ReaderParams};
+use crate::registry::package::index::{PackageIndex, Reader, ReaderParams};
+use crate::registry::reader::ReaderKey;
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::manifest::LocaleString;
@@ -34,11 +35,13 @@ pub mod context;
 pub mod db;
 pub mod device_info;
 pub mod info;
+pub mod locales;
 pub mod metrics;
 mod migrations;
 pub mod mirror;
 pub mod os;
 pub mod package;
+pub mod reader;
 pub mod signer;
 pub mod sync;
 pub mod upstream;
@@ -77,23 +80,68 @@ pub struct FullIndex {
     pub name: Option<String>,
     pub icon: Option<DataUrl<'static>>,
     pub description: Option<LocaleString>,
+    /// Locale registry-owned `LocaleString`s fall back to when a requested one is missing.
+    #[serde(default)]
+    pub default_locale: Option<InternedString>,
     pub package: PackageIndex,
     pub os: OsIndex,
     pub signers: BTreeMap<Guid, SignerInfo>,
     #[serde(default)]
     pub trust_signers: BTreeSet<Guid>,
+    /// Keys allowed to read the private s9pks that list them. Admin-only.
+    #[serde(default)]
+    pub readers: BTreeMap<Guid, ReaderKey>,
 }
 
 rpc_toolkit::reflect_ts!(FullIndex);
 rpc_toolkit::ts_export!(FullIndex, namespaces = [""]);
 
 impl Model<FullIndex> {
+    /// Drops what the requester cannot see, and the reader directory for non-admins.
+    pub fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<(), Error> {
+        self.as_package_mut().retain_visible(reader)?;
+        if !reader.is_some_and(|reader| reader.admin) {
+            self.as_readers_mut().ser(&BTreeMap::new())?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn retain_registered_package_signatures(&mut self) -> Result<(), Error> {
         let signers = self.as_signers().de()?;
         self.as_package_mut().mutate(|packages| {
             packages.retain_registered_signatures(&signers);
             Ok(())
         })
+    }
+
+    /// Resolves every `LocaleString` with `LocaleString::localize_for` and its owner's default.
+    pub fn localize_for(&mut self, locale: Option<&str>) -> Result<(), Error> {
+        let default = self.as_default_locale().de()?;
+        self.for_each_unpackaged_locale_string(&mut |s| {
+            s.localize_for(locale, default.as_deref())
+        })?;
+        for (_, package) in self.as_package_mut().as_packages_mut().as_entries_mut()? {
+            for (_, version) in package.as_versions_mut().as_entries_mut()? {
+                version.localize_for(locale)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Visits every `LocaleString` outside `PackageIndex.packages`.
+    pub(crate) fn for_each_unpackaged_locale_string(
+        &mut self,
+        f: &mut impl FnMut(&mut LocaleString),
+    ) -> Result<(), Error> {
+        self.as_description_mut()
+            .mutate(|d| Ok(d.iter_mut().for_each(&mut *f)))?;
+        for (_, category) in self.as_package_mut().as_categories_mut().as_entries_mut()? {
+            category.as_name_mut().mutate(|n| Ok(f(n)))?;
+        }
+        for (_, version) in self.as_os_mut().as_versions_mut().as_entries_mut()? {
+            version.as_release_notes_mut().mutate(|n| Ok(f(n)))?;
+        }
+        Ok(())
     }
 }
 
@@ -104,7 +152,7 @@ pub async fn get_full_index(
     let db = ctx.db.peek().await;
     let reader = params.reader(&db)?;
     let mut index = db.into_index();
-    index.as_package_mut().retain_visible(reader.as_ref())?;
+    index.retain_visible(reader.as_ref())?;
     index.de()
 }
 

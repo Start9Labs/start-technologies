@@ -5,6 +5,19 @@ use const_format::formatcp;
 
 rust_i18n::i18n!("locales", fallback = ["en_US"]);
 
+/// The candidate serving a language: an exact match, else the first with its language code.
+pub fn best_locale<'a>(
+    lang: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    let candidates: Vec<&str> = candidates.into_iter().collect();
+    if let Some(exact) = candidates.iter().find(|l| **l == lang) {
+        return Some(exact);
+    }
+    let prefix = lang.split_inclusive('_').next().filter(|p| !p.is_empty())?;
+    candidates.into_iter().find(|l| l.starts_with(prefix))
+}
+
 pub const DATA_DIR: &str = "/media/startos/data";
 pub const MAIN_DATA: &str = formatcp!("{DATA_DIR}/main");
 pub const PACKAGE_DATA: &str = formatcp!("{DATA_DIR}/package-data");
@@ -103,14 +116,12 @@ pub use id::*;
 use imbl_value::Value;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
-    CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async,
-    from_fn_async_local,
+    Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async, from_fn_async_local,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext};
 use crate::disk::fsck::RequiresReboot;
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::system::kiosk;
 use crate::util::output::print_table;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
@@ -266,13 +277,6 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "backup",
             backup::backup::<C>().with_about("about.commands-backup"),
-        )
-        .subcommand(
-            "registry",
-            CallRemoteHandler::<RpcContext, _, _, RegistryUrlParams>::new(
-                registry::registry_api::<RegistryContext>(),
-            )
-            .no_cli(),
         )
         .subcommand(
             "registry",

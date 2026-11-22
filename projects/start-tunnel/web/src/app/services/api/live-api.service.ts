@@ -2,6 +2,7 @@ import { inject, Service } from '@angular/core'
 import {
   AuthKeyService,
   databaseSubscription,
+  DatabaseUpdate,
   HttpService,
   RpcError,
   localRpcRequest,
@@ -12,7 +13,6 @@ import {
 import { createRpcClient } from '@start9labs/start-core'
 import { catchError } from 'rxjs'
 import type { Observable } from 'rxjs'
-import type { Update } from 'patch-db-client'
 import type { TunnelData } from '../patch-db/data-model'
 import { AuthService } from '../auth.service'
 import { PATCH_CACHE } from '../patch-db/patch-db-source'
@@ -41,7 +41,7 @@ export class LiveApiService extends ApiService {
     })
   }
 
-  override watchDb$(): Observable<Update<TunnelData>> {
+  override watchDb$(): Observable<DatabaseUpdate<TunnelData>> {
     return databaseSubscription<TunnelData>(
       this.sockets,
       this.authKeys,
@@ -49,7 +49,15 @@ export class LiveApiService extends ApiService {
     ).pipe(catchError(error => this.raiseError(error)))
   }
 
+  checkEnrollment(): Promise<unknown> {
+    return this.request({ method: 'auth.key.list', params: {} })
+  }
+
   private rpcRequest<T>(options: RPCOptions): Promise<T> {
+    return this.request<T>(options).catch(error => this.raiseError(error))
+  }
+
+  private request<T>(options: RPCOptions): Promise<T> {
     return localRpcRequest<T>(
       this.http,
       this.sockets,
@@ -57,7 +65,7 @@ export class LiveApiService extends ApiService {
       this.identity,
       this.cache$,
       options,
-    ).catch(error => this.raiseError(error))
+    )
   }
 
   private raiseError(error: unknown): never {

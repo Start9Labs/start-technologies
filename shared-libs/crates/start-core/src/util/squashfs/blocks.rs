@@ -19,9 +19,25 @@ pub(super) struct EncodedBlock {
     pub compressed: bool,
 }
 
+thread_local! {
+    static COMPRESSOR: std::cell::RefCell<Option<(i32, zstd::bulk::Compressor<'static>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Compresses with this thread's reusable context for the level.
+fn compress(bytes: &[u8], level: i32) -> io::Result<Vec<u8>> {
+    COMPRESSOR.with_borrow_mut(|cached| {
+        if !matches!(cached, Some((cached_level, _)) if *cached_level == level) {
+            *cached = Some((level, zstd::bulk::Compressor::new(level)?));
+        }
+        let (_, compressor) = cached.as_mut().expect("compressor initialized");
+        compressor.compress(bytes)
+    })
+}
+
 pub(super) fn encode_block(bytes: &[u8], level: i32) -> io::Result<EncodedBlock> {
     // Known source size bounds the frame window to the kernel's block workspace.
-    let result = zstd::bulk::compress(bytes, level)?;
+    let result = compress(bytes, level)?;
     if result.len() >= bytes.len() {
         Ok(EncodedBlock {
             bytes: bytes.to_vec(),

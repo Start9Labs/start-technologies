@@ -223,6 +223,10 @@ export const CopyOperation: z.ZodObject<{
   id: 'CopyOperation',
   description: "JSON Patch 'copy' operation representation",
 })
+export const DbCursor: z.ZodObject<{ epoch: z.ZodString; id: z.ZodInt }> =
+  /* @__PURE__ */ object({ epoch: z.string(), id: z.int() }).meta({
+    id: 'DbCursor',
+  })
 
 /**
  * Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
@@ -433,8 +437,8 @@ export const ListDevicesParams: z.ZodObject<{ subnet: z.ZodString }> =
   /* @__PURE__ */ object({ subnet: z.string() }).meta({
     id: 'ListDevicesParams',
   })
-export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
-  id: 'ListParams',
+export const ListKeysParams: typeof empty = /* @__PURE__ */ empty.meta({
+  id: 'ListKeysParams',
 })
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
@@ -699,16 +703,6 @@ export const SubnetParams: z.ZodObject<{ subnet: z.ZodString }> =
   /* @__PURE__ */ object({ subnet: z.string() }).meta({
     id: 'SubnetParams',
   })
-export const SubscribeParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'SubscribeParams',
-})
 
 /**
  * JSON Patch 'test' operation representation
@@ -832,9 +826,20 @@ export const AddDeviceParams: z.ZodObject<{
   id: 'AddDeviceParams',
 })
 export const AddKeyParams: z.ZodObject<{
-  name: z.ZodString
   key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ name: z.string(), key: AnyVerifyingKey }).meta({
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  userAgent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  key: AnyVerifyingKey,
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
   id: 'AddKeyParams',
 })
 export const ApplyWithPathParams: z.ZodIntersection<
@@ -864,21 +869,6 @@ export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
     id: 'AuthKeys',
     description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
-export const KillParams: z.ZodObject<{
-  pubkeys: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
-    z.ZodArray<typeof AnyVerifyingKey>
-  >
-  tokens: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
-  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
-}).meta({
-  id: 'KillParams',
-})
 export const LoginParams: z.ZodObject<{
   password: z.ZodString
   /**
@@ -1048,10 +1038,11 @@ export const PatchOperation: z.ZodUnion<
     id: 'PatchOperation',
     description: 'JSON Patch single patch operation',
   })
-export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
-  /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-    id: 'RemoveKeyParams',
-  })
+export const RemoveKeyParams: z.ZodObject<{
+  keys: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ keys: z.array(AnyVerifyingKey) }).meta({
+  id: 'RemoveKeyParams',
+})
 export const RemovePortForwardParams: z.ZodObject<{
   source: typeof ForwardAddress
   /**
@@ -1138,6 +1129,30 @@ export const SetSubnetDnsParams: z.ZodObject<{
   }),
 }).meta({
   id: 'SetSubnetDnsParams',
+})
+export const SubscribeParams: z.ZodObject<{
+  pointer: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  /**
+   * The subscriber's last revision; resumes only within the epoch that reported it.
+   */
+  since: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
+    z.ZodNullable<typeof DbCursor>
+  >
+}> = /* @__PURE__ */ object({
+  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * The subscriber's last revision; resumes only within the epoch that reported it.
+   */
+  since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
+    description:
+      "The subscriber's last revision; resumes only within the epoch that reported it.",
+  }),
+}).meta({
+  id: 'SubscribeParams',
 })
 export const SubscribeRes: z.ZodObject<{
   dump: typeof Dump
@@ -1252,6 +1267,23 @@ export const WgConfig: z.ZodObject<{
 })
 
 /**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export const KeyList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  keys: typeof AuthKeys
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  keys: AuthKeys,
+}).meta({
+  id: 'KeyList',
+  description: "Enrolled keys, including ephemeral ones, and the caller's own.",
+})
+
+/**
  * Representation of JSON Patch (list of patch operations)
  */
 export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
@@ -1260,31 +1292,6 @@ export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
     id: 'Patch',
     description: 'Representation of JSON Patch (list of patch operations)',
   })
-
-/**
- * The server's sessions, by credential type.
- */
-export const Sessions: z.ZodObject<{
-  pubkeys: typeof AuthKeys
-  tokens: z.ZodRecord<z.ZodString, typeof Session>
-}> = /* @__PURE__ */ object({
-  pubkeys: AuthKeys,
-  tokens: z.record(z.string(), Session),
-}).meta({
-  id: 'Sessions',
-  description: "The server's sessions, by credential type.",
-})
-
-/**
- * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
- */
-export const SubscribeResult: z.ZodUnion<
-  readonly [typeof SubscribeRes, typeof Dump]
-> = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
-  id: 'SubscribeResult',
-  description:
-    'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
-})
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -1321,18 +1328,6 @@ export const RemovePinholeParams: z.ZodObject<{
   transport: wire(Transport.optional(), Transport),
 }).meta({
   id: 'RemovePinholeParams',
-})
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof Sessions
-}> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: Sessions,
-}).meta({
-  id: 'SessionList',
 })
 export const SetPinholeEnabledParams: z.ZodObject<{
   gua: z.ZodString
@@ -1412,6 +1407,45 @@ export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
   /* @__PURE__ */ object({ id: z.int(), patch: DiffPatch }).meta({
     id: 'Revision',
   })
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export const SubscribeStart: z.ZodObject<{
+  epoch: z.ZodString
+  id: z.ZodInt
+  value: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
+    z.ZodNullable<z.ZodUnknown>
+  >
+  revisions: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
+    z.ZodNullable<z.ZodArray<typeof Revision>>
+  >
+}> = /* @__PURE__ */ object({
+  epoch: z.string(),
+  id: z.int(),
+  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
+  revisions: wire(
+    z.array(Revision).nullable().optional(),
+    z.array(Revision).nullable(),
+  ),
+}).meta({
+  id: 'SubscribeStart',
+  description:
+    'A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.',
+})
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export const SubscribeStartResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof SubscribeStart]
+> = /* @__PURE__ */ z.union([SubscribeRes, SubscribeStart]).meta({
+  id: 'SubscribeStartResult',
+  description:
+    'Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.',
+})
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,
   _CHILDREN: {
@@ -1438,9 +1472,9 @@ export const Api = {
                   }),
                   empty,
                 ),
-                empty,
+                ListKeysParams,
               ),
-              _RETURN: /* @__PURE__ */ AuthKeys,
+              _RETURN: /* @__PURE__ */ KeyList,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },
@@ -1463,34 +1497,6 @@ export const Api = {
           _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
-        },
-        session: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            kill: {
-              _PARAMS: /* @__PURE__ */ KillParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            list: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
-                  empty,
-                ),
-                ListParams,
-              ),
-              _RETURN: /* @__PURE__ */ SessionList,
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-          },
         },
         'set-password': {
           _PARAMS: /* @__PURE__ */ SetPasswordParams,
@@ -1517,7 +1523,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeParams,
-          _RETURN: /* @__PURE__ */ SubscribeResult,
+          _RETURN: /* @__PURE__ */ SubscribeStartResult,
           _ITEM: /* @__PURE__ */ Revision,
           _FINAL: /* @__PURE__ */ z.null(),
         },

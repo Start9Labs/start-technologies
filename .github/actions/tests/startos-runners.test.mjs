@@ -11,41 +11,57 @@ const load = name =>
     readFileSync(new URL(`../../workflows/${name}`, import.meta.url), 'utf8'),
   )
 const workflow = load('startos-iso.yaml')
+const products = load('build-products.yaml')
 const image = load('startos-image.yaml').jobs.build
-const [standard, fast] = Array.from(
-  image['runs-on'].matchAll(/fromJson\('([\s\S]*?)'\)/g),
-  match => yaml.load(match[1]),
-)
+const runners = yaml.load(image['runs-on'].match(/fromJson\('([\s\S]*?)'\)/)[1])
 const architectures = yaml.load(
   image.env.ARCH.match(/fromJson\('([\s\S]*?)'\)/)[1],
 )
-const bootstrap = image.steps.find(
-  step => step.name === 'Update RISC-V action runtime',
+const bootstrap = yaml.load(
+  readFileSync(
+    new URL('../riscv-action-runtime/action.yml', import.meta.url),
+    'utf8',
+  ),
+).runs.steps[0]
+const rootfs = products.jobs.rootfs
+const rootfsRunners = yaml.load(
+  rootfs['runs-on'].match(/fromJson\('([\s\S]*?)'\)/)[1],
 )
 
 for (const platform of ['riscv64', 'riscv64-nonfree']) {
-  test(`${platform} retains native assembly and the fast-runner alternative`, () => {
-    assert.equal(standard[platform], 'ubuntu-24.04-riscv')
-    assert.equal(fast[platform], 'amd64-fast')
+  test(`${platform} image assembly stays native`, () => {
+    assert.equal(runners[platform], 'ubuntu-24.04-riscv')
     assert.equal(architectures[platform], 'riscv64')
   })
 }
 
-test('the native runtime bootstrap precedes every JavaScript action', () => {
-  assert.ok(bootstrap)
-  assert.ok(image.steps.indexOf(bootstrap) < image.steps.findIndex(s => s.uses))
-  assert.equal(
-    bootstrap.if,
-    "${{ env.ARCH == 'riscv64' && !inputs.fast-runner }}",
-  )
-  assert.equal(
-    workflow.jobs.image.with['fast-runner'],
-    "${{ github.event.inputs.runner == 'fast' }}",
-  )
-  assert.equal(
-    workflow.jobs.image.with['nodejs-version'],
-    workflow.env.NODEJS_VERSION,
-  )
+test('each architecture builds its container runtime rootfs natively', () => {
+  assert.deepEqual(rootfsRunners, {
+    x86_64: 'ubuntu-latest',
+    aarch64: 'ubuntu-24.04-arm',
+    riscv64: 'ubuntu-24.04-riscv',
+  })
+  for (const [platform, arch] of Object.entries(architectures))
+    assert.equal(rootfsRunners[arch], runners[platform], platform)
+})
+
+test('the native runtime bootstrap precedes every JavaScript action after checkout', () => {
+  for (const [job, arch] of [
+    [image, 'env.ARCH'],
+    [rootfs, 'matrix.arch'],
+  ]) {
+    const actions = job.steps.filter(step => step.uses)
+    assert.equal(actions[0].uses, 'actions/checkout@v6')
+    assert.equal(actions[1].uses, './.github/actions/riscv-action-runtime')
+    assert.equal(actions[1].if, `\${{ ${arch} == 'riscv64' }}`)
+    assert.equal(actions[1].with['nodejs-version'], '${{ env.NODEJS_VERSION }}')
+  }
+  assert.equal(bootstrap.env.NODEJS_VERSION, '${{ inputs.nodejs-version }}')
+  for (const caller of [workflow, products])
+    assert.equal(
+      caller.jobs.image.with['nodejs-version'],
+      caller.env.NODEJS_VERSION,
+    )
 })
 
 for (const [name, validChecksum, startsJavaScript] of [

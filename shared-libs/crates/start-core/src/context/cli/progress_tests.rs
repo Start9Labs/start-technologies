@@ -28,7 +28,7 @@ async fn progress_preserves_local_credential_precedence_session_reuse_and_termin
         let key = key.clone();
         let received = received.clone();
         async move { upgrade.on_upgrade(move |socket| async move {
-            let (_, _, mut socket) = EncryptedSocket::accept(Box::new(socket), &key, &["127.0.0.1".into()], NonZeroUsize::new(1024 * 1024).unwrap(), &Target::Rpc, None, |_| async { Ok(()) }).await.unwrap();
+            let (_, _, mut socket) = EncryptedSocket::accept(Box::new(socket), &key.into(), &["127.0.0.1".into()], NonZeroUsize::new(1024 * 1024).unwrap(), &Target::Rpc, None, |_| async { Ok(()) }).await.unwrap();
             for success in [true, false] {
                 let text = socket.next().await.unwrap().unwrap().into_text().unwrap();
                 let request: serde_json::Value = serde_json::from_str(&text).unwrap();

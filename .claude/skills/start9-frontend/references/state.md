@@ -47,44 +47,14 @@ Every app follows **abstract `ApiService` + `LiveApiService` + `MockApiService`*
 DI level by workspace config (monorepo) or environment (brochure). Methods are **typed and
 promise-based**; components call `await this.api.method(params)` and never touch HTTP.
 
-- **Monorepo = JSON-RPC**: StartOS/Tunnel's keyed local calls use `RpcSocketService`
-  (`@start9labs/shared`) for signed-DH admission and encrypted messages. Each connection signs fresh RPC/GUID intent before the network deadline.
-  Capture serialization before asynchronous key lookup; retain the existing RxJS socket and
-  source-service retry/cancellation owners. `AuthKeyService` leases cancel on replacement,
-  rollback and logout, including pending acquisition/enrollment. Public normal calls without a
-  key and explicit foreign overrides retain HTTP; a failed exchange never retries as plaintext.
-  StartOS's `StartupApiService` and setup-wizard use `AuthKeyService.admissionLease` and the same
-  socket owner for initialization, diagnostics and state/DNS probes. Missing device keys use
-  unpersisted possession without enrollment. Normal product APIs explicitly attach
-  `ServerIdentityService.openObserver`; startup callers never populate persistent normal-server
-  history. Per-operation open observation also covers healthy session reuse and authorization
-  rejection. Callers select that contract explicitly; an unauthenticated mode response cannot
-  downgrade a normal caller. Mock mode reuses the existing API fixture. RPC-level errors use
-  `isRpcError(body)` → `RpcError`; local code-34 rejection forces logout; foreign probe rejection never invalidates local authentication. `localRpcRequest` owns OS/Tunnel local capture/dispatch, envelope errors and cancellable
-  `meta.patchSequence` fences; foreign replies never wait on the local cache.
-  `authenticatedRpcTransport` shares device-key stream admission with database observation; server authorization remains live.
-  Normal generated streams wait for their initiating fences and preserve iterator disposal;
-  identity replacement or caller disposal releases blocked fences. HTTP compatibility projects older `x-patch-sequence` headers only when JSON metadata
-  is absent. Resource requests retain HTTP/header signatures. PatchDB uses the generated
-  `RpcStreamClient` through the same socket owner: initial dump, typed revisions, terminal outcome.
-  The initial dump establishes its own fence; never wait on that cache before delivering it.
-  The source owns one AbortSignal through key lookup, initialization and iteration, and retains
-  its existing 250ms batching/retry policy. Per-request queues bound serialized UTF-8 bytes,
-  including backlogs held behind initial fences; exceeding the budget cancels that request. Terminal outcomes drain accepted items;
-  physical loss discards them. Portal and startup logs consume typed items through their existing
-  status/history/batching/retry owners; a successful portal terminal invalidates the ongoing view.
-  Metrics uses generated typed follow with an initial snapshot and items from its existing sensor
-  cache. AuthService gates ref-counted observation; final unsubscribe/logout cancels acquisition,
-  iteration and recovery. Existing error recovery and normal-end read-only repeat remain.
-- **start-wrt retains its RPC/reconnect workflow owners**: all browser RPC composes shared encrypted
-  transport, with unpersisted anonymous admission before device enrollment. The caller omits
-  normal-product peer-history observation for missing-key bootstrap. `admissionLease` carries
-  the existing device key when present; avoid a second asynchronous lookup. Deadlines
-  surface `{code: 0}`; `ConnectionService` and update recovery call the shared session-abort
-  primitive before probing again. A timed-out multiplexed probe alone cannot release siblings
-  holding a dead socket. Authenticated generated firmware metadata feeds the
-  existing stale-UI detector, including metadata retained on initiating stream errors; the HTTP compatibility header remains for legacy clients. The wizard's component-scoped service consumes generated typed flash progress and requires successful termination before reporting completion. Its destruction cancels observation, never accepted flashing; network loss reuses ConnectionService without replay. DOM-style encrypted continuations preserve log/update event,
-  close and retry ownership. Physical close starts recovery, not an update-success claim.
+- **Monorepo = generated, typed JSON-RPC.** Components and pages call `ApiService` methods typed
+  from the generated `RPC.*` trees (StartWRT: its own `bindings.ts`); StartOS/Tunnel pages read
+  PatchDB through `toSignal(patch.watch$(…))`. Transport, key admission, PatchDB fences and
+  stream lifetimes belong to shared primitives and product API, auth, data-source and reconnect
+  services. Their contracts are in `shared-libs/ts-modules/ARCHITECTURE.md` and
+  `projects/start-wrt/web/ARCHITECTURE.md`; read those before changing these owners. Components
+  make RPC calls through the product API service, not directly through the transport. RPC errors
+  surface as `RpcError` (`isRpcError(body)`), network loss as `{ code: 0 }`.
 - **start9-store = REST + Zod through a BFF**: frontend calls `/api/*` only (SSR server proxies
   it — same relative URLs in dev/prod/SSR); domain types + Zod schemas live in `shared/`;
   commerce backends hide behind the API (`CommerceBackend` interface). The frontend must never

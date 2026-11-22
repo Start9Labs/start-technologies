@@ -3,10 +3,12 @@ import { Component, computed, inject, input } from '@angular/core'
 import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { Router } from '@angular/router'
 import {
+  canMigrateFrom,
   MarketplacePkg,
   matchingTrustedKeys,
   packageSigners,
   packageSignerPolicy,
+  requiresOsUpdate,
 } from '@start9labs/marketplace'
 import {
   ErrorService,
@@ -38,6 +40,8 @@ type KEYS =
   | 's9pks'
   | 'signers'
   | 'signatures'
+  | 'sourceVersion'
+  | 'osVersion'
 
 @Component({
   selector: 'marketplace-controls',
@@ -45,6 +49,21 @@ type KEYS =
     @if (!trusted().length) {
       <div tuiNotification appearance="warning">
         {{ "This service package isn't signed by anyone you trust." | i18n }}
+      </div>
+    }
+    @if (needsOsUpdate()) {
+      <div tuiNotification appearance="warning">
+        {{
+          'This version requires a newer version of StartOS. Update your server to install it.'
+            | i18n
+        }}
+      </div>
+    } @else if (!migrates()) {
+      <div tuiNotification appearance="warning">
+        {{
+          'Your installed version cannot update directly to this version.'
+            | i18n
+        }}
       </div>
     }
     <div class="g-buttons">
@@ -56,6 +75,7 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="warning"
+                [disabled]="needsOsUpdate()"
                 (click)="tryInstall()"
               >
                 {{ 'Downgrade' | i18n }}
@@ -66,6 +86,7 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="primary"
+                [disabled]="needsOsUpdate() || !migrates()"
                 (click)="tryInstall()"
               >
                 {{ 'Update' | i18n }}
@@ -76,6 +97,7 @@ type KEYS =
                 tuiButton
                 type="button"
                 appearance="secondary-grayscale"
+                [disabled]="needsOsUpdate()"
                 (click)="tryInstall()"
               >
                 {{ 'Reinstall' | i18n }}
@@ -97,6 +119,7 @@ type KEYS =
           tuiButton
           type="button"
           appearance="primary"
+          [disabled]="needsOsUpdate()"
           (click)="tryInstall()"
         >
           {{ (sameFlavor() ? 'Install' : 'Switch') | i18n }}
@@ -144,6 +167,23 @@ export class MarketplaceControlsComponent {
       !pkg ||
       this.exver.getFlavor(getManifest(pkg).version) === this.pkg().flavor,
   )
+  private readonly packageVersionCompat = toSignal(
+    this.patch.watch$('serverInfo', 'packageVersionCompat'),
+  )
+  protected readonly needsOsUpdate = computed(
+    (compat = this.packageVersionCompat()) =>
+      !this.file() &&
+      !!compat &&
+      requiresOsUpdate(this.exver, this.pkg(), compat),
+  )
+  protected readonly migrates = computed((pkg = this.localPkg()) => {
+    if (!pkg || !this.sameFlavor()) return true
+    const installed = getManifest(pkg).version
+    return (
+      this.exver.compareExver(installed, this.pkg().version) !== -1 ||
+      canMigrateFrom(this.exver, this.pkg(), installed)
+    )
+  })
   protected readonly trusted = computed(() =>
     matchingTrustedKeys(
       packageSigners(this.pkg()),
@@ -159,7 +199,7 @@ export class MarketplaceControlsComponent {
     if (
       !this.file() &&
       !(await this.alerts.alertPreDownload(
-        this.pkg().preDownloadAlert,
+        this.pkg(),
         localPkg ? getManifest(localPkg).version : null,
       ))
     )

@@ -594,4 +594,6 @@ export default {
   642: 'Aby wyłączyć ten VPN, najpierw zmień {vpns} tak, aby łączyły się przez coś innego.',
   643: 'Nigdy (domyślnie)',
   644: 'Gdy za NAT',
+  645: 'Zaloguj się z wiersza poleceń',
+  646: 'Zarejestruj tę przeglądarkę',
 } satisfies i18n

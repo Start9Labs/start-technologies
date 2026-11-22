@@ -121,6 +121,7 @@ export type ApplyParamsInput = z.input<typeof schemas.ApplyParams>
  * JSON Patch 'copy' operation representation
  */
 export type CopyOperation = z.output<typeof schemas.CopyOperation>
+export type DbCursorInput = z.input<typeof schemas.DbCursor>
 
 /**
  * Per-subnet DNS proxy configuration. WireGuard clients on a subnet are pointed
@@ -160,7 +161,7 @@ export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
 export type HttpRedirectStatus = z.output<typeof schemas.HttpRedirectStatus>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type ListDevicesParamsInput = z.input<typeof schemas.ListDevicesParams>
-export type ListParamsInput = z.input<typeof schemas.ListParams>
+export type ListKeysParamsInput = z.input<typeof schemas.ListKeysParams>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
 
 /**
@@ -200,7 +201,6 @@ export type SetSubnetIpv6ParamsInput = z.input<
 export type SetSubnetWanParamsInput = z.input<typeof schemas.SetSubnetWanParams>
 export type ShowConfigParamsInput = z.input<typeof schemas.ShowConfigParams>
 export type SubnetParamsInput = z.input<typeof schemas.SubnetParams>
-export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 
 /**
  * JSON Patch 'test' operation representation
@@ -235,7 +235,6 @@ export type ApplyWithPathParamsInput = z.input<
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 
 /**
@@ -253,6 +252,7 @@ export type SetPortForwardEnabledParamsInput = z.input<
   typeof schemas.SetPortForwardEnabledParams
 >
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
+export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TransportWireInput = z.input<typeof schemas.TransportWire>
 export type UpdatePortForwardLabelParamsInput = z.input<
@@ -261,19 +261,14 @@ export type UpdatePortForwardLabelParamsInput = z.input<
 export type WgConfig = z.output<typeof schemas.WgConfig>
 
 /**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export type KeyList = z.output<typeof schemas.KeyList>
+
+/**
  * Representation of JSON Patch (list of patch operations)
  */
 export type Patch = z.output<typeof schemas.Patch>
-
-/**
- * The server's sessions, by credential type.
- */
-export type Sessions = z.output<typeof schemas.Sessions>
-
-/**
- * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
- */
-export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -289,7 +284,6 @@ export type DiffPatch = z.output<typeof schemas.DiffPatch>
 export type RemovePinholeParamsInput = z.input<
   typeof schemas.RemovePinholeParams
 >
-export type SessionList = z.output<typeof schemas.SessionList>
 export type SetPinholeEnabledParamsInput = z.input<
   typeof schemas.SetPinholeEnabledParams
 >
@@ -298,4 +292,14 @@ export type UpdatePinholeLabelParamsInput = z.input<
 >
 export type WgSubnetConfig = z.output<typeof schemas.WgSubnetConfig>
 export type Revision = z.output<typeof schemas.Revision>
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export type SubscribeStart = z.output<typeof schemas.SubscribeStart>
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export type SubscribeStartResult = z.output<typeof schemas.SubscribeStartResult>
 export type Api = RpcSchemaTree<typeof schemas.Api>

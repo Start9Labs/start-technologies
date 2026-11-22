@@ -192,8 +192,8 @@ impl DbContext for ServerContext {
 }
 
 impl SignatureAuthContext for ServerContext {
-    fn server_identity(&self) -> Result<startos::sign::Signer, startos::Error> {
-        ServerContext::server_identity(self)
+    fn server_identity(&self) -> Result<startos::sign::session::ServerIdentity, startos::Error> {
+        ServerContext::server_identity(self).map(Into::into)
     }
     fn replay_check(&self) -> startos::middleware::auth::signature::RequestReplayCheck {
         ServerContext::replay_check(self)
@@ -1071,15 +1071,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_kill_accepts_pem_and_der64_keys() {
+    async fn key_remove_accepts_pem_and_der64_keys() {
         let ctx = ServerContext::default();
         enroll_named_keys(&ctx, &["pem", "der64"]).await;
         let pem = key_id("pem")
             .parse::<AnyVerifyingKey>()
             .unwrap()
             .to_string();
-        let params = imbl_value::from_value(json!({ "pubkeys": [pem, key_id("der64")] })).unwrap();
-        startos::auth::kill(ctx.clone(), params).await.unwrap();
+        let params = imbl_value::from_value(json!({ "keys": [pem, key_id("der64")] })).unwrap();
+        startos::auth::remove_key(ctx.clone(), params)
+            .await
+            .unwrap();
         assert!(enrolled(&ctx).await.is_empty());
     }
 

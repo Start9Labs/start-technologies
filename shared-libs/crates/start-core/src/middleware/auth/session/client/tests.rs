@@ -326,9 +326,17 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
     let dns = Arc::new(crate::net::dns::DnsController::new(
         crate::util::sync::Watch::new(Default::default()),
     ));
-    let startup = InitContext::init(&crate::context::config::ServerConfig::default(), dns)
-        .await
-        .unwrap();
+    let startup = InitContext::init(
+        &crate::context::config::ServerConfig::default(),
+        dns,
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
+    )
+    .await
+    .unwrap();
     let app = crate::net::static_server::ui_router(startup.clone());
     let (url, _server) = server(app).await;
     let ctx = CliContext::init(ClientConfig {
@@ -372,29 +380,87 @@ async fn all_startup_contexts_ignore_an_unavailable_stored_signer() {
 }
 
 #[tokio::test]
+async fn diagnostic_recovery_without_a_persistent_key_is_encrypted_and_advertises_temporary_scope()
+{
+    let key = crate::db::model::private::generate_server_identity_key().0;
+    let expected = crate::sign::AnyVerifyingKey::Ed25519(key.verifying_key());
+    let dns = Arc::new(crate::net::dns::DnsController::new(
+        crate::util::sync::Watch::new(Default::default()),
+    ));
+    let diagnostic = crate::context::DiagnosticContext::init(
+        &crate::context::config::ServerConfig::default(),
+        None,
+        crate::Error::new(
+            color_eyre::eyre::eyre!("recovery fixture"),
+            crate::ErrorKind::Filesystem,
+        ),
+        dns,
+        crate::context::StartupIdentity::temporary(key),
+    )
+    .await
+    .unwrap();
+    let (url, _server) = server(crate::net::static_server::ui_router(diagnostic)).await;
+    let signer: Signer = crate::sign::AnySigningKey::generate().into();
+    let (peer, mut socket) = super::connect(
+        &reqwest::Client::new(),
+        &signer,
+        super::RpcSessionUpgrader::url(url.clone()).unwrap(),
+        "127.0.0.1",
+        crate::sign::session::Target::Rpc,
+        HeaderMap::new(),
+    )
+    .await
+    .unwrap();
+    assert!(peer.temporary);
+    assert_eq!(peer.key, expected);
+    assert_eq!(
+        super::request(
+            &mut socket,
+            super::request_body("state", imbl_value::json!({})).unwrap()
+        )
+        .await
+        .unwrap()
+        .as_str(),
+        Some("error")
+    );
+
+    let (ctx, _identity) = cli(&url, signer);
+    let error = ctx
+        .call_remote::<RegistryContext>("state", imbl_value::json!({}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, crate::ErrorKind::InvalidSignature);
+    assert!(
+        !ctx.id_key_path
+            .with_file_name("registry-identities")
+            .exists()
+    );
+}
+
+#[tokio::test]
 async fn actual_registry_cli_dispatch_and_promotion_use_encrypted_admission() {
     let (_temp, registry, admin, _, _) = crate::registry::tests::fixture().await;
     let (url, _task) = server(crate::registry::registry_router(registry)).await;
     let (ctx, _identity) = cli(&url, admin);
     let result = <CliContext as CallRemote<RegistryContext>>::call_remote(
         &ctx,
-        "registry.package.access.get",
+        "registry.admin.reader.list",
         Default::default(),
-        imbl_value::json!({"id":"secret"}),
+        imbl_value::json!({}),
         rpc_toolkit::Empty {},
     )
     .await
     .unwrap();
-    assert_eq!(result["private"].as_bool(), Some(true));
+    assert_eq!(result.as_object().map(|r| r.len()), Some(1));
     let result = crate::registry::package::promote::call_registry(
         &ctx,
         crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
-        "package.access.get",
-        imbl_value::json!({"id":"secret"}),
+        "admin.reader.list",
+        imbl_value::json!({}),
     )
     .await
     .unwrap();
-    assert_eq!(result["private"].as_bool(), Some(true));
+    assert_eq!(result.as_object().map(|r| r.len()), Some(1));
 }
 
 #[tokio::test]
@@ -433,14 +499,14 @@ async fn registry_cli_websocket_keeps_the_configured_http_proxy() {
     ctx.id_key.set(admin).unwrap();
     let response = <CliContext as CallRemote<RegistryContext>>::call_remote(
         &ctx,
-        "registry.package.access.get",
+        "registry.admin.reader.list",
         Default::default(),
-        imbl_value::json!({"id":"secret"}),
+        imbl_value::json!({}),
         rpc_toolkit::Empty {},
     )
     .await
     .unwrap();
-    assert_eq!(response["private"].as_bool(), Some(true));
+    assert_eq!(response.as_object().map(|r| r.len()), Some(1));
     let headers = request.await.unwrap();
     assert!(headers.starts_with("GET http://"), "{headers}");
     assert!(headers.contains("/nested/rpc/v2 "), "{headers}");
@@ -488,14 +554,14 @@ async fn registry_cli_websocket_keeps_socks_remote_dns() {
     ctx.id_key.set(admin).unwrap();
     let response = <CliContext as CallRemote<RegistryContext>>::call_remote(
         &ctx,
-        "registry.package.access.get",
+        "registry.admin.reader.list",
         Default::default(),
-        imbl_value::json!({"id":"secret"}),
+        imbl_value::json!({}),
         rpc_toolkit::Empty {},
     )
     .await
     .unwrap();
-    assert_eq!(response["private"].as_bool(), Some(true));
+    assert_eq!(response.as_object().map(|r| r.len()), Some(1));
 }
 
 #[tokio::test]
@@ -586,8 +652,8 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
         crate::registry::package::promote::call_registry(
             &rejected,
             crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
-            "package.access.get",
-            imbl_value::json!({"id":"secret"}),
+            "admin.reader.list",
+            imbl_value::json!({}),
         )
         .await
         .is_err()
@@ -608,12 +674,12 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     let result = crate::registry::package::promote::call_registry(
         &trusted,
         crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
-        "package.access.get",
-        imbl_value::json!({"id":"secret"}),
+        "admin.reader.list",
+        imbl_value::json!({}),
     )
     .await
     .unwrap();
-    assert_eq!(result["private"].as_bool(), Some(true));
+    assert_eq!(result.as_object().map(|r| r.len()), Some(1));
     let ordinary = trusted
         .client
         .post(crate::registry::package::promote::registry_rpc_url(&url).unwrap())
@@ -674,12 +740,12 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     let result = crate::registry::package::promote::call_registry(
         &insecure,
         crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
-        "package.access.get",
-        imbl_value::json!({"id":"secret"}),
+        "admin.reader.list",
+        imbl_value::json!({}),
     )
     .await
     .unwrap();
-    assert_eq!(result["private"].as_bool(), Some(true));
+    assert_eq!(result.as_object().map(|r| r.len()), Some(1));
     let legacy_url = format!("https://localhost:{}/legacy/", url.port().unwrap());
     let legacy = CliContext::init(ClientConfig {
         host: Some(legacy_url.parse().unwrap()),
@@ -812,10 +878,17 @@ async fn actual_gpg_cli_authenticates_without_exporting_the_identity() {
     let dns = Arc::new(crate::net::dns::DnsController::new(
         crate::util::sync::Watch::new(Default::default()),
     ));
-    let startup =
-        crate::context::InitContext::init(&crate::context::config::ServerConfig::default(), dns)
-            .await
-            .unwrap();
+    let startup = crate::context::InitContext::init(
+        &crate::context::config::ServerConfig::default(),
+        dns,
+        Some(
+            crate::db::model::private::generate_server_identity_key()
+                .0
+                .into(),
+        ),
+    )
+    .await
+    .unwrap();
     let observed = calls.clone();
     let startup = crate::net::static_server::ui_router(startup).layer(axum::middleware::from_fn(
         move |request: axum::extract::Request, next: axum::middleware::Next| {

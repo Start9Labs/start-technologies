@@ -844,6 +844,10 @@ pub const ENVIRONMENT: &str = include_str!(concat!(
     "/../../../build/env/ENVIRONMENT.txt"
 ));
 
+pub fn commit_hash() -> &'static str {
+    COMMIT_HASH.trim()
+}
+
 pub fn git_info() -> Result<InternedString, Error> {
     Ok(InternedString::intern(COMMIT_HASH))
 }
@@ -903,7 +907,7 @@ mod tests {
             ("0.4.1.3", "0.4.2", 0),
             ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.2.2", 0),
-            ("0.4.2.2", "0.4.3", 0),
+            ("0.4.2.2", "0.4.3", 3),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()
@@ -1034,7 +1038,10 @@ mod tests {
                 db["public"]["serverInfo"]["version"],
                 to_value(&current.semver()).unwrap()
             );
-            assert_eq!(applied_migration_revision(&mut db).unwrap(), 0);
+            assert_eq!(
+                applied_migration_revision(&mut db).unwrap(),
+                current.migration_revision()
+            );
         }
     }
 

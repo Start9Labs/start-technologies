@@ -51,18 +51,9 @@ pub fn set_locale_from_env() {
 }
 
 pub fn set_locale(lang: &str) {
-    let mut best = None;
-    let prefix = lang.split_inclusive("_").next().unwrap();
-    for l in rust_i18n::available_locales!() {
-        if l == lang {
-            best = Some(l);
-            break;
-        }
-        if best.is_none() && l.starts_with(prefix) {
-            best = Some(l);
-        }
-    }
-    rust_i18n::set_locale(best.unwrap_or(lang));
+    rust_i18n::set_locale(
+        crate::best_locale(lang, rust_i18n::available_locales!()).unwrap_or(lang),
+    );
 }
 
 /// Help text that is not a locale key stays as written.
@@ -303,9 +294,16 @@ pub(crate) fn assert_no_shadowed_args(root: clap::Command) {
     );
 }
 
+/// Replaces every page in the directory, removing pages for deleted commands.
 #[cfg(test)]
 fn export_manpages(command: clap::Command, dir: &str) {
     std::fs::create_dir_all(dir).unwrap();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|ext| ext == "1") {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
     clap_mangen::generate_to(command, dir).unwrap();
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();

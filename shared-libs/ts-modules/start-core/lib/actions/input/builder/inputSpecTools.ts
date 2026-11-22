@@ -23,6 +23,7 @@ export interface BoundValue<OuterType> {
   // Static (non-dynamic) methods — no OuterType involved
   toggle: typeof Value.toggle
   triState: typeof Value.triState
+  acknowledgement: typeof Value.acknowledgement
   text: typeof Value.text
   textarea: typeof Value.textarea
   number: typeof Value.number

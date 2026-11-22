@@ -61,6 +61,21 @@ export class RpcService {
   async request<M extends RpcMethod<Api>>(
     options: RPCOptions<M>,
   ): Promise<RpcReturnType<Api, M>> {
+    const body = await this.send(options)
+    if (isRpcError(body)) this.raiseError(new RpcError(body.error))
+    return body.result
+  }
+
+  /** Rejects on an unauthenticated reply without signing out. */
+  async probe<M extends RpcMethod<Api>>(
+    options: RPCOptions<M>,
+  ): Promise<RpcReturnType<Api, M>> {
+    const body = await this.send(options)
+    if (isRpcError(body)) throw new RpcError(body.error)
+    return body.result
+  }
+
+  private async send<M extends RpcMethod<Api>>(options: RPCOptions<M>) {
     const request = rpcRequestBody(options)
     const lease = await this.authKeys.admissionLease()
     const body = await this.sockets.message<RpcReturnType<Api, M>>(
@@ -73,10 +88,7 @@ export class RpcService {
     )
     this.checkFirmware(body?.meta)
     if (body === null) throw new Error('Empty RPC response')
-
-    if (isRpcError(body)) this.raiseError(new RpcError(body.error))
-
-    return body.result
+    return body
   }
 
   private checkFirmware(meta: unknown): void {

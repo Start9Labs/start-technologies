@@ -28,20 +28,32 @@ Run `start-registry info set-trust-signers` without IDs to clear the selection. 
 
 ## Private packages
 
-Admins can restrict package metadata and icons to admins, authorized publishers, and selected
-registered signers:
+A private s9pk is hosted encrypted. The registry stores its AES-256-CTR keystream and shows the
+s9pk, keystream included, only to admins, the package's authorized publishers, and the reader keys
+it lists. Versions and packages with no s9pk a requester can see are hidden from them. Admins keep
+a labeled directory of reader keys, typically StartOS server keys:
 
 ```bash
-start-registry package access set-private <PACKAGE_ID> true
-start-registry package access add-reader <PACKAGE_ID> <SIGNER_ID>
-start-registry package access get <PACKAGE_ID>
-start-registry package access remove-reader <PACKAGE_ID> <SIGNER_ID>
+start-registry admin reader add <LABEL> <KEY>
+start-registry admin reader list
+start-registry admin reader edit <ID> --label <LABEL>
+start-registry admin reader remove <ID>
 ```
 
-`set-private` creates a package entry when needed, allowing restriction before publication.
-Existing packages default to public. Readers authenticate through encrypted sessions or signed
-requests; revocations update active subscriptions. A subscriber using the public mirror must reconnect after receiving a private
-access grant. Archive URLs remain governed by their download host.
+Publishers mark an s9pk private when indexing it, listing each reader key:
+
+```bash
+start-cli s9pk publish <FILE> --private --reader <KEY>...
+start-cli s9pk encrypt <FILE>
+start-cli registry package add <FILE> --url <URL> --private --reader <KEY>...
+```
+
+`s9pk publish --private` uploads ciphertext to S3. `s9pk encrypt` writes the ciphertext for hosting
+elsewhere, and `registry package add --private` indexes it. The keystream is derived from the
+publisher's key and the archive, so both commands agree. Clients decrypt as they download and
+verify the archive's commitment. Readers authenticate through encrypted sessions or signed
+requests; revocations update active subscriptions. A subscriber using the public mirror must
+reconnect after receiving a private access grant.
 
 ## Package endorsements
 
@@ -97,7 +109,7 @@ Configuration is read from CLI flags and a config file (`-c <path>`; default sea
 | `-c, --config <path>`   | config file                                                      |
 | `--mirror-of <url>`     | mirror another registry's index (read-only index)                |
 
-Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/rpc/v2` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection through signed ephemeral DH. Streaming requires encrypted admission and `rpcstream`, with the client's selected URL host configured on the registry. A legacy HTTP 200 response without upgrading, or HTTP 404/405/501, selects signed HTTP polling every 15 minutes; each cycle retries upgrade support. Polls retrieve full package versions/revisions, registry info and the selected OS index through the same cache/trust owners. Authorization, transport and failed encrypted admission errors never downgrade. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view; omitted versions retain the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
+Clients synchronize registry metadata through `db.subscribe`: `rpcstream` opt-in uses the shared `/rpc/v2` socket, while ordinary requests retain the GUID WebSocket continuation. StartOS authenticates and encrypts this shared connection through signed ephemeral DH. Streaming requires encrypted admission and `rpcstream`, with the client's selected URL host configured on the registry. A legacy HTTP 200 response without upgrading, or HTTP 404/405/501, selects signed HTTP polling every 15 minutes; each cycle retries upgrade support. Polls retrieve full package versions/revisions, registry info and the selected OS index through the same cache/trust owners. Authorization, transport and failed encrypted admission errors never downgrade. A subscription's optional `osVersion` selects a lazily shared backward-compatible index view, and its optional `language` a lazily shared view with every translated field resolved to that locale; omitting them retains the canonical format. StartOS maintains package, signer, and OS-update caches independently of open browser sessions. OS releases marked `security` generate notifications on compatible StartOS servers using that registry for updates.
 
 ## Mirroring another registry
 

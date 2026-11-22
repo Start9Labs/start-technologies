@@ -45,7 +45,7 @@ async fn read_update_notes(
     if &notes.version != version {
         return Ok(None);
     }
-    let notes = without_pre_update(&notes.release_notes.localized_for(locale));
+    let notes = without_pre_update(&notes.release_notes.localized_for(Some(locale), None));
     Ok((!notes.trim().is_empty()).then_some(notes))
 }
 

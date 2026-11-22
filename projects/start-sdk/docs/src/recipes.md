@@ -16,7 +16,7 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 | [Generate Config Files](recipe-config-files.md)             | Produce YAML, TOML, INI, JSON, or ENV files from user settings using FileModel                                                                      |
 | [Pass Config via Environment Variables](recipe-env-vars.md) | Configure your service through environment variables in the daemon definition                                                                       |
 | [Hardcode Config Values](recipe-hardcode-config.md)         | Lock down ports, paths, or auth modes so users cannot change them                                                                                   |
-| [Set a Primary URL](recipe-primary-url.md)                  | Let users choose which hostname the service uses for links, invites, and federation                                                                 |
+| [Set a Primary URL](recipe-primary-url.md)                  | Let users choose which hostname the service uses for links, invites, notifications, and federation                                                  |
 | [Set Up SMTP / Email](recipe-smtp.md)                       | Let users configure email sending with disabled/system/custom modes                                                                                 |
 
 ## Credentials & Access Control
@@ -62,13 +62,13 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 
 ## Dependencies
 
-| Recipe                                                               | Description                                                                                                |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| [Depend on Another Service](recipe-dependency.md)                    | Declare a dependency, read its connection info, and auto-configure                                         |
-| [Enforce Settings on a Dependency](recipe-enforce-dependency.md)     | Create a cross-service task that requires specific dependency configuration                                |
-| [Mount Volumes from Another Service](recipe-mount-dependency.md)     | Read-only access to a dependency's data volume                                                             |
-| [Let Dependents Through a Proxy Auth Gate](recipe-dependent-auth.md) | Publish a key on a `public` volume so dependents pass an `addSsl.auth` gate, and read it on the other side |
-| [Support Alternative Dependencies](recipe-alternative-deps.md)       | Let users choose between backends (e.g., LND vs CLN)                                                       |
+| Recipe                                                               | Description                                                                                              |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| [Depend on Another Service](recipe-dependency.md)                    | Declare a dependency, read its connection info, and auto-configure                                       |
+| [Enforce Settings on a Dependency](recipe-enforce-dependency.md)     | Create a cross-service task that requires specific dependency configuration                              |
+| [Mount Volumes from Another Service](recipe-mount-dependency.md)     | Read-only access to a dependency's data volume                                                           |
+| [Let Dependents Through a Proxy Auth Gate](recipe-dependent-auth.md) | Publish a key on a `public` volume so dependents pass a `proxy.auth` gate, and read it on the other side |
+| [Support Alternative Dependencies](recipe-alternative-deps.md)       | Let users choose between backends (e.g., LND vs CLN)                                                     |
 
 ## Data & Health
 

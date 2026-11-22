@@ -39,7 +39,19 @@ pub(super) async fn poll(
                     )
                     .await?,
                 )?;
-                to_value(&index(info, packages))?
+                let mut index = index(info, packages);
+                index.os = from_value(
+                    call_legacy(
+                        client,
+                        signer,
+                        registry,
+                        http::HeaderMap::new(),
+                        "os.index",
+                        imbl_value::json!({}),
+                    )
+                    .await?,
+                )?;
+                to_value(&index)?
             }
             Subscription::Os(_) => {
                 call_legacy(
@@ -63,6 +75,7 @@ pub(super) fn index(info: RegistryInfo, packages: GetPackagesResponseFull) -> Fu
         name: info.name,
         icon: info.icon,
         description: info.description,
+        default_locale: info.default_locale,
         package: PackageIndex {
             categories: info.categories,
             packages: packages

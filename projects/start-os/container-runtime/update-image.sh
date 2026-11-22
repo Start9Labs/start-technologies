@@ -9,10 +9,9 @@ if [ "$ARCH" = "riscv64" ]; then
   RUST_ARCH="riscv64gc"
 fi
 
+# The riscv64 image runner's kernel cannot mount squashfs.
 mount -t tmpfs tmpfs /tmp
-mkdir -p /tmp/lower /tmp/upper /tmp/work /tmp/combined
-mount -o loop debian.${ARCH}.squashfs /tmp/lower
-mount -t overlay -olowerdir=/tmp/lower,upperdir=/tmp/upper,workdir=/tmp/work overlay /tmp/combined
+unsquashfs -q -d /tmp/combined debian.${ARCH}.squashfs
 
 mkdir -p /tmp/combined/usr/lib/startos/
 cp ../build/lib/resolved.conf /tmp/combined/usr/lib/startos/resolved.conf

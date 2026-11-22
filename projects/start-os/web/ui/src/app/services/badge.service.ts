@@ -8,41 +8,38 @@ import { NotificationService } from 'src/app/services/notification.service'
 import { OSService } from 'src/app/services/os.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
-import { UpdatesRefinementService } from 'src/app/services/updates-refinement.service'
 import { FilterUpdatesPipe } from '../routes/portal/routes/updates/filter-updates.pipe'
 
+/** Counts tally pending items; warnings flag conditions that need attention. */
 @Injectable({
   providedIn: 'root',
 })
 export class BadgeService {
   private readonly notifications = inject(NotificationService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
-  private readonly system$ = inject(OSService).updateAvailable$.pipe(
-    map(Number),
-  )
+  private readonly system$ = inject(OSService).showUpdate$.pipe(map(Number))
   private readonly metrics$ = this.patch
     .watch$('serverInfo', 'ntpSynced')
-    .pipe(map(synced => Number(!synced)))
+    .pipe(map(synced => !synced))
   private readonly filterUpdatesPipe = inject(FilterUpdatesPipe)
   private readonly hiddenUpdates = inject(HiddenUpdatesService)
-  private readonly refinement = inject(UpdatesRefinementService)
 
-  private readonly registryErrors$ = inject(
-    MarketplaceService,
-  ).requestErrors$.pipe(map(errors => errors.length > 0))
+  private readonly marketplace = inject(MarketplaceService)
+  private readonly registryErrors$ = this.marketplace.requestErrors$.pipe(
+    map(errors => errors.length > 0),
+  )
 
-  // The navbar keeps refinement warm across Updates navigation.
   private readonly updates$ = combineLatest([
-    this.refinement.refined$,
+    this.marketplace.marketplace$,
     inject(LocalPackagesService),
     this.hiddenUpdates.effective$,
   ]).pipe(
     map(
-      ([refined, local, hidden]) =>
-        Object.entries(refined.marketplace).reduce(
-          (list, [_, store]) =>
+      ([marketplace, local, hidden]) =>
+        Object.values(marketplace).reduce(
+          (list, store) =>
             this.filterUpdatesPipe
-              .transform(store?.packages || [], local, hidden)
+              .transform(store?.updates || [], local, hidden)
               .reduce((result, { id }) => result.add(id), list),
           new Set<string>(),
         ).size,
@@ -66,23 +63,28 @@ export class BadgeService {
   )
 
   getWarning(id: string): Observable<boolean> {
-    if (id === 'updates') return this.registryErrors$
-    return id === 'system' || id === 'backup-targets'
-      ? this.backups$
-      : of(false)
+    switch (id) {
+      case 'system':
+        return combineLatest([this.backups$, this.registryErrors$]).pipe(
+          map(([backups, registries]) => backups || registries),
+        )
+      case 'backup-targets':
+        return this.backups$
+      case 'registries':
+        return this.registryErrors$
+      case 'metrics':
+        return this.metrics$
+      default:
+        return of(false)
+    }
   }
 
   getCount(id: string): Observable<number> {
     switch (id) {
       case 'updates':
-        // Registry errors replace the navigation count, not cached update rows.
-        return combineLatest([this.updates$, this.registryErrors$]).pipe(
-          map(([count, error]) => (error ? 0 : count)),
-        )
+        return this.updates$
       case 'system':
         return this.system$
-      case 'metrics':
-        return this.metrics$
       case 'notifications':
         return this.notifications.unreadCount$
       default:

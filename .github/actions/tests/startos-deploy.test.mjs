@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { chmodSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import yaml from 'js-yaml'
@@ -136,16 +136,24 @@ if (command === 'ls') {
 `,
   )
   f.nodeExecutable('sleep', '')
+  chmodSync(
+    f.write(
+      'scripts/s3-put-once.sh',
+      readFileSync(join(REPO, 'scripts/s3-put-once.sh')),
+    ),
+    0o755,
+  )
   f.write('bucket/.keep', '')
   f.write('puts.log', '')
   for (const file of FILES) f.write(`artifacts/${file}`, `${file} built\n`)
   const env = {
     ...f.env,
     PATH: `${f.root}:${f.env.PATH}`,
+    GITHUB_WORKSPACE: f.root,
     VERSION,
     PLATFORM,
     REGISTRY: 'https://registry.example',
-    GITHUB_SHA: SHA,
+    COMMIT: SHA,
     S3_BUCKET: 's3://bucket',
     S3_CDN: 'https://cdn.example',
     FORCE_OVERWRITE: 'false',
@@ -271,6 +279,29 @@ for (const [name, existing, force, status, uploaded] of [
     assert.deepEqual(f.puts().sort(), uploaded.map(f.key).sort())
   })
 }
+
+const wrtUpload = step(
+  load('start-wrt.yaml').jobs.deploy,
+  'Upload images to S3',
+)
+const WRT_IMAGES = [
+  'startwrt-1.3.0-aaaaaaa_spacemit-k1-sdcard.img.gz',
+  'startwrt-1.3.0-aaaaaaa_spacemit-k1-sysupgrade.img.gz',
+]
+
+test('start-wrt deploy upload skips images an earlier attempt uploaded and refuses different bytes', t => {
+  const f = deployFixture(t, index({}))
+  for (const image of WRT_IMAGES)
+    f.write(`artifacts/${image}`, `${image} built\n`)
+  f.object(WRT_IMAGES[0], `${WRT_IMAGES[0]} built\n`)
+  const rerun = f.run(wrtUpload)
+  assert.equal(rerun.status, 0, rerun.stdout + rerun.stderr)
+  assert.deepEqual(f.puts(), [f.key(WRT_IMAGES[1])])
+  f.object(WRT_IMAGES[1], 'another build\n')
+  const conflict = f.run(wrtUpload)
+  assert.equal(conflict.status, 1, conflict.stdout + conflict.stderr)
+  assert.deepEqual(f.puts(), [f.key(WRT_IMAGES[1])])
+})
 
 const indexAssets = step(leg, 'Index assets in registry')
 const indexed = registry =>
@@ -426,3 +457,111 @@ for (const [name, deployed, published, status, warning] of [
     assert.equal(f.run('test -e deleted.log').status, 1)
   })
 }
+
+test('a deploy leg missing one of its images fails before uploading', t => {
+  const check = step(leg, 'Check downloaded images')
+  for (const [platform, files, ok] of [
+    [PLATFORM, FILES, true],
+    [PLATFORM, [FILES[0]], false],
+    [
+      PLATFORM,
+      [`startos-${VERSION}-aaaaaaa_${PLATFORM}-nonfree.iso`, FILES[0]],
+      false,
+    ],
+    [
+      'raspberrypi',
+      [
+        `startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`,
+        `startos-${VERSION}-aaaaaaa_raspberrypi.img.gz`,
+      ],
+      true,
+    ],
+    [
+      'raspberrypi',
+      [
+        `startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`,
+        `startos-${VERSION}-aaaaaaa_raspberrypi.img`,
+      ],
+      false,
+    ],
+    ['raspberrypi', [`startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`], false],
+  ]) {
+    const f = fixture(t)
+    for (const file of files) f.write(`artifacts/${file}`, '')
+    const result = f.run('bash', ['-e', '-c', check], {
+      cwd: join(f.root, 'artifacts'),
+      env: { ...f.env, PLATFORM: platform },
+      encoding: 'utf8',
+    })
+    assert.equal(
+      result.status === 0,
+      ok,
+      `${platform} ${files}: ${result.stdout}`,
+    )
+  }
+})
+
+test('a start-wrt deploy missing one of its images fails before uploading', t => {
+  const check = step(
+    load('start-wrt.yaml').jobs.deploy,
+    'Check downloaded images',
+  )
+  for (const [files, ok] of [
+    [WRT_IMAGES, true],
+    [[WRT_IMAGES[0]], false],
+    [[WRT_IMAGES[1]], false],
+  ]) {
+    const f = fixture(t)
+    for (const file of files) f.write(`artifacts/${file}`, '')
+    const result = f.run('bash', ['-e', '-c', check], {
+      cwd: join(f.root, 'artifacts'),
+      env: f.env,
+      encoding: 'utf8',
+    })
+    assert.equal(result.status === 0, ok, `${files}: ${result.stdout}`)
+  }
+})
+
+test('a raspberrypi deploy indexes its img gzipped and records the img.gz as published', t => {
+  const f = deployFixture(t, index({ [VERSION]: entry(SHA) }))
+  const pi = [
+    `startos-${VERSION}-aaaaaaa_raspberrypi.squashfs`,
+    `startos-${VERSION}-aaaaaaa_raspberrypi.img.gz`,
+  ]
+  for (const file of pi) f.write(`artifacts/${file}`, `${file} built\n`)
+  const env = { PLATFORM: 'raspberrypi', RUNNER_TEMP: f.root }
+  const result = f.run(indexAssets, env, join(f.root, 'artifacts'))
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  const version = f.registry().versions[VERSION]
+  assert.deepEqual(version.img.raspberrypi.urls, [
+    `https://cdn.example/v${VERSION}/${pi[1]}`,
+  ])
+  assert.deepEqual(version.squashfs.raspberrypi.urls, [
+    `https://cdn.example/v${VERSION}/${pi[0]}`,
+  ])
+  const add = f
+    .calls()
+    .find(
+      call =>
+        call.slice(0, 4).join(' ') === 'registry os asset add' &&
+        call.some(arg => arg.endsWith('.img.gz')),
+    )
+  const indexedFile = add.slice(4).find(arg => !arg.startsWith('--'))
+  assert.equal(indexedFile, pi[1].replace(/\.gz$/, ''))
+  assert.equal(
+    readFileSync(join(f.root, 'artifacts', indexedFile), 'utf8'),
+    `${pi[1]} built\n`,
+  )
+  const recorded = f.run(
+    step(leg, 'Record published images'),
+    env,
+    join(f.root, 'artifacts'),
+  )
+  assert.equal(recorded.status, 0, recorded.stderr)
+  assert.deepEqual(
+    readFileSync(join(f.root, 'published-raspberrypi.txt'), 'utf8')
+      .trim()
+      .split('\n'),
+    [pi[0], pi[1]],
+  )
+})

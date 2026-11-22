@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import '@angular/compiler'
-import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
+import {
+  createEnvironmentInjector,
+  runInInjectionContext,
+  signal,
+} from '@angular/core'
 import { BehaviorSubject, of } from 'rxjs'
 import { loadTypeScript } from './typescript-loader.mjs'
 
@@ -24,8 +28,8 @@ classes(
 )
 classes(
   '@taiga-ui/core',
-  ['TuiButton', 'TuiCell', 'TuiIcon', 'TuiNotification', 'TuiTitle'],
-  ';export const TUI_ICON_START=Symbol();export const tuiButtonOptionsProvider=()=>[];',
+  ['TuiButton', 'TuiCell', 'TuiIcon', 'TuiLink', 'TuiNotification', 'TuiTitle'],
+  ';export const TUI_ICON_START=Symbol();export const TUI_BREAKPOINT=Symbol();export const tuiButtonOptionsProvider=()=>[];',
 )
 classes('@taiga-ui/kit', [
   'TuiAvatar',
@@ -33,21 +37,15 @@ classes('@taiga-ui/kit', [
   'TuiFade',
   'TuiSkeleton',
 ])
-classes('@ng-web-apis/platform', [], 'export const WA_IS_MOBILE=Symbol();')
 for (const [file, name] of [
   ['hidden-updates', 'HiddenUpdatesService'],
   ['local-packages', 'LocalPackagesService'],
   ['marketplace', 'MarketplaceService'],
   ['notification', 'NotificationService'],
   ['os', 'OSService'],
-  ['updates-refinement', 'UpdatesRefinementService'],
   ['title', 'TitleDirective'],
 ])
-  classes(
-    `src/app/services/${file}.service`,
-    [name],
-    file === 'updates-refinement' ? ';export const refinementKey=()=>"";' : '',
-  )
+  classes(`src/app/services/${file}.service`, [name])
 classes('src/app/routes/portal/components/placeholder.component', [
   'PlaceholderComponent',
 ])
@@ -64,7 +62,7 @@ boundaries.set(
 )
 loadTypeScript(boundaries)
 const { PatchDB } = await import('patch-db-client')
-const { WA_IS_MOBILE } = await import('@ng-web-apis/platform')
+const { TUI_BREAKPOINT } = await import('@taiga-ui/core')
 const { HiddenUpdatesService } =
   await import('src/app/services/hidden-updates.service')
 const { LocalPackagesService } =
@@ -74,8 +72,6 @@ const { MarketplaceService } =
 const { NotificationService } =
   await import('src/app/services/notification.service')
 const { OSService } = await import('src/app/services/os.service')
-const { UpdatesRefinementService } =
-  await import('src/app/services/updates-refinement.service')
 const { FilterUpdatesPipe } =
   await import('../routes/portal/routes/updates/filter-updates.pipe')
 const { BadgeService } = await import('../src/app/services/badge.service.ts')
@@ -88,22 +84,30 @@ function fixture(t, mobile = false) {
     { url: 'https://two.test/', name: 'Two', status: 'connected' },
   ])
   const errors = new BehaviorSubject([])
-  const refined = new BehaviorSubject({
-    marketplace: { 'https://one.test/': { packages: [{ id: 'one' }] } },
-    pending: new Set(),
+  const marketplace = new BehaviorSubject({
+    'https://one.test/': {
+      packages: [{ id: 'one' }],
+      updates: [{ id: 'one' }],
+    },
   })
   const local = new BehaviorSubject({})
   const injector = createEnvironmentInjector([
-    { provide: WA_IS_MOBILE, useValue: mobile },
+    {
+      provide: TUI_BREAKPOINT,
+      useValue: signal(mobile ? 'mobile' : 'desktopLarge'),
+    },
     {
       provide: MarketplaceService,
-      useValue: { registries$: hosts, requestErrors$: errors },
+      useValue: {
+        registries$: hosts,
+        requestErrors$: errors,
+        marketplace$: marketplace,
+      },
     },
-    { provide: UpdatesRefinementService, useValue: { refined$: refined } },
     { provide: LocalPackagesService, useValue: local },
     { provide: HiddenUpdatesService, useValue: { effective$: of({}) } },
     { provide: NotificationService, useValue: { unreadCount$: of(0) } },
-    { provide: OSService, useValue: { updateAvailable$: of(false) } },
+    { provide: OSService, useValue: { showUpdate$: of(false) } },
     {
       provide: PatchDB,
       useValue: {
@@ -116,38 +120,53 @@ function fixture(t, mobile = false) {
   return {
     hosts,
     errors,
-    refined,
+    marketplace,
     make: type => runInInjectionContext(injector, () => new type()),
   }
 }
 
-test('registry errors replace the navigation count without dropping retained update rows', t => {
+test('registry errors warn on System and Registries while the Updates count stays', t => {
   const f = fixture(t)
   const badges = f.make(BadgeService)
-  const counts = [],
-    warnings = []
+  const latest = {}
+  const watch = (key, source) =>
+    source.subscribe(value => (latest[key] = value))
   const subscriptions = [
-    badges.getCount('updates').subscribe(value => counts.push(value)),
-    badges.getWarning('updates').subscribe(value => warnings.push(value)),
+    watch('count', badges.getCount('updates')),
+    watch('updates', badges.getWarning('updates')),
+    watch('system', badges.getWarning('system')),
+    watch('registries', badges.getWarning('registries')),
   ]
   t.after(() =>
     subscriptions.forEach(subscription => subscription.unsubscribe()),
   )
-  assert.equal(counts.at(-1), 1)
-  assert.equal(warnings.at(-1), false)
-  f.errors.next(['https://two.test/'])
-  assert.equal(counts.at(-1), 0)
-  assert.equal(warnings.at(-1), true)
-  f.refined.next({
-    marketplace: {
-      'https://one.test/': { packages: [{ id: 'one' }, { id: 'two' }] },
-    },
-    pending: new Set(),
+  assert.deepEqual(latest, {
+    count: 1,
+    updates: false,
+    system: false,
+    registries: false,
   })
-  assert.equal(counts.at(-1), 0)
+  f.errors.next(['https://two.test/'])
+  assert.deepEqual(latest, {
+    count: 1,
+    updates: false,
+    system: true,
+    registries: true,
+  })
+  f.marketplace.next({
+    'https://one.test/': {
+      packages: [{ id: 'one' }, { id: 'two' }],
+      updates: [{ id: 'one' }, { id: 'two' }],
+    },
+  })
+  assert.equal(latest.count, 2)
   f.errors.next([])
-  assert.equal(counts.at(-1), 2)
-  assert.equal(warnings.at(-1), false)
+  assert.deepEqual(latest, {
+    count: 2,
+    updates: false,
+    system: false,
+    registries: false,
+  })
 })
 
 test('registry availability revisions update the selected table without selecting the first registry', t => {

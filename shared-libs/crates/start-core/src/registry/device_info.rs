@@ -45,6 +45,19 @@ impl DeviceInfo {
             hardware: Some(HardwareInfo::load(ctx).await?),
         })
     }
+
+    /// Also admits releases built for a newer StartOS, which listings show but install rejects.
+    pub fn for_listing(&self) -> Self {
+        let mut device = self.clone();
+        device.os.compat = exver::VersionRange::or(
+            device.os.compat,
+            exver::VersionRange::anchor(
+                exver::GT,
+                exver::ExtendedVersion::new(device.os.version.clone(), Default::default()),
+            ),
+        );
+        device
+    }
 }
 impl DeviceInfo {
     pub fn to_header_value(&self) -> HeaderValue {
@@ -368,7 +381,7 @@ fn project_os_headlines(method: &str, res: &mut Value, legacy: bool) {
 fn project_legacy_os_notes(method: &str, res: &mut Value) -> Result<(), Error> {
     for (_, info) in os_version_infos(method, res) {
         let notes: LocaleString = from_value(info["releaseNotes"].clone())?;
-        info["releaseNotes"] = Value::String(notes.localized_for("en_US").into());
+        info["releaseNotes"] = Value::String(notes.localized_for(Some("en_US"), None).into());
     }
     Ok(())
 }
