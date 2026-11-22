@@ -957,6 +957,8 @@ function hasDisplayedHealth<M extends T.SDKManifest>(
  * Implements {@link T.DaemonBuildable}: `build()` performs the first
  * reconcile and wires up the re-run trigger; `term()` shuts everything
  * down in dependent-first order.
+ *
+ * Stopped instances must not restore cleared health or overwrite replacement health.
  */
 export class DaemonsReconciler<M extends T.SDKManifest>
   implements T.DaemonBuildable
@@ -965,11 +967,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
   private inFlight: Promise<void> | null = null
   private pendingRerun = false
   private sharedVolumesRevision = 0
-  private isTerminating = false
-  private resolveTerminating!: () => void
-  private readonly terminatingPromise = new Promise<void>(resolve => {
-    this.resolveTerminating = resolve
-  })
+  private readonly termination = new AbortController()
   private termPromise: Promise<void> | null = null
   private detached = false
 
@@ -1005,7 +1003,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
 
   /** Trigger an out-of-band reconcile. Internal — exposed for testing. */
   scheduleRerun(): void {
-    if (this.isTerminating) return
+    if (this.termination.signal.aborted) return
     if (this.inFlight) {
       this.pendingRerun = true
       return
@@ -1039,10 +1037,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
   }
 
   private runReconcile(): Promise<void> {
-    if (this.isTerminating) return Promise.resolve()
-    // Tracking the in-flight promise (rather than a boolean) lets term()
-    // await its completion before mutating `running` — eliminating the
-    // race between teardown and a concurrent reconcile.
+    if (this.termination.signal.aborted) return Promise.resolve()
     const p = (async () => {
       try {
         const recorded = await this.fn({ effects: this.builderEffects() })
@@ -1055,7 +1050,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
     this.inFlight = p
     p.finally(() => {
       if (this.inFlight === p) this.inFlight = null
-      if (this.pendingRerun && !this.isTerminating) {
+      if (this.pendingRerun && !this.termination.signal.aborted) {
         this.pendingRerun = false
         this.runReconcile().catch(e => logErrorOnce(asError(e)))
       }
@@ -1167,13 +1162,24 @@ export class DaemonsReconciler<M extends T.SDKManifest>
 
     await this.stopEntries(toStop)
 
-    if (!this.isTerminating && stoppedDaemons.length > 0) {
-      await Promise.race([
-        Promise.all(stoppedDaemons.map(hd => hd.waitForHealthWrites())),
-        this.terminatingPromise,
-      ])
+    if (!this.termination.signal.aborted && stoppedDaemons.length > 0) {
+      let onTerminating!: () => void
+      const terminated = new Promise<void>(resolve => {
+        onTerminating = resolve
+        this.termination.signal.addEventListener('abort', onTerminating, {
+          once: true,
+        })
+      })
+      try {
+        await Promise.race([
+          Promise.all(stoppedDaemons.map(hd => hd.waitForHealthWrites())),
+          terminated,
+        ])
+      } finally {
+        this.termination.signal.removeEventListener('abort', onTerminating)
+      }
     }
-    if (this.isTerminating) return
+    if (this.termination.signal.aborted) return
     if (healthToClear.length > 0) {
       try {
         await this.rootEffects.clearHealth({ only: healthToClear })
@@ -1285,13 +1291,8 @@ export class DaemonsReconciler<M extends T.SDKManifest>
 
   private async term(): Promise<void> {
     if (this.termPromise) return this.termPromise
-    this.isTerminating = true
-    this.resolveTerminating()
+    this.termination.abort()
     this.termPromise = (async () => {
-      // Drain any in-flight reconcile before stopping. The reconcile
-      // catches its own errors, so awaiting it never throws; the await
-      // just synchronises so we don't race against startEntry/stopEntries
-      // mutations to `running`.
       if (this.inFlight) {
         await this.inFlight.catch(() => {})
       }
