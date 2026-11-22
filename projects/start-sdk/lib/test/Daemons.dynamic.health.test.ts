@@ -361,9 +361,8 @@ describe('Daemons.dynamic health clearing', () => {
         requires: [],
       }),
     )
-    const signal = (
-      reconciler as unknown as { termination: AbortController }
-    ).termination.signal
+    const signal = (reconciler as unknown as { termination: AbortController })
+      .termination.signal
 
     const built = await reconciler.build()
     try {
