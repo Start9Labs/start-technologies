@@ -322,7 +322,7 @@ Some addresses are left out of the comparison, in the cases where StartOS can te
 
 ## Choosing a Primary URL
 
-A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over a reader and a writer for the choice, wherever the package keeps it — a field of `store.json`, or the service's own config file:
+A service that builds links, invites, notifications or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over a reader and a writer for the choice, wherever the package keeps it — a field of `store.json`, or the service's own config file:
 
 ```typescript
 // primaryUrl.ts
