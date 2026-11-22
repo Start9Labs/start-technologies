@@ -53,11 +53,22 @@ function sleep(ms: number, abort: AbortSignal): Promise<void> {
   })
 }
 
+const contextLeaveCallbacks = new WeakMap<T.Effects, Set<() => void>>()
+
+// Completed readers must release context-held callbacks.
 function onLeaveUntil(effects: T.Effects, fn: () => void): () => void {
-  let cb: (() => void) | null = fn
-  effects.onLeaveContext(() => cb?.())
+  const existing = contextLeaveCallbacks.get(effects)
+  const callbacks = existing ?? new Set<() => void>()
+  if (!existing) {
+    contextLeaveCallbacks.set(effects, callbacks)
+    effects.onLeaveContext(() => {
+      for (const callback of callbacks) callback()
+      callbacks.clear()
+    })
+  }
+  callbacks.add(fn)
   return () => {
-    cb = null
+    callbacks.delete(fn)
   }
 }
 

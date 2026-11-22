@@ -490,6 +490,49 @@ describe('FileHelper watch retry backoff', () => {
     }
   })
 
+  test('bounds context-leave registrations across completed readers', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'file-watch-context-'))
+    const path = join(dir, 'config.txt')
+    await fs.writeFile(path, 'initial')
+
+    const leaveCallbacks: (() => void | null | undefined)[] = []
+    const ctxEffects = {
+      isInContext: true,
+      onLeaveContext: (fn: () => void | null | undefined) => {
+        leaveCallbacks.push(fn)
+      },
+    } as Effects
+    const file = FileHelper.string(path)
+    let gen: AsyncGenerator<string | null> | undefined
+    let watchNext: Promise<unknown> | undefined
+
+    try {
+      for (let i = 0; i < 10; i++) {
+        await expect(
+          file.read().waitFor(ctxEffects, () => true),
+        ).resolves.toBe('initial')
+        gen = file.read().watch(ctxEffects)
+        expect((await gen.next()).value).toBe('initial')
+        await gen.return(undefined)
+      }
+      expect(leaveCallbacks).toHaveLength(1)
+
+      gen = file.read().watch(ctxEffects)
+      expect((await gen.next()).value).toBe('initial')
+      watchNext = gen.next()
+      ctxEffects.isInContext = false
+      for (const fn of leaveCallbacks) fn()
+      await expect(watchNext).rejects.toThrow(AbortedError)
+      expect(leaveCallbacks).toHaveLength(1)
+    } finally {
+      ctxEffects.isInContext = false
+      for (const fn of leaveCallbacks) fn()
+      await watchNext?.catch(() => {})
+      await gen?.return(undefined).catch(() => {})
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
   test('propagates doRead errors without retrying with backoff', async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'file-backoff-read-err-'))
     const invalidJsonPath = join(dir, 'bad.json')
