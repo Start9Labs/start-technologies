@@ -124,7 +124,7 @@ jobs:
       - name: Provision workspace build key
         run: |
           mkdir -p .startos
-          cp ~/.startos/developer.key.pem .startos/build-key
+          cp ~/.startos/id.key.pem .startos/build-key
         shell: bash
       - name: Install package dependencies
         run: npm ci
@@ -321,11 +321,8 @@ jobs:
           PACKAGE_ID="${{ steps.version.outputs.package_id }}"
           VERSION="${{ steps.version.outputs.version }}"
 
-          OUTPUT=$(start-cli --registry="${REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}" 2>&1)
-          EXIT_CODE=$?
-
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "::warning::Could not query registry: ${OUTPUT}"
+          if ! OUTPUT=$(start-cli --registry="${REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}"); then
+            echo "::warning::Could not query registry"
           elif [ -n "$OUTPUT" ]; then
             echo "Version ${VERSION} already exists on ${REGISTRY}. Removing..."
             start-cli --registry="${REGISTRY}" registry package remove "${PACKAGE_ID}" "${VERSION}"
