@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-registry-admin-reader 1  "reader "
+.SH NAME
+start\-cli\-registry\-admin\-reader \- Commands to add, list, edit, or remove registry reader keys
+.SH SYNOPSIS
+\fBstart\-cli registry admin reader\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Commands to add, list, edit, or remove registry reader keys
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-registry\-admin\-reader\-add(1)
+Register a key that private s9pks can grant read access to
+.TP
+start\-cli\-registry\-admin\-reader\-edit(1)
+Change the label of a registry reader key
+.TP
+start\-cli\-registry\-admin\-reader\-list(1)
+List registry reader keys
+.TP
+start\-cli\-registry\-admin\-reader\-remove(1)
+Remove a registry reader key and revoke it from every private s9pk

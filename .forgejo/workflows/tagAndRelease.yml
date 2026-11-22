@@ -23,6 +23,10 @@ name: Tag and Release
         description: Proxy URL start-cli uses to reach the registries, e.g. socks5h://proxy.example:9050 for .onion registries. The proxy must already be reachable from the runner. Defaults to the caller's REGISTRY_PROXY variable.
         type: string
         default: ${{ vars.REGISTRY_PROXY }}
+      PACKAGE_READER_KEYS:
+        description: Public keys of the registry reader keys (`start-cli registry admin reader add`) that may read a private repository's package, one per line, in DER Base64 or PEM. Defaults to the caller's PACKAGE_READER_KEYS variable.
+        type: string
+        default: ${{ vars.PACKAGE_READER_KEYS }}
     secrets:
       DEV_KEY:
         description: Developer signing key
@@ -32,6 +36,9 @@ name: Tag and Release
         required: false
       S3_SECRET_KEY:
         description: S3 secret key for uploading packages
+        required: false
+      PACKAGES_TOKEN:
+        description: Forgejo token that can write the repository owner's packages; publishes a private repository's package on Forgejo without S3
         required: false
 jobs:
   Tag:
@@ -50,6 +57,10 @@ jobs:
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/configure-registry-proxy@master
         with:
           proxy: ${{ inputs.REGISTRY_PROXY }}
+      - name: Set up developer signing key
+        uses: https://github.com/Start9Labs/start-technologies/.github/actions/configure-developer-key@master
+        with:
+          key: ${{ secrets.DEV_KEY }}
       - name: Extract package ID and version
         id: extract
         uses: https://github.com/Start9Labs/start-technologies/.github/actions/extract-version@master
@@ -75,11 +86,8 @@ jobs:
 
           echo "Checking if ${PACKAGE_ID}@${VERSION} exists on ${REFERENCE_REGISTRY}..."
 
-          OUTPUT=$(start-cli --registry="${REFERENCE_REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}" 2>&1)
-          EXIT_CODE=$?
-
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "::error::Failed to query production registry: ${OUTPUT}"
+          if ! OUTPUT=$(start-cli --registry="${REFERENCE_REGISTRY}" registry package get "${PACKAGE_ID}" --target-version="${VERSION}"); then
+            echo "::error::Failed to query production registry"
             exit 1
           fi
 
@@ -109,8 +117,10 @@ jobs:
       RELEASE_REGISTRY: ${{ inputs.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL: ${{ inputs.S3_S9PKS_BASE_URL }}
       REGISTRY_PROXY: ${{ inputs.REGISTRY_PROXY }}
+      PACKAGE_READER_KEYS: ${{ inputs.PACKAGE_READER_KEYS }}
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
       S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
     runs-on: ubuntu-latest

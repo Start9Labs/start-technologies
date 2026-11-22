@@ -485,14 +485,17 @@ function fixture(t, cachedVersion, providers = []) {
       ])
     },
     restartFor(reason) {
+      this.statusInfo('restart', reason)
+    },
+    statusInfo(field, value) {
       source.next([
         {
           id: ++revision,
           patch: [
             {
               op: 'replace',
-              path: '/serverInfo/statusInfo/restart',
-              value: reason,
+              path: `/serverInfo/statusInfo/${field}`,
+              value,
             },
           ],
         },
@@ -1273,6 +1276,20 @@ test('a downloaded update is no longer offered and blocks another update until r
   assert.equal(f.shown.at(-1), false)
   assert.equal(await firstValueFrom(f.os.updateDisabled$), true)
 })
+
+for (const field of ['restarting', 'shuttingDown']) {
+  test(`the restart reason is withheld while ${field}`, async t => {
+    const f = fixture(t, '0.4.0.2')
+    await f.load()
+    const reasons = []
+    const sub = f.os.restartReason$.subscribe(value => reasons.push(value))
+    t.after(() => sub.unsubscribe())
+    f.restartFor('update')
+    assert.equal(reasons.at(-1), 'update')
+    f.statusInfo(field, true)
+    assert.equal(reasons.at(-1), null)
+  })
+}
 
 test('a refreshed same-version listing clears availability when its image matches the running build', async t => {
   const f = fixture(t, '0.4.0.2')

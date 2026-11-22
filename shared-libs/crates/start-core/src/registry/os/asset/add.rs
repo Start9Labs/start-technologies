@@ -136,6 +136,8 @@ async fn add_asset(
                         urls: vec![url.clone()],
                         commitment: commitment.clone(),
                         signatures: SignatureMap::new(),
+                        private: None,
+                        readers: Default::default(),
                     })
                 })?
                 .mutate(|s| {

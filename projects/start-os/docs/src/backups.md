@@ -459,7 +459,7 @@ The **Hostname** field accepts an IP address, a DNS name containing a dot (such 
 
 1. Choose a target. Unavailable targets cannot be selected.
 
-1. Select the services and volumes to back up, or click "Toggle all", then click "Done".
+1. Select the services and volumes to back up. Use the checkbox next to "Shared Volumes" or "Services" to select everything in that group. Then click "Done".
 
 1. Enter your master password.
 
@@ -469,9 +469,30 @@ While a backup runs, its progress appears at the top of the page. Wait for the p
 
 The **Backups** page lists past backups, newest first, with when each started, how long it took, its target and its result: **Succeeded**, **Completed with errors** or **Failed**. Select a backup's report button to see which services and volumes were backed up, and any errors.
 
+## What a Backup Does Not Include
+
+A backup holds each service's data and your server's identity: its name, root certificate authority and keys. You choose the restored server's master password during setup. Settings you make in StartOS itself return to their defaults after a restore. Note them down so you can re-enter them. Which of them backups should include is being discussed in [start-technologies#4859](https://github.com/Start9Labs/start-technologies/issues/4859).
+
+Restoring a service does not bring back:
+
+- the public and private domains enabled on each of its interfaces, and its interface port settings.
+- its outbound gateway and DNS choices.
+
+Restoring an entire server also does not bring back:
+
+- the server's own domains, WiFi networks, ACME settings, default outbound gateway, outbound DNS and passthroughs. Certificates are issued again.
+- SSH keys added for logging in.
+- SMTP, custom registries and NUT (UPS) settings.
+- backup targets, their credentials, and backup history.
+- performance settings (zram, CPU governor) and UI preferences.
+- notifications.
+
 ## Restoring Backups
 
 Restore previously created backups to recover individual services, volumes or your entire server. This is for disaster recovery when a service is accidentally uninstalled or when your data drive is lost or corrupted.
+
+> [!IMPORTANT]
+> A restore brings back your data, not your StartOS settings. See [What a Backup Does Not Include](#what-a-backup-does-not-include).
 
 ### Restoring Individual Services or Volumes
 

@@ -193,14 +193,13 @@ import { HeaderComponent } from './components/header/header.component'
 })
 export class PortalComponent {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private readonly os = inject(OSService)
   protected readonly power = inject(PowerService)
 
   readonly mobile = inject(WA_IS_MOBILE)
   readonly plugins = inject(PluginsService)
-  readonly update = toSignal(inject(OSService).updating$)
-  readonly restartReason = toSignal(
-    this.patch.watch$('serverInfo', 'statusInfo', 'restart'),
-  )
+  readonly update = toSignal(this.os.updating$)
+  readonly restartReason = toSignal(this.os.restartReason$)
   readonly deferredPower = toSignal(
     this.patch.watch$('serverInfo', 'statusInfo', 'deferredPowerAction'),
   )
