@@ -1482,49 +1482,71 @@ describe('HealthDaemon ready-check hysteresis and display-null logging', () => {
     expect(done).toBe(true)
   })
 
-  it('delivers raw health transitions to public addWatcher while keeping dependents running across blips', async () => {
-    jest.spyOn(console, 'error').mockImplementation(() => {})
-    const depDaemon = controllableDaemon()
-    const appDaemon = controllableDaemon()
-    const seq: HealthCheckResult[] = [
-      { result: 'success', message: null },
-      { result: 'failure', message: 'blip 1' },
-      { result: 'loading', message: 'catching up' },
-      { result: 'success', message: null },
-    ]
-    let i = 0
-    const dep = new HealthDaemon<Manifest>(
-      depDaemon as unknown as Daemon<Manifest>,
-      [],
-      'dep',
-      {
-        display: null,
-        trigger: cooldownTrigger(1_000),
-        fn: () => seq[Math.min(i++, seq.length - 1)],
-      },
-      fakeEffects(),
-    )
-    const app = new HealthDaemon<Manifest>(
-      appDaemon as unknown as Daemon<Manifest>,
-      [dep],
-      'app',
-      EXIT_SUCCESS,
-      fakeEffects(),
-    )
-    const observed: string[] = []
-    dep.addWatcher(() => observed.push(dep.health.result))
+  it.each<HealthCheckResult>([
+    { result: 'loading', message: 'catching up' },
+    { result: 'disabled', message: 'turned off' },
+    { result: 'starting', message: 'initializing' },
+    { result: 'starting', waiting: true, message: 'waiting' },
+  ])(
+    'delivers raw transitions and pauses on $result after a tolerated failure',
+    async nonFailure => {
+      jest.spyOn(console, 'error').mockImplementation(() => {})
+      const depDaemon = controllableDaemon()
+      const appDaemon = controllableDaemon()
+      const seq: HealthCheckResult[] = [
+        { result: 'success', message: null },
+        { result: 'failure', message: 'blip 1' },
+        nonFailure,
+        { result: 'success', message: null },
+      ]
+      let i = 0
+      const dep = new HealthDaemon<Manifest>(
+        depDaemon as unknown as Daemon<Manifest>,
+        [],
+        'dep',
+        {
+          display: null,
+          trigger: cooldownTrigger(1_000),
+          fn: () => seq[Math.min(i++, seq.length - 1)],
+        },
+        fakeEffects(),
+      )
+      const app = new HealthDaemon<Manifest>(
+        appDaemon as unknown as Daemon<Manifest>,
+        [dep],
+        'app',
+        EXIT_SUCCESS,
+        fakeEffects(),
+      )
+      const observed: string[] = []
+      dep.addWatcher(() => observed.push(dep.health.result))
 
-    await dep.updateStatus()
-    await app.updateStatus()
+      await dep.updateStatus()
+      await app.updateStatus()
 
-    await jest.advanceTimersByTimeAsync(4_000)
-    expect(observed).toEqual(['success', 'failure', 'loading', 'success'])
-    expect(appDaemon.start).toHaveBeenCalledTimes(1)
-    expect(appDaemon.stop).not.toHaveBeenCalled()
+      await jest.advanceTimersByTimeAsync(2_000)
+      expect(observed).toEqual(['success', 'failure'])
+      expect(appDaemon.start).toHaveBeenCalledTimes(1)
+      expect(appDaemon.stop).not.toHaveBeenCalled()
 
-    await app.term()
-    await dep.term()
-  })
+      await jest.advanceTimersByTimeAsync(1_000)
+      expect(dep.health.result).toBe(nonFailure.result)
+      expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+
+      await jest.advanceTimersByTimeAsync(1_000)
+      expect(observed).toEqual([
+        'success',
+        'failure',
+        nonFailure.result,
+        'success',
+      ])
+      expect(appDaemon.start).toHaveBeenCalledTimes(2)
+      expect(appDaemon.stop).toHaveBeenCalledTimes(1)
+
+      await app.term()
+      await dep.term()
+    },
+  )
 
   it('handles unstringifiable thrown values without terminating the health check loop', async () => {
     const logged = jest.spyOn(console, 'error').mockImplementation(() => {})
