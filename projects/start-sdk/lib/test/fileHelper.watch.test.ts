@@ -508,9 +508,9 @@ describe('FileHelper watch retry backoff', () => {
 
     try {
       for (let i = 0; i < 10; i++) {
-        await expect(
-          file.read().waitFor(ctxEffects, () => true),
-        ).resolves.toBe('initial')
+        await expect(file.read().waitFor(ctxEffects, () => true)).resolves.toBe(
+          'initial',
+        )
         gen = file.read().watch(ctxEffects)
         expect((await gen.next()).value).toBe('initial')
         await gen.return(undefined)
