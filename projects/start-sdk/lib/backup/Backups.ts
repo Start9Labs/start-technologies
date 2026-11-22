@@ -191,6 +191,7 @@ function validateDumpFileName(fileName: string): void {
   }
 }
 
+/** Pre-rename failures preserve the previous dump; incomplete copies never become live. */
 async function copyFileAtomically<M extends T.SDKManifest>(
   sub: SubContainer<M>,
   src: string,
@@ -211,9 +212,19 @@ async function copyFileAtomically<M extends T.SDKManifest>(
     throw new Error(`Invalid dump size for ${src}: ${sizeText}`)
   }
   const dst = path.join(dstDir, fileName)
+  // StartOS serializes backups; this helper owns matching staging files.
+  const stagedPrefix = `.${fileName}.`
+  for (const name of await fs.readdir(dstDir)) {
+    if (
+      name.startsWith(stagedPrefix) &&
+      /^[0-9a-f]{24}\.tmp$/.test(name.slice(stagedPrefix.length))
+    ) {
+      await fs.rm(path.join(dstDir, name), { force: true })
+    }
+  }
   const staged = path.join(
     dstDir,
-    `.${fileName}.${randomBytes(12).toString('hex')}.tmp`,
+    `${stagedPrefix}${randomBytes(12).toString('hex')}.tmp`,
   )
   let created = false
   let renamed = false
@@ -427,8 +438,8 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * this uses `pg_dump` to create a logical dump before backup and `pg_restore` to rebuild
    * the database after restore.
    *
-   * The dump is staged in the subcontainer's `/tmp` and copied to the backup
-   * target, so it needs transient room for one copy of the dump.
+   * The subcontainer needs transient room for one dump. The backup target
+   * holds the previous and replacement dumps until replacement completes.
    *
    * @returns A configured Backups instance with pre/post hooks. Chain `.addVolume()` or
    * `.addSync()` to include additional volumes/paths in the backup.
