@@ -70,11 +70,11 @@ bins.mod.does-not-exist:
   pl_PL: "%{name} nie istnieje w MultiExecutable"
 
 bins.start-init.updating-firmware:
-  en_US: "Updating Firmware"
-  de_DE: "Firmware wird aktualisiert"
-  es_ES: "Actualizando firmware"
-  fr_FR: "Mise à jour du firmware"
-  pl_PL: "Aktualizacja oprogramowania"
+  en_US: "Updating firmware. Do not power off your server"
+  de_DE: "Firmware wird aktualisiert. Schalten Sie Ihren Server nicht aus"
+  es_ES: "Actualizando firmware. No apague su servidor"
+  fr_FR: "Mise à jour du firmware. N'éteignez pas votre serveur"
+  pl_PL: "Aktualizacja oprogramowania układowego. Nie wyłączaj serwera"
 
 bins.start-init.rebooting:
   en_US: "Rebooting"
@@ -124,6 +124,42 @@ bins.start-init.failed-to-kill-kiosk:
   es_ES: "Error al cerrar el kiosco: %{error}"
   fr_FR: "Échec de la fermeture du kiosque : %{error}"
   pl_PL: "Nie udało się zamknąć kiosku: %{error}"
+
+# firmware.rs
+firmware.failed-message:
+  en_US: "Updating server firmware to %{id} failed: %{error}. Contact Start9 support before restarting your server."
+  de_DE: "Die Aktualisierung der Server-Firmware auf %{id} ist fehlgeschlagen: %{error}. Wenden Sie sich an den Start9-Support, bevor Sie Ihren Server neu starten."
+  es_ES: "La actualización del firmware del servidor a %{id} falló: %{error}. Contacte con el soporte de Start9 antes de reiniciar su servidor."
+  fr_FR: "La mise à jour du firmware du serveur vers %{id} a échoué : %{error}. Contactez le support Start9 avant de redémarrer votre serveur."
+  pl_PL: "Aktualizacja oprogramowania układowego serwera do %{id} nie powiodła się: %{error}. Skontaktuj się z pomocą techniczną Start9 przed ponownym uruchomieniem serwera."
+
+firmware.failed-title:
+  en_US: "Firmware update failed"
+  de_DE: "Firmware-Aktualisierung fehlgeschlagen"
+  es_ES: "Error al actualizar el firmware"
+  fr_FR: "Échec de la mise à jour du firmware"
+  pl_PL: "Aktualizacja oprogramowania układowego nie powiodła się"
+
+firmware.interrupted-message:
+  en_US: "Updating server firmware to %{id} was interrupted before it finished. Contact Start9 support before restarting your server."
+  de_DE: "Die Aktualisierung der Server-Firmware auf %{id} wurde unterbrochen, bevor sie abgeschlossen war. Wenden Sie sich an den Start9-Support, bevor Sie Ihren Server neu starten."
+  es_ES: "La actualización del firmware del servidor a %{id} se interrumpió antes de terminar. Contacte con el soporte de Start9 antes de reiniciar su servidor."
+  fr_FR: "La mise à jour du firmware du serveur vers %{id} a été interrompue avant la fin. Contactez le support Start9 avant de redémarrer votre serveur."
+  pl_PL: "Aktualizacja oprogramowania układowego serwera do %{id} została przerwana przed zakończeniem. Skontaktuj się z pomocą techniczną Start9 przed ponownym uruchomieniem serwera."
+
+firmware.updated-message:
+  en_US: "Server firmware was updated from %{from} to %{id}."
+  de_DE: "Die Server-Firmware wurde von %{from} auf %{id} aktualisiert."
+  es_ES: "El firmware del servidor se actualizó de %{from} a %{id}."
+  fr_FR: "Le firmware du serveur a été mis à jour de %{from} vers %{id}."
+  pl_PL: "Oprogramowanie układowe serwera zostało zaktualizowane z %{from} do %{id}."
+
+firmware.updated-title:
+  en_US: "Firmware updated"
+  de_DE: "Firmware aktualisiert"
+  es_ES: "Firmware actualizado"
+  fr_FR: "Firmware mis à jour"
+  pl_PL: "Oprogramowanie układowe zaktualizowane"
 
 bins.startd.metrics-daemon-panicked:
   en_US: "Metrics daemon panicked!"
