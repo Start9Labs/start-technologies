@@ -42,10 +42,17 @@ const RUN_UNTIL_SUCCESS_ID = '__RUN_UNTIL_SUCCESS'
  * Every daemon and standalone health check requires a `Ready` configuration
  * that tells StartOS how to determine whether the daemon is healthy.
  *
- * The `fn` is called on a recurring interval controlled by `trigger` (defaults
- * to 1 s before the first non-pending result, then 30 s). During the initial
- * `gracePeriod` window, `failure` results are softened to `starting` so the
- * UI doesn't flash red while a daemon is still booting.
+ * The `fn` runs at the interval selected by `trigger`. During the initial
+ * `gracePeriod` window, `failure` results are displayed as `starting`.
+ *
+ * A first `success` opens the `requires` gate. After success, up to two
+ * consecutive `failure` polls preserve dependent readiness; the third failure
+ * or any other non-success result closes the gate. Success resets the count.
+ * This counts polls, not elapsed time; triggers and check runtimes determine
+ * the duration. Crashes, unexpected exits, failed starts, and upstream loss
+ * close the gate immediately, as do failures that end polling or park
+ * `statusTrigger` at `Infinity`.
+ * `runUntilSuccess` requires every check's raw result to be `success`.
  *
  * ### Health check result states
  *

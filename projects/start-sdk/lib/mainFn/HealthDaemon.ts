@@ -280,7 +280,11 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     }
     if (health.result === 'success') {
       this.setDependentsReady(true)
-    } else if (tolerateTransient && this.dependentsReady) {
+    } else if (
+      health.result === 'failure' &&
+      tolerateTransient &&
+      this.dependentsReady
+    ) {
       this.consecutiveUnhealthy += 1
       if (this.consecutiveUnhealthy >= READY_FAILURE_THRESHOLD) {
         this.setDependentsReady(false)
