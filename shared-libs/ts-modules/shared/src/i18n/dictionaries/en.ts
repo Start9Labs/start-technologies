@@ -1105,4 +1105,6 @@ export const ENGLISH: Record<string, number> = {
   'Enroll this browser': 1310,
   'A password is saved. Leave Password empty to keep it.': 1311,
   'Remove saved password': 1312,
+  'Last synced': 1313,
+  'just now': 1314,
 }

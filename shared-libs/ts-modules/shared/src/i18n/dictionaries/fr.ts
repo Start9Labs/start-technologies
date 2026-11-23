@@ -1104,4 +1104,6 @@ export default {
   1310: 'Enregistrer ce navigateur',
   1311: 'Un mot de passe est enregistré. Laissez « Mot de passe » vide pour le conserver.',
   1312: 'Supprimer le mot de passe enregistré',
+  1313: 'Dernière synchronisation',
+  1314: "à l'instant",
 } satisfies i18n

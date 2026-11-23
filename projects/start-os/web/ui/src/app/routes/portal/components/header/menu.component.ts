@@ -14,11 +14,12 @@ import {
   TuiDropdown,
   TuiHint,
   TuiIcon,
+  TuiTitle,
 } from '@taiga-ui/core'
 import { filter } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { AuthService } from 'src/app/services/auth.service'
-import { STATUS } from 'src/app/services/status.service'
+import { LAST_SYNCED, STATUS } from 'src/app/services/status.service'
 import { TitleService } from 'src/app/services/title.service'
 import { ABOUT } from './about.component'
 
@@ -45,7 +46,12 @@ import { ABOUT } from './about.component'
       @if (status().status !== 'success') {
         <div class="status">
           <tui-icon [icon]="status().icon" />
-          {{ status().message | i18n }}
+          <span tuiTitle="s">
+            {{ status().message | i18n }}
+            @if (lastSynced(); as synced) {
+              <span tuiSubtitle>{{ synced }}</span>
+            }
+          </span>
         </div>
       }
       <tui-data-list safeLinks [style.width.rem]="13" (click)="close()">
@@ -135,6 +141,7 @@ import { ABOUT } from './about.component'
     TuiDataList,
     TuiButton,
     TuiIcon,
+    TuiTitle,
     RouterLink,
     i18nPipe,
     TuiHint,
@@ -152,6 +159,7 @@ export class HeaderMenuComponent {
   open = false
 
   readonly status = inject(STATUS)
+  readonly lastSynced = inject(LAST_SYNCED)
 
   about() {
     this.dialog.openComponent(ABOUT, { label: 'About this server' }).subscribe()

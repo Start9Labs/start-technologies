@@ -5459,6 +5459,80 @@ test('patch cache restores every key after another tab clears the snapshot', asy
   assert.deepEqual(await (await patchDbCache(t, win)).read(), next)
 })
 
+test('patch cache restores freshness with a saved snapshot and clears it on logout', async t => {
+  const { win } = fakeIndexedDb()
+  t.mock.method(Date, 'now', () => 1000)
+  const cache = await patchDbCache(t, win)
+  await cache.markSynced()
+  assert.equal(cache.synced(), null)
+  const emptyReader = await patchDbCache(t, win)
+  assert.deepEqual(await emptyReader.read(), { id: 0, value: {} })
+  assert.equal(emptyReader.synced(), null)
+
+  const snapshot = { id: 3, value: { ui: { a: 1 } } }
+  await cache.write(snapshot)
+  await cache.markSynced()
+  assert.equal(cache.synced(), 1000)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), snapshot)
+  assert.equal(reader.synced(), 1000)
+
+  await cache.clear()
+  assert.equal(cache.synced(), null)
+  assert.deepEqual(await reader.read(), { id: 0, value: {} })
+  assert.equal(reader.synced(), null)
+})
+
+test('patch cache discards freshness when a failed write invalidates its snapshot', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  t.mock.method(Date, 'now', () => 1000)
+  const cache = await patchDbCache(t, win)
+  await cache.write({ id: 3, value: { ui: { a: 1 } } })
+  await cache.markSynced()
+  control.fail = true
+  await cache.write({ id: 4, value: { ui: { a: 2 } } })
+  assert.equal(cache.synced(), null)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), { id: 0, value: {} })
+  assert.equal(reader.synced(), null)
+})
+
+test('patch cache does not refresh metadata after another tab clears the snapshot', async t => {
+  const { win } = fakeIndexedDb()
+  let now = 1000
+  t.mock.method(Date, 'now', () => now)
+  const active = await patchDbCache(t, win)
+  await active.write({ id: 3, value: { ui: { a: 1 } } })
+  await active.markSynced()
+  const other = await patchDbCache(t, win)
+  await other.clear()
+  now = 2000
+  await active.markSynced()
+  assert.equal(active.synced(), 1000)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), { id: 0, value: {} })
+  assert.equal(reader.synced(), null)
+})
+
+test('patch cache retains the previous freshness when its metadata write fails', async t => {
+  const { win, control } = fakeIndexedDb()
+  let now = 1000
+  t.mock.method(console, 'error', () => {})
+  t.mock.method(Date, 'now', () => now)
+  const cache = await patchDbCache(t, win)
+  const snapshot = { id: 3, value: { ui: { a: 1 } } }
+  await cache.write(snapshot)
+  await cache.markSynced()
+  now = 2000
+  control.fail = true
+  await cache.markSynced()
+  assert.equal(cache.synced(), 1000)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), snapshot)
+  assert.equal(reader.synced(), 1000)
+})
+
 test('patch cache discards its snapshot after a failed write and clears on demand', async t => {
   const { win, control } = fakeIndexedDb()
   t.mock.method(console, 'error', () => {})

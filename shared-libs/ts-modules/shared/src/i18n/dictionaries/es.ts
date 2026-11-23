@@ -1104,4 +1104,6 @@ export default {
   1310: 'Registrar este navegador',
   1311: 'Hay una contraseña guardada. Deje «Contraseña» vacío para conservarla.',
   1312: 'Eliminar la contraseña guardada',
+  1313: 'Última sincronización',
+  1314: 'justo ahora',
 } satisfies i18n
