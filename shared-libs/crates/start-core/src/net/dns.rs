@@ -60,7 +60,10 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "status",
-            from_fn(|ctx: RpcContext| Ok::<_, Error>(ctx.net_controller.dns.status())).no_cli(),
+            from_fn(|ctx: RpcContext| Ok::<_, Error>(ctx.net_controller.dns.status()))
+                .with_display_serializable()
+                .with_about("about.dns-status")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "query",

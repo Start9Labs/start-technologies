@@ -12,14 +12,18 @@ use crate::service::rpc::CallbackId;
 use crate::util::Invoke;
 use crate::{GatewayId, PackageId};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct GetContainerIpParams {
     /// Ignored: the address is fixed for the installation.
+    #[arg(skip)]
     callback: Option<CallbackId>,
     /// Rejected when present: the effect answers only for the calling service.
     #[serde(default, skip_serializing)]
     #[visit(ts(skip))]
+    #[arg(skip)]
     package_id: Option<imbl_value::Value>,
 }
 
@@ -50,9 +54,12 @@ pub async fn get_container_ip(
         .ip())
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct GetOutboundGatewayParams {
+    #[arg(skip)]
     callback: Option<CallbackId>,
 }
 

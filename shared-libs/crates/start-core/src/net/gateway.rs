@@ -137,6 +137,13 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
                 .no_cli(),
         )
         .subcommand(
+            "edit",
+            from_fn_async(cli_edit_gateway)
+                .no_ts()
+                .no_display()
+                .with_about("about.edit-gateway"),
+        )
+        .subcommand(
             "set-secure",
             from_fn_async(set_secure)
                 .with_metadata("sync_db", Value::Bool(true))
@@ -703,6 +710,52 @@ rpc_toolkit::ts_export!(EditGatewayParams, namespaces = [""]);
 
 async fn edit_gateway(ctx: RpcContext, params: EditGatewayParams) -> Result<(), Error> {
     ctx.net_controller.net_iface.edit(params).await
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+struct CliEditGatewayParams {
+    #[arg(help = "help.arg.gateway-id")]
+    id: GatewayId,
+    #[arg(long, help = "help.arg.gateway-name")]
+    name: Option<InternedString>,
+    #[arg(long = "dns", help = "help.arg.gateway-dns-server")]
+    dns: Vec<String>,
+    #[arg(long, conflicts_with = "dns", help = "help.arg.gateway-automatic-dns")]
+    automatic_dns: bool,
+}
+
+impl From<CliEditGatewayParams> for EditGatewayParams {
+    fn from(
+        CliEditGatewayParams {
+            id,
+            name,
+            dns,
+            automatic_dns,
+        }: CliEditGatewayParams,
+    ) -> Self {
+        let dns = if automatic_dns {
+            Some(OutboundDnsUpdate { servers: None })
+        } else {
+            (!dns.is_empty()).then_some(OutboundDnsUpdate { servers: Some(dns) })
+        };
+        Self { id, name, dns }
+    }
+}
+
+async fn cli_edit_gateway(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params,
+        ..
+    }: HandlerArgs<CliContext, CliEditGatewayParams>,
+) -> Result<(), Error> {
+    context
+        .call_fronted(parent_method, method, &EditGatewayParams::from(params))
+        .await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
@@ -5453,5 +5506,29 @@ mod wg_config_tests {
         assert!(!parsed.to_nm_settings("wg0", None).unwrap()["connection"].contains_key("uuid"));
         let updated = parsed.to_nm_settings("wg0", Some("uuid-x")).unwrap();
         assert_eq!(as_str(&updated["connection"]["uuid"]), "uuid-x");
+    }
+}
+
+#[cfg(test)]
+mod edit_cli_tests {
+    use super::*;
+
+    fn edit(args: &[&str]) -> Result<EditGatewayParams, clap::Error> {
+        CliEditGatewayParams::try_parse_from(["edit", "eth0"].iter().chain(args)).map(Into::into)
+    }
+
+    #[test]
+    fn edit_cli_maps_dns_flags_to_the_update() {
+        let unchanged = edit(&["--name", "Home"]).unwrap();
+        assert_eq!(unchanged.name.as_deref(), Some("Home"));
+        assert!(unchanged.dns.is_none());
+        let fixed = edit(&["--dns", "1.1.1.1", "--dns", "9.9.9.9"]).unwrap();
+        assert_eq!(
+            fixed.dns.and_then(|dns| dns.servers),
+            Some(vec!["1.1.1.1".to_owned(), "9.9.9.9".to_owned()])
+        );
+        let automatic = edit(&["--automatic-dns"]).unwrap();
+        assert!(automatic.dns.is_some_and(|dns| dns.servers.is_none()));
+        assert!(edit(&["--dns", "1.1.1.1", "--automatic-dns"]).is_err());
     }
 }

@@ -591,16 +591,51 @@ mod tests {
     }
 }
 
-#[derive(Deserialize, Serialize, visit_rs::VisitFields)]
+#[derive(Deserialize, Serialize, clap::Args, visit_rs::VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct Cifs {
+    #[arg(help = "help.arg.cifs-hostname")]
     pub hostname: String,
+    #[arg(help = "help.arg.cifs-path")]
     pub path: PathBuf,
+    #[arg(help = "help.arg.cifs-username")]
     pub username: String,
+    #[arg(skip)]
     pub password: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(Cifs);
+
+/// Reads `CIFS_PASSWORD`, else prompts on the terminal. Empty is `None`.
+pub fn read_password() -> Result<Option<String>, Error> {
+    let password = crate::util::tui::read_password(
+        "CIFS_PASSWORD",
+        &t!("disk.mount.filesystem.cifs.prompt-password"),
+    )?;
+    Ok((!password.is_empty()).then_some(password))
+}
+
+/// CLI password handling for changing CIFS connection details.
+#[derive(Deserialize, Serialize, clap::Args)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+pub struct CifsUpdatePasswordArgs {
+    #[arg(long, help = "help.arg.keep-cifs-password")]
+    pub keep_password: bool,
+}
+
+impl CifsUpdatePasswordArgs {
+    /// `None` keeps the stored password; empty clears it.
+    pub fn read(&self) -> Result<Option<String>, Error> {
+        if self.keep_password {
+            Ok(None)
+        } else {
+            Ok(Some(read_password()?.unwrap_or_default()))
+        }
+    }
+}
 
 impl std::fmt::Debug for Cifs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
