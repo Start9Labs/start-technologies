@@ -1780,22 +1780,92 @@ mod tests {
         for (scheme, host, origin, allowed) in [
             (Scheme::HTTPS, "service.test", None, true),
             (Scheme::HTTP, "service.test", None, true),
-            (Scheme::HTTPS, "service.test", Some("https://service.test"), true),
-            (Scheme::HTTPS, "service.test:443", Some("https://SERVICE.test"), true),
-            (Scheme::HTTPS, "service.test", Some("https://service.test:443"), true),
-            (Scheme::HTTP, "service.test", Some("http://service.test:80"), true),
-            (Scheme::HTTPS, "service.test:8443", Some("https://service.test:8443"), true),
-            (Scheme::HTTP, "192.168.1.5:5959", Some("http://192.168.1.5:5959"), true),
-            (Scheme::HTTPS, "[fd00::1]:4443", Some("https://[fd00::1]:4443"), true),
-            (Scheme::HTTPS, "service.test", Some("https://attacker.test"), false),
-            (Scheme::HTTPS, "service.test:8443", Some("https://service.test"), false),
-            (Scheme::HTTP, "192.168.1.5:5959", Some("http://192.168.1.5:8080"), false),
+            (
+                Scheme::HTTPS,
+                "service.test",
+                Some("https://service.test"),
+                true,
+            ),
+            (
+                Scheme::HTTPS,
+                "service.test:443",
+                Some("https://SERVICE.test"),
+                true,
+            ),
+            (
+                Scheme::HTTPS,
+                "service.test",
+                Some("https://service.test:443"),
+                true,
+            ),
+            (
+                Scheme::HTTP,
+                "service.test",
+                Some("http://service.test:80"),
+                true,
+            ),
+            (
+                Scheme::HTTPS,
+                "service.test:8443",
+                Some("https://service.test:8443"),
+                true,
+            ),
+            (
+                Scheme::HTTP,
+                "192.168.1.5:5959",
+                Some("http://192.168.1.5:5959"),
+                true,
+            ),
+            (
+                Scheme::HTTPS,
+                "[fd00::1]:4443",
+                Some("https://[fd00::1]:4443"),
+                true,
+            ),
+            (
+                Scheme::HTTPS,
+                "service.test",
+                Some("https://attacker.test"),
+                false,
+            ),
+            (
+                Scheme::HTTPS,
+                "service.test:8443",
+                Some("https://service.test"),
+                false,
+            ),
+            (
+                Scheme::HTTP,
+                "192.168.1.5:5959",
+                Some("http://192.168.1.5:8080"),
+                false,
+            ),
             (Scheme::HTTPS, "service.test", Some("null"), false),
             (Scheme::HTTPS, "service.test", Some("not a URL"), false),
-            (Scheme::HTTPS, "[fd00::1]:4443", Some("https://[fd00::2]:4443"), false),
-            (Scheme::HTTPS, "service.test", Some("http://service.test"), false),
-            (Scheme::HTTP, "service.test", Some("https://service.test"), false),
-            (Scheme::HTTPS, "service.test:8443", Some("http://service.test:8443"), false),
+            (
+                Scheme::HTTPS,
+                "[fd00::1]:4443",
+                Some("https://[fd00::2]:4443"),
+                false,
+            ),
+            (
+                Scheme::HTTPS,
+                "service.test",
+                Some("http://service.test"),
+                false,
+            ),
+            (
+                Scheme::HTTP,
+                "service.test",
+                Some("https://service.test"),
+                false,
+            ),
+            (
+                Scheme::HTTPS,
+                "service.test:8443",
+                Some("http://service.test:8443"),
+                false,
+            ),
         ] {
             for extended_connect in [false, true] {
                 for forwarded_headers in [
@@ -2170,11 +2240,25 @@ mod tests {
         .unwrap();
 
         let mut req = req_with_auth(Some("Basic YWxpY2U6aHVudGVyMg=="));
-        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate), &Scheme::HTTP).unwrap();
+        apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            Some(&gate),
+            &Scheme::HTTP,
+        )
+        .unwrap();
         assert_eq!(req.headers().get("X-Forwarded-User").unwrap(), "alice");
 
         let mut req = req_with_auth(Some("Basic Ym9iOnN3b3JkZmlzaA=="));
-        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate), &Scheme::HTTP).unwrap();
+        apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            Some(&gate),
+            &Scheme::HTTP,
+        )
+        .unwrap();
         assert_eq!(req.headers().get("X-Forwarded-User").unwrap(), "bob");
     }
 
@@ -2190,8 +2274,14 @@ mod tests {
         .unwrap();
 
         let mut req = req_with_auth(Some("Basic YWxpY2U6d3Jvbmc="));
-        let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate), &Scheme::HTTP)
-            .unwrap_err();
+        let resp = apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            Some(&gate),
+            &Scheme::HTTP,
+        )
+        .unwrap_err();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
         assert_eq!(
             resp.headers().get(http::header::WWW_AUTHENTICATE).unwrap(),
@@ -2199,8 +2289,14 @@ mod tests {
         );
 
         let mut req = req_with_auth(None);
-        let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate), &Scheme::HTTP)
-            .unwrap_err();
+        let resp = apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            Some(&gate),
+            &Scheme::HTTP,
+        )
+        .unwrap_err();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
     }
 
@@ -2213,12 +2309,25 @@ mod tests {
         .unwrap();
 
         let mut req = req_with_auth(Some("Bearer alpha"));
-        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate), &Scheme::HTTP).unwrap();
+        apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            Some(&gate),
+            &Scheme::HTTP,
+        )
+        .unwrap();
         assert!(req.headers().get("X-Forwarded-User").is_none());
 
         let mut req = req_with_auth(Some("Bearer gamma"));
-        let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate), &Scheme::HTTP)
-            .unwrap_err();
+        let resp = apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            Some(&gate),
+            &Scheme::HTTP,
+        )
+        .unwrap_err();
         assert_eq!(resp.status(), http::StatusCode::UNAUTHORIZED);
         assert!(
             resp.headers()
@@ -2235,7 +2344,14 @@ mod tests {
         let mut req = req_with_auth(None);
         req.headers_mut()
             .insert("X-Forwarded-User", HeaderValue::from_static("root"));
-        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, None, &Scheme::HTTP).unwrap();
+        apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            None,
+            &Scheme::HTTP,
+        )
+        .unwrap();
         assert!(req.headers().get("X-Forwarded-User").is_none());
     }
 
@@ -2253,8 +2369,14 @@ mod tests {
         })
         .unwrap();
         let mut req = req_with_auth(None);
-        let resp = apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate), &Scheme::HTTP)
-            .unwrap_err();
+        let resp = apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            Some(&gate),
+            &Scheme::HTTP,
+        )
+        .unwrap_err();
         assert_eq!(
             resp.headers().get(http::header::WWW_AUTHENTICATE).unwrap(),
             "Basic realm=\"haxor\""
@@ -2274,7 +2396,14 @@ mod tests {
         let mut req = req_with_auth(Some("Basic YWxpY2U6aHVudGVyMg=="));
         req.headers_mut()
             .insert("X-Forwarded-User", HeaderValue::from_static("root"));
-        apply_request_policy(&mut req, None, ForwardedHeaders::Disabled, Some(&gate), &Scheme::HTTP).unwrap();
+        apply_request_policy(
+            &mut req,
+            None,
+            ForwardedHeaders::Disabled,
+            Some(&gate),
+            &Scheme::HTTP,
+        )
+        .unwrap();
         assert_eq!(req.headers().get("X-Forwarded-User").unwrap(), "alice");
     }
 }
