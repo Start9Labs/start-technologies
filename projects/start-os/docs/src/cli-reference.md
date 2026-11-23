@@ -843,6 +843,8 @@ Restart the server from diagnostic mode.
 
 Rebuild all containers from diagnostic mode.
 
+Once the server has a password, run this on the server itself.
+
 ### `start-cli diagnostic disk forget <GUID>`
 
 Forget a disk so the system no longer expects it.

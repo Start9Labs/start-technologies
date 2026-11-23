@@ -249,6 +249,33 @@ pub async fn write_shadow(password: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The start9 user's password field in `<root>/etc/shadow`, lock marker included.
+pub(crate) async fn start9_shadow_field(root: &Path) -> Result<Option<String>, Error> {
+    let shadow = tokio::fs::read_to_string(root.join("etc/shadow")).await?;
+    Ok(shadow
+        .lines()
+        .find_map(|line| line.strip_prefix("start9:"))
+        .and_then(|rest| rest.split(':').next())
+        .map(str::to_owned))
+}
+
+/// The start9 user's crypt(3) hash. `None` when the user is absent or locked.
+pub(crate) async fn start9_password_hash(root: &Path) -> Result<Option<String>, Error> {
+    Ok(start9_shadow_field(root)
+        .await?
+        .filter(|hash| hash.starts_with('$')))
+}
+
+/// Accepts SHA-512 crypt hashes, the format [`write_shadow`] writes.
+pub(crate) fn check_shadow_password(hash: &str, password: &str) -> Result<(), Error> {
+    sha_crypt::sha512_check(password, hash).map_err(|_| {
+        Error::new(
+            eyre!("{}", t!("auth.password-incorrect")),
+            ErrorKind::IncorrectPassword,
+        )
+    })
+}
+
 #[derive(Clone, Serialize, Deserialize, VisitVariants)]
 #[serde(untagged)]
 pub enum PasswordType {

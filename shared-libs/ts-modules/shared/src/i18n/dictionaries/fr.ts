@@ -1102,4 +1102,5 @@ export default {
   1308: "Ce navigateur n'est pas encore enregistré",
   1309: 'Se connecter depuis la ligne de commande',
   1310: 'Enregistrer ce navigateur',
+  1311: 'Saisissez votre mot de passe principal pour continuer.',
 } satisfies i18n

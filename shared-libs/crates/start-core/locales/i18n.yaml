@@ -3916,6 +3916,14 @@ middleware.auth.unauthorized:
   fr_FR: "NON AUTORISÉ"
   pl_PL: "BRAK AUTORYZACJI"
 
+# middleware/auth/password.rs
+middleware.auth.password-required:
+  en_US: "The server password is required."
+  de_DE: "Das Serverpasswort ist erforderlich."
+  es_ES: "Se requiere la contraseña del servidor."
+  fr_FR: "Le mot de passe du serveur est requis."
+  pl_PL: "Wymagane jest hasło serwera."
+
 # middleware/auth/session.rs
 middleware.auth.rate-limited-login:
   en_US: "Please limit login attempts to 3 per 20 seconds."

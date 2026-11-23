@@ -47,25 +47,6 @@ pub async fn sign_unsigned_modules(root: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// Read the start9 user's password hash from `<root>/etc/shadow`.
-/// Returns None if the user doesn't exist or the password is locked.
-async fn start9_shadow_hash(root: &Path) -> Result<Option<String>, Error> {
-    let shadow = tokio::fs::read_to_string(root.join("etc/shadow")).await?;
-    for line in shadow.lines() {
-        if let Some(("start9", rest)) = line.split_once(':') {
-            if let Some((hash, _)) = rest.split_once(':') {
-                let hash = hash.trim_start_matches("!");
-                if hash.starts_with('$') {
-                    return Ok(Some(hash.to_owned()));
-                }
-                // Locked or invalid password
-                return Ok(None);
-            }
-        }
-    }
-    Ok(None)
-}
-
 /// Enroll the DKMS MOK certificate, protected by the start9 user's password.
 /// `root` holds both the certificate and `etc/shadow`: `/` at runtime, or the target
 /// overlay during install. Idempotent: skips if already enrolled, or if the password
@@ -97,7 +78,11 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         return Ok(false);
     }
 
-    let Some(hash) = start9_shadow_hash(root).await? else {
+    let Some(hash) = crate::auth::start9_shadow_field(root)
+        .await?
+        .map(|hash| hash.trim_start_matches('!').to_owned())
+        .filter(|hash| hash.starts_with('$'))
+    else {
         tracing::info!("enroll_mok: start9 user password not set, skipping");
         return Ok(false);
     };

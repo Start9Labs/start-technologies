@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
+use clap::Parser;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
     CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, DiagnosticContext, RpcContext};
 use crate::disk::repair;
@@ -12,6 +14,18 @@ use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::update::diagnostic as update;
 use crate::util::io::delete_file;
+
+/// Credential for a diagnostic command that changes the server.
+#[derive(Default, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticPasswordParams {
+    /// The server password. Unnecessary on the server itself, or before a password is set.
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+rpc_toolkit::reflect_ts!(DiagnosticPasswordParams);
 
 pub fn diagnostic<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -63,6 +77,7 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "rebuild",
             from_fn_async(rebuild)
+                .with_metadata("authenticated", Value::Bool(true))
                 .no_display()
                 .with_about("about.teardown-rebuild-containers")
                 .with_call_remote::<CliContext>(),
@@ -70,6 +85,7 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "update",
             from_fn_async(update::update_system)
+                .with_metadata("authenticated", Value::Bool(true))
                 .with_metadata("get_local_auth", Value::Bool(true))
                 .no_cli(),
         )
@@ -95,7 +111,7 @@ pub fn restart(ctx: DiagnosticContext) -> Result<(), Error> {
         .log_err();
     Ok(())
 }
-pub async fn rebuild(ctx: DiagnosticContext) -> Result<(), Error> {
+pub async fn rebuild(ctx: DiagnosticContext, _: DiagnosticPasswordParams) -> Result<(), Error> {
     tokio::fs::write(SYSTEM_REBUILD_PATH, b"").await?;
     restart(ctx)
 }
@@ -104,7 +120,9 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "forget",
-            from_fn_async(forget_disk::<DiagnosticContext>).no_cli(),
+            from_fn_async(|ctx: DiagnosticContext, _: DiagnosticPasswordParams| forget_disk(ctx))
+                .with_metadata("authenticated", Value::Bool(true))
+                .no_cli(),
         )
         .subcommand("forget", from_fn_async(forget_disk::<RpcContext>).no_cli())
         .subcommand(
@@ -117,7 +135,9 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "repair",
-            from_fn_async(|_: DiagnosticContext| repair()).no_cli(),
+            from_fn_async(|_: DiagnosticContext, _: DiagnosticPasswordParams| repair())
+                .with_metadata("authenticated", Value::Bool(true))
+                .no_cli(),
         )
         .subcommand("repair", from_fn_async(|_: RpcContext| repair()).no_cli())
         .subcommand(
@@ -167,6 +187,13 @@ mod tests {
                 diagnostic_available,
                 "{method} in diagnostic",
             );
+            if let Some(diagnostic_method) = diagnostic.method_from_dots(method) {
+                assert_eq!(
+                    diagnostic.metadata(diagnostic_method).get("authenticated"),
+                    Some(&Value::Bool(true)),
+                    "{method} must require diagnostic authentication",
+                );
+            }
             let runtime_method = runtime
                 .method_from_dots(method)
                 .unwrap_or_else(|| panic!("{method} missing from runtime"));
@@ -178,6 +205,30 @@ mod tests {
             assert!(
                 cli.method_from_dots(method).is_some(),
                 "{method} missing from CLI",
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_mode_authenticates_changes_and_keeps_reads_public() {
+        let diagnostic = DiagnosticContext::api();
+        for (method, authenticated) in [
+            ("diagnostic.error", false),
+            ("diagnostic.logs", false),
+            ("diagnostic.kernel-logs", false),
+            ("diagnostic.restart", false),
+            ("diagnostic.rebuild", true),
+            ("diagnostic.update", true),
+            ("diagnostic.disk.forget", true),
+            ("diagnostic.disk.repair", true),
+        ] {
+            let method_path = diagnostic
+                .method_from_dots(method)
+                .unwrap_or_else(|| panic!("{method} missing from diagnostic"));
+            assert_eq!(
+                diagnostic.metadata(method_path).get("authenticated"),
+                Some(&Value::Bool(authenticated)),
+                "{method}",
             );
         }
     }

@@ -44,6 +44,9 @@ pub struct DiagnosticUpdateSystemParams {
     #[arg(long = "no-progress", action = ArgAction::SetFalse, help = "help.arg.no-progress")]
     #[serde(default)]
     progress: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    auth: crate::diagnostic::DiagnosticPasswordParams,
 }
 rpc_toolkit::reflect_ts!(DiagnosticUpdateSystemParams);
 
@@ -333,10 +336,10 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_ui_keeps_signed_updates_public() {
+    fn diagnostic_ui_updates_require_authentication() {
         let metadata =
             DiagnosticContext::api().metadata(["diagnostic", "update"].into_iter().collect());
-        assert_eq!(metadata.get("authenticated"), Some(&Value::Bool(false)));
+        assert_eq!(metadata.get("authenticated"), Some(&Value::Bool(true)));
         assert_eq!(metadata.get("get_local_auth"), Some(&Value::Bool(true)));
     }
 }
