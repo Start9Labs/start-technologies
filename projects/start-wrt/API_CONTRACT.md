@@ -605,10 +605,12 @@ struct WanDnsSetRequest {
 }
 // Response: null
 // Backend: stores custom servers in the `startwrt` config (`system_dns`
-// section), sets `peerdns` on wan/wan6 (0 for Custom, 1 for Isp), rewrites
-// per-profile DNS forwarding (dnsmasq + firewall DNAT), regenerates the
-// SmartDNS config, then runs the full reload_system() (network + smartdns +
-// firewall + dnsmasq)
+// section), sets `peerdns` on wan/wan6 (0 for Custom, 1 for Isp), forwards the
+// main dnsmasq — the router's own lookups — to the system SmartDNS group for
+// Custom (`noresolv` + `server 127.0.0.1#5300`) and to the WAN's resolvers for
+// Isp, rewrites per-profile DNS forwarding (dnsmasq + firewall DNAT),
+// regenerates the SmartDNS config, then runs the full reload_system() (network
+// + smartdns + firewall + dnsmasq)
 ```
 
 ### `wan.ddns-get`

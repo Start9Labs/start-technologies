@@ -27,6 +27,11 @@ pub fn smartdns_port_for_vlan(vlan_tag: u16) -> u16 {
     SMARTDNS_SYSTEM_PORT + vlan_tag
 }
 
+/// The dnsmasq `server` entry that forwards to the system SmartDNS group.
+pub fn system_dnsmasq_upstream() -> String {
+    format!("127.0.0.1#{SMARTDNS_SYSTEM_PORT}")
+}
+
 /// A SmartDNS server group with its bind address and upstream servers.
 pub struct SmartDnsGroup {
     pub name: String,
