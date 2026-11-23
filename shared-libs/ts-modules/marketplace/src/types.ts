@@ -8,9 +8,7 @@ export type GetPackageReq = PackageParams & {
   otherVersions: 'short'
 }
 /** StartOS's cached version list carries no release notes; fetched details do. */
-export type OtherVersion = Partial<T.PackageInfoShort> & {
-  superseded?: boolean
-}
+export type OtherVersion = Partial<T.PackageInfoShort>
 
 export type GetPackageRes = Omit<T.GetPackageResponse, 'otherVersions'> & {
   otherVersions: { [version: string]: OtherVersion }

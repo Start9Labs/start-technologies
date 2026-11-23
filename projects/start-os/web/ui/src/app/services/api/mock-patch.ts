@@ -102,13 +102,15 @@ function mockListings(): T.RegistryCache['listings'] {
       return [
         id,
         {
+          detailsHash: 'mock',
           categories: pkg.categories,
           firstPublishedAt: pkg.firstPublishedAt,
           releases: Object.fromEntries(listed.map(v => [v, versions[v]!])),
           versions: Object.fromEntries(
-            [...Object.keys(versions), ...Object.keys(pkg.otherVersions)].map(
-              v => [v, {}],
-            ),
+            [
+              ...Object.keys(versions),
+              ...Object.keys(pkg.otherVersions ?? {}),
+            ].map(v => [v, {}]),
           ),
           updateTarget,
         },

@@ -1,12 +1,7 @@
 import type { Api, ApiClient, Params, Result } from './api.types'
 import { inject, Injectable } from '@angular/core'
 import { WA_CRYPTO, WA_SESSION_STORAGE } from '@ng-web-apis/common'
-import {
-  FALLBACK_ICON,
-  GetPackageRes,
-  GetPackagesRes,
-  registrySigningKeys,
-} from '@start9labs/marketplace'
+import { FALLBACK_ICON, registrySigningKeys } from '@start9labs/marketplace'
 import {
   FullKeyboard,
   i18nPipe,
