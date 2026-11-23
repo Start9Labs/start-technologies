@@ -125,6 +125,7 @@ export type CopyOperation = z.output<typeof schemas.CopyOperation>
 export type CountEntry = z.output<typeof schemas.CountEntry>
 export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DataUrlInput = z.input<typeof schemas.DataUrl>
+export type DbCursorInput = z.input<typeof schemas.DbCursor>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type Dump = z.output<typeof schemas.Dump>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
@@ -318,11 +319,6 @@ export type Patch = z.output<typeof schemas.Patch>
 export type RegistryInfo = z.output<typeof schemas.RegistryInfo>
 
 /**
- * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
- */
-export type SubscribeResult = z.output<typeof schemas.SubscribeResult>
-
-/**
  * Database-generated patches contain only add, remove and replace operations.
  */
 export type DiffPatch = z.output<typeof schemas.DiffPatch>
@@ -341,5 +337,15 @@ export type PackageVersionExport = z.output<typeof schemas.PackageVersionExport>
 export type Revision = z.output<typeof schemas.Revision>
 export type GetPackageResult = z.output<typeof schemas.GetPackageResult>
 export type PackageIndex = z.output<typeof schemas.PackageIndex>
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export type SubscribeStart = z.output<typeof schemas.SubscribeStart>
 export type FullIndex = z.output<typeof schemas.FullIndex>
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export type SubscribeStartResult = z.output<typeof schemas.SubscribeStartResult>
 export type Api = RpcSchemaTree<typeof schemas.Api>

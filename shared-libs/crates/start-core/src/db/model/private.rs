@@ -32,6 +32,8 @@ pub struct Private {
     #[serde(default)]
     pub registry_indexes: BTreeMap<url::Url, crate::registry::FullIndex>,
     #[serde(default)]
+    pub registry_cursors: BTreeMap<url::Url, crate::registry::sync::RegistryCursor>,
+    #[serde(default)]
     pub push: crate::notifications::push::PushState,
     pub cifs: CifsTargets,
     #[serde(default)]

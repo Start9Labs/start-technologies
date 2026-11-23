@@ -13,6 +13,7 @@ use url::Url;
 
 use crate::PackageId;
 use crate::context::RpcContext;
+use crate::db::DbCursor;
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
 use crate::db::model::public::ServerInfo;
 use crate::db::model::{Database, DatabaseModel};
@@ -90,6 +91,33 @@ pub struct OsUpdateCache {
 }
 
 rpc_toolkit::reflect_ts!(OsUpdateCache);
+
+/// What the registry projects an index subscription for.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryView {
+    pub os_version: exver::Version,
+    pub language: Option<InternedString>,
+}
+
+impl RegistryView {
+    pub(crate) fn new(device: &DeviceInfo) -> Self {
+        Self {
+            os_version: device.os.version.clone(),
+            language: None,
+        }
+    }
+}
+
+/// The saved index's last registry revision, within the view and epoch it was received in.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryCursor {
+    /// Absent for registries that cannot resume.
+    pub epoch: Option<InternedString>,
+    pub id: u64,
+    pub view: RegistryView,
+}
 
 type ContextProvider = Arc<dyn Fn() -> Option<RpcContext> + Send + Sync>;
 type RegistryTasks = BTreeMap<BTreeSet<Subscription>, NonDetachingJoinHandle<()>>;
@@ -303,17 +331,24 @@ fn reconcile(
         }
         Ok(())
     })?;
-    let mut indexes = db
-        .as_private()
-        .as_value()
-        .get("registryIndexes")
-        .map(|value| from_value::<BTreeMap<Url, FullIndex>>(value.clone()))
-        .transpose()?
-        .unwrap_or_default();
-    indexes.retain(|url, _| desired.contains(&Subscription::Index(url.clone())));
-    db.as_private_mut()
-        .as_registry_indexes_mut()
-        .ser(&indexes)?;
+    let stale = |url: &Url| !desired.contains(&Subscription::Index(url.clone()));
+    if db.as_private().as_value().get("registryIndexes").is_some() {
+        for url in db.as_private().as_registry_indexes().keys()? {
+            if stale(&url) {
+                db.as_private_mut().as_registry_indexes_mut().remove(&url)?;
+            }
+        }
+    } else {
+        db.as_private_mut()
+            .as_registry_indexes_mut()
+            .ser(&BTreeMap::new())?;
+    }
+    let cursors = registry_cursors_mut(db)?;
+    for url in cursors.keys()? {
+        if stale(&url) {
+            cursors.remove(&url)?;
+        }
+    }
     sync_os_default_locale(db)
 }
 
@@ -562,6 +597,232 @@ async fn watch_installed_versions(db: TypedPatchDb<Database>, context: ContextPr
     }
 }
 
+/// The cursor to resume an index subscription from, when the saved index came from this view.
+fn resumable_cursor(
+    db: &DatabaseModel,
+    url: &Url,
+    view: &RegistryView,
+) -> Result<Option<DbCursor>, Error> {
+    let private = db.as_private();
+    if private.as_registry_indexes().as_idx(url).is_none() {
+        return Ok(None);
+    }
+    Ok(private
+        .as_registry_cursors()
+        .as_idx(url)
+        .map(|cursor| cursor.de())
+        .transpose()?
+        .filter(|cursor| &cursor.view == view)
+        .and_then(|cursor| {
+            cursor.epoch.map(|epoch| DbCursor {
+                epoch,
+                id: cursor.id,
+            })
+        }))
+}
+
+/// A failed event forgets the cursor, so the next connection starts from a dump.
+async fn ingest(
+    db: &TypedPatchDb<Database>,
+    url: &Url,
+    view: &RegistryView,
+    event: &connection::SubscriptionEvent,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
+    let result = db
+        .mutate(|db| ingest_event(db, url, view, event, device))
+        .await
+        .result;
+    if result.is_err() {
+        let _ = db.mutate(|db| forget_cursor(db, url)).await.result;
+    }
+    result
+}
+
+fn registry_cursors_mut(
+    db: &mut DatabaseModel,
+) -> Result<&mut Model<BTreeMap<Url, RegistryCursor>>, Error> {
+    let cursors = db.as_private_mut().as_registry_cursors_mut();
+    if !matches!(cursors.as_value(), Value::Object(_)) {
+        cursors.ser(&BTreeMap::new())?;
+    }
+    Ok(cursors)
+}
+
+fn forget_cursor(db: &mut DatabaseModel, url: &Url) -> Result<(), Error> {
+    registry_cursors_mut(db)?.remove(url)?;
+    Ok(())
+}
+
+fn saved_cursor(db: &DatabaseModel, url: &Url) -> Result<RegistryCursor, Error> {
+    db.as_private()
+        .as_registry_cursors()
+        .as_idx(url)
+        .or_not_found(lazy_format!("registry cursor for {url}"))?
+        .de()
+}
+
+fn ingest_event(
+    db: &mut DatabaseModel,
+    url: &Url,
+    view: &RegistryView,
+    event: &connection::SubscriptionEvent,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
+    use connection::SubscriptionEvent;
+    if !Subscription::Index(url.clone()).selected(&db.as_public().as_server_info().de()?) {
+        return Ok(());
+    }
+    let (epoch, id, changed) = match event {
+        SubscriptionEvent::Start(start) => match &start.revisions {
+            None => {
+                from_value::<FullIndex>(start.value.clone())?;
+                save_index(db, url, start.value.clone())?;
+                (start.epoch.clone(), start.id, None)
+            }
+            Some(revisions) => {
+                let cursor = saved_cursor(db, url)?;
+                ensure_code!(
+                    cursor.epoch.is_some() && cursor.epoch == start.epoch && &cursor.view == view,
+                    ErrorKind::Network,
+                    "{}",
+                    t!("registry.sync.unrequested-replay")
+                );
+                let changed = apply_revisions(db, url, cursor.id, revisions)?;
+                (start.epoch.clone(), start.id, changed)
+            }
+        },
+        SubscriptionEvent::Revision(revision) => {
+            let cursor = saved_cursor(db, url)?;
+            let changed = apply_revisions(db, url, cursor.id, std::slice::from_ref(revision))?;
+            (cursor.epoch, revision.id, changed)
+        }
+    };
+    registry_cursors_mut(db)?.insert(
+        url,
+        &RegistryCursor {
+            epoch,
+            id,
+            view: view.clone(),
+        },
+    )?;
+    refresh_public(db, url, changed.as_ref(), device)?;
+    sync_os_default_locale(db)
+}
+
+fn save_index(db: &mut DatabaseModel, url: &Url, index: Value) -> Result<(), Error> {
+    db.as_private_mut()
+        .as_registry_indexes_mut()
+        .insert_model(url, Model::from_value(index))?;
+    Ok(())
+}
+
+/// Applies revisions to the saved index; `None` when a revision may change every package.
+fn apply_revisions(
+    db: &mut DatabaseModel,
+    url: &Url,
+    mut last: u64,
+    revisions: &[patch_db::Revision],
+) -> Result<Option<BTreeSet<PackageId>>, Error> {
+    let index = db
+        .as_private_mut()
+        .as_registry_indexes_mut()
+        .as_idx_mut(url)
+        .or_not_found(lazy_format!("registry index for {url}"))?;
+    let mut changed = Some(BTreeSet::new());
+    for revision in revisions {
+        ensure_code!(
+            revision.id > last,
+            ErrorKind::Database,
+            "out-of-order registry revision"
+        );
+        patch_db::json_patch::patch(index.as_value_mut(), &revision.patch)
+            .with_kind(ErrorKind::Database)?;
+        changed = changed
+            .zip(changed_packages(&revision.patch))
+            .map(|(mut all, ids)| {
+                all.extend(ids);
+                all
+            });
+        last = revision.id;
+    }
+    Ok(changed)
+}
+
+/// Packages whose listing a patch to an index may change; `None` for all of them.
+/// StartOS releases change no package.
+pub(crate) fn changed_packages(patch: &patch_db::DiffPatch) -> Option<BTreeSet<PackageId>> {
+    let mut changed = BTreeSet::new();
+    for path in patch.paths() {
+        match (
+            path.get_segment(0),
+            path.get_segment(1),
+            path.get_segment(2),
+        ) {
+            (Some("os"), _, _) => (),
+            (Some("package"), Some("packages"), Some(id)) => {
+                changed.insert(id.parse().ok()?);
+            }
+            _ => return None,
+        }
+    }
+    Some(changed)
+}
+
+/// Rebuilds a registry's public cache entry from its saved index.
+/// `changed` names the packages whose listings may differ, `None` meaning all of them;
+/// registry-level fields are always rebuilt.
+pub(crate) fn refresh_public(
+    db: &mut DatabaseModel,
+    url: &Url,
+    changed: Option<&BTreeSet<PackageId>>,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
+    let _ = changed;
+    let index = db
+        .as_private()
+        .as_registry_indexes()
+        .as_idx(url)
+        .or_not_found(lazy_format!("registry index for {url}"))?
+        .clone();
+    let publishes_os_updates = !from_value::<BTreeMap<exver::Version, OsVersionInfo>>(
+        crate::registry::os::version::select_versions(
+            index.as_os(),
+            None,
+            None,
+            Some(&device.os.platform),
+        )?,
+    )?
+    .is_empty();
+    let info = crate::registry::info::from_index(&index)?;
+    let mut package_device = device.clone();
+    package_device.os.language = None;
+    let mut catalog = select_releases(index.as_package(), &package_device.for_listing())?;
+    let mut targets = update_targets(
+        index.as_package(),
+        &installed_versions(db)?,
+        &package_device,
+    )?;
+    for (id, package) in &mut catalog {
+        package.update_target = targets.remove(id);
+        for release in package.versions.values_mut() {
+            release.info.strip_access();
+        }
+    }
+    refresh_registry(db, url, &info)?;
+    db.as_public_mut().as_registry_cache_mut().insert(
+        url,
+        &RegistryCache {
+            info,
+            catalog,
+            publishes_os_updates,
+            status: RegistryStatus::Connected,
+            error: None,
+        },
+    )?;
+    Ok(())
+}
+
 async fn publish(
     db: &TypedPatchDb<Database>,
     subscription: &Subscription,
@@ -584,47 +845,10 @@ fn publish_snapshot(
     }
     match subscription {
         Subscription::Index(url) => {
-            let mut index: FullIndex = from_value(value.clone())?;
-            let publishes_os_updates = !from_value::<BTreeMap<exver::Version, OsVersionInfo>>(
-                crate::registry::os::version::select_versions(
-                    &Model::from_value(to_value(&index.os)?),
-                    None,
-                    None,
-                    Some(&device.os.platform),
-                )?,
-            )?
-            .is_empty();
-            index.os = OsIndex::default();
-            let index = Model::from_value(to_value(&index)?);
-            let info = crate::registry::info::from_index(&index)?;
-            let mut package_device = device.clone();
-            package_device.os.language = None;
-            let mut catalog = select_releases(index.as_package(), &package_device.for_listing())?;
-            let mut targets = update_targets(
-                index.as_package(),
-                &installed_versions(db)?,
-                &package_device,
-            )?;
-            for (id, package) in &mut catalog {
-                package.update_target = targets.remove(id);
-                for release in package.versions.values_mut() {
-                    release.info.strip_access();
-                }
-            }
-            refresh_registry(db, url, &info)?;
-            db.as_private_mut()
-                .as_registry_indexes_mut()
-                .insert(url, &index.de()?)?;
-            db.as_public_mut().as_registry_cache_mut().insert(
-                url,
-                &RegistryCache {
-                    info,
-                    catalog,
-                    publishes_os_updates,
-                    status: RegistryStatus::Connected,
-                    error: None,
-                },
-            )?;
+            let index: FullIndex = from_value(value.clone())?;
+            save_index(db, url, to_value(&index)?)?;
+            forget_cursor(db, url)?;
+            refresh_public(db, url, None, device)?;
         }
         Subscription::Os(url) => {
             let index: Model<OsIndex> = Model::from_value(value.clone());

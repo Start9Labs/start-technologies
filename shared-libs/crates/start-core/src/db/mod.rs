@@ -149,7 +149,7 @@ pub async fn dump(ctx: RpcContext, DumpParams { pointer }: DumpParams) -> Result
     Ok(ctx.db.dump(pointer.as_ref().unwrap_or(&*PUBLIC)).await)
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct DbCursor {
     pub epoch: InternedString,

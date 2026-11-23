@@ -164,7 +164,7 @@ impl Broadcast {
         dump: Dump,
         capacity: NonZeroUsize,
     ) -> Result<(Bytes, JsonSubscriber), Error> {
-        let listeners = self.listeners.entry(ptr).or_default();
+        let listeners = self.listeners.entry(ptr.clone()).or_default();
         let json = match &listeners.dump {
             Some(json) => json.clone(),
             None => {
@@ -173,17 +173,26 @@ impl Broadcast {
                 json
             }
         };
-        let receiver = listeners
+        Ok((json, self.subscribe_json_revisions(ptr, capacity)))
+    }
+
+    /// A bounded JSON revision stream without a dump, for subscribers resuming from a replay.
+    pub fn subscribe_json_revisions(
+        &mut self,
+        ptr: JsonPointer,
+        capacity: NonZeroUsize,
+    ) -> JsonSubscriber {
+        let receiver = self
+            .listeners
+            .entry(ptr)
+            .or_default()
             .json
             .entry(capacity)
             .or_insert_with(|| broadcast::channel(capacity.get()).0)
             .subscribe();
-        Ok((
-            json,
-            JsonSubscriber {
-                receiver: Some(receiver),
-            },
-        ))
+        JsonSubscriber {
+            receiver: Some(receiver),
+        }
     }
 }
 

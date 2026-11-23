@@ -3335,12 +3335,26 @@ registry.sync.not-saved:
   fr_FR: "%{registry} n'est pas un registre enregistré"
   pl_PL: "%{registry} nie jest zapisanym rejestrem"
 
+registry.sync.revision-before-start:
+  en_US: "Registry sent a revision before the subscription's initial response"
+  de_DE: "Die Registry hat vor der ersten Antwort des Abonnements eine Revision gesendet"
+  es_ES: "El registro envió una revisión antes de la respuesta inicial de la suscripción"
+  fr_FR: "Le registre a envoyé une révision avant la réponse initiale de l'abonnement"
+  pl_PL: "Rejestr wysłał rewizję przed początkową odpowiedzią subskrypcji"
+
 registry.sync.unreachable:
   en_US: "%{registry} is unreachable: %{error}"
   de_DE: "%{registry} ist nicht erreichbar: %{error}"
   es_ES: "%{registry} no está accesible: %{error}"
   fr_FR: "%{registry} est injoignable : %{error}"
   pl_PL: "%{registry} jest nieosiągalny: %{error}"
+
+registry.sync.unrequested-replay:
+  en_US: "Registry resumed a subscription from a revision this server does not hold"
+  de_DE: "Die Registry hat ein Abonnement ab einer Revision fortgesetzt, die dieser Server nicht besitzt"
+  es_ES: "El registro reanudó una suscripción desde una revisión que este servidor no tiene"
+  fr_FR: "Le registre a repris un abonnement à partir d'une révision que ce serveur ne possède pas"
+  pl_PL: "Rejestr wznowił subskrypcję od rewizji, której ten serwer nie posiada"
 
 # sign/commitment/request.rs
 sign.commitment.request.unsupported-type:
