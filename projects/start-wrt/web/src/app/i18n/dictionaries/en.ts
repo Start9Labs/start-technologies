@@ -601,4 +601,11 @@ export const ENGLISH: Record<string, number> = {
   'When behind NAT': 644,
   'Sign in from the command line': 645,
   'Enroll this browser': 646,
+  'Managed switch': 647,
+  'Delegate {port}?': 648,
+  'Every security profile will be sent to {port} as a tagged VLAN, and a managed switch connected to it decides which profile each of its own ports belongs to. Anyone who can log in to the switch can reach every profile, so protect its password and finish its VLAN setup before connecting it.': 649,
+  'Delegate': 650,
+  'VLAN IDs': 651,
+  'VLAN ID': 652,
+  "{port} sends each security profile to the switch tagged with its VLAN ID. Set up the switch's VLANs with these IDs.": 653,
 }

@@ -596,4 +596,11 @@ export default {
   644: 'Lorsque derrière un NAT',
   645: 'Se connecter depuis la ligne de commande',
   646: 'Enregistrer ce navigateur',
+  647: 'Switch administrable',
+  648: 'Déléguer {port} ?',
+  649: 'Chaque profil de sécurité sera envoyé à {port} sous forme de VLAN étiqueté, et un switch administrable qui y est branché décide à quel profil appartient chacun de ses propres ports. Quiconque peut se connecter au switch peut atteindre tous les profils : protégez son mot de passe et terminez la configuration de ses VLAN avant de le brancher.',
+  650: 'Déléguer',
+  651: 'ID de VLAN',
+  652: 'ID de VLAN',
+  653: '{port} envoie chaque profil de sécurité au switch, étiqueté avec son ID de VLAN. Configurez les VLAN du switch avec ces ID.',
 } satisfies i18n

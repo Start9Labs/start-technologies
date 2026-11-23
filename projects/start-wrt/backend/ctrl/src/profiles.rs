@@ -1186,6 +1186,14 @@ pub async fn list<C: CtrlContext>(ctx: C) -> Result<Vec<ProfileId>, Error> {
     list_config(ctx, &cfgs)
 }
 
+/// The VLAN tags of every profile on record.
+fn profile_vlans(ctx: &impl CtrlContext, cfgs: &Configs) -> Result<BTreeSet<u16>, Error> {
+    Ok(list_config(ctx.clone(), cfgs)?
+        .into_iter()
+        .map(|id| id.vlan_tag)
+        .collect())
+}
+
 pub(crate) fn list_config(_ctx: impl CtrlContext, cfgs: &Configs) -> Result<Vec<ProfileId>, Error> {
     let mut found = Vec::new();
     for section in &cfgs["startwrt"].sections {
@@ -1366,7 +1374,12 @@ fn ensure_vlan_filtering(cfgs: &mut Configs, bridge_name: &str) -> Result<(), Er
         )?;
     }
 
-    // Update LAN interface from br-lan to br-lan.1
+    attach_lan_to_vlan1(cfgs, bridge_name)
+}
+
+/// Moves the `lan` interface from the bare bridge onto its VLAN 1 device,
+/// where a filtering bridge delivers the Admin VLAN.
+pub(crate) fn attach_lan_to_vlan1(cfgs: &mut Configs, bridge_name: &str) -> Result<(), Error> {
     for section in &mut cfgs["network"].sections {
         if let Ok(mut iface) = section.get::<NetworkInterface>() {
             if section.name().as_deref() == Some("lan") && iface.device == bridge_name {
@@ -1808,11 +1821,15 @@ fn set_config<C: CtrlContext>(
                 .unwrap_or(false)
         });
         if !has_bridge_vlan {
+            let ports = crate::trunk::trunk_ports(cfgs, bridge_name, &profile_vlans(&ctx, cfgs)?)?
+                .iter()
+                .map(|port| crate::trunk::member(port, true))
+                .collect();
             cfgs["network"].append(
                 &NetworkBridgeVlan {
                     device: bridge_name.clone(),
                     vlan: profile.id.vlan_tag,
-                    ports: Vec::new(),
+                    ports,
                 },
                 None,
             )?;
@@ -2020,11 +2037,23 @@ fn create_config(
             _ => (),
         }
     }
+    // A profile whose VLAN has no bridge-vlan section — Admin on a bridge
+    // without VLAN filtering — still owns its tag.
+    for id in list_config(ctx.clone(), cfgs)? {
+        existing_tags.insert(id.vlan_tag);
+    }
     let found_bridge = find_lan_bridge(cfgs)?
         .map(|dev| dev.name)
         .ok_or_else(|| Error::new(eyre!("missing LAN bridge"), ErrorKind::MissingLanBridge))?;
     let vlan_tag = match profile.id.vlan_tag {
         Some(chosen_tag) => {
+            // 802.1Q reserves 0 and 4095.
+            if chosen_tag == 0 || chosen_tag >= 4095 {
+                return Err(Error::new(
+                    eyre!("VLAN tag out of range: {chosen_tag}"),
+                    ErrorKind::ReservedVlanTag,
+                ));
+            }
             if existing_tags.contains(&chosen_tag) {
                 return Err(Error::new(
                     eyre!("duplicate VLAN tag: {chosen_tag}"),
@@ -2033,7 +2062,7 @@ fn create_config(
             }
             chosen_tag
         }
-        None => (101..2_u16.pow(12))
+        None => (101..4095_u16)
             .find(|t| !existing_tags.contains(t))
             .expect("we somehow exausted all vlan tags, that should be impossible"),
     };
@@ -2067,16 +2096,14 @@ fn create_config(
             })
             .next()
             .unwrap_or_default();
+        let trunks = crate::trunk::trunk_ports(cfgs, &found_bridge, &profile_vlans(&ctx, cfgs)?)?;
         cfgs["network"].append(
             &NetworkBridgeVlan {
                 device: found_bridge.clone(),
                 vlan: vlan_tag,
                 ports: bridge_ports
-                    .into_iter()
-                    .map(|port| NetworkVlanPort {
-                        port,
-                        tagging: Some(NetworkVlanPortTagging::PRIMARY),
-                    })
+                    .iter()
+                    .map(|port| crate::trunk::member(port, trunks.contains(port)))
                     .collect(),
             },
             None,
@@ -2095,12 +2122,16 @@ fn create_config(
         )?;
         // Transition to VLAN filtering: ensure VLAN 1 exists for existing bridge ports
         ensure_vlan_filtering(cfgs, &found_bridge)?;
-        // Create a portless bridge-vlan so br-lan.<vlan> can exist
+        // Create the bridge-vlan so br-lan.<vlan> can exist; only trunks are members
+        let ports = crate::trunk::trunk_ports(cfgs, &found_bridge, &profile_vlans(&ctx, cfgs)?)?
+            .iter()
+            .map(|port| crate::trunk::member(port, true))
+            .collect();
         cfgs["network"].append(
             &NetworkBridgeVlan {
                 device: found_bridge.clone(),
                 vlan: vlan_tag,
-                ports: Vec::new(),
+                ports,
             },
             None,
         )?;
@@ -8199,6 +8230,205 @@ config dhcp 'guest'
             "non-admin profiles are still gated on the outbound"
         );
         assert_eq!(guest.dhcpv6.as_deref(), Some("disabled"));
+    }
+
+    fn profile_with_tag(tag: Option<u16>) -> Profile<ProfileIdOpt> {
+        Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Third".into()),
+                interface: None,
+                vlan_tag: tag,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 102, 1),
+            outbound: "wan".into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn create_rejects_admin_tag_on_flat_bridge() {
+        // Without VLAN filtering, Admin's VLAN has no bridge-vlan section;
+        // its tag is still taken.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network"))
+            .unwrap()
+            .replace(
+                "config bridge-vlan\n\toption device 'br-lan'\n\toption vlan '99'\n\n",
+                "",
+            )
+            .replace(
+                "\toption device 'br-lan.99'\n",
+                "\toption device 'br-lan'\n",
+            );
+        assert!(
+            !network.contains("vlan '99'"),
+            "fixture must drop Admin's bridge-vlan"
+        );
+        std::fs::write(dir.path().join("network"), network).unwrap();
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let err = create_config(
+            ctx.clone(),
+            &mut cfgs,
+            &profile_with_tag(Some(99)),
+            Some("third".into()),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::DuplicateVlanTag);
+    }
+
+    #[tokio::test]
+    async fn create_rejects_reserved_tags_and_accepts_the_last_usable_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        for tag in [0, 4095, u16::MAX] {
+            let err = create_config(
+                ctx.clone(),
+                &mut cfgs,
+                &profile_with_tag(Some(tag)),
+                Some("third".into()),
+            )
+            .unwrap_err();
+            assert_eq!(err.kind, ErrorKind::ReservedVlanTag, "tag {tag}");
+        }
+        let id = create_config(
+            ctx.clone(),
+            &mut cfgs,
+            &profile_with_tag(Some(4094)),
+            Some("third".into()),
+        )
+        .unwrap();
+        assert_eq!(id.vlan_tag, 4094);
+    }
+
+    #[tokio::test]
+    async fn create_tags_trunk_ports_into_the_new_vlan() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        // eth0 is a trunk (tagged everywhere), eth1 an ordinary Admin port.
+        let network = std::fs::read_to_string(dir.path().join("network"))
+            .unwrap()
+            .replace(
+                "\toption vlan '99'\n",
+                "\toption vlan '99'\n\tlist ports 'eth0:t'\n\tlist ports 'eth1:u*'\n",
+            )
+            .replace(
+                "\toption vlan '101'\n",
+                "\toption vlan '101'\n\tlist ports 'eth0:t'\n",
+            );
+        std::fs::write(dir.path().join("network"), network).unwrap();
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let third = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Third".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 102, 1),
+            outbound: "wan".into(),
+            lan_access: LanAccess::SameProfile,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+        let third_id = create_config(ctx.clone(), &mut cfgs, &third, Some("third".into())).unwrap();
+
+        let mut members = None;
+        for section in &cfgs["network"].sections {
+            if let Ok(vlan) = section.get::<NetworkBridgeVlan>() {
+                if vlan.vlan == third_id.vlan_tag {
+                    members = Some(
+                        vlan.ports
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>(),
+                    );
+                }
+            }
+        }
+        assert_eq!(members.unwrap(), vec!["eth0:t".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn create_tags_a_trunk_untagged_in_a_vlan_of_no_profile() {
+        // VLAN 4000 belongs to no profile. eth0 sends it untagged and is still
+        // a trunk, so the new profile's VLAN reaches it tagged.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let mut network = std::fs::read_to_string(dir.path().join("network"))
+            .unwrap()
+            .replace(
+                "\toption vlan '99'\n",
+                "\toption vlan '99'\n\tlist ports 'eth0:t'\n\tlist ports 'eth1:u*'\n",
+            )
+            .replace(
+                "\toption vlan '101'\n",
+                "\toption vlan '101'\n\tlist ports 'eth0:t'\n",
+            );
+        network.push_str(
+            "\nconfig bridge-vlan\n\toption device 'br-lan'\n\toption vlan '4000'\n\tlist ports 'eth0:u*'\n",
+        );
+        std::fs::write(dir.path().join("network"), network).unwrap();
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+
+        let third_id = create_config(
+            ctx.clone(),
+            &mut cfgs,
+            &profile_with_tag(None),
+            Some("third".into()),
+        )
+        .unwrap();
+
+        let members = cfgs["network"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<NetworkBridgeVlan>().ok())
+            .find(|v| v.vlan == third_id.vlan_tag)
+            .map(|v| v.ports.iter().map(ToString::to_string).collect::<Vec<_>>());
+        assert_eq!(members.unwrap(), vec!["eth0:t".to_string()]);
     }
 
     #[tokio::test]

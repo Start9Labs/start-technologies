@@ -596,4 +596,11 @@ export default {
   644: 'Cuando está detrás de NAT',
   645: 'Iniciar sesión desde la línea de comandos',
   646: 'Registrar este navegador',
+  647: 'Switch gestionado',
+  648: '¿Delegar {port}?',
+  649: 'Cada perfil de seguridad se enviará a {port} como una VLAN etiquetada, y un switch gestionado conectado a él decide a qué perfil pertenece cada uno de sus propios puertos. Cualquiera que pueda iniciar sesión en el switch puede acceder a todos los perfiles, así que proteja su contraseña y termine de configurar sus VLAN antes de conectarlo.',
+  650: 'Delegar',
+  651: 'IDs de VLAN',
+  652: 'ID de VLAN',
+  653: '{port} envía cada perfil de seguridad al switch etiquetado con su ID de VLAN. Configura las VLAN del switch con estos IDs.',
 } satisfies i18n

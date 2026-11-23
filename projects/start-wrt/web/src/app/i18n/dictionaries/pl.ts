@@ -596,4 +596,11 @@ export default {
   644: 'Gdy za NAT',
   645: 'Zaloguj się z wiersza poleceń',
   646: 'Zarejestruj tę przeglądarkę',
+  647: 'Przełącznik zarządzalny',
+  648: 'Delegować {port}?',
+  649: 'Każdy profil bezpieczeństwa będzie wysyłany na {port} jako tagowany VLAN, a podłączony do niego przełącznik zarządzalny decyduje, do którego profilu należy każdy z jego własnych portów. Każdy, kto może zalogować się do przełącznika, ma dostęp do wszystkich profili, dlatego chroń jego hasło i dokończ konfigurację VLAN, zanim go podłączysz.',
+  650: 'Deleguj',
+  651: 'Identyfikatory VLAN',
+  652: 'Identyfikator VLAN',
+  653: '{port} wysyła każdy profil bezpieczeństwa do przełącznika oznaczony jego identyfikatorem VLAN. Skonfiguruj sieci VLAN przełącznika z użyciem tych identyfikatorów.',
 } satisfies i18n

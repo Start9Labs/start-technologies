@@ -596,4 +596,11 @@ export default {
   644: 'Wenn hinter NAT',
   645: 'Über die Befehlszeile anmelden',
   646: 'Diesen Browser registrieren',
+  647: 'Managed Switch',
+  648: '{port} delegieren?',
+  649: 'Jedes Sicherheitsprofil wird als getaggtes VLAN an {port} gesendet, und ein daran angeschlossener Managed Switch entscheidet, zu welchem Profil jeder seiner eigenen Ports gehört. Wer sich am Switch anmelden kann, erreicht jedes Profil. Schützen Sie daher sein Passwort und schließen Sie seine VLAN-Einrichtung ab, bevor Sie ihn anschließen.',
+  650: 'Delegieren',
+  651: 'VLAN-IDs',
+  652: 'VLAN-ID',
+  653: '{port} sendet jedes Sicherheitsprofil mit seiner VLAN-ID getaggt an den Switch. Richten Sie die VLANs des Switches mit diesen IDs ein.',
 } satisfies i18n
