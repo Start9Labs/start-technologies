@@ -22,7 +22,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   private resolveReady: (() => void) | undefined
   private resolvedReady: boolean = false
   private readyPromise: Promise<void>
-  private session: { abort: AbortController; done: Promise<void> } | null = null
+  private session: AbortController | null = null
   constructor(
     readonly daemon: Daemon<Manifest> | null,
     readonly dependencies: HealthDaemon<Manifest>[],
@@ -46,9 +46,9 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   }) {
     this.terminated = true
     this.healthWatchers = []
+    this.stopSession()
     await this.transition.catch(() => {})
     this.running = false
-    await this.stopSession()
 
     await this.daemon?.term({
       ...termOptions,
@@ -91,16 +91,16 @@ export class HealthDaemon<Manifest extends SDKManifest> {
       }
     } else {
       console.debug(`Stopping ${this.id}...`)
-      await this.stopSession()
+      this.stopSession()
       // Dependency loss pauses the daemon without destroying its SubContainer.
       await this.daemon?.stop()
     }
   }
 
-  private async stopSession() {
+  /** Aborts the health check without waiting for an in-flight `ready.fn`. */
+  private stopSession() {
     if (!this.session) return
-    this.session.abort.abort()
-    await this.session.done
+    this.session.abort()
     this.session = null
     this.resetReady()
   }
@@ -117,7 +117,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   }
 
   private startSession() {
-    this.session?.abort.abort()
+    this.session?.abort()
 
     const abort = new AbortController()
 
@@ -141,12 +141,10 @@ export class HealthDaemon<Manifest extends SDKManifest> {
       }
     })
 
-    const done =
-      this.ready === 'EXIT_SUCCESS'
-        ? Promise.resolve()
-        : this.runHealthCheckLoop(abort.signal)
+    if (this.ready !== 'EXIT_SUCCESS')
+      void this.runHealthCheckLoop(abort.signal)
 
-    this.session = { abort, done }
+    this.session = abort
   }
 
   private async runHealthCheckLoop(signal: AbortSignal): Promise<void> {
@@ -176,7 +174,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     try {
       for (let res = await next(); !res.done; res = await next()) {
         const response: HealthCheckResult = await Promise.resolve(
-          this.ready.fn(),
+          this.ready.fn(signal),
         ).catch(err => {
           return {
             result: 'failure' as const,

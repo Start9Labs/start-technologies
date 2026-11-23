@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-s9pk-encrypt 1  "encrypt "
+.SH NAME
+start\-cli\-s9pk\-encrypt \- Write an s9pk encrypted with the key your identity derives for it, for hosting a private s9pk
+.SH SYNOPSIS
+\fBstart\-cli s9pk encrypt\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIS9PK\fR> [\fIOUTPUT\fR]
+.SH DESCRIPTION
+Write an s9pk encrypted with the key your identity derives for it, for hosting a private s9pk
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIS9PK\fR>
+Path to s9pk package file
+.TP
+[\fIOUTPUT\fR]
+Path to write the encrypted s9pk to, or \- for stdout; defaults to <stem>.encrypted.s9pk beside the input

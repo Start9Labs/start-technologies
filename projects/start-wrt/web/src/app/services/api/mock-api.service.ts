@@ -693,16 +693,21 @@ export class MockApiService extends ApiService {
 
   async wifiRegulatory(): Promise<WifiRegulatory> {
     await pauseFor(100)
-    const world = this.mockWifi.country === null
-    const channels24 = world
-      ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-      : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-    const channels5 = world
-      ? [36, 40, 44, 48]
-      : [
-          36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124,
-          128, 132, 136, 140, 144, 149, 153, 157, 161, 165,
-        ]
+    const { country } = this.mockWifi
+    const channels24 =
+      country === null || country === 'US'
+        ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+    // The AW7916-NPD's FCC grant leaves out 52-144.
+    const channels5 =
+      country === null
+        ? [36, 40, 44, 48]
+        : country === 'US'
+          ? [36, 40, 44, 48, 149, 153, 157, 161, 165]
+          : [
+              36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124,
+              128, 132, 136, 140, 144, 149, 153, 157, 161, 165,
+            ]
     return {
       countries: ['CA', 'CR', 'DE', 'FR', 'GB', 'MX', 'US'],
       bands: {
@@ -1025,6 +1030,7 @@ export class MockApiService extends ApiService {
           Object.entries(this.mockEthernet.ports).map(([name, port]) => [
             name,
             {
+              ...port,
               profile:
                 port.profile?.interface === params.interface
                   ? { ...port.profile, fullname: newFullname }
@@ -1096,6 +1102,7 @@ export class MockApiService extends ApiService {
           Object.entries(this.mockEthernet.ports).map(([name, port]) => [
             name,
             {
+              ...port,
               profile:
                 port.profile?.interface === deleted.interface
                   ? null
@@ -2192,20 +2199,24 @@ export class MockApiService extends ApiService {
     wan_ipv6: true,
     wan_port: 'eth0',
     ports: {
-      eth0: { profile: null },
+      eth0: { profile: null, trunk: false },
       eth1: {
         profile: { fullname: 'Admin', interface: 'lan', vlan_tag: 1 },
+        trunk: false,
       },
       eth2: {
         profile: { fullname: 'Admin', interface: 'lan', vlan_tag: 1 },
+        trunk: false,
       },
       eth3: {
         profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
+        trunk: false,
       },
       usb_eth0: {
         profile: { fullname: 'Guest', interface: 'guest', vlan_tag: 100 },
+        trunk: false,
       },
-      usb_eth1: { profile: null },
+      usb_eth1: { profile: null, trunk: false },
     },
     usb_ports: {
       usb_eth0: { present: true, active: true },
@@ -2244,6 +2255,7 @@ export class MockApiService extends ApiService {
         Object.entries(params.ports).map(([name, port]) => [
           name,
           {
+            trunk: port.trunk ?? false,
             profile: port.profile
               ? (this.mockProfiles.find(
                   p =>

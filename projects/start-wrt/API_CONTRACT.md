@@ -776,8 +776,12 @@ struct LanIpv6SetRequest {
 
 #[derive(Serialize, Deserialize)]
 struct Port<Id = ProfileId> {
-    /// Security profile assigned to this port, if any
+    /// Security profile assigned to this port, if any. Always `None` on a trunk.
     profile: Option<Id>,
+    /// Trunk: the port carries every profile as a tagged VLAN and no untagged
+    /// traffic, for a managed switch that assigns its own ports to profiles.
+    /// Defaults to `false` when omitted in a request.
+    trunk: bool,
 }
 
 #[derive(Serialize)]
@@ -851,6 +855,15 @@ struct EthernetSetResult {
 // applies the bridge-VLAN/WAN update, then reloads network + firewall.
 // A recorded USB port the request omits keeps its profile; a USB port as
 // `wan_port` fails with InvalidValue.
+//
+// Trunks: a port with `trunk: true` joins every profile's bridge VLAN tagged,
+// including Admin's, and a profile created later joins it too. A trunk turns
+// on bridge VLAN filtering even when Admin is the only profile. A port becoming
+// a trunk is not a profile change (its devices keep the VLAN the switch gives
+// them); a trunk returning to a profile is, and the preview places each device
+// behind it in the VLAN the switch tagged it with.
+// Errors: `InvalidTrunkPort` (1027) for a trunk with a profile, on the WAN
+// port, or on a USB port.
 ```
 
 Note: `ProfileId` and `ProfileIdOpt` are shared types defined at the top of the contract.
@@ -1809,11 +1822,15 @@ struct WifiSetResult {
 // `InvalidValue` before anything is written; codes are upper-case, as in the
 // database, so `us` is rejected. `null` clears it and returns the radios to the
 // world domain.
-// A radio whose channel or width changes, or that is being enabled, is rejected
-// with `InvalidValue` unless `wifi.regulatory` lists that width for the channel
-// (`autoWidths` for "auto"), or when the radio's PHY mode cannot express the
-// width (HT stops at 40 MHz).
-// A call that changes `country` instead rejects any width above 80 MHz.
+// A radio whose band, channel or width changes, or that is being enabled, is
+// rejected with `InvalidValue` unless `wifi.regulatory` lists the channel in its
+// band with that width, or with any width when the radio has none (`autoWidths`
+// for "auto"), or when the radio's PHY mode cannot express the width (HT stops
+// at 40 MHz).
+// A call that changes `country` instead rejects any width above 80 MHz; once the
+// new country is in force, it moves a radio off a channel that country forbids
+// to "auto" and narrows a width its channel cannot carry, as the daemon does at
+// boot. Country changes apply even when a blackout defers the Wi-Fi reload.
 ```
 
 ### `wifi.blackout-get`
@@ -1912,7 +1929,7 @@ struct WifiRegulatory {
     countries: Vec<String>,
     /// What an access point may use under the country currently in force,
     /// keyed by band ("2g", "5g"). Re-read after a `wifi.set` that changes
-    /// `country`; a channel or width outside it leaves that radio down.
+    /// `country`.
     bands: HashMap<String, BandChannels>,
 }
 
@@ -1935,7 +1952,8 @@ struct ApChannel {
 // Response: WifiRegulatory
 // Backend: reads `iw phy <phy> channels` for every radio. A channel is usable
 // unless disabled or No IR; a width also needs the kernel's width flag on its
-// channels.
+// channels. Under the US and its territories, mt76 disables 5250-5730 MHz on an
+// MT7916 and keeps its 6 GHz channels No IR (the AW7916-NPD's FCC grant).
 ```
 
 ---
@@ -2030,6 +2048,8 @@ struct Profile<ProfileIdOpt> {
     dns_source: String,
 }
 // Response: ProfileId
+// Errors: `ReservedVlanTag` (1028) for a vlan_tag of 0 or 4095 and above,
+//   `DuplicateVlanTag` for one another profile holds, Admin's included.
 // Validation: the Subnet rules below. outbound must be "wan" or an outbound VPN that vpn-client.list reports as
 //   enabled: an unknown interface (or one that is a VPN server rather than a
 //   client) is ErrorKind::NotFound, a disabled one ErrorKind::VpnDisabled.

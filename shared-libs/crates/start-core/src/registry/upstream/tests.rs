@@ -240,8 +240,8 @@ async fn mirror_rejects_index_writes_but_serves_reads_and_local_admin_changes() 
     for (method, params) in [
         ("info.set-name", json!({ "name": "Renamed" })),
         (
-            "package.access.set-private",
-            json!({ "id": "public", "private": true }),
+            "admin.reader.add",
+            json!({ "label": "Stranger", "key": AnySigningKey::generate().verifying_key() }),
         ),
         (
             "os.version.edit",
@@ -270,13 +270,21 @@ async fn mirror_rejects_index_writes_but_serves_reads_and_local_admin_changes() 
         "{index}"
     );
 
+    let reader_key = reader.verifying_key().await.unwrap();
     let reader_id = ctx
         .db
-        .peek()
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_signers_mut()
+                .add_signer(&crate::registry::signer::SignerInfo {
+                    name: "Reader".into(),
+                    contact: vec![],
+                    keys: [reader_key.clone()].into(),
+                    gpg_exports: Default::default(),
+                })
+        })
         .await
-        .as_index()
-        .as_signers()
-        .get_signer(&reader.verifying_key().await.unwrap())
+        .result
         .unwrap();
     let response = rpc(
         &url,

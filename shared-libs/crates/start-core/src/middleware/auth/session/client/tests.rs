@@ -444,23 +444,23 @@ async fn actual_registry_cli_dispatch_and_promotion_use_encrypted_admission() {
     let (ctx, _identity) = cli(&url, admin);
     let result = <CliContext as CallRemote<RegistryContext>>::call_remote(
         &ctx,
-        "registry.package.access.get",
+        "registry.admin.reader.list",
         Default::default(),
-        imbl_value::json!({"id":"secret"}),
+        imbl_value::json!({}),
         rpc_toolkit::Empty {},
     )
     .await
     .unwrap();
-    assert_eq!(result["private"].as_bool(), Some(true));
+    assert_eq!(result.as_object().map(|r| r.len()), Some(1));
     let result = crate::registry::package::promote::call_registry(
         &ctx,
         crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
-        "package.access.get",
-        imbl_value::json!({"id":"secret"}),
+        "admin.reader.list",
+        imbl_value::json!({}),
     )
     .await
     .unwrap();
-    assert_eq!(result["private"].as_bool(), Some(true));
+    assert_eq!(result.as_object().map(|r| r.len()), Some(1));
 }
 
 #[tokio::test]
@@ -499,14 +499,14 @@ async fn registry_cli_websocket_keeps_the_configured_http_proxy() {
     ctx.id_key.set(admin).unwrap();
     let response = <CliContext as CallRemote<RegistryContext>>::call_remote(
         &ctx,
-        "registry.package.access.get",
+        "registry.admin.reader.list",
         Default::default(),
-        imbl_value::json!({"id":"secret"}),
+        imbl_value::json!({}),
         rpc_toolkit::Empty {},
     )
     .await
     .unwrap();
-    assert_eq!(response["private"].as_bool(), Some(true));
+    assert_eq!(response.as_object().map(|r| r.len()), Some(1));
     let headers = request.await.unwrap();
     assert!(headers.starts_with("GET http://"), "{headers}");
     assert!(headers.contains("/nested/rpc/v2 "), "{headers}");
@@ -554,14 +554,14 @@ async fn registry_cli_websocket_keeps_socks_remote_dns() {
     ctx.id_key.set(admin).unwrap();
     let response = <CliContext as CallRemote<RegistryContext>>::call_remote(
         &ctx,
-        "registry.package.access.get",
+        "registry.admin.reader.list",
         Default::default(),
-        imbl_value::json!({"id":"secret"}),
+        imbl_value::json!({}),
         rpc_toolkit::Empty {},
     )
     .await
     .unwrap();
-    assert_eq!(response["private"].as_bool(), Some(true));
+    assert_eq!(response.as_object().map(|r| r.len()), Some(1));
 }
 
 #[tokio::test]
@@ -652,8 +652,8 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
         crate::registry::package::promote::call_registry(
             &rejected,
             crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
-            "package.access.get",
-            imbl_value::json!({"id":"secret"}),
+            "admin.reader.list",
+            imbl_value::json!({}),
         )
         .await
         .is_err()
@@ -674,12 +674,12 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     let result = crate::registry::package::promote::call_registry(
         &trusted,
         crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
-        "package.access.get",
-        imbl_value::json!({"id":"secret"}),
+        "admin.reader.list",
+        imbl_value::json!({}),
     )
     .await
     .unwrap();
-    assert_eq!(result["private"].as_bool(), Some(true));
+    assert_eq!(result.as_object().map(|r| r.len()), Some(1));
     let ordinary = trusted
         .client
         .post(crate::registry::package::promote::registry_rpc_url(&url).unwrap())
@@ -740,12 +740,12 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     let result = crate::registry::package::promote::call_registry(
         &insecure,
         crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
-        "package.access.get",
-        imbl_value::json!({"id":"secret"}),
+        "admin.reader.list",
+        imbl_value::json!({}),
     )
     .await
     .unwrap();
-    assert_eq!(result["private"].as_bool(), Some(true));
+    assert_eq!(result.as_object().map(|r| r.len()), Some(1));
     let legacy_url = format!("https://localhost:{}/legacy/", url.port().unwrap());
     let legacy = CliContext::init(ClientConfig {
         host: Some(legacy_url.parse().unwrap()),

@@ -37,6 +37,9 @@ pub const DEFAULT_WAN6_INTERFACE: &str = "wan6";
 #[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
 pub struct Port<Id: Ord = ProfileId> {
     pub profile: Option<Id>,
+    /// Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+    #[serde(default)]
+    pub trunk: bool,
 }
 rpc_toolkit::reflect_ts!(impl [Id: Ord] for Port<Id> where [Option<Id>: rpc_toolkit::ts::TS]);
 
@@ -86,7 +89,8 @@ rpc_toolkit::reflect_ts!(EthernetSetResult);
 /// Names of ports whose profile (VLAN) assignment is changing: present in
 /// `old_ports` but resolving to a different VLAN than `requested`. Newly added
 /// ports (absent from `old_ports`) are excluded — they have no existing devices
-/// to move off a subnet.
+/// to move off a subnet. A port becoming a trunk keeps every VLAN, so its
+/// devices stay where the switch puts them.
 fn changed_vlan_ports(
     requested: &BTreeMap<String, Port<ProfileIdOpt>>,
     old_ports: &HashMap<String, Option<u16>>,
@@ -94,6 +98,9 @@ fn changed_vlan_ports(
 ) -> Result<HashSet<String>, Error> {
     let mut changed = HashSet::new();
     for (name, port) in requested {
+        if port.trunk {
+            continue;
+        }
         let new_vlan = match &port.profile {
             Some(id) => Some(lookup.resolve(id)?.vlan_tag),
             None => None,
@@ -233,6 +240,8 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> 
 
     let mut wan_ipv6 = false;
     let mut wan_port = None;
+    let profile_vlans = lookup.list().iter().map(|p| p.vlan_tag).collect();
+    let trunks = crate::trunk::trunk_ports(cfgs, &found_bridge.name, &profile_vlans)?;
     let all_ports: HashSet<String> = found_bridge
         .ports
         .into_iter()
@@ -249,19 +258,25 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> 
     let mut ports: BTreeMap<String, Port> = all_ports
         .iter()
         .map(|name| {
+            let trunk = trunks.contains(name);
             (
                 name.clone(),
                 Port {
                     profile: vlan_ports
                         .get(name)
+                        .filter(|_| !trunk)
                         .and_then(|tag| lookup.from_vlan(*tag))
                         .cloned(),
+                    trunk,
                 },
             )
         })
         .collect();
     if let Some(ref wp) = wan_port {
-        ports.entry(wp.clone()).or_insert(Port { profile: None });
+        ports.entry(wp.clone()).or_insert(Port {
+            profile: None,
+            trunk: false,
+        });
     }
     for section in &cfgs["network"].sections {
         if section.name().as_deref() == Some(DEFAULT_WAN6_INTERFACE) {
@@ -291,20 +306,24 @@ pub async fn set<C: CtrlContext>(
     let EthernetSetRequest { ethernet, preview } = req;
 
     // Snapshot current port→profile mapping so we can detect changes after write.
-    let old_ports = if ctx.effectful() {
-        get(ctx.clone())
-            .await
-            .ok()
-            .map(|e| {
-                e.ports
-                    .into_iter()
-                    .map(|(name, port)| (name, port.profile.map(|p| p.vlan_tag)))
-                    .collect::<HashMap<String, Option<u16>>>()
-            })
-            .unwrap_or_default()
+    let old = if ctx.effectful() {
+        get(ctx.clone()).await.ok()
     } else {
-        HashMap::new()
+        None
     };
+    let old_trunks: HashSet<String> = old
+        .iter()
+        .flat_map(|e| e.ports.iter().filter(|(_, p)| p.trunk))
+        .map(|(name, _)| name.clone())
+        .collect();
+    let old_ports = old
+        .map(|e| {
+            e.ports
+                .into_iter()
+                .map(|(name, port)| (name, port.profile.map(|p| p.vlan_tag)))
+                .collect::<HashMap<String, Option<u16>>>()
+        })
+        .unwrap_or_default();
 
     let changed_ports: HashSet<String> = if ctx.effectful() {
         let arena = Arena::new();
@@ -317,13 +336,27 @@ pub async fn set<C: CtrlContext>(
         let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs)?;
         let changed_ports = changed_vlan_ports(&ethernet.ports, &old_ports, &lookup)?;
         if preview {
-            // The bridge FDB places each device on its port.
+            let new_vlans = ethernet
+                .ports
+                .iter()
+                .filter_map(|(name, port)| Some((name, port.profile.as_ref()?)))
+                .map(|(name, id)| Ok((name.clone(), lookup.resolve(id)?.vlan_tag)))
+                .collect::<Result<HashMap<String, u16>, Error>>()?;
+            // The bridge FDB places each device on its port, and behind a
+            // trunk, in the VLAN the switch tagged it with.
             let leaving: HashMap<String, String> = crate::devices::get_bridge_fdb()
                 .await
                 .into_iter()
                 .filter(|(_, entry)| changed_ports.contains(&entry.port))
                 .filter_map(|(mac, entry)| {
-                    let vlan = old_ports.get(&entry.port).copied().flatten()?;
+                    let vlan = match old_ports.get(&entry.port).copied().flatten() {
+                        Some(vlan) => vlan,
+                        None if old_trunks.contains(&entry.port) => entry.vlan?,
+                        None => return None,
+                    };
+                    if new_vlans.get(&entry.port) == Some(&vlan) {
+                        return None;
+                    }
                     Some((mac, lookup.from_vlan(vlan)?.fullname.clone()))
                 })
                 .collect();
@@ -362,6 +395,7 @@ pub async fn set<C: CtrlContext>(
                                 Some(id) => Some(lookup.resolve(id)?.clone()),
                                 None => None,
                             },
+                            trunk: v.trunk,
                         },
                     ))
                 })
@@ -483,9 +517,11 @@ async fn bounce_changed_ports(old_ports: &HashMap<String, Option<u16>>, new_ethe
         let new_vlan = new_port.profile.as_ref().map(|p| p.vlan_tag);
         let old_vlan = old_ports.get(name).copied().flatten();
         // Only bounce if the port existed before and its VLAN actually changed.
-        // Skip the WAN port — it's not a bridge member.
+        // Skip the WAN port — it's not a bridge member — and a trunk, whose
+        // devices sit behind a switch that keeps their link up.
         if old_ports.contains_key(name)
             && old_vlan != new_vlan
+            && !new_port.trunk
             && new_ethernet.wan_port.as_ref() != Some(name)
         {
             to_bounce.push(name.clone());
@@ -591,16 +627,36 @@ fn set_config(
                 .get(name)
                 .and_then(|vlan| lookup.from_vlan(*vlan))
                 .cloned(),
+            // A recorded USB port is never a trunk.
+            trunk: false,
         });
     }
 
     bridge.ports.clear();
     for (port_name, port) in &layout {
+        if port.trunk && port.profile.is_some() {
+            return Err(Error::new(
+                eyre!("trunk port cannot have profile: {port_name}"),
+                ErrorKind::InvalidTrunkPort,
+            ));
+        }
+        if port.trunk && usb_ports.contains_key(port_name) {
+            return Err(Error::new(
+                eyre!("A USB port cannot be a trunk: {port_name}"),
+                ErrorKind::InvalidTrunkPort,
+            ));
+        }
         if Some(port_name) == ethernet.wan_port.as_ref() {
             if port.profile.is_some() {
                 return Err(Error::new(
                     eyre!("WAN port cannot have profile: {port_name}"),
                     ErrorKind::WanPortWithProfile,
+                ));
+            }
+            if port.trunk {
+                return Err(Error::new(
+                    eyre!("WAN port cannot be a trunk: {port_name}"),
+                    ErrorKind::InvalidTrunkPort,
                 ));
             }
         } else {
@@ -701,7 +757,20 @@ fn set_config(
         cfgs["network"].append(&bridge, None)?;
     }
 
-    let needs_vlan_filtering = lookup.list().iter().any(|p| p.vlan_tag != 1);
+    let has_trunk = layout.values().any(|p| p.trunk);
+    let lan_uses_vlan1 = cfgs["network"].sections.iter().any(|section| {
+        section.name().as_deref() == Some("lan")
+            && section
+                .get::<NetworkInterface>()
+                .is_ok_and(|iface| iface.device == format!("{}.1", bridge.name))
+    });
+    // VLAN 1 stays while `lan` uses its VLAN device, even after the last trunk
+    // or non-Admin profile is gone: dropping it would strand the gateway.
+    let needs_vlan_filtering =
+        has_trunk || lan_uses_vlan1 || lookup.list().iter().any(|p| p.vlan_tag != 1);
+    if has_trunk {
+        profiles::attach_lan_to_vlan1(cfgs, &bridge.name)?;
+    }
 
     for profile in lookup.list() {
         let mut ports = Vec::new();
@@ -709,14 +778,15 @@ fn set_config(
             if Some(port_name) == ethernet.wan_port.as_ref() {
                 continue;
             }
+            if port.trunk {
+                ports.push(crate::trunk::member(port_name, true));
+                continue;
+            }
             let assigned = port.profile.as_ref() == Some(profile);
             let default_to_admin =
                 needs_vlan_filtering && port.profile.is_none() && profile.vlan_tag == 1;
             if assigned || default_to_admin {
-                ports.push(NetworkVlanPort {
-                    port: port_name.clone(),
-                    tagging: Some(NetworkVlanPortTagging::PRIMARY),
-                });
+                ports.push(crate::trunk::member(port_name, false));
             }
         }
 
@@ -734,22 +804,11 @@ fn set_config(
         }
 
         let vlan = profile.vlan_tag;
-        // VLAN filtering OFF (no profile has a tag != 1): br-lan is a plain
-        // flat bridge — the `lan` L3 interface sits on `br-lan` directly, not
-        // `br-lan.1`, and no bridge-vlan sections exist (the br-lan -> br-lan.1
-        // flip + VID-1 creation happens only in profiles::ensure_vlan_filtering,
-        // when the first non-admin profile is created). There is no Admin VLAN
-        // to preserve here; emitting an empty VID-1 section would needlessly
-        // turn the flat bridge into a filtering bridge with no member ports.
-        // So skip it.
-        //
-        // VLAN filtering ON: do NOT skip. The (possibly empty) VID-1 section is
-        // what keeps the Admin VLAN on the bridge, carrying the router's own
-        // `br-lan.1` management interface and the default `network='lan'`
-        // wireless SSID — the AP ports are attached at runtime by hostapd and
-        // never appear in `ethernet.ports`. Dropping it there was the bug that
-        // left WiFi/gateway with "No route to host"; hence the
-        // `&& !needs_vlan_filtering` guard.
+        // Only a flat bridge, with `lan` on the bridge itself, skips an empty
+        // VID-1 section. Once filtering is on, that section is what keeps the
+        // Admin VLAN on the bridge: it carries the router's own `br-lan.1`
+        // and the Admin SSID, whose AP ports hostapd attaches at runtime and
+        // which never appear in `ethernet.ports`.
         if ports.is_empty() && vlan == 1 && !needs_vlan_filtering {
             continue;
         }
@@ -790,6 +849,7 @@ pub async fn edit<C: CtrlContext + Clone>(ctx: C) -> Result<(), Error> {
                     k,
                     Port {
                         profile: v.profile.map(Into::into),
+                        trunk: v.trunk,
                     },
                 )
             })
@@ -1286,6 +1346,7 @@ config interface 'wan'
                                     interface: Some(p.interface.clone()),
                                     vlan_tag: Some(p.vlan_tag),
                                 }),
+                                trunk: v.trunk,
                             },
                         )
                     })
@@ -1329,6 +1390,7 @@ config interface 'wan'
                                 interface: Some("lan".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
                     (
@@ -1339,6 +1401,7 @@ config interface 'wan'
                                 interface: Some("guest".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
                 ]),
@@ -1379,9 +1442,16 @@ config interface 'wan'
                                 interface: Some("lan".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
-                    ("eth1".into(), Port { profile: None }),
+                    (
+                        "eth1".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
                 ]),
             }),
         )
@@ -1417,9 +1487,16 @@ config interface 'wan'
                                 interface: Some("lan".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
-                    ("eth1".into(), Port { profile: None }),
+                    (
+                        "eth1".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
                 ]),
             }),
         )
@@ -1456,10 +1533,23 @@ config interface 'wan'
                                 interface: Some("lan".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
-                    ("eth1".into(), Port { profile: None }),
-                    ("eth2".into(), Port { profile: None }),
+                    (
+                        "eth1".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
+                    (
+                        "eth2".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
                 ]),
             }),
         )
@@ -1483,7 +1573,13 @@ config interface 'wan'
                 wan_ipv6: false,
                 wan_port: Some("eth1".into()),
                 ports: BTreeMap::from([
-                    ("eth0".into(), Port { profile: None }),
+                    (
+                        "eth0".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
                     (
                         "eth1".into(),
                         Port {
@@ -1492,6 +1588,7 @@ config interface 'wan'
                                 interface: Some("guest".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
                 ]),
@@ -1522,7 +1619,13 @@ config interface 'wan'
                 wan_ipv6: false,
                 wan_port: Some("eth0".into()),
                 ports: BTreeMap::from([
-                    ("eth0".into(), Port { profile: None }),
+                    (
+                        "eth0".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
                     (
                         "eth1".into(),
                         Port {
@@ -1531,6 +1634,7 @@ config interface 'wan'
                                 interface: Some("lan".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
                     (
@@ -1541,6 +1645,7 @@ config interface 'wan'
                                 interface: Some("guest".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
                 ]),
@@ -1604,6 +1709,7 @@ config interface 'wan'
                                     interface: Some(p.interface.clone()),
                                     vlan_tag: Some(p.vlan_tag),
                                 }),
+                                trunk: v.trunk,
                             },
                         )
                     })
@@ -1665,9 +1771,16 @@ config interface 'wan'
                                 interface: Some("guest".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
-                    ("eth1".into(), Port { profile: None }),
+                    (
+                        "eth1".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
                 ]),
             }),
         )
@@ -1743,6 +1856,7 @@ config interface 'guest'
                             interface: Some("guest".into()),
                             vlan_tag: None,
                         }),
+                        trunk: false,
                     },
                 )]),
             }),
@@ -1800,8 +1914,20 @@ config interface 'guest'
             wan_ipv6: false,
             wan_port: None,
             ports: BTreeMap::from([
-                ("eth0".into(), Port { profile: None }),
-                ("eth1".into(), Port { profile: None }),
+                (
+                    "eth0".into(),
+                    Port {
+                        profile: None,
+                        trunk: false,
+                    },
+                ),
+                (
+                    "eth1".into(),
+                    Port {
+                        profile: None,
+                        trunk: false,
+                    },
+                ),
             ]),
         };
         set_from_config(&ctx, &mut cfgs, &ethernet).unwrap();
@@ -1836,8 +1962,20 @@ config interface 'guest'
             wan_ipv6: true,
             wan_port: Some("eth1".into()),
             ports: BTreeMap::from([
-                ("eth0".into(), Port { profile: None }),
-                ("eth1".into(), Port { profile: None }),
+                (
+                    "eth0".into(),
+                    Port {
+                        profile: None,
+                        trunk: false,
+                    },
+                ),
+                (
+                    "eth1".into(),
+                    Port {
+                        profile: None,
+                        trunk: false,
+                    },
+                ),
             ]),
         };
         set_from_config(&ctx, &mut cfgs, &ethernet).unwrap();
@@ -1878,8 +2016,20 @@ config interface 'guest'
             wan_ipv6: false,
             wan_port: Some("eth1".into()),
             ports: BTreeMap::from([
-                ("eth0".into(), Port { profile: None }),
-                ("eth1".into(), Port { profile: None }),
+                (
+                    "eth0".into(),
+                    Port {
+                        profile: None,
+                        trunk: false,
+                    },
+                ),
+                (
+                    "eth1".into(),
+                    Port {
+                        profile: None,
+                        trunk: false,
+                    },
+                ),
             ]),
         };
         set_from_config(&ctx, &mut cfgs, &ethernet).unwrap();
@@ -1959,6 +2109,7 @@ config interface 'guest'
                                 interface: Some("guest".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
                     (
@@ -1969,6 +2120,7 @@ config interface 'guest'
                                 interface: Some("lan".into()),
                                 vlan_tag: None,
                             }),
+                            trunk: false,
                         },
                     ),
                 ]),
@@ -2026,6 +2178,7 @@ config interface 'guest'
                 interface: Some("lan".into()),
                 vlan_tag: None,
             }),
+            trunk: false,
         }
     }
 
@@ -2093,13 +2246,51 @@ config interface 'guest'
                 ports: BTreeMap::from([
                     ("eth0".into(), admin_port()),
                     ("eth1".into(), admin_port()),
-                    ("usb_eth0".into(), Port { profile: None }),
+                    (
+                        "usb_eth0".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
                 ]),
             }),
         )
         .await
         .unwrap_err();
         assert!(err.to_string().contains("USB port"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("network")).unwrap(),
+            before
+        );
+    }
+
+    #[tokio::test]
+    async fn set_refuses_a_usb_port_as_trunk() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_usb(dir.path());
+        let before = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        let err = set(
+            TestContext(dir.path().to_path_buf()),
+            DeserializeStdin(Ethernet {
+                wan_ipv6: false,
+                wan_port: None,
+                ports: BTreeMap::from([
+                    ("eth0".into(), admin_port()),
+                    ("eth1".into(), admin_port()),
+                    (
+                        "usb_eth0".into(),
+                        Port {
+                            profile: None,
+                            trunk: true,
+                        },
+                    ),
+                ]),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidTrunkPort);
         assert_eq!(
             std::fs::read_to_string(dir.path().join("network")).unwrap(),
             before
@@ -2168,5 +2359,508 @@ config device
             .await
             .unwrap();
         assert!(find_lan_bridge(&cfgs).unwrap().is_none());
+    }
+
+    // ── trunk ports ────────────────────────────────────────────
+
+    fn guest() -> ProfileIdOpt {
+        ProfileIdOpt {
+            fullname: None,
+            interface: Some("guest".into()),
+            vlan_tag: None,
+        }
+    }
+
+    /// `vlan -> "port:tagging"` members of every br-lan VLAN on disk.
+    async fn vlan_members(ctx: &TestContext) -> BTreeMap<u16, Vec<String>> {
+        let arena = Arena::new();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
+        let mut out = BTreeMap::new();
+        for section in &cfgs["network"].sections {
+            if let Some(v) = section.get_typed::<NetworkBridgeVlan>().unwrap() {
+                if v.device == "br-lan" {
+                    out.insert(v.vlan, v.ports.iter().map(ToString::to_string).collect());
+                }
+            }
+        }
+        out
+    }
+
+    async fn lan_device(ctx: &TestContext) -> String {
+        let arena = Arena::new();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network"])
+            .await
+            .unwrap();
+        let mut device = None;
+        for section in &cfgs["network"].sections {
+            if section.name().as_deref() == Some("lan") {
+                device = Some(section.get::<NetworkInterface>().unwrap().device);
+            }
+        }
+        device.unwrap()
+    }
+
+    #[tokio::test]
+    async fn get_reports_trunk_port() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config device
+\toption name 'br-lan'
+\toption type 'bridge'
+\tlist ports 'eth0'
+\tlist ports 'eth1'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '1'
+\tlist ports 'eth0:t'
+\tlist ports 'eth1:u*'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '3'
+\tlist ports 'eth0:t'
+
+config interface 'lan'
+\toption device 'br-lan.1'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+
+config interface 'guest'
+\toption device 'br-lan.3'
+\toption proto 'static'
+\toption ipaddr '192.168.3.1'
+\toption netmask '255.255.255.0'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let result = get(ctx).await.unwrap();
+        assert!(result.ports["eth0"].trunk);
+        assert!(result.ports["eth0"].profile.is_none());
+        assert!(!result.ports["eth1"].trunk);
+        assert_eq!(result.ports["eth1"].profile.as_ref().unwrap().vlan_tag, 1);
+    }
+
+    #[tokio::test]
+    async fn get_reports_trunk_port_untagged_in_a_vlan_of_no_profile() {
+        // VLAN 4000 belongs to no profile, so eth0's untagged membership there
+        // says nothing about which profile it serves: it is still a trunk.
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config device
+\toption name 'br-lan'
+\toption type 'bridge'
+\tlist ports 'eth0'
+\tlist ports 'eth1'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '1'
+\tlist ports 'eth0:t'
+\tlist ports 'eth1:u*'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '3'
+\tlist ports 'eth0:t'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '4000'
+\tlist ports 'eth0:u*'
+
+config interface 'lan'
+\toption device 'br-lan.1'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+
+config interface 'guest'
+\toption device 'br-lan.3'
+\toption proto 'static'
+\toption ipaddr '192.168.3.1'
+\toption netmask '255.255.255.0'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let result = get(ctx).await.unwrap();
+        assert!(result.ports["eth0"].trunk);
+        assert!(result.ports["eth0"].profile.is_none());
+        assert!(!result.ports["eth1"].trunk);
+    }
+
+    #[tokio::test]
+    async fn get_reports_port_with_untagged_membership_as_not_trunk() {
+        // Tagged in every VLAN but untagged in one: that port delivers one
+        // profile's frames untagged, so it is that profile's port, not a trunk.
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config device
+\toption name 'br-lan'
+\toption type 'bridge'
+\tlist ports 'eth0'
+\tlist ports 'eth1'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '1'
+\tlist ports 'eth0:t'
+\tlist ports 'eth1:u*'
+
+config bridge-vlan
+\toption device 'br-lan'
+\toption vlan '3'
+\tlist ports 'eth0:u*'
+
+config interface 'lan'
+\toption device 'br-lan.1'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+
+config interface 'guest'
+\toption device 'br-lan.3'
+\toption proto 'static'
+\toption ipaddr '192.168.3.1'
+\toption netmask '255.255.255.0'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let result = get(ctx).await.unwrap();
+        assert!(!result.ports["eth0"].trunk);
+        assert_eq!(result.ports["eth0"].profile.as_ref().unwrap().vlan_tag, 3);
+    }
+
+    #[tokio::test]
+    async fn set_trunk_port_has_no_untagged_membership() {
+        // Across a trunk being set and the other port moving between profiles,
+        // every membership the trunk holds is tagged and it is in every VLAN.
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let ethernet = |eth1: Option<ProfileIdOpt>| {
+            DeserializeStdin(Ethernet {
+                wan_ipv6: false,
+                wan_port: None,
+                ports: BTreeMap::from([
+                    (
+                        "eth0".into(),
+                        Port {
+                            profile: None,
+                            trunk: true,
+                        },
+                    ),
+                    (
+                        "eth1".into(),
+                        Port {
+                            profile: eth1,
+                            trunk: false,
+                        },
+                    ),
+                ]),
+            })
+        };
+
+        for eth1 in [Some(guest()), None, Some(guest())] {
+            set(ctx.clone(), ethernet(eth1)).await.unwrap();
+            let vlans = vlan_members(&ctx).await;
+            assert_eq!(vlans.len(), 2, "both profiles keep a VLAN");
+            for (vlan, members) in &vlans {
+                let eth0: Vec<_> = members.iter().filter(|m| m.starts_with("eth0")).collect();
+                assert_eq!(eth0, vec!["eth0:t"], "trunk membership in VLAN {vlan}");
+            }
+            assert!(get(ctx.clone()).await.unwrap().ports["eth0"].trunk);
+        }
+    }
+
+    #[tokio::test]
+    async fn set_trunk_port_joins_every_vlan_tagged() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        set(
+            ctx.clone(),
+            DeserializeStdin(Ethernet {
+                wan_ipv6: false,
+                wan_port: None,
+                ports: BTreeMap::from([
+                    (
+                        "eth0".into(),
+                        Port {
+                            profile: None,
+                            trunk: true,
+                        },
+                    ),
+                    (
+                        "eth1".into(),
+                        Port {
+                            profile: Some(guest()),
+                            trunk: false,
+                        },
+                    ),
+                ]),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let vlans = vlan_members(&ctx).await;
+        assert_eq!(vlans[&1], vec!["eth0:t".to_string()]);
+        assert_eq!(vlans[&3], vec!["eth0:t".to_string(), "eth1:u*".into()]);
+
+        let after = get(ctx.clone()).await.unwrap();
+        assert!(after.ports["eth0"].trunk);
+        assert!(after.ports["eth0"].profile.is_none());
+        assert_eq!(after.ports["eth1"].profile.as_ref().unwrap().vlan_tag, 3);
+
+        // Back to a plain Admin port: no tagged membership survives.
+        set(
+            ctx.clone(),
+            DeserializeStdin(Ethernet {
+                wan_ipv6: false,
+                wan_port: None,
+                ports: BTreeMap::from([
+                    (
+                        "eth0".into(),
+                        Port {
+                            profile: None,
+                            trunk: false,
+                        },
+                    ),
+                    (
+                        "eth1".into(),
+                        Port {
+                            profile: Some(guest()),
+                            trunk: false,
+                        },
+                    ),
+                ]),
+            }),
+        )
+        .await
+        .unwrap();
+        let vlans = vlan_members(&ctx).await;
+        assert_eq!(vlans[&1], vec!["eth0:u*".to_string()]);
+        assert_eq!(vlans[&3], vec!["eth1:u*".to_string()]);
+        assert!(!get(ctx).await.unwrap().ports["eth0"].trunk);
+    }
+
+    #[tokio::test]
+    async fn set_trunk_lifecycle_preserves_admin_vlan() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("startwrt"),
+            "\
+config profile lan
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config device
+\toption name 'br-lan'
+\toption type 'bridge'
+\tlist ports 'eth0'
+\tlist ports 'eth1'
+
+config interface 'lan'
+\toption device 'br-lan'
+\toption proto 'static'
+\toption ipaddr '192.168.1.1'
+\toption netmask '255.255.255.0'
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("firewall"),
+            "\
+config zone
+\toption name 'lan'
+\tlist network 'lan'
+\toption input 'ACCEPT'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+",
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        let mut layout = Ethernet {
+            wan_ipv6: false,
+            wan_port: None,
+            ports: BTreeMap::from([
+                (
+                    "eth0".into(),
+                    Port {
+                        profile: None,
+                        trunk: true,
+                    },
+                ),
+                (
+                    "eth1".into(),
+                    Port {
+                        profile: None,
+                        trunk: false,
+                    },
+                ),
+            ]),
+        };
+
+        set(ctx.clone(), DeserializeStdin(layout.clone()))
+            .await
+            .unwrap();
+        let vlans = vlan_members(&ctx).await;
+        assert_eq!(vlans[&1], vec!["eth0:t".to_string(), "eth1:u*".into()]);
+        assert_eq!(lan_device(&ctx).await, "br-lan.1");
+        let after = get(ctx.clone()).await.unwrap();
+        assert!(after.ports["eth0"].trunk);
+        assert_eq!(after.ports["eth1"].profile.as_ref().unwrap().vlan_tag, 1);
+
+        layout.ports.get_mut("eth0").unwrap().trunk = false;
+        set(ctx.clone(), DeserializeStdin(layout.clone()))
+            .await
+            .unwrap();
+        assert_eq!(lan_device(&ctx).await, "br-lan.1");
+        assert_eq!(
+            vlan_members(&ctx).await[&1],
+            vec!["eth0:u*".to_string(), "eth1:u*".into()]
+        );
+        let after = get(ctx.clone()).await.unwrap();
+        for port in after.ports.values() {
+            assert!(!port.trunk);
+            assert_eq!(port.profile.as_ref().unwrap().vlan_tag, 1);
+        }
+
+        layout.ports.get_mut("eth0").unwrap().trunk = true;
+        layout.wan_port = Some("eth1".into());
+        set(ctx.clone(), DeserializeStdin(layout.clone()))
+            .await
+            .unwrap();
+
+        layout.ports.get_mut("eth0").unwrap().trunk = false;
+        layout.wan_port = Some("eth0".into());
+        set(ctx.clone(), DeserializeStdin(layout)).await.unwrap();
+        assert_eq!(lan_device(&ctx).await, "br-lan.1");
+        assert_eq!(vlan_members(&ctx).await[&1], vec!["eth1:u*".to_string()]);
+        let after = get(ctx).await.unwrap();
+        assert_eq!(after.wan_port.as_deref(), Some("eth0"));
+        assert_eq!(after.ports["eth1"].profile.as_ref().unwrap().vlan_tag, 1);
+    }
+
+    #[tokio::test]
+    async fn set_rejects_trunk_with_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let err = set(
+            ctx,
+            DeserializeStdin(Ethernet {
+                wan_ipv6: false,
+                wan_port: None,
+                ports: BTreeMap::from([(
+                    "eth0".into(),
+                    Port {
+                        profile: Some(guest()),
+                        trunk: true,
+                    },
+                )]),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidTrunkPort);
+    }
+
+    #[tokio::test]
+    async fn set_rejects_wan_trunk() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_wan(dir.path(), false);
+        let ctx = TestContext(dir.path().to_path_buf());
+
+        let err = set(
+            ctx,
+            DeserializeStdin(Ethernet {
+                wan_ipv6: false,
+                wan_port: Some("eth2".into()),
+                ports: BTreeMap::from([(
+                    "eth2".into(),
+                    Port {
+                        profile: None,
+                        trunk: true,
+                    },
+                )]),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidTrunkPort);
+    }
+
+    #[tokio::test]
+    async fn changed_vlan_ports_skips_port_becoming_trunk() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        let ctx = TestContext(dir.path().to_path_buf());
+        let arena = Arena::new();
+        let cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "firewall"])
+            .await
+            .unwrap();
+        let lookup = profiles::Lookup::parse(ctx.clone(), &cfgs).unwrap();
+        let old = HashMap::from([("eth0".to_string(), Some(1)), ("eth1".to_string(), None)]);
+
+        let requested = BTreeMap::from([
+            (
+                "eth0".to_string(),
+                Port {
+                    profile: None,
+                    trunk: true,
+                },
+            ),
+            (
+                "eth1".to_string(),
+                Port {
+                    profile: Some(guest()),
+                    trunk: false,
+                },
+            ),
+        ]);
+        let changed = changed_vlan_ports(&requested, &old, &lookup).unwrap();
+        assert_eq!(changed, HashSet::from(["eth1".to_string()]));
+
+        // Leaving the trunk for a profile is a move.
+        let old = HashMap::from([("eth0".to_string(), None)]);
+        let requested = BTreeMap::from([(
+            "eth0".to_string(),
+            Port {
+                profile: Some(guest()),
+                trunk: false,
+            },
+        )]);
+        let changed = changed_vlan_ports(&requested, &old, &lookup).unwrap();
+        assert_eq!(changed, HashSet::from(["eth0".to_string()]));
     }
 }

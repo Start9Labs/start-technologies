@@ -30,9 +30,9 @@ async fn fixture() -> Fixture {
         let info = &mut state["index"]["package"]["packages"][name]["versions"]["1.0.0:0"];
         info["icon"] = icon.clone();
         info["dependencyMetadata"] = json!({ "dep": { "icon": icon } });
-        info["s9pks"] = json!([[{}, { "signatures": {
+        info["s9pks"][0][1]["signatures"] = json!({
             key().interned_der64().to_string(): AnySignature::Ed25519ph(signature),
-        } }]]);
+        });
     }
     state["index"]["os"]["versions"] = json!({ "0.4.0.6": {
         "headline": "Stored unused headline",
@@ -196,15 +196,16 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
         own_view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["icon"],
         json!("data:image/png;base64,c2VjcmV0")
     );
-    assert_eq!(
-        own_view["package"]["packages"]["secret"]["readers"],
-        json!([])
+    assert!(
+        own_view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]
+            .get("readers")
+            .is_none()
     );
 
     let mut state = fixture.main.peek().await.into_value();
     state["index"]["os"]["versions"]["0.4.0.6"]["releaseNotes"] =
         json!({ "en_US": "Updated", "pl_PL": "Nowe" });
-    state["index"]["package"]["packages"]["secret"]["readers"] = json!([]);
+    secret_s9pk(&mut state)["readers"] = json!([]);
     fixture
         .main
         .put(&JsonPointer::<&str>::default(), &state)
