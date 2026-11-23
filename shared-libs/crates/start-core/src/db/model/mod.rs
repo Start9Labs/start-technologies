@@ -51,7 +51,6 @@ impl Database {
                 backup_target_credentials: BTreeMap::new(),
                 shared_volume_credentials: BTreeMap::new(),
                 package_stores: BTreeMap::new(),
-                smtp: None,
                 server_identity_key: Der64(account.server_identity_key.clone()),
             },
         })

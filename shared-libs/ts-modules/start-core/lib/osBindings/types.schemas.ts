@@ -4627,28 +4627,6 @@ export const SetOutboundGatewayParams: z.ZodObject<{
 }).meta({
   id: 'SetOutboundGatewayParams',
 })
-export const SetSmtpParams: z.ZodObject<{
-  host: z.ZodString
-  port: z.ZodInt
-  from: z.ZodString
-  username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  keepPassword: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
-}> = /* @__PURE__ */ object({
-  host: z.string(),
-  port: z.int(),
-  from: z.string(),
-  username: z.string(),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
-  keepPassword: wire(z.boolean().optional(), z.boolean()),
-  security: wire(SmtpSecurity.optional(), SmtpSecurity),
-}).meta({
-  id: 'SetSmtpParams',
-})
 export const SetStaticDnsParams: z.ZodObject<{
   gateway: typeof GatewayId
   servers: z.ZodCodec<
@@ -4856,23 +4834,6 @@ export const SignerInfo: z.ZodObject<{
 }).meta({
   id: 'SignerInfo',
 })
-export const SmtpInfo: z.ZodObject<{
-  host: z.ZodString
-  port: z.ZodInt
-  from: z.ZodString
-  username: z.ZodString
-  passwordSet: z.ZodBoolean
-  security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
-}> = /* @__PURE__ */ object({
-  host: z.string(),
-  port: z.int(),
-  from: z.string(),
-  username: z.string(),
-  passwordSet: z.boolean(),
-  security: wire(SmtpSecurity.optional(), SmtpSecurity),
-}).meta({
-  id: 'SmtpInfo',
-})
 export const SmtpValue: z.ZodCodec<
   z.ZodIntersection<
     z.ZodIntersection<
@@ -5018,13 +4979,7 @@ export const TestSmtpParams: z.ZodObject<{
   from: z.ZodString
   to: z.ZodString
   username: z.ZodString
-  /**
-   * Omitted, uses the saved password for the same host, port and username.
-   */
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodString
   security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
 }> = /* @__PURE__ */ object({
   host: z.string(),
@@ -5032,13 +4987,7 @@ export const TestSmtpParams: z.ZodObject<{
   from: z.string(),
   to: z.string(),
   username: z.string(),
-  /**
-   * Omitted, uses the saved password for the same host, port and username.
-   */
-  password: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Omitted, uses the saved password for the same host, port and username.',
-  }),
+  password: z.string(),
   security: wire(SmtpSecurity.optional(), SmtpSecurity),
 }).meta({
   id: 'TestSmtpParams',
@@ -8106,8 +8055,8 @@ export const ServerInfo: z.ZodObject<{
     z.ZodNullable<typeof Epp>
   >
   smtp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof SmtpInfo>>,
-    z.ZodNullable<typeof SmtpInfo>
+    z.ZodOptional<z.ZodNullable<typeof SmtpValue>>,
+    z.ZodNullable<typeof SmtpValue>
   >
   nut: z.ZodCodec<z.ZodOptional<typeof NutConfig>, typeof NutConfig>
   echoipUrls: z.ZodCodec<
@@ -8181,7 +8130,7 @@ export const ServerInfo: z.ZodObject<{
   zram: wire(z.boolean().optional(), z.boolean()),
   governor: wire(Governor.nullable().optional(), Governor.nullable()),
   epp: wire(Epp.nullable().optional(), Epp.nullable()),
-  smtp: wire(SmtpInfo.nullable().optional(), SmtpInfo.nullable()),
+  smtp: wire(SmtpValue.nullable().optional(), SmtpValue.nullable()),
   nut: wire(NutConfig.optional(), NutConfig),
   echoipUrls: wire(z.array(z.string()).optional(), z.array(z.string())),
   ram: z.int(),
