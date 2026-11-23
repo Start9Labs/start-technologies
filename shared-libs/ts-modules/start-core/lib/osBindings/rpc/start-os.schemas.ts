@@ -1921,8 +1921,8 @@ export const AttachParams: z.ZodObject<{
     z.ZodNullable<typeof TermSize>
   >
   subcontainer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
   >
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1948,7 +1948,7 @@ export const AttachParams: z.ZodObject<{
   tty: z.boolean(),
   stderrTty: z.boolean(),
   ptySize: wire(TermSize.nullable().optional(), TermSize.nullable()),
-  subcontainer: wire(Guid.nullable().optional(), Guid.nullable()),
+  subcontainer: wire(z.string().nullable().optional(), z.string().nullable()),
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   imageId: wire(ImageId.nullable().optional(), ImageId.nullable()),
   user: wire(z.string().nullable().optional(), z.string().nullable()),
@@ -2189,8 +2189,8 @@ export const ExecParams: z.ZodObject<{
    * Part of the subcontainer's ID. Overrides `name` and `imageId`.
    */
   subcontainer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
   >
   /**
    * Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
@@ -2238,7 +2238,10 @@ export const ExecParams: z.ZodObject<{
   /**
    * Part of the subcontainer's ID. Overrides `name` and `imageId`.
    */
-  subcontainer: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+  subcontainer: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
     description:
       "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
   }),

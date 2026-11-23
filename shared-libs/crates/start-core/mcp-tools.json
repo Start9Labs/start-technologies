@@ -3651,9 +3651,7 @@
             "ptySize": {
               "anyOf": [{ "$ref": "#/$defs/TermSize" }, { "type": "null" }]
             },
-            "subcontainer": {
-              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
-            },
+            "subcontainer": { "type": ["string", "null"] },
             "name": { "type": ["string", "null"] },
             "imageId": {
               "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
@@ -3704,7 +3702,6 @@
           "required": ["rows", "cols"],
           "additionalProperties": true
         },
-        "Guid": { "type": "string" },
         "ImageId": { "type": "string" }
       },
       "type": "object",
@@ -3720,9 +3717,7 @@
         "ptySize": {
           "anyOf": [{ "$ref": "#/$defs/TermSize" }, { "type": "null" }]
         },
-        "subcontainer": {
-          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
-        },
+        "subcontainer": { "type": ["string", "null"] },
         "name": { "type": ["string", "null"] },
         "imageId": {
           "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
@@ -3836,7 +3831,7 @@
             },
             "subcontainer": {
               "description": "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
-              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+              "type": ["string", "null"]
             },
             "name": {
               "description": "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
@@ -3855,7 +3850,6 @@
           "additionalProperties": true
         },
         "PackageId": { "type": "string" },
-        "Guid": { "type": "string" },
         "ImageId": { "type": "string" }
       },
       "type": "object"

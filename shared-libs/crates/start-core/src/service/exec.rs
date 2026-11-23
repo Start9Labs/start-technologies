@@ -245,30 +245,36 @@ pub struct ExecResult {
 }
 rpc_toolkit::reflect_ts!(ExecResult);
 
-/// Writes the command's output streams; a failed command fails the CLI.
+/// Writes the result, then fails the CLI for a timed-out or failed command in every format.
 pub fn display_exec(params: WithIoFormat<ExecParams>, result: ExecResult) -> Result<(), Error> {
     use std::io::Write;
+    let failure = exec_failure(&result);
     if let Some(format) = params.format {
-        return display_serializable(format, result);
+        display_serializable(format, result)?;
+    } else {
+        let mut stdout = rpc_toolkit::output::stdout();
+        stdout.write_all(result.stdout.as_bytes())?;
+        stdout.flush()?;
+        let mut stderr = rpc_toolkit::output::stderr();
+        stderr.write_all(result.stderr.as_bytes())?;
+        stderr.flush()?;
     }
-    let mut stdout = rpc_toolkit::output::stdout();
-    stdout.write_all(result.stdout.as_bytes())?;
-    stdout.flush()?;
-    let mut stderr = rpc_toolkit::output::stderr();
-    stderr.write_all(result.stderr.as_bytes())?;
-    stderr.flush()?;
+    failure.map_or(Ok(()), Err)
+}
+
+fn exec_failure(result: &ExecResult) -> Option<Error> {
     if result.timed_out {
-        Err(Error::new(
+        Some(Error::new(
             eyre!("{}", t!("service.exec.timed-out")),
             ErrorKind::Timeout,
         ))
     } else if result.exit_code != 0 {
-        Err(Error::new(
+        Some(Error::new(
             eyre!("{}", t!("service.exec.failed", code = result.exit_code)),
             ErrorKind::Unknown,
         ))
     } else {
-        Ok(())
+        None
     }
 }
 
@@ -442,11 +448,45 @@ mod test {
     }
 
     #[test]
+    fn failed_or_timed_out_commands_fail_the_cli() {
+        use clap::Parser;
+        let result = |exit_code, timed_out| ExecResult {
+            exit_code,
+            timed_out,
+            ..Default::default()
+        };
+        assert!(exec_failure(&result(0, false)).is_none());
+        assert!(matches!(
+            exec_failure(&result(2, false)),
+            Some(Error {
+                kind: ErrorKind::Unknown,
+                ..
+            })
+        ));
+        assert!(matches!(
+            exec_failure(&result(137, true)),
+            Some(Error {
+                kind: ErrorKind::Timeout,
+                ..
+            })
+        ));
+        let format = WithIoFormat {
+            format: Some(crate::util::serde::IoFormat::Json),
+            rest: ExecParams::try_parse_from(["exec", "hello-world"]).unwrap(),
+        };
+        assert!(display_exec(format, result(1, false)).is_err());
+    }
+
+    #[test]
     fn exec_cli_preserves_partial_subcontainer_selectors_in_rpc_params() {
         use clap::Parser;
         for selector in ["ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", "ABCDEFGH", "abcdefgh"] {
             let params = ExecParams::try_parse_from([
-                "exec", "--subcontainer", selector, "hello-world", "true",
+                "exec",
+                "--subcontainer",
+                selector,
+                "hello-world",
+                "true",
             ])
             .unwrap();
             assert_eq!(params.subcontainer.as_deref(), Some(selector));
