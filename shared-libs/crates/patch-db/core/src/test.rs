@@ -118,9 +118,12 @@ async fn catch_up_replays_scoped_revisions_within_its_epoch() {
 #[tokio::test]
 async fn json_catch_up_replays_within_its_epoch_and_streams_later_revisions() {
     let db = PatchDb::in_memory();
-    db.put(&ROOT, &ord_json!({ "index": { "package": {} }, "other": 0 }))
-        .await
-        .unwrap();
+    db.put(
+        &ROOT,
+        &ord_json!({ "index": { "package": {} }, "other": 0 }),
+    )
+    .await
+    .unwrap();
     let index: JsonPointer = "/index".parse().unwrap();
     let capacity = NonZeroUsize::new(8).unwrap();
     let (epoch, catchup, _) = db
