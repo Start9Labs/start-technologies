@@ -13,6 +13,7 @@ import { FormBuilder, NonNullableFormBuilder, Validators } from '@angular/forms'
 import {
   BehaviorSubject,
   EMPTY,
+  filter,
   firstValueFrom,
   map,
   of,
@@ -48,7 +49,7 @@ boundary(
     'ExverComparesPipe',
     'LeafProgressPipe',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const isDefaultRegistry = url => Object.values(defaultRegistries).some(known => defaultUrl(known, url)); export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; ' +
+  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const isDefaultRegistry = url => Object.values(defaultRegistries).some(known => defaultUrl(known, url)); export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; export const isNetworkError = error => error?.code === 0; ' +
     `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
@@ -4227,6 +4228,7 @@ test('registry status keeps its last known observation while the server is disco
       { provide: PackageIconService, useValue: {} },
       { provide: ApiService, useValue: {} },
       { provide: ConnectionService, useValue: connected },
+      { provide: ErrorService, useValue: { handleError: assert.fail } },
     ],
     null,
   )
@@ -4481,7 +4483,10 @@ const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
   listings: {
     example: {
       categories: ['bitcoin'],
-      releases: { [version]: { title: version, shortDescription: '' } },
+      releases: {
+        [version]: { title: version, description: { short: '', long: '' } },
+      },
+      versions: { [version]: {} },
     },
   },
 })
@@ -4502,7 +4507,13 @@ function marketplaceFixture(t, entries = {}) {
   const queries = []
   const responses = []
   const packageQueries = []
-  const details = { best: {}, otherVersions: {}, missing: new Set() }
+  const details = {
+    best: {},
+    otherVersions: {},
+    missing: new Set(),
+    error: null,
+  }
+  const errors = []
   const refreshes = []
   const connections = []
   const iconRequests = []
@@ -4551,6 +4562,10 @@ function marketplaceFixture(t, entries = {}) {
       provide: PackageIconService,
       useFactory: () => new ProductionPackageIconService(),
     },
+    {
+      provide: ErrorService,
+      useValue: { handleError: error => errors.push(error) },
+    },
     { provide: ConnectionService, useValue: connection },
     { provide: MarketplaceService, useFactory: () => new MarketplaceService() },
     {
@@ -4567,6 +4582,7 @@ function marketplaceFixture(t, entries = {}) {
             registries: {
               package: async params => {
                 packageQueries.push(params)
+                if (details.error) throw details.error
                 const version = params.targetVersion.slice(1)
                 return {
                   categories: [],
@@ -4619,6 +4635,7 @@ function marketplaceFixture(t, entries = {}) {
     queries,
     responses,
     packageQueries,
+    errors,
     details,
     refreshes,
     connections,
@@ -4988,34 +5005,98 @@ test('marketplace tolerates browser snapshots without listings and consumes the 
   assert.deepEqual(f.queries, [])
 })
 
-test('marketplace lists the update target as the installable update and fetches its details lazily', async t => {
-  const entry = registryEntry('2.0.0:0')
-  entry.listings.example.releases['2.0.0:0'].releaseNotes = 'Stepping stone'
+test('marketplace reads listed releases and the update target from the row without fetching', async t => {
+  const entry = registryEntry('3.0.0:0')
+  entry.listings.example.releases['2.0.0:0'] = {
+    title: '2.0.0:0',
+    description: { short: '', long: 'Stepping stone details' },
+    releaseNotes: 'Stepping stone',
+  }
+  entry.listings.example.versions = {
+    '1.0.0:0': { superseded: true },
+    '2.0.0:0': {},
+    '3.0.0:0': {},
+  }
   entry.listings.example.updateTarget = '2.0.0:0'
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
-  f.details.otherVersions = {
-    '3.0.0:0': { releaseNotes: 'Latest' },
-  }
   await f.service.connect('https://registry.test')
   const store = await firstValueFrom(f.service.currentRegistry$)
+  assert.deepEqual(
+    store.packages.map(({ version }) => version),
+    ['3.0.0:0'],
+  )
   assert.deepEqual(
     store.updates.map(({ version }) => version),
     ['2.0.0:0'],
   )
   assert.equal(store.updates[0].releaseNotes, 'Stepping stone')
+  const newest = await firstValueFrom(
+    f.service.getPackage$('example', null, null),
+  )
+  assert.equal(newest.version, '3.0.0:0')
+  assert.deepEqual(Object.keys(newest.otherVersions).sort(), [
+    '1.0.0:0',
+    '2.0.0:0',
+  ])
+  assert.equal(newest.otherVersions['1.0.0:0'].superseded, true)
+  assert.equal(newest.otherVersions['2.0.0:0'].releaseNotes, 'Stepping stone')
+  const target = await firstValueFrom(
+    f.service.getPackage$('example', '2.0.0:0', null),
+  )
+  assert.equal(target.description.long, 'Stepping stone details')
   assert.deepEqual(f.packageQueries, [])
-  const pkg = await firstValueFrom(f.service.getPackage$('example', null, null))
-  assert.equal(pkg.version, '2.0.0:0')
-  assert.equal(pkg.title, '2.0.0:0')
-  assert.deepEqual(pkg.otherVersions, f.details.otherVersions)
+  assert.deepEqual(f.queries, [])
+})
+
+test("details fetch other versions' release notes on demand", async t => {
+  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
+  f.details.otherVersions = { '0.9.0:0': { releaseNotes: 'Older notes' } }
+  const pkg = await firstValueFrom(
+    f.service
+      .getDetails$('example', '1.0.0:0', 'https://registry.test/')
+      .pipe(filter(Boolean)),
+  )
+  assert.equal(pkg.otherVersions['0.9.0:0'].releaseNotes, 'Older notes')
   assert.deepEqual(f.packageQueries, [
     {
       registry: 'https://registry.test/',
       id: 'example',
-      targetVersion: '=2.0.0:0',
+      targetVersion: '=1.0.0:0',
     },
   ])
-  assert.deepEqual(f.queries, [])
+})
+
+test('details recover after transport loss', async t => {
+  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
+  f.details.error = { code: 0 }
+  const values = f.watch(
+    f.service.getDetails$('example', '1.0.0:0', 'https://registry.test/'),
+  )
+  await tick()
+  assert.equal(values.at(-1), null)
+  assert.deepEqual(f.errors, [])
+  f.connection.next(false)
+  f.details.error = null
+  f.connection.next(true)
+  await tick()
+  assert.equal(values.at(-1).version, '1.0.0:0')
+  assert.equal(f.packageQueries.length, 2)
+})
+
+test('an application error is reported and does not end the other-version observation', async t => {
+  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
+  await f.service.connect('https://registry.test')
+  f.details.error = new Error('Failed to read saved package')
+  const values = f.watch(f.service.getPackage$('example', '0.9.0:0', null))
+  await tick()
+  assert.equal(values.at(-1), null)
+  assert.deepEqual(f.errors, [f.details.error])
+  f.details.error = null
+  f.replace('/registryCache', {
+    'https://registry.test/': registryEntry('2.0.0:0'),
+  })
+  await tick()
+  assert.equal(values.at(-1).version, '0.9.0:0')
 })
 
 test('an exact version is fetched once its package is listed and again when its row changes', async t => {

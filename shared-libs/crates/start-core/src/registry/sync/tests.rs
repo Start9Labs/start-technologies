@@ -115,6 +115,33 @@ async fn refreshing_a_registry_cancels_its_group_without_cancelling_other_regist
 }
 
 #[tokio::test]
+async fn reconciliation_restarts_every_registry_after_a_coalesced_language_change() {
+    let mut tasks = RegistryTasks::new();
+    let mut cancelled = Vec::new();
+    for url in [url(), "https://other.test/".parse().unwrap()] {
+        let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
+        cancelled.push(receiver);
+        tasks.insert(
+            BTreeSet::from([Subscription::Index(url)]),
+            tokio::spawn(async move {
+                let _sender = sender;
+                std::future::pending::<()>().await;
+            })
+            .into(),
+        );
+    }
+    let mut previous = Some(Some("en_US".into()));
+    reconcile_connection_language(&mut tasks, &mut previous, &Some("en_US".into())).await;
+    assert_eq!(tasks.len(), 2);
+    reconcile_connection_language(&mut tasks, &mut previous, &Some("de_DE".into())).await;
+    assert!(tasks.is_empty());
+    assert_eq!(previous, Some(Some("de_DE".into())));
+    for receiver in cancelled {
+        assert!(receiver.await.is_err());
+    }
+}
+
+#[tokio::test]
 async fn registry_settings_watch_ignores_unrelated_writes_and_reads_coherent_settings() {
     let temp = tempfile::tempdir().unwrap();
     let db = TypedPatchDb::<Database>::load_unchecked(
@@ -874,6 +901,64 @@ fn index_revisions_patch_the_saved_index_and_resume_only_from_the_same_view() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn listed_release_metadata_follows_live_replayed_and_snapshot_updates() {
+    use connection::{SubscriptionEvent, SubscriptionStart};
+
+    let mut db = database();
+    let view = RegistryView::new(&device());
+    let start = |id, value, revisions| {
+        SubscriptionEvent::Start(SubscriptionStart {
+            epoch: Some("details".into()),
+            id,
+            value,
+            revisions,
+        })
+    };
+    let ingest = |db: &mut DatabaseModel, event| ingest_event(db, &url(), &view, &event, &device());
+    let row = |db: &DatabaseModel| {
+        db.as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .as_listings()
+            .as_idx(&"test".parse().unwrap())
+            .unwrap()
+            .as_value()
+            .clone()
+    };
+    ingest(&mut db, start(1, to_value(&index()).unwrap(), None)).unwrap();
+    let before = row(&db);
+    let detail = |id, text| {
+        revision(
+            id,
+            json!([{
+                "op": "replace",
+                "path": "/package/packages/test/versions/2.0.0:0/description/long",
+                "value": text,
+            }]),
+        )
+    };
+    let long = |row: &Value| row["releases"]["2.0.0:0"]["description"]["long"].clone();
+    assert_eq!(long(&before), json!("Test"));
+    ingest(&mut db, SubscriptionEvent::Revision(detail(2, "Updated"))).unwrap();
+    assert_eq!(long(&row(&db)), json!("Updated"));
+    ingest(
+        &mut db,
+        start(3, Value::Null, Some(vec![detail(3, "Replayed")])),
+    )
+    .unwrap();
+    assert_eq!(long(&row(&db)), json!("Replayed"));
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&index()).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    assert_eq!(row(&db), before);
 }
 
 #[tokio::test]

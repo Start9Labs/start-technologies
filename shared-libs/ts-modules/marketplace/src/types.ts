@@ -7,11 +7,13 @@ export type GetPackageReq = PackageParams & {
   id: string
   otherVersions: 'short'
 }
-export type GetPackageRes = T.GetPackageResponse & {
-  /** StartOS marks revisions a newer one supersedes; the brochure omits them. */
-  otherVersions: {
-    [version: string]: T.PackageInfoShort & { superseded?: boolean }
-  }
+/** StartOS's cached version list carries no release notes; fetched details do. */
+export type OtherVersion = Partial<T.PackageInfoShort> & {
+  superseded?: boolean
+}
+
+export type GetPackageRes = Omit<T.GetPackageResponse, 'otherVersions'> & {
+  otherVersions: { [version: string]: OtherVersion }
 }
 
 export type GetPackagesReq = PackageParams & {
@@ -67,7 +69,7 @@ export type StoreData<P extends MarketplaceListing = MarketplaceListing> =
     updates?: P[]
   }
 
-/** A release as a registry listing shows it; `getPackage$` resolves the full package. */
+/** A release as a registry listing shows it. */
 export type MarketplaceListing = Pick<
   T.PackageVersionInfo,
   | 'title'

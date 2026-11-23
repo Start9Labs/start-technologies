@@ -2,7 +2,6 @@ import { inject, Injectable } from '@angular/core'
 import {
   AbstractMarketplaceService,
   Marketplace,
-  MarketplaceListing,
   MarketplacePkg,
   StoreDataWithUrl,
   StoreIdentity,
@@ -13,13 +12,16 @@ import {
 } from '@start9labs/marketplace'
 import {
   defaultRegistries,
+  ErrorService,
   Exver,
+  isNetworkError,
   registryUrl,
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
+  catchError,
   combineLatest,
   distinctUntilChanged,
   filter,
@@ -34,6 +36,7 @@ import {
   switchMap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { ConnectionService } from 'src/app/services/connection.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
@@ -47,6 +50,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
+  private readonly connection = inject(ConnectionService)
+  private readonly errors = inject(ErrorService)
 
   private readonly registryCache$ = this.patch.watch$('registryCache')
 
@@ -133,6 +138,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
     ]),
   )
 
+  /** Listed releases follow the live cache; any other version is fetched. */
   getPackage$(
     id: string,
     version: string | null,
@@ -148,13 +154,31 @@ export class MarketplaceService extends AbstractMarketplaceService {
           distinctUntilChanged(),
           switchMap(row => {
             const selected =
-              version ??
-              Object.keys(row?.releases ?? {}).find(
-                v => this.exver.getFlavor(v) === flavor,
-              )
-            return row && selected
-              ? from(this.fetchPackage(url, id, selected))
-              : of(null)
+              version ?? (row && newestReleases(this.exver, row)[flavor ?? ''])
+            if (!row || !selected) return of(null)
+            const release = row.releases[selected]
+            return release
+              ? of(toPkg(this.exver, id, selected, row, release))
+              : this.getDetails$(id, selected, url)
+          }),
+        ),
+      ),
+    )
+  }
+
+  /** A release with every other version's release notes, refetched after reconnecting. */
+  getDetails$(
+    id: string,
+    version: string,
+    registry: string,
+  ): Observable<MarketplacePkg | null> {
+    return this.connection.pipe(
+      filter(Boolean),
+      switchMap(() =>
+        from(this.fetchPackage(registry, id, version)).pipe(
+          catchError(error => {
+            if (!isNetworkError(error)) this.errors.handleError(error)
+            return of(null)
           }),
         ),
       ),
@@ -227,20 +251,23 @@ export class MarketplaceService extends AbstractMarketplaceService {
     url: string,
     entry: T.Public['registryCache'][string],
   ): StoreDataWithUrl {
-    const packages = Object.entries(entry.listings).flatMap(([id, row]) =>
-      Object.entries(row.releases).map(([version, release]) =>
-        toListing(this.exver, id, version, row, release),
-      ),
-    )
+    const listings = Object.entries(entry.listings)
     return {
       url,
       info: this.registryInfo(entry.info),
       status: registryStatus(entry),
       error: entry.error,
-      packages,
-      updates: packages.filter(
-        pkg => entry.listings[pkg.id]?.updateTarget === pkg.version,
+      packages: listings.flatMap(([id, row]) =>
+        Object.values(newestReleases(this.exver, row)).map(version =>
+          toPkg(this.exver, id, version, row, row.releases[version]!),
+        ),
       ),
+      updates: listings.flatMap(([id, row]) => {
+        const release = row.updateTarget && row.releases[row.updateTarget]
+        return release && row.updateTarget
+          ? [toPkg(this.exver, id, row.updateTarget, row, release)]
+          : []
+      }),
     }
   }
 
@@ -302,13 +329,28 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 }
 
-function toListing(
+/** The newest listed release of each flavor, keyed by flavor (`''` for none). */
+function newestReleases(
+  exver: Exver,
+  row: T.PackageListing,
+): Record<string, string> {
+  const newest: Record<string, string> = {}
+  Object.keys(row.releases).forEach(version => {
+    const flavor = exver.getFlavor(version) ?? ''
+    const current = newest[flavor]
+    if (!current || exver.compareExver(version, current) === 1)
+      newest[flavor] = version
+  })
+  return newest
+}
+
+function toPkg(
   exver: Exver,
   id: string,
   version: string,
-  { categories, firstPublishedAt }: T.PackageListing,
-  { shortDescription, sourceVersion, satisfies, ...release }: T.ListedRelease,
-): MarketplaceListing {
+  { categories, firstPublishedAt, releases, versions }: T.PackageListing,
+  release: T.PackageVersionInfo,
+): MarketplacePkg {
   return {
     ...release,
     id,
@@ -316,9 +358,24 @@ function toListing(
     flavor: exver.getFlavor(version),
     categories,
     firstPublishedAt,
-    description: { short: shortDescription },
-    sourceVersion: sourceVersion ?? null,
-    satisfies: satisfies ?? [],
+    best: { [version]: release },
+    otherVersions: Object.fromEntries(
+      Object.entries(versions)
+        .filter(([other]) => other !== version)
+        .map(([other, info]) => {
+          const listed = releases[other]
+          return [
+            other,
+            listed
+              ? {
+                  ...info,
+                  releaseNotes: listed.releaseNotes,
+                  defaultLocale: listed.defaultLocale,
+                }
+              : info,
+          ]
+        }),
+    ),
   }
 }
 

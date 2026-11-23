@@ -29,7 +29,15 @@ import {
   TuiProgressCircle,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { filter, switchMap, take } from 'rxjs'
+import {
+  combineLatest,
+  distinctUntilChanged,
+  filter,
+  of,
+  startWith,
+  switchMap,
+  take,
+} from 'rxjs'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
@@ -358,18 +366,23 @@ export class UpdatesItemComponent {
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
 
   private readonly pkg = toSignal(
-    toObservable(this.expanded).pipe(
-      filter(Boolean),
-      take(1),
-      switchMap(() => {
-        const { id, version, flavor } = this.item()
-        return this.service.getPackage$(
-          id,
-          version,
-          flavor,
-          this.parent.current()?.url,
-        )
-      }),
+    combineLatest([
+      toObservable(this.expanded).pipe(filter(Boolean), take(1)),
+      toObservable(this.item).pipe(
+        distinctUntilChanged(
+          (a, b) =>
+            a.id === b.id && a.version === b.version && a.flavor === b.flavor,
+        ),
+      ),
+      toObservable(computed(() => this.parent.current()?.url)),
+    ]).pipe(
+      switchMap(([, { id, version }, registry]) =>
+        registry
+          ? this.service
+              .getDetails$(id, version, registry)
+              .pipe(startWith(null))
+          : of(null),
+      ),
     ),
   )
 

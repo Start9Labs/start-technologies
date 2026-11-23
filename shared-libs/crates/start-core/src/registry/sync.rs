@@ -24,7 +24,7 @@ use crate::registry::device_info::DeviceInfo;
 use crate::registry::info::RegistryInfo;
 use crate::registry::os::index::{OsIndex, OsVersionInfo};
 use crate::registry::package::get::{
-    GetPackageParams, GetPackageResponse, PackageDetailLevel, PackageListing, listing,
+    GetPackageParams, GetPackageResponse, PackageListing, listing, select_package_details,
     select_packages, update_target,
 };
 use crate::registry::package::index::PackageIndex;
@@ -187,6 +187,18 @@ async fn stop_registry_connections(tasks: &mut RegistryTasks, groups: Vec<BTreeS
     }
 }
 
+async fn reconcile_connection_language(
+    tasks: &mut RegistryTasks,
+    previous: &mut Option<Option<InternedString>>,
+    language: &Option<InternedString>,
+) {
+    if previous.as_ref() != Some(language) {
+        let all = tasks.keys().cloned().collect();
+        stop_registry_connections(tasks, all).await;
+        *previous = Some(language.clone());
+    }
+}
+
 async fn cancel_registry_connection(tasks: &mut RegistryTasks, registry: &Url) {
     let groups = tasks
         .keys()
@@ -205,13 +217,6 @@ struct RegistrySettingsWatch {
     registries: patch_db::DbWatch,
     os_registry: patch_db::DbWatch,
     language: patch_db::DbWatch,
-}
-
-/// A language change resubscribes every registry, which then serves that language.
-#[derive(PartialEq, Eq)]
-enum SettingsChange {
-    Registries,
-    Language,
 }
 
 impl RegistrySettingsWatch {
@@ -242,15 +247,16 @@ impl RegistrySettingsWatch {
         db.peek().await.as_public().as_server_info().de()
     }
 
-    async fn changed(&mut self) -> Result<SettingsChange, patch_db::Error> {
+    async fn changed(&mut self) -> Result<(), patch_db::Error> {
         tokio::select! {
-            changed = self.registries.changed() => changed.map(|_| SettingsChange::Registries),
-            changed = self.os_registry.changed() => changed.map(|_| SettingsChange::Registries),
-            changed = self.language.changed() => changed.map(|_| SettingsChange::Language),
+            changed = self.registries.changed() => changed,
+            changed = self.os_registry.changed() => changed,
+            changed = self.language.changed() => changed,
         }
     }
 }
 
+/// Every registry connection follows the saved server language.
 pub async fn watch_registries(
     db: TypedPatchDb<Database>,
     mut refreshes: tokio::sync::mpsc::Receiver<Url>,
@@ -261,10 +267,12 @@ pub async fn watch_registries(
         tokio::spawn(watch_installed_versions(db.clone(), context.clone())).into();
     let mut watch = RegistrySettingsWatch::new(&db).await;
     let mut tasks = RegistryTasks::new();
+    let mut language = None;
     loop {
-        let desired = watch.read(&db).await.map(|info| subscriptions(&info));
-        match desired {
-            Ok(desired) => {
+        match watch.read(&db).await {
+            Ok(info) => {
+                reconcile_connection_language(&mut tasks, &mut language, &info.language).await;
+                let desired = subscriptions(&info);
                 let connections = connections(&desired);
                 let removed = tasks
                     .keys()
@@ -309,14 +317,7 @@ pub async fn watch_registries(
             Err(error) => tracing::warn!(?error, "Invalid registry configuration"),
         }
         tokio::select! {
-            changed = watch.changed() => match changed {
-                Ok(SettingsChange::Language) => {
-                    let all = tasks.keys().cloned().collect();
-                    stop_registry_connections(&mut tasks, all).await;
-                }
-                Ok(SettingsChange::Registries) => (),
-                Err(_) => return,
-            },
+            changed = watch.changed() => if changed.is_err() { return; },
             refresh = refreshes.recv() => match refresh {
                 Some(registry) => cancel_registry_connection(&mut tasks, &registry).await,
                 None => return,
@@ -979,13 +980,10 @@ pub(crate) fn synced_keystream(
     Ok(None)
 }
 
-/// Selects packages from a saved registry's synchronized index.
-/// A registry with no index yet selects nothing unless its synchronization failed.
-pub(crate) fn synced_packages(
-    db: &DatabaseModel,
+fn synced_package_index<'a>(
+    db: &'a DatabaseModel,
     registry: &Url,
-    params: &GetPackageParams,
-) -> Result<Value, Error> {
+) -> Result<Option<&'a Model<PackageIndex>>, Error> {
     let url = registry_url(registry.as_str())?;
     if !is_connected(
         &db.as_public().as_server_info().as_registries().de()?,
@@ -993,19 +991,31 @@ pub(crate) fn synced_packages(
     ) {
         return Err(not_saved(registry));
     }
-    let empty = Model::new(&PackageIndex::default())?;
-    let index = match db.as_private().as_registry_indexes().as_idx(&url) {
-        Some(index) => index.as_package(),
+    match db.as_private().as_registry_indexes().as_idx(&url) {
+        Some(index) => Ok(Some(index.as_package())),
         None => {
             if let Some(cache) = db.as_public().as_registry_cache().as_idx(&url) {
                 if cache.as_status().de()? == RegistryStatus::Error {
                     return Err(unreachable(registry, cache.as_error().de()?.as_deref()));
                 }
             }
-            &empty
+            Ok(None)
         }
-    };
-    select_packages(index, params)
+    }
+}
+
+/// Selects packages from a saved registry's synchronized index.
+/// A registry with no index yet selects nothing unless its synchronization failed.
+pub(crate) fn synced_packages(
+    db: &DatabaseModel,
+    registry: &Url,
+    params: &GetPackageParams,
+) -> Result<Value, Error> {
+    let empty = Model::new(&PackageIndex::default())?;
+    select_packages(
+        synced_package_index(db, registry)?.unwrap_or(&empty),
+        params,
+    )
 }
 
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
@@ -1032,23 +1042,14 @@ pub async fn synced_package(
 ) -> Result<GetPackageResponse, Error> {
     let mut device = DeviceInfo::load(&ctx).await?.for_listing();
     device.os.language = None;
-    let mut package: GetPackageResponse = from_value(synced_packages(
-        &ctx.db.peek().await,
-        &registry_url(&registry)?,
-        &GetPackageParams {
-            id: Some(id),
-            target_version,
-            source_version: None,
-            device_info: Some(device),
-            other_versions: Some(PackageDetailLevel::Short),
-            all_revisions: false,
-            reader: Default::default(),
-        },
-    )?)?;
-    for info in package.best.values_mut() {
-        info.strip_access();
-    }
-    Ok(package)
+    let snapshot = ctx.db.peek().await;
+    let empty = Model::new(&PackageIndex::default())?;
+    select_package_details(
+        synced_package_index(&snapshot, &registry_url(&registry)?)?.unwrap_or(&empty),
+        &id,
+        target_version.as_ref(),
+        &device,
+    )
 }
 
 /// The selected StartOS update source's synchronized releases for this server.

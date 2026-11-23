@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use clap::{Parser, ValueEnum};
-use exver::{ExtendedVersion, Version, VersionRange};
+use exver::{ExtendedVersion, VersionRange};
 use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use patch_db::ModelExt;
@@ -16,18 +16,12 @@ use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, ProgressUnits};
-use crate::registry::asset::RegistryAsset;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfo;
-use crate::registry::package::icon::PackageIcon;
-use crate::registry::package::index::{
-    PackageIndex, PackageVersionInfo, PreDownloadAlert, ReaderParams,
-};
-use crate::s9pk::git_hash::GitHash;
+use crate::registry::package::index::{PackageIndex, PackageVersionInfo, ReaderParams};
 use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
-use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::util::VersionString;
 use crate::util::io::{TrackingIO, create_file, delete_file, rename, to_tmp_path};
 use crate::util::serde::{WithIoFormat, display_serializable};
@@ -68,6 +62,9 @@ pub struct PackageInfoShort {
     /// `PackageMetadata::default_locale`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_locale: Option<InternedString>,
+    /// A newer same-flavor revision covers this release's hardware.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub superseded: bool,
 }
 
 rpc_toolkit::reflect_ts!(PackageInfoShort);
@@ -404,8 +401,10 @@ pub struct PackageListing {
     /// When this registry first published any version it still carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_published_at: Option<DateTime<Utc>>,
-    /// One release per flavor: the update target, else the newest this server can run.
-    pub releases: BTreeMap<VersionString, ListedRelease>,
+    /// The newest release of each flavor this server can run, plus the update target.
+    pub releases: BTreeMap<VersionString, PackageVersionInfo>,
+    /// Every release this server can run.
+    pub versions: BTreeMap<VersionString, ListedVersion>,
     /// Newest release of the installed flavor that the installed version can migrate to and this
     /// server can install.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -414,58 +413,25 @@ pub struct PackageListing {
 
 rpc_toolkit::reflect_ts!(PackageListing);
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-pub struct ListedRelease {
-    pub title: InternedString,
-    /// `PackageMetadata::default_locale`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_locale: Option<InternedString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon: Option<PackageIcon>,
-    pub short_description: LocaleString,
-    pub release_notes: LocaleString,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pre_download_alert: Option<PreDownloadAlert>,
-    #[serde(default = "crate::s9pk::manifest::current_version")]
-    pub os_version: Version,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_version: Option<VersionRange>,
-    #[serde(default)]
-    pub satisfies: BTreeSet<VersionString>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git_hash: Option<GitHash>,
-    pub s9pks: Vec<(HardwareRequirements, RegistryAsset<MerkleArchiveCommitment>)>,
+pub struct ListedVersion {
+    /// A newer same-flavor revision covers this release's hardware.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub superseded: bool,
 }
 
-rpc_toolkit::reflect_ts!(ListedRelease);
+rpc_toolkit::reflect_ts!(ListedVersion);
 
-/// Copies the release's fields from the index without deserializing them.
+/// The release as the index saves it, without s9pk access.
 fn listed_release(info: &Model<PackageVersionInfo>) -> Value {
-    let info = info.as_value();
-    let field = |name: &str| info.get(name).filter(|value| !value.is_null()).cloned();
-    [
-        ("title", field("title")),
-        ("defaultLocale", field("defaultLocale")),
-        ("icon", field("icon")),
-        (
-            "shortDescription",
-            info.get("description")
-                .and_then(|description| description.get("short"))
-                .cloned(),
-        ),
-        ("releaseNotes", field("releaseNotes")),
-        ("preDownloadAlert", field("preDownloadAlert")),
-        ("osVersion", field("osVersion")),
-        ("sourceVersion", field("sourceVersion")),
-        ("satisfies", field("satisfies")),
-        ("gitHash", field("gitHash")),
-        ("s9pks", field("s9pks").map(without_access)),
-    ]
-    .into_iter()
-    .filter_map(|(key, value)| Some((InternedString::intern(key), value?)))
-    .collect::<imbl_value::InOMap<_, _>>()
-    .into()
+    let mut release = info.as_value().clone();
+    if let Some(fields) = release.as_object_mut() {
+        if let Some(s9pks) = fields.remove("s9pks") {
+            fields.insert("s9pks".into(), without_access(s9pks));
+        }
+    }
+    release
 }
 
 /// `PackageVersionInfo::strip_access`, leaving public assets' values untouched.
@@ -498,7 +464,6 @@ fn without_access(mut s9pks: Value) -> Value {
 }
 
 /// A package's cache row, absent when the device can run none of its releases.
-/// The update target replaces the newest release of its flavor.
 pub(crate) fn listing(
     index: &Model<PackageIndex>,
     id: &PackageId,
@@ -518,10 +483,23 @@ pub(crate) fn listing(
     let Some(mut releases) = best.remove(id) else {
         return Ok(None);
     };
-    if let Some(target) = update_target.filter(|target| !releases.contains_key(*target)) {
-        if let Some(info) = other.remove(id).and_then(|mut other| other.remove(target)) {
-            releases.retain(|version, _| version.flavor() != target.flavor());
-            releases.insert(target.clone(), info);
+    let other = other.remove(id).unwrap_or_default();
+    let superseded = superseded_revisions(Some(&releases), &other)?;
+    let versions: imbl_value::InOMap<_, _> = releases
+        .keys()
+        .chain(other.keys())
+        .map(|version| {
+            Ok::<_, Error>((
+                InternedString::from_display(version),
+                to_value(&ListedVersion {
+                    superseded: superseded.contains(version),
+                })?,
+            ))
+        })
+        .try_collect()?;
+    if let Some(target) = update_target {
+        if let Some(info) = other.get(target) {
+            releases.insert(target.clone(), info.clone());
         }
     }
     let package = index
@@ -544,6 +522,7 @@ pub(crate) fn listing(
             .collect::<imbl_value::InOMap<_, _>>()
             .into(),
     );
+    row.insert("versions".into(), versions.into());
     if let Some(target) = update_target {
         row.insert("updateTarget".into(), to_value(target)?);
     }
@@ -575,6 +554,59 @@ pub(crate) fn update_target(
                 && version.partial_cmp(installed) == Some(std::cmp::Ordering::Greater)
         })
         .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)))
+}
+
+/// Details retain superseded release notes independently of the selected target range.
+pub(crate) fn select_package_details(
+    index: &Model<PackageIndex>,
+    id: &PackageId,
+    target_version: Option<&VersionRange>,
+    device: &DeviceInfo,
+) -> Result<GetPackageResponse, Error> {
+    let params = GetPackageParams {
+        id: Some(id.clone()),
+        target_version: None,
+        source_version: None,
+        device_info: Some(device.clone()),
+        other_versions: None,
+        all_revisions: true,
+        reader: Default::default(),
+    };
+    let matching = get_matching_models(index, &params)?;
+    let (newest, mut older) = partition_best(matching.clone());
+    let superseded = superseded_revisions(newest.get(id), &older.remove(id).unwrap_or_default())?;
+    let (mut selected, _) = partition_best(
+        matching
+            .iter()
+            .filter(|(_, version, _)| target_version.is_none_or(|range| version.satisfies(range)))
+            .cloned()
+            .collect(),
+    );
+    let selected = selected.remove(id).unwrap_or_default();
+    let other_versions = matching
+        .into_iter()
+        .filter(|(_, version, _)| !selected.contains_key(&VersionString::from(version.clone())))
+        .map(|(_, version, info)| {
+            let version = VersionString::from(version);
+            let mut short: PackageInfoShort = from_value(info.into())?;
+            short.superseded = superseded.contains(&version);
+            Ok((version, short))
+        })
+        .collect::<Result<_, Error>>()?;
+    let best = selected
+        .into_iter()
+        .map(|(version, info)| {
+            let mut info = info.de()?;
+            info.strip_access();
+            Ok((version, info))
+        })
+        .collect::<Result<_, Error>>()?;
+    Ok(GetPackageResponse {
+        categories: categories(index, id)?,
+        first_published_at: first_published_at(index, id)?,
+        best,
+        other_versions: Some(other_versions),
+    })
 }
 
 pub(crate) fn select_packages(
@@ -1133,7 +1165,7 @@ mod tests {
     }
 
     #[test]
-    fn listing_lists_one_release_per_flavor_and_its_update_target() {
+    fn listing_keeps_the_newest_release_per_flavor_its_update_target_and_every_version() {
         use crate::registry::package::index::tests::version_info_signed_by;
 
         let (_, info) = version_info_signed_by(1);
@@ -1162,26 +1194,47 @@ mod tests {
             hardware: None,
         };
         let id: PackageId = "demo".parse().unwrap();
-        let releases = |row: Model<PackageListing>| {
-            let row = row.de().unwrap();
-            assert_eq!(row.categories, ["tools".into()].into());
-            row.releases
-                .keys()
-                .map(ToString::to_string)
-                .collect::<BTreeSet<_>>()
+        let keys = |versions: Vec<&VersionString>| -> BTreeSet<String> {
+            versions.into_iter().map(ToString::to_string).collect()
         };
-        let set = |versions: [&str; 2]| -> BTreeSet<String> { versions.map(str::to_owned).into() };
+        let set = |versions: &[&str]| -> BTreeSet<String> {
+            versions.iter().map(|v| (*v).to_owned()).collect()
+        };
 
-        let newest = listing(&index, &id, &device, None).unwrap().unwrap();
-        assert!(newest.as_value().get("updateTarget").is_none());
-        assert_eq!(releases(newest), set(["#alt:1.0.0:0", "2.0.0:0"]));
+        let newest = listing(&index, &id, &device, None)
+            .unwrap()
+            .unwrap()
+            .de()
+            .unwrap();
+        assert_eq!(newest.categories, ["tools".into()].into());
+        assert!(newest.update_target.is_none());
+        assert_eq!(
+            keys(newest.releases.keys().collect()),
+            set(&["#alt:1.0.0:0", "2.0.0:0"])
+        );
+        let release = &newest.releases[&"2.0.0:0".parse::<VersionString>().unwrap()];
+        assert_eq!(
+            to_value(&release.metadata.description).unwrap(),
+            info["description"]
+        );
+        assert_eq!(
+            keys(newest.versions.keys().collect()),
+            set(&["#alt:1.0.0:0", "1.0.0:0", "1.0.0:1", "2.0.0:0"])
+        );
+        assert!(newest.versions[&"1.0.0:0".parse::<VersionString>().unwrap()].superseded);
+        assert!(!newest.versions[&"1.0.0:1".parse::<VersionString>().unwrap()].superseded);
 
         let target: VersionString = "1.0.0:1".parse().unwrap();
         let updating = listing(&index, &id, &device, Some(&target))
             .unwrap()
+            .unwrap()
+            .de()
             .unwrap();
-        assert_eq!(updating.as_value()["updateTarget"], json!("1.0.0:1"));
-        assert_eq!(releases(updating), set(["#alt:1.0.0:0", "1.0.0:1"]));
+        assert_eq!(updating.update_target, Some(target));
+        assert_eq!(
+            keys(updating.releases.keys().collect()),
+            set(&["#alt:1.0.0:0", "1.0.0:1", "2.0.0:0"])
+        );
 
         let installed: VersionString = "1.0.0:0".parse().unwrap();
         assert_eq!(
@@ -1191,14 +1244,63 @@ mod tests {
     }
 
     #[test]
-    fn listed_release_reads_back_as_its_type() {
+    fn exact_details_keep_other_versions_and_superseded_release_notes() {
         use crate::registry::package::index::tests::version_info_signed_by;
 
         let (_, info) = version_info_signed_by(1);
-        let release: ListedRelease =
+        let info = to_value(&info).unwrap();
+        let index: Model<PackageIndex> = json!({
+            "categories": {},
+            "packages": { "demo": {
+                "authorized": {},
+                "categories": ["tools"],
+                "versions": {
+                    "1.0.0:0": info,
+                    "1.0.0:1": info,
+                    "2.0.0:0": info,
+                    "#alt:1.0.0:0": info,
+                },
+            } },
+        })
+        .into();
+        let id: PackageId = "demo".parse().unwrap();
+        let device = DeviceInfo {
+            os: crate::registry::device_info::OsInfo {
+                version: "0.4.0".parse().unwrap(),
+                compat: "*".parse().unwrap(),
+                platform: "x86_64".into(),
+                language: None,
+            },
+            hardware: None,
+        };
+        let target = "=1.0.0:1".parse().unwrap();
+        let details = select_package_details(&index, &id, Some(&target), &device).unwrap();
+        let version = |value: &str| value.parse::<VersionString>().unwrap();
+        assert_eq!(details.best.len(), 1);
+        assert!(details.best.contains_key(&version("1.0.0:1")));
+        let other = details.other_versions.unwrap();
+        assert_eq!(other.len(), 3);
+        assert!(other[&version("1.0.0:0")].superseded);
+        assert!(!other[&version("2.0.0:0")].superseded);
+        assert_eq!(
+            to_value(&other[&version("1.0.0:0")]).unwrap()["releaseNotes"],
+            info["releaseNotes"]
+        );
+        assert!(other.contains_key(&version("#alt:1.0.0:0")));
+    }
+
+    #[test]
+    fn listed_release_is_the_saved_release_without_access() {
+        use crate::registry::package::index::tests::version_info_signed_by;
+
+        let (_, mut info) = version_info_signed_by(1);
+        for (_, asset) in &mut info.s9pks {
+            asset.readers.insert(crate::rpc_continuations::Guid::new());
+        }
+        let release: PackageVersionInfo =
             from_value(listed_release(&Model::new(&info).unwrap())).unwrap();
-        assert_eq!(release.title, info.metadata.title);
-        assert_eq!(release.s9pks.len(), info.s9pks.len());
+        info.strip_access();
+        assert_eq!(to_value(&release).unwrap(), to_value(&info).unwrap());
     }
 
     #[test]

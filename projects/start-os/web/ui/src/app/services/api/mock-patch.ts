@@ -80,30 +80,6 @@ const MOCK_UPDATE_TARGETS: Record<string, string> = {
   'btc-rpc-proxy': '0.4.0:0',
 }
 
-const flavorOf = (version: string) =>
-  version.startsWith('#') ? version.slice(1, version.indexOf(':')) : null
-
-function mockRelease({
-  description,
-  sourceVersion,
-  gitHash,
-  ...info
-}: T.PackageVersionInfo): T.ListedRelease {
-  return {
-    title: info.title,
-    defaultLocale: info.defaultLocale,
-    icon: info.icon,
-    shortDescription: description.short,
-    releaseNotes: info.releaseNotes,
-    preDownloadAlert: info.preDownloadAlert,
-    osVersion: info.osVersion,
-    sourceVersion: sourceVersion ?? undefined,
-    satisfies: info.satisfies,
-    gitHash: gitHash ?? undefined,
-    s9pks: info.s9pks,
-  }
-}
-
 function mockListings(): T.RegistryCache['listings'] {
   return Object.fromEntries(
     Object.entries(Mock.RegistryPackages).map(([id, pkg]) => {
@@ -116,20 +92,23 @@ function mockListings(): T.RegistryCache['listings'] {
           ...Object.entries(pkg.best),
         ],
       )
-      const listed = Object.keys(pkg.best).filter(
-        v =>
-          !updateTarget ||
-          !versions[updateTarget] ||
-          flavorOf(v) !== flavorOf(updateTarget),
+      const listed = Object.keys(pkg.best)
+      if (
+        updateTarget &&
+        versions[updateTarget] &&
+        !listed.includes(updateTarget)
       )
-      if (updateTarget && versions[updateTarget]) listed.push(updateTarget)
+        listed.push(updateTarget)
       return [
         id,
         {
           categories: pkg.categories,
           firstPublishedAt: pkg.firstPublishedAt,
-          releases: Object.fromEntries(
-            listed.map(v => [v, mockRelease(versions[v]!)]),
+          releases: Object.fromEntries(listed.map(v => [v, versions[v]!])),
+          versions: Object.fromEntries(
+            [...Object.keys(versions), ...Object.keys(pkg.otherVersions)].map(
+              v => [v, {}],
+            ),
           ),
           updateTarget,
         },

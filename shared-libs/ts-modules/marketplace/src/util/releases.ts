@@ -19,7 +19,9 @@ export function pendingReleases(
   const pending =
     installed && exver.getFlavor(installed) === pkg.flavor
       ? Object.entries(pkg.otherVersions || {})
-          .map(([version, info]) => ({ ...info, version }))
+          .flatMap(([version, { releaseNotes, ...info }]) =>
+            releaseNotes ? [{ ...info, releaseNotes, version }] : [],
+          )
           .filter(
             ({ version }) =>
               exver.getFlavor(version) === pkg.flavor &&
