@@ -1088,8 +1088,8 @@ pub async fn synced_package(
     Ok(current)
 }
 
-/// The package's current selection, then each different selection after a change to the
-/// registry's saved index. A selection that fails ends the stream with that error.
+/// The current selection, then distinct selections following index, membership or status changes.
+/// Selection failures end the stream even before the first index arrives.
 pub(crate) async fn watch_synced_package(
     db: TypedPatchDb<Database>,
     registry: Url,
@@ -1108,14 +1108,29 @@ pub(crate) async fn watch_synced_package(
     pointer.push_end("registryIndexes");
     pointer.push_end(registry.as_str());
     let mut revisions = db.subscribe(pointer).await;
+    let mut membership = db
+        .subscribe("/public/serverInfo/registries".parse().unwrap())
+        .await;
+    let mut status_pointer = JsonPointer::<String>::default();
+    status_pointer.push_end("public");
+    status_pointer.push_end("registryCache");
+    status_pointer.push_end(registry.as_str());
+    status_pointer.push_end("status");
+    let mut status = db.subscribe(status_pointer).await;
     let select = move |db: &DatabaseModel| {
         select_synced_package(db, &registry, &id, target_version.as_ref(), &device)
     };
     let current = select(&db.peek().await)?;
     let mut last = to_value(&current)?;
     let changes = async_stream::stream! {
-        while revisions.recv().await.is_some() {
-            while revisions.try_recv().is_ok() {}
+        while tokio::select! {
+            revision = revisions.recv() => revision,
+            revision = membership.recv() => revision,
+            revision = status.recv() => revision,
+        }.is_some() {
+            for receiver in [&mut revisions, &mut membership, &mut status] {
+                while receiver.try_recv().is_ok() {}
+            }
             match select(&db.peek().await) {
                 Ok(next) => match to_value(&next) {
                     Ok(value) if value == last => {}

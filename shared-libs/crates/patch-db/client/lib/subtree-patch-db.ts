@@ -54,7 +54,8 @@ type Active = {
  * subscribed on the server, and a path is released a short delay after its last
  * watcher leaves. Every subscribed path keeps its own cursor so it fast-forwards
  * on reconnect, and data from a released path stays readable until it is
- * subscribed again. A failed subscription stops them all and is reported on
+ * subscribed again. The document cursor follows the lowest live subscription,
+ * including handovers. A failed subscription stops them all and is reported on
  * {@link failures$}; {@link start} resumes them.
  */
 export class SubtreePatchDB<
@@ -111,12 +112,15 @@ export class SubtreePatchDB<
 
   override stop() {
     this.suspend()
-    this.releases.forEach(timer => clearTimeout(timer))
-    this.releases.clear()
     this.cursors.clear()
     this.loaded.clear()
     Object.values(this.watchedNodes).forEach(node => node.subject.complete())
     this.watchedNodes = {}
+    this.releases.forEach(timer => clearTimeout(timer))
+    this.releases.clear()
+    this.watchers.forEach((count, pointer) => {
+      if (!count) this.watchers.delete(pointer)
+    })
     this.cache$.next({ id: 0, value: {} as T })
     this.changes$.next()
   }
@@ -236,7 +240,7 @@ export class SubtreePatchDB<
     if (!entry) return
     this.active.delete(pointer)
     entry.subscription.unsubscribe()
-    this.changes$.next()
+    this.emit(this.cache$.value)
   }
 
   private suspend() {
@@ -307,8 +311,10 @@ export class SubtreePatchDB<
     this.handleRevision(
       {
         id: revision.id,
-        patch: revision.patch.map(
-          op => ({ ...op, path: pointer + op.path }) as Operation<unknown>,
+        patch: revision.patch.map(op =>
+          op.path === '' && op.op !== PatchOp.REMOVE
+            ? this.replacementAt(cache, arrayFromPath(pointer), op.value)
+            : ({ ...op, path: pointer + op.path } as Operation<unknown>),
         ),
       },
       cache,
@@ -316,6 +322,21 @@ export class SubtreePatchDB<
   }
 
   private applyAt(cache: Dump<T>, path: string[], value: unknown) {
+    if (!path.length) {
+      this.handleDump({ id: cache.id, value: value as T }, cache)
+      return
+    }
+    this.handleRevision(
+      { id: cache.id, patch: [this.replacementAt(cache, path, value)] },
+      cache,
+    )
+  }
+
+  private replacementAt(
+    cache: Dump<T>,
+    path: string[],
+    value: unknown,
+  ): Operation<unknown> {
     const parents = path.slice(0, -1)
     const missing = parents.findIndex(
       (_, i) =>
@@ -329,26 +350,9 @@ export class SubtreePatchDB<
       const nested = path
         .slice(missing + 1)
         .reduceRight<unknown>((child, key) => ({ [key]: child }), value)
-      this.handleRevision(
-        {
-          id: cache.id,
-          patch: [
-            { op: PatchOp.REPLACE, path: pathFromArray(at), value: nested },
-          ],
-        },
-        cache,
-      )
-    } else if (path.length) {
-      this.handleRevision(
-        {
-          id: cache.id,
-          patch: [{ op: PatchOp.REPLACE, path: pathFromArray(path), value }],
-        },
-        cache,
-      )
-    } else {
-      this.handleDump({ id: cache.id, value: value as T }, cache)
+      return { op: PatchOp.REPLACE, path: pathFromArray(at), value: nested }
     }
+    return { op: PatchOp.REPLACE, path: pathFromArray(path), value }
   }
 
   private emit(cache: Dump<T>) {

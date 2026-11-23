@@ -14,6 +14,10 @@ async fn watched_db() -> TypedPatchDb<Database> {
         &device(),
     )
     .unwrap();
+    memory_db(model).await
+}
+
+async fn memory_db(model: DatabaseModel) -> TypedPatchDb<Database> {
     let db = TypedPatchDb::<Database>::load_unchecked(PatchDb::in_memory());
     db.put(&ROOT, model.as_value()).await.unwrap();
     db
@@ -69,6 +73,64 @@ async fn watched_details_follow_index_changes_and_skip_unrelated_writes() {
         .unwrap()
         .unwrap();
     assert_eq!(release_notes(&next, "1.0.0:0"), json!("Edited"));
+}
+
+#[tokio::test]
+async fn watched_details_report_failure_before_the_first_index_arrives() {
+    let db = memory_db(database()).await;
+    let (current, changes) =
+        watch_synced_package(db.clone(), url(), "test".parse().unwrap(), None, device())
+            .await
+            .unwrap();
+    assert!(current.best.is_empty());
+    let mut changes = Box::pin(changes);
+    db.mutate(|db| {
+        set_status(
+            db,
+            &Subscription::Index(url()),
+            RegistryStatus::Error,
+            Some("Unavailable"),
+        )
+    })
+    .await
+    .result
+    .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), changes.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err()
+    );
+    assert!(changes.next().await.is_none());
+}
+
+#[tokio::test]
+async fn watched_details_end_when_removed_before_the_first_index_arrives() {
+    let db = memory_db(database()).await;
+    let (current, changes) =
+        watch_synced_package(db.clone(), url(), "test".parse().unwrap(), None, device())
+            .await
+            .unwrap();
+    assert!(current.best.is_empty());
+    let mut changes = Box::pin(changes);
+    db.mutate(|db| {
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_registries_mut()
+            .ser(&Default::default())
+    })
+    .await
+    .result
+    .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), changes.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err()
+    );
+    assert!(changes.next().await.is_none());
 }
 
 #[tokio::test]

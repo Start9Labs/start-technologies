@@ -1,7 +1,31 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { BehaviorSubject, Observable, Subject } from 'rxjs'
-import { SubtreePatchDB } from 'patch-db-client'
+import { scopeOperations, SubtreePatchDB } from 'patch-db-client'
+
+test('subtree patch scoping preserves server removal and missing-value semantics', () => {
+  for (const pointer of ['/a', '/a/b']) {
+    assert.deepEqual(scopeOperations([{ op: 'remove', path: '/a' }], pointer), [
+      { op: 'replace', path: '', value: null },
+    ])
+  }
+  for (const op of ['add', 'replace']) {
+    assert.deepEqual(
+      scopeOperations([{ op, path: '/a', value: { b: 1 } }], '/a/b'),
+      [{ op, path: '', value: 1 }],
+    )
+    assert.deepEqual(scopeOperations([{ op, path: '/a', value: {} }], '/a/b'), [
+      { op, path: '', value: null },
+    ])
+  }
+  assert.deepEqual(scopeOperations([{ op: 'remove', path: '/a/b' }], '/a'), [
+    { op: 'remove', path: '/b' },
+  ])
+  assert.deepEqual(scopeOperations([{ op: 'remove', path: '/a' }], ''), [
+    { op: 'remove', path: '/a' },
+  ])
+  assert.deepEqual(scopeOperations([{ op: 'remove', path: '/ab' }], '/a'), [])
+})
 
 function fixture(t, { releaseDelay = 5000 } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout'] })
@@ -80,6 +104,7 @@ test('an ancestor subscription serves its descendants and replaces their subscri
   assert.equal(f.calls[0].closed, false)
   f.start(f.calls[1], 4, { a: { v: 2 }, b: { v: 1 } })
   assert.equal(f.calls[0].closed, true)
+  assert.equal(f.cache.value.id, 4)
   assert.deepEqual(child.values.at(-1), { v: 2 })
   assert.deepEqual(parent.values.at(-1), { a: { v: 2 }, b: { v: 1 } })
   f.watch('packageData', 'b')
@@ -180,6 +205,47 @@ test('a deep subscription creates the parents its dump needs', t => {
   f.revision(f.calls[0], 3, [{ op: 'replace', path: '', value: 'stopped' }])
   t.mock.timers.tick(250)
   assert.deepEqual(deep.values.at(-1), 'stopped')
+})
+
+for (const mode of ['replay', 'revision']) {
+  test(`a child ${mode} materializes its cached null parent`, t => {
+    const f = fixture(t)
+    f.db.start()
+    const parent = f.watch('a')
+    f.start(f.calls[0], 5, null)
+    const child = f.watch('a', 'b')
+    parent.subscription.unsubscribe()
+    t.mock.timers.tick(5000)
+    const call = f.open('/a/b')[0]
+    assert.deepEqual(call.since, { epoch: 'boot', id: 5 })
+    const revision = {
+      id: 6,
+      patch: [{ op: 'replace', path: '', value: 1 }],
+    }
+    call.events.next({
+      epoch: 'boot',
+      id: mode === 'replay' ? 6 : 5,
+      revisions: mode === 'replay' ? [revision] : [],
+    })
+    if (mode === 'revision') {
+      call.events.next(revision)
+      t.mock.timers.tick(250)
+    }
+    assert.equal(child.values.at(-1), 1)
+    assert.deepEqual(f.cache.value.value, { a: { b: 1 } })
+  })
+}
+
+test('stop discards released paths rather than reopening them on start', t => {
+  const f = fixture(t)
+  f.db.start()
+  const root = f.watch()
+  f.start(f.calls[0], 5, { serverInfo: {} })
+  root.subscription.unsubscribe()
+  f.db.stop()
+  f.db.start()
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.calls[0].closed, true)
 })
 
 test('stop clears the document, cursors and subscriptions', t => {

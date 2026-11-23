@@ -60,13 +60,22 @@ export class PatchDbCache {
     }
   }
 
-  /** Stored revisions describe complete snapshots across browser tabs. */
+  /**
+   * Stored revisions describe complete snapshots across browser tabs.
+   * Every persisted root retains resumable coverage after a whole-document subscription.
+   */
   async write(
     { id, value }: Dump<DataModel>,
     cursors: Record<string, Cursor>,
   ): Promise<void> {
+    const root = cursors['']
     const roots = Object.fromEntries(
-      Object.entries(cursors).filter(([pointer]) => persisted(pointer)),
+      [
+        ...(root
+          ? Object.keys(value).map(key => [pathFromArray([key]), root] as const)
+          : []),
+        ...Object.entries(cursors),
+      ].filter(([pointer]) => persisted(pointer)),
     )
     const previous = this.saved
     this.saved = { id, roots, value: { ...value } }

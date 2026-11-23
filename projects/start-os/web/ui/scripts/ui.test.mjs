@@ -227,7 +227,7 @@ const { ActivatedRoute, convertToParamMap, Router } =
   await import('@angular/router')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
-const { PatchDB } = await import('patch-db-client')
+const { PatchDB, SubtreePatchDB } = await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
 const { i18nService: ProductionI18nService } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.service.ts')
@@ -5363,6 +5363,41 @@ test('patch cache never persists registry or OS update data, or their cursors', 
     dump: { id: 3, value: { serverInfo: { a: 1 } } },
     cursors: { '/serverInfo': { epoch: 'boot', id: 3 } },
   })
+})
+
+test('whole-document subscriptions retain offline coverage without persisting external caches', async t => {
+  const { win } = fakeIndexedDb()
+  const cache = await rawPatchDbCache(t, win)
+  const cursor = { epoch: 'boot', id: 5 }
+  const newer = { epoch: 'boot', id: 6 }
+  const value = {
+    serverInfo: { hostname: 'cached' },
+    packageData: {},
+    ui: { a: 1 },
+    registryCache: { r: {} },
+    osUpdateCache: { versions: {} },
+  }
+  await cache.write({ id: 5, value }, { '': cursor, '/ui': newer })
+  const { dump, cursors } = await (await rawPatchDbCache(t, win)).read()
+  assert.deepEqual(cursors, {
+    '/serverInfo': cursor,
+    '/packageData': cursor,
+    '/ui': newer,
+  })
+  assert.deepEqual(Object.keys(dump.value).sort(), [
+    'packageData',
+    'serverInfo',
+    'ui',
+  ])
+  const patch = new SubtreePatchDB({ subscribe: () => EMPTY })
+  patch.restore(dump, cursors)
+  const values = []
+  const subscription = patch.watch$('serverInfo').subscribe(v => values.push(v))
+  t.after(() => {
+    subscription.unsubscribe()
+    patch.stop()
+  })
+  assert.deepEqual(values, [{ hostname: 'cached' }])
 })
 
 test('patch cache stores a keyed root that is not a map whole', async t => {

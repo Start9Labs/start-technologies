@@ -274,21 +274,25 @@ export function scopeOperations(
   pointer: string,
 ): Operation<unknown>[] {
   return patch.flatMap((op): Operation<unknown>[] => {
-    if (op.path === pointer || op.path.startsWith(pointer + '/'))
-      return [{ ...op, path: op.path.slice(pointer.length) }]
-    if (op.path === '' || pointer.startsWith(op.path + '/')) {
-      if (op.op === PatchOp.REMOVE) return [{ op: PatchOp.REMOVE, path: '' }]
+    if (
+      op.path === pointer ||
+      op.path === '' ||
+      pointer.startsWith(op.path + '/')
+    ) {
+      if (op.op === PatchOp.REMOVE)
+        return [{ op: PatchOp.REPLACE, path: '', value: null }]
       return [
         {
-          op: PatchOp.REPLACE,
+          ...op,
           path: '',
-          value: getValueByPointer(
-            op.value as any,
-            pointer.slice(op.path.length),
-          ),
+          value:
+            getValueByPointer(op.value as any, pointer.slice(op.path.length)) ??
+            null,
         },
       ]
     }
+    if (op.path.startsWith(pointer + '/'))
+      return [{ ...op, path: op.path.slice(pointer.length) }]
     return []
   })
 }
