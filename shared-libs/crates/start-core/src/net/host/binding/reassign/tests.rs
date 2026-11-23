@@ -69,7 +69,7 @@ fn database(host: Host, server: Host, ports: AvailablePorts) -> DatabaseModel {
         })),
         ..Default::default()
     };
-    let mut db = DatabaseModel::from(imbl_value::json!({
+    let mut db = DatabaseModel::from(imbl_value::ord_json!({
         "public": {
             "registryCache": {},
             "osUpdateCache": null,

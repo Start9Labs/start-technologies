@@ -1,15 +1,15 @@
 use std::fmt::Write;
 use std::{fs, io};
 
-use imbl_value::Value;
+use imbl_value::OrdValue;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct TestCase {
     comment: Option<String>,
-    doc: Value,
-    patch: Value,
-    expected: Option<Value>,
+    doc: OrdValue,
+    patch: OrdValue,
+    expected: Option<OrdValue>,
     error: Option<String>,
     #[serde(default)]
     disabled: bool,
@@ -17,7 +17,7 @@ struct TestCase {
     merge: bool,
 }
 
-fn run_case(doc: &Value, patches: &Value, merge_patch: bool) -> Result<Value, String> {
+fn run_case(doc: &OrdValue, patches: &OrdValue, merge_patch: bool) -> Result<OrdValue, String> {
     let mut actual = doc.clone();
     if merge_patch {
         crate::merge(&mut actual, patches);
@@ -37,7 +37,7 @@ fn run_case(doc: &Value, patches: &Value, merge_patch: bool) -> Result<Value, St
     Ok(actual)
 }
 
-fn run_case_patch_unsafe(doc: &Value, patches: &Value) -> Result<Value, String> {
+fn run_case_patch_unsafe(doc: &OrdValue, patches: &OrdValue) -> Result<OrdValue, String> {
     let mut actual = doc.clone();
     let patches: crate::Patch =
         imbl_value::from_value(patches.clone()).map_err(|e| e.to_string())?;

@@ -266,7 +266,7 @@ async fn target_initialization_and_content_recovery_require_validated_contents()
 }
 
 fn database() -> DatabaseModel {
-    DatabaseModel::from(to_value(&serde_json::json!({
+    DatabaseModel::from(imbl_value::to_ord_value(&serde_json::json!({
         "public": {"backupTargets": {}},
         "private": {"backupTargetCredentials": {}, "cifs": {
             "7": {"hostname": "nas.local", "path": "/backups", "username": "family", "password": "private-password"}

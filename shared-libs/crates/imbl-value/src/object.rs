@@ -1,10 +1,11 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use imbl::shared_ptr::DefaultSharedPtr;
 use imbl::OrdMap;
 use yasi::InternedString;
 
-use crate::{GenericValue, InOMap};
+use crate::{GenericValue, InOMap, OrdMapIterMut};
 
 /// The map backing a JSON object whose values are `V`.
 pub trait ObjectMap<V>: Clone + Default + FromIterator<(InternedString, V)> {
@@ -12,10 +13,15 @@ pub trait ObjectMap<V>: Clone + Default + FromIterator<(InternedString, V)> {
     where
         Self: 'a,
         V: 'a;
+    type EntriesMut<'a>: Iterator<Item = (&'a InternedString, &'a mut V)>
+    where
+        Self: 'a,
+        V: 'a;
     type IntoEntries: ExactSizeIterator<Item = (InternedString, V)>;
 
     fn len(&self) -> usize;
     fn entries(&self) -> Self::Entries<'_>;
+    fn entries_mut(&mut self) -> Self::EntriesMut<'_>;
     fn into_entries(self) -> Self::IntoEntries;
     fn get(&self, key: &str) -> Option<&V>;
     fn get_mut(&mut self, key: &str) -> Option<&mut V>;
@@ -51,6 +57,13 @@ impl<V: Clone> ObjectMap<V> for InOMap<InternedString, V> {
         = crate::in_order_map::Iter<'a, InternedString, V>
     where
         V: 'a;
+    type EntriesMut<'a>
+        = std::iter::Map<
+        imbl::vector::IterMut<'a, (InternedString, V), DefaultSharedPtr>,
+        fn(&'a mut (InternedString, V)) -> (&'a InternedString, &'a mut V),
+    >
+    where
+        V: 'a;
     type IntoEntries = <Self as IntoIterator>::IntoIter;
 
     fn len(&self) -> usize {
@@ -58,6 +71,9 @@ impl<V: Clone> ObjectMap<V> for InOMap<InternedString, V> {
     }
     fn entries(&self) -> Self::Entries<'_> {
         self.into_iter()
+    }
+    fn entries_mut(&mut self) -> Self::EntriesMut<'_> {
+        self.iter_mut().map(|(k, v)| (&*k, v))
     }
     fn into_entries(self) -> Self::IntoEntries {
         self.into_iter()
@@ -84,7 +100,11 @@ impl<V: Clone> ObjectMap<V> for InOMap<InternedString, V> {
 
 impl<V: Clone> ObjectMap<V> for OrdMap<InternedString, V> {
     type Entries<'a>
-        = imbl::ordmap::Iter<'a, InternedString, V, imbl::shared_ptr::DefaultSharedPtr>
+        = imbl::ordmap::Iter<'a, InternedString, V, DefaultSharedPtr>
+    where
+        V: 'a;
+    type EntriesMut<'a>
+        = OrdMapIterMut<'a, InternedString, V>
     where
         V: 'a;
     type IntoEntries = <Self as IntoIterator>::IntoIter;
@@ -94,6 +114,9 @@ impl<V: Clone> ObjectMap<V> for OrdMap<InternedString, V> {
     }
     fn entries(&self) -> Self::Entries<'_> {
         self.iter()
+    }
+    fn entries_mut(&mut self) -> Self::EntriesMut<'_> {
+        self.into()
     }
     fn into_entries(self) -> Self::IntoEntries {
         self.into_iter()

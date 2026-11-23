@@ -1,6 +1,5 @@
-use std::collections::BTreeSet;
-
-use imbl_value::Value;
+use imbl_value::imbl::ordmap::DiffItem;
+use imbl_value::OrdValue;
 use json_ptr::JsonPointer;
 
 use crate::{AddOperation, PatchOperation, RemoveOperation, ReplaceOperation};
@@ -32,7 +31,7 @@ impl PatchDiffer {
 /// use json_patch::{patch, diff, from_value};
 ///
 /// # pub fn main() {
-/// let left = json!({
+/// let left = ord_json!({
 ///   "title": "Goodbye!",
 ///   "author" : {
 ///     "givenName" : "John",
@@ -42,7 +41,7 @@ impl PatchDiffer {
 ///   "content": "This will be unchanged"
 /// });
 ///
-/// let right = json!({
+/// let right = ord_json!({
 ///   "title": "Hello!",
 ///   "author" : {
 ///     "givenName" : "John"
@@ -53,7 +52,7 @@ impl PatchDiffer {
 /// });
 ///
 /// let p = diff(&left, &right);
-/// assert_eq!(p, from_value(json!([
+/// assert_eq!(p, from_value(ord_json!([
 ///   { "op": "remove", "path": "/author/familyName" },
 ///   { "op": "add", "path": "/phoneNumber", "value": "+01-123-456-7890" },
 ///   { "op": "remove", "path": "/tags/1" },
@@ -66,43 +65,44 @@ impl PatchDiffer {
 ///
 /// # }
 /// ```
-pub fn diff(from: &Value, to: &Value) -> super::Patch {
+pub fn diff(from: &OrdValue, to: &OrdValue) -> super::Patch {
     let mut differ = PatchDiffer::new();
     diff_mut(&mut differ, from, to);
     differ.patch
 }
 
-fn diff_mut(differ: &mut PatchDiffer, from: &Value, to: &Value) {
+fn diff_mut(differ: &mut PatchDiffer, from: &OrdValue, to: &OrdValue) {
     match (from, to) {
-        (Value::Object(f), Value::Object(t)) if !f.ptr_eq(t) => {
-            for key in f
-                .keys()
-                .chain(t.keys())
-                .map(|k| &**k)
-                .collect::<BTreeSet<_>>()
-            {
-                differ.path.push_end(key);
-                match (f.get(key), to.get(key)) {
-                    (Some(f), Some(t)) if f != t => {
+        (OrdValue::Object(f), OrdValue::Object(t)) => {
+            for item in f.diff(t) {
+                match item {
+                    DiffItem::Update {
+                        old: (key, f),
+                        new: (_, t),
+                    } => {
+                        differ.path.push_end(key);
                         diff_mut(differ, f, t);
+                        differ.path.pop_end();
                     }
-                    (Some(_), None) => {
+                    DiffItem::Remove(key, _) => {
+                        differ.path.push_end(key);
                         differ.patch.0.push(PatchOperation::Remove(RemoveOperation {
                             path: differ.path.clone(),
                         }));
+                        differ.path.pop_end();
                     }
-                    (None, Some(t)) => {
+                    DiffItem::Add(key, t) => {
+                        differ.path.push_end(key);
                         differ.patch.0.push(PatchOperation::Add(AddOperation {
                             path: differ.path.clone(),
                             value: t.clone(),
                         }));
+                        differ.path.pop_end();
                     }
-                    _ => (),
                 }
-                differ.path.pop_end();
             }
         }
-        (Value::Array(f), Value::Array(t)) if !f.ptr_eq(t) => {
+        (OrdValue::Array(f), OrdValue::Array(t)) if !f.ptr_eq(t) => {
             if f.len() < t.len() {
                 let mut f_idx = 0;
                 let mut t_idx = 0;
@@ -195,15 +195,15 @@ fn diff_mut(differ: &mut PatchDiffer, from: &Value, to: &Value) {
 
 #[cfg(test)]
 mod tests {
-    use imbl_value::Value;
+    use imbl_value::OrdValue;
 
     #[test]
     pub fn replace_all() {
-        let left = json!({"title": "Hello!"});
-        let p = super::diff(&left, &Value::Null);
+        let left = ord_json!({"title": "Hello!"});
+        let p = super::diff(&left, &OrdValue::Null);
         assert_eq!(
             p,
-            imbl_value::from_value(json!([
+            imbl_value::from_value(ord_json!([
                 { "op": "replace", "path": "", "value": null },
             ]))
             .unwrap()
@@ -212,11 +212,11 @@ mod tests {
 
     #[test]
     pub fn add_all() {
-        let right = json!({"title": "Hello!"});
-        let p = super::diff(&Value::Null, &right);
+        let right = ord_json!({"title": "Hello!"});
+        let p = super::diff(&OrdValue::Null, &right);
         assert_eq!(
             p,
-            imbl_value::from_value(json!([
+            imbl_value::from_value(ord_json!([
                 { "op": "replace", "path": "", "value": { "title": "Hello!" } },
             ]))
             .unwrap()
@@ -225,12 +225,12 @@ mod tests {
 
     #[test]
     pub fn remove_all() {
-        let left = json!(["hello", "bye"]);
-        let right = json!([]);
+        let left = ord_json!(["hello", "bye"]);
+        let right = ord_json!([]);
         let p = super::diff(&left, &right);
         assert_eq!(
             p,
-            imbl_value::from_value(json!([
+            imbl_value::from_value(ord_json!([
                 { "op": "remove", "path": "/0" },
                 { "op": "remove", "path": "/0" },
             ]))
@@ -240,12 +240,12 @@ mod tests {
 
     #[test]
     pub fn remove_tail() {
-        let left = json!(["hello", "bye", "hi"]);
-        let right = json!(["hello"]);
+        let left = ord_json!(["hello", "bye", "hi"]);
+        let right = ord_json!(["hello"]);
         let p = super::diff(&left, &right);
         assert_eq!(
             p,
-            imbl_value::from_value(json!([
+            imbl_value::from_value(ord_json!([
                 { "op": "remove", "path": "/1" },
                 { "op": "remove", "path": "/1" },
             ]))
@@ -254,12 +254,12 @@ mod tests {
     }
     #[test]
     pub fn replace_object() {
-        let left = json!(["hello", "bye"]);
-        let right = json!({"hello": "bye"});
+        let left = ord_json!(["hello", "bye"]);
+        let right = ord_json!({"hello": "bye"});
         let p = super::diff(&left, &right);
         assert_eq!(
             p,
-            imbl_value::from_value(json!([
+            imbl_value::from_value(ord_json!([
                 { "op": "replace", "path": "", "value": &right },
             ]))
             .unwrap()
@@ -268,10 +268,10 @@ mod tests {
 
     #[test]
     fn escape_json_keys() {
-        let mut left = json!({
+        let mut left = ord_json!({
             "/slashed/path": 1
         });
-        let right = json!({
+        let right = ord_json!({
             "/slashed/path": 2,
         });
         let patch = super::diff(&left, &right);
@@ -284,7 +284,7 @@ mod tests {
 
     proptest::proptest! {
         #[test]
-        fn test_diff(mut from: Value, to: Value) {
+        fn test_diff(mut from: OrdValue, to: OrdValue) {
             let patch = super::diff(&from, &to);
             crate::patch(&mut from, &patch).unwrap();
             assert_eq!(from, to);

@@ -141,7 +141,7 @@ pub(crate) async fn replace_index(
     http: &reqwest::Client,
     signer: &Signer,
     upstream: &Url,
-    index: &Value,
+    index: &GenericValue<impl ObjectKind>,
 ) -> Result<(), Error> {
     let index: FullIndex = from_value(index.clone())?;
     let packages = Model::<PackageIndex>::new(&index.package)?;

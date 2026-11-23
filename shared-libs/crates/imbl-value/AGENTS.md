@@ -18,18 +18,20 @@ not that one. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it works.
   operations the rest of the crate uses on objects.
 - `src/ser.rs` — `Serialize` impl for `GenericValue` plus a custom `Serializer<K>` that turns any `T: Serialize`
   into a `GenericValue<K>`.
-- `src/de.rs` — `Deserialize` impl for `GenericValue` with the `MapAccess`/`SeqAccess` visitors.
+- `src/de.rs` — `Deserialize` impl for `GenericValue`, and one by-reference `Deserializer` that both
+  `GenericValue` and `&GenericValue` forward to: the owned form copies strings, the borrowed form lends them.
 - `src/from.rs` — `From`/`Into` impls: `serde_json::Value` ↔ `GenericValue`, `Value` ↔ `OrdValue`, and
   slice/array/`str` → `GenericValue`.
 - `src/index.rs` — the `Index` trait and impls for `usize`/`str`/`String` indexing.
 - `src/macros.rs` — the `json!` macro (and `json_internal!`/`json_internal_vec!`/`json_unexpected!` helpers)
-  for ergonomic `Value` construction.
+  for ergonomic `Value` construction, and `ord_json!`, which builds an `OrdValue` from the same syntax.
+- `src/ord_map_iter_mut.rs` — `OrdMapIterMut`, mutable iteration over an `imbl::OrdMap`, which `imbl` lacks.
 - `src/in_order_map/mod.rs` — `InOMap<K, V>`, an insertion-order-preserving persistent map backed by
   `imbl::Vector<(K, V)>`, with get/insert/remove/update plus union/difference/intersection set ops.
 - `src/in_order_map/my_visitor.rs` — `MyVisitor`, the serde `Visitor` for deserializing an `InOMap`.
 - `src/arbitrary.rs` — proptest `Arbitrary` impl and `value_strategy`/`number_strategy`/`array_strategy`/`object_strategy`.
   Gated behind the `arbitrary` feature.
-- RPC's `ts` consumer owns TypeScript bridges for `Value` (`unknown`) and `InOMap` (map).
+- RPC's `ts` consumer owns TypeScript bridges for `Value` and `OrdValue` (`unknown`) and `InOMap` (map).
 
 ## Build & test (run from the repo root)
 
@@ -48,6 +50,9 @@ cargo build -p imbl-value --features arbitrary  # build with the proptest strate
 - **Object keys are `yasi::InternedString`, not `String`.** `Value`'s objects are `InOMap<InternedString, Value>`
   and `OrdValue`'s are `OrdMap<InternedString, OrdValue>`; use the re-exported `imbl_value::InternedString`
   for keys.
+- **Deserializing an owned value never takes it apart.** `from_value` walks the value by reference, so a
+  value shared with another (a database snapshot, a clone) costs the same as `T::deserialize(&value)`.
+  Both forms fall back to `deserialize_any` when asked for a number they don't hold.
 - **Write value behavior once, against `GenericValue<K>`.** `Value` and `OrdValue` share every impl; reach
   objects through `ObjectMap` rather than a concrete map. `json!` builds a `Value`; convert with
   `OrdValue::from`.

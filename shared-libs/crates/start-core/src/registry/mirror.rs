@@ -163,7 +163,7 @@ pub async fn index_mirror(
 }
 
 async fn projected_root(
-    root: &Value,
+    root: &OrdValue,
     key: Option<&AnyVerifyingKey>,
     view: &IndexView,
     icons: &Path,
@@ -195,8 +195,6 @@ fn visible_index(
 mod tests {
     mod compatibility;
 
-    use imbl_value::json;
-
     use super::*;
     use crate::rpc_continuations::Guid;
 
@@ -205,15 +203,15 @@ mod tests {
             .verifying_key()
     }
 
-    fn package(private: bool, reader: &Guid) -> Value {
-        let mut asset = json!({ "readers": [reader] });
+    fn package(private: bool, reader: &Guid) -> OrdValue {
+        let mut asset = imbl_value::ord_json!({ "readers": [reader] });
         if private {
-            asset["private"] = json!({
+            asset["private"] = imbl_value::ord_json!({
                 "key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
                 "iv": "AgICAgICAgICAgICAgICAg",
             });
         }
-        json!({
+        imbl_value::ord_json!({
             "authorized": {},
             "categories": [],
             "versions": { "1.0.0:0": { "releaseNotes": "notes", "s9pks": [[{}, asset]] } },
@@ -221,8 +219,8 @@ mod tests {
     }
 
     /// The reader key is both a registered signer and a reader-directory entry.
-    fn root(private: bool, reader: &Guid, admins: &[&Guid]) -> Value {
-        json!({
+    fn root(private: bool, reader: &Guid, admins: &[&Guid]) -> OrdValue {
+        imbl_value::ord_json!({
             "migrations": [],
             "admins": admins,
             "index": {
@@ -247,20 +245,17 @@ mod tests {
         })
     }
 
-    fn secret_s9pk(root: &mut Value) -> &mut Value {
+    fn secret_s9pk(root: &mut OrdValue) -> &mut OrdValue {
         &mut root["index"]["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]
     }
 
-    fn packages(root: &Value) -> Vec<String> {
-        root["index"]["package"]["packages"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|k| k.to_string())
+    fn packages<K: ObjectKind>(root: &GenericValue<K>) -> Vec<String> {
+        imbl_value::ObjectMap::entries(root["index"]["package"]["packages"].as_object().unwrap())
+            .map(|(k, _)| k.to_string())
             .collect()
     }
 
-    async fn visible_root(root: &Value, key: Option<&AnyVerifyingKey>) -> Value {
+    async fn visible_root(root: &OrdValue, key: Option<&AnyVerifyingKey>) -> Value {
         projected_root(root, key, &IndexView::default(), Path::new(""))
             .await
             .unwrap()
@@ -297,7 +292,7 @@ mod tests {
             crate::sign::AnySigningKey::Ed25519(ed25519_dalek::SigningKey::from_bytes(&[8; 32]))
                 .verifying_key();
         let mirror_key_in =
-            |root: Value, key: Option<AnyVerifyingKey>| mirror_key(&root.into(), key).unwrap();
+            |root: OrdValue, key: Option<AnyVerifyingKey>| mirror_key(&root.into(), key).unwrap();
         assert_eq!(mirror_key_in(root(true, &reader, &[]), None), None);
         assert_eq!(
             mirror_key_in(root(true, &reader, &[]), Some(stranger)),
@@ -319,11 +314,11 @@ mod tests {
         let reader = Guid::new();
         let permitted = root(true, &reader, &[]);
         let mut denied = permitted.clone();
-        secret_s9pk(&mut denied)["readers"] = json!([]);
+        secret_s9pk(&mut denied)["readers"] = imbl_value::ord_json!([]);
         let mut admin = denied.clone();
-        admin["admins"] = json!([reader]);
+        admin["admins"] = imbl_value::ord_json!([reader]);
         let mut revoked = permitted.clone();
-        revoked["index"]["readers"] = json!({});
+        revoked["index"]["readers"] = imbl_value::ord_json!({});
 
         let main = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::in_memory());
         main.put(&JsonPointer::<&str>::default(), &denied)
@@ -391,7 +386,10 @@ mod tests {
         .await
         .unwrap();
         let (dump, mut sub) = public.db.dump_and_sub("/index".parse().unwrap()).await;
-        assert_eq!(packages(&json!({ "index": dump.value })), ["public"]);
+        assert_eq!(
+            packages(&imbl_value::ord_json!({ "index": dump.value })),
+            ["public"]
+        );
         assert_eq!(
             packages(&own.db.dump(&JsonPointer::<&str>::default()).await.value),
             ["public", "secret"]

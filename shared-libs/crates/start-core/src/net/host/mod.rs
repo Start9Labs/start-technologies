@@ -1115,7 +1115,7 @@ mod tests {
             if !stored {
                 range.remove("transport");
             }
-            let mut host = Model::<Host>::from(imbl_value::to_value(&value).unwrap());
+            let mut host = Model::<Host>::from(imbl_value::to_ord_value(&value).unwrap());
             host.update_addresses(
                 &ServerHostname::new(InternedString::intern("server")).unwrap(),
                 &Default::default(),

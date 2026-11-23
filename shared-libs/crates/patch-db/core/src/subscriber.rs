@@ -8,7 +8,7 @@ use std::task::{ready, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
-use imbl_value::{InternedString, Value};
+use imbl_value::{InternedString, OrdValue};
 use json_patch::patch;
 use json_ptr::JsonPointer;
 use serde::de::DeserializeOwned;
@@ -198,7 +198,7 @@ impl Broadcast {
 
 #[derive(Debug)]
 pub struct DbWatch {
-    state: Value,
+    state: OrdValue,
     subscriber: Subscriber,
     seen: bool,
 }
@@ -223,11 +223,11 @@ impl DbWatch {
         }
         Ok(())
     }
-    pub fn peek(&mut self) -> Result<Value, Error> {
+    pub fn peek(&mut self) -> Result<OrdValue, Error> {
         self.sync()?;
         Ok(self.state.clone())
     }
-    pub fn peek_and_mark_seen(&mut self) -> Result<Value, Error> {
+    pub fn peek_and_mark_seen(&mut self) -> Result<OrdValue, Error> {
         self.sync()?;
         self.seen = true;
         Ok(self.state.clone())
@@ -251,7 +251,7 @@ impl DbWatch {
 }
 impl Unpin for DbWatch {}
 impl Stream for DbWatch {
-    type Item = Result<Value, Error>;
+    type Item = Result<OrdValue, Error>;
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,

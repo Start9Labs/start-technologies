@@ -232,7 +232,7 @@ impl Model<PackageState> {
             PackageStateMatchModel::Installed(s) | PackageStateMatchModel::Removing(s) => {
                 s.into_manifest()
             }
-            PackageStateMatchModel::Error(_) => Value::Null.into(),
+            PackageStateMatchModel::Error(_) => OrdValue::Null.into(),
         }
     }
     pub fn as_manifest(&self, preference: ManifestPreference) -> &Model<Manifest> {
@@ -247,7 +247,7 @@ impl Model<PackageState> {
             PackageStateMatchModelRef::Installed(s) | PackageStateMatchModelRef::Removing(s) => {
                 s.as_manifest()
             }
-            PackageStateMatchModelRef::Error(_) => (&Value::Null).into(),
+            PackageStateMatchModelRef::Error(_) => (&OrdValue::Null).into(),
         }
     }
     pub fn as_manifest_mut(

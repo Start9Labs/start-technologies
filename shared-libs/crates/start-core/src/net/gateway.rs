@@ -10,7 +10,7 @@ use clap::Parser;
 use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use imbl::{OrdMap, OrdSet};
-use imbl_value::{InternedString, Value};
+use imbl_value::{InternedString, OrdMapIterMut, Value};
 use ipnet::IpNet;
 use itertools::Itertools;
 use nix::net::if_::if_nametoindex;
@@ -51,7 +51,6 @@ use crate::net::{
 };
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::collections::OrdMapIterMut;
 use crate::util::future::{NonDetachingJoinHandle, Until};
 use crate::util::io::open_file;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
@@ -4320,7 +4319,7 @@ mod dns_config_tests {
     #[tokio::test]
     async fn invalid_requester_dns_never_changes_gateway_or_dns() {
         let (_temp, db, interfaces) = policy_fixture().await;
-        let before: Value = db.peek().await.clone().into();
+        let before: OrdValue = db.peek().await.clone().into();
         for servers in [
             imbl_value::json!([]),
             imbl_value::json!(["bad"]),
@@ -4344,7 +4343,7 @@ mod dns_config_tests {
                     .await
                     .is_err()
             );
-            let after: Value = db.peek().await.clone().into();
+            let after: OrdValue = db.peek().await.clone().into();
             assert_eq!(before, after);
         }
     }
@@ -4370,7 +4369,7 @@ mod dns_config_tests {
             imbl_value::json!({"package": "pkg", "gateway": "wg0"}),
         )
         .await;
-        let before: Value = db.peek().await.clone().into();
+        let before: OrdValue = db.peek().await.clone().into();
         for gateway in ["eth0", "missing"] {
             let params =
                 imbl_value::json!({"package": "pkg", "gateway": gateway, "dns": {"servers": null}});
@@ -4388,7 +4387,7 @@ mod dns_config_tests {
                     .await
                     .is_err()
             );
-            let after: Value = db.peek().await.clone().into();
+            let after: OrdValue = db.peek().await.clone().into();
             assert_eq!(before, after);
         }
     }

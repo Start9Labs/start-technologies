@@ -13,7 +13,7 @@ fn publish_index(db: &mut DatabaseModel, index: &FullIndex) {
     publish_snapshot(
         db,
         &Subscription::Index(url()),
-        &to_value(index).unwrap(),
+        &to_ord_value(index).unwrap(),
         &device(),
     )
     .unwrap();
@@ -28,8 +28,8 @@ fn os_default_locale_follows_registry_only_changes_in_either_snapshot_order() {
         let mut db = database();
         let mut index = index();
         index.default_locale = Some("pl_PL".into());
-        let full = to_value(&index).unwrap();
-        let os = to_value(&index.os).unwrap();
+        let full = to_ord_value(&index).unwrap();
+        let os = to_ord_value(&index.os).unwrap();
         for subscription in order {
             let value = match &subscription {
                 Subscription::Index(_) => &full,
@@ -56,7 +56,7 @@ fn disconnecting_the_package_registry_clears_the_os_default_locale() {
     publish_snapshot(
         &mut db,
         &Subscription::Os(url()),
-        &to_value(&index.os).unwrap(),
+        &to_ord_value(&index.os).unwrap(),
         &device(),
     )
     .unwrap();

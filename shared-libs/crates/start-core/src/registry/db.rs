@@ -345,9 +345,12 @@ mod tests {
     #[tokio::test]
     async fn subscription_preserves_dump_and_revision_wire_format() {
         let db = PatchDb::in_memory();
-        db.put(&ROOT, &imbl_value::json!({"index": {"name": "registry"}}))
-            .await
-            .unwrap();
+        db.put(
+            &ROOT,
+            &imbl_value::ord_json!({"index": {"name": "registry"}}),
+        )
+        .await
+        .unwrap();
         crate::sign::instance::load(&db).await.unwrap();
         let (start, mut sub) = subscription_start(&db, None, None).await.unwrap();
         let wire = serde_json::to_value(SubscribeIndexResult::Stream(start)).unwrap();
@@ -363,7 +366,7 @@ mod tests {
         assert_eq!(revision.id, dump.id + 1);
         let mut value = dump.value;
         patch_db::json_patch::patch(&mut value, &revision.patch).unwrap();
-        assert_eq!(value, imbl_value::json!({"name": "renamed"}));
+        assert_eq!(value, imbl_value::ord_json!({"name": "renamed"}));
     }
 
     #[tokio::test]
@@ -401,15 +404,21 @@ mod tests {
             .unwrap();
         assert_ne!(other.epoch, start.epoch);
         assert!(other.revisions.is_none());
-        assert_eq!(other.value, Some(imbl_value::json!({"name": "registry"})));
+        assert_eq!(
+            other.value,
+            Some(imbl_value::ord_json!({"name": "registry"}))
+        );
     }
 
     #[tokio::test]
     async fn subscription_closes_after_32_queued_revisions_and_reconnects() {
         let db = PatchDb::in_memory();
-        db.put(&ROOT, &imbl_value::json!({"index": {"name": "registry"}}))
-            .await
-            .unwrap();
+        db.put(
+            &ROOT,
+            &imbl_value::ord_json!({"index": {"name": "registry"}}),
+        )
+        .await
+        .unwrap();
         let (_, mut sub) = subscription(&db, None).await.unwrap();
         for i in 0..32 {
             db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &i)
@@ -424,7 +433,7 @@ mod tests {
         }
         assert!(sub.recv().await.unwrap().is_none());
         let (dump, _) = subscription(&db, None).await.unwrap();
-        assert_eq!(dump.value, imbl_value::json!({"name": 65}));
+        assert_eq!(dump.value, imbl_value::ord_json!({"name": 65}));
     }
 
     #[test]
@@ -493,14 +502,14 @@ async fn cli_apply(
             .await?
             .apply_function(|db| {
                 let res = apply_expr(
-                    serde_json::to_value(patch_db::Value::from(db))
+                    serde_json::to_value(patch_db::OrdValue::from(db))
                         .with_kind(ErrorKind::Deserialization)?
                         .into(),
                     &expr,
                 )?;
 
                 Ok::<_, Error>((
-                    to_value(
+                    to_ord_value(
                         &serde_json::from_value::<RegistryDatabase>(res.clone().into()).with_ctx(
                             |_| {
                                 (
@@ -535,7 +544,7 @@ pub async fn apply(
     ctx.db
         .mutate(|db| {
             let res = apply_expr(
-                serde_json::to_value(patch_db::Value::from(db.clone()))
+                serde_json::to_value(patch_db::OrdValue::from(db.clone()))
                     .with_kind(ErrorKind::Deserialization)?
                     .into(),
                 &expr,

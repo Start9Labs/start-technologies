@@ -161,7 +161,7 @@ mod tests {
 
     fn entry(desired: DesiredStatus, started: bool) -> Model<PackageDataEntry> {
         Model::from(
-            crate::db::prelude::to_value(&json!({
+            crate::db::prelude::to_ord_value(&json!({
                 "statusInfo": StatusInfo {
                     desired,
                     started: started.then(chrono::Utc::now),

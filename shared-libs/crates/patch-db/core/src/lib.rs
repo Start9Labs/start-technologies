@@ -13,7 +13,8 @@ mod subscriber;
 mod test;
 
 pub use imbl_value as value;
-pub use imbl_value::Value;
+/// The value every database holds. Object keys are kept sorted; insertion order is not preserved.
+pub use imbl_value::OrdValue;
 pub use json_patch;
 pub use json_ptr;
 pub use model::{DestructureMut, HasModel, Model, ModelExt, Pointer};

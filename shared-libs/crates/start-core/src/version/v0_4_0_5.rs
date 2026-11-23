@@ -204,7 +204,7 @@ mod tests {
             let db = PatchDb::in_memory();
             db.put(&ROOT, &fixture).await.unwrap();
             Current::default().pre_init(&db).await.unwrap();
-            let migrated = db.dump(&ROOT).await.value;
+            let migrated = Value::from(db.dump(&ROOT).await.value);
             assert_eq!(
                 migrated["public"]["serverInfo"]["latestMigrationRevision"],
                 json!(Current::default().migration_revision())
@@ -239,12 +239,12 @@ mod tests {
                     .is_none()
             );
             Current::default().pre_init(&db).await.unwrap();
-            assert_eq!(db.dump(&ROOT).await.value, migrated);
+            assert_eq!(Value::from(db.dump(&ROOT).await.value), migrated);
             let mut completed = migrated;
             completed["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
             db.put(&ROOT, &completed).await.unwrap();
             Current::default().pre_init(&db).await.unwrap();
-            assert_eq!(db.dump(&ROOT).await.value, completed);
+            assert_eq!(Value::from(db.dump(&ROOT).await.value), completed);
         }
     }
 

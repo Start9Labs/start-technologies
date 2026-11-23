@@ -407,7 +407,7 @@ mod tests {
     use super::*;
 
     fn outbound_selections(default: Option<&str>, package: Option<&str>) -> Model<Database> {
-        imbl_value::json!({"public": {
+        imbl_value::ord_json!({"public": {
             "serverInfo": {"network": {"defaultOutbound": default}},
             "packageData": {
                 "inheriting": {"outboundGateway": null},

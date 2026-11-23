@@ -1,6 +1,6 @@
 use std::num::NonZeroUsize;
 
-use imbl_value::json;
+use imbl_value::ord_json;
 use json_ptr::ROOT;
 
 use crate::{Dump, PatchDb};
@@ -18,7 +18,7 @@ fn idle_subscriptions_reclaim_dropped_listeners_without_a_revision() {
     let capacity = NonZeroUsize::new(1).unwrap();
     let dump = Dump {
         id: 0,
-        value: json!(null),
+        value: ord_json!(null),
     };
     for _ in 0..100 {
         drop(
@@ -39,7 +39,7 @@ fn idle_subscriptions_reclaim_dropped_listeners_without_a_revision() {
 #[tokio::test]
 async fn json_subscribers_share_dumps_and_scoped_revisions_across_capacities() {
     let db = PatchDb::in_memory();
-    db.put(&ROOT, &json!({ "visible": 1, "secret": 7 }))
+    db.put(&ROOT, &ord_json!({ "visible": 1, "secret": 7 }))
         .await
         .unwrap();
     let pointer: json_ptr::JsonPointer = "/visible".parse().unwrap();
@@ -86,7 +86,7 @@ async fn json_subscribers_share_dumps_and_scoped_revisions_across_capacities() {
         .unwrap();
     let dump: Dump = serde_json::from_slice(&fresh).unwrap();
     assert_eq!(dump.id, 3);
-    assert_eq!(dump.value, json!(2));
+    assert_eq!(dump.value, ord_json!(2));
 }
 
 #[tokio::test]
@@ -104,7 +104,7 @@ async fn a_lagging_json_subscriber_closes_and_recovers_only_from_a_fresh_dump() 
         .unwrap();
     assert_eq!(
         serde_json::from_slice::<Dump>(&initial).unwrap().value,
-        json!(0)
+        ord_json!(0)
     );
     for value in 1..=2 {
         db.put(&ROOT, &value).await.unwrap();
@@ -119,7 +119,7 @@ async fn a_lagging_json_subscriber_closes_and_recovers_only_from_a_fresh_dump() 
         .unwrap();
     let dump: Dump = serde_json::from_slice(&dump).unwrap();
     assert_eq!(dump.id, 3);
-    assert_eq!(dump.value, json!(2));
+    assert_eq!(dump.value, ord_json!(2));
     db.put(&ROOT, &3).await.unwrap();
     assert!(slow.recv().await.unwrap().is_none());
     let next = reconnected.recv().await.unwrap().unwrap();
@@ -129,7 +129,7 @@ async fn a_lagging_json_subscriber_closes_and_recovers_only_from_a_fresh_dump() 
 #[tokio::test]
 async fn json_dump_and_subscription_cover_changes_before_the_dump_is_read() {
     let db = PatchDb::in_memory();
-    db.put(&ROOT, &json!({ "count": 0 })).await.unwrap();
+    db.put(&ROOT, &ord_json!({ "count": 0 })).await.unwrap();
     let (dump, mut revisions) = db
         .dump_and_sub_json(ROOT.to_owned(), NonZeroUsize::new(4).unwrap())
         .await
@@ -138,7 +138,7 @@ async fn json_dump_and_subscription_cover_changes_before_the_dump_is_read() {
         .await
         .unwrap();
     let mut dump: Dump = serde_json::from_slice(&dump).unwrap();
-    assert_eq!(dump.value["count"], json!(0));
+    assert_eq!(dump.value["count"], ord_json!(0));
     let json = revisions.recv().await.unwrap().unwrap();
     let revision: crate::Revision = serde_json::from_slice(&json).unwrap();
     assert_eq!(revision.id, dump.id + 1);

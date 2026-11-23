@@ -10,7 +10,7 @@ async fn watched_db() -> TypedPatchDb<Database> {
     publish_snapshot(
         &mut model,
         &Subscription::Index(url()),
-        &to_value(&index()).unwrap(),
+        &to_ord_value(&index()).unwrap(),
         &device(),
     )
     .unwrap();
@@ -31,9 +31,9 @@ fn pointer(segments: &[&str]) -> JsonPointer {
     pointer
 }
 
-fn release_notes(details: &GetPackageResponse, version: &str) -> Value {
+fn release_notes(details: &GetPackageResponse, version: &str) -> OrdValue {
     let version: VersionString = version.parse().unwrap();
-    to_value(&details.other_versions.as_ref().unwrap()[&version].release_notes).unwrap()
+    to_ord_value(&details.other_versions.as_ref().unwrap()[&version].release_notes).unwrap()
 }
 
 #[tokio::test]
@@ -45,7 +45,10 @@ async fn watched_details_follow_index_changes_and_skip_unrelated_writes() {
             .unwrap();
     let mut changes = Box::pin(changes);
     assert!(current.best.contains_key(&"2.0.0:0".parse().unwrap()));
-    assert_eq!(release_notes(&current, "1.0.0:0"), json!("First"));
+    assert_eq!(
+        release_notes(&current, "1.0.0:0"),
+        imbl_value::ord_json!("First")
+    );
 
     db.put(&pointer(&["public", "serverInfo", "hostname"]), &"renamed")
         .await
@@ -72,7 +75,10 @@ async fn watched_details_follow_index_changes_and_skip_unrelated_writes() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(release_notes(&next, "1.0.0:0"), json!("Edited"));
+    assert_eq!(
+        release_notes(&next, "1.0.0:0"),
+        imbl_value::ord_json!("Edited")
+    );
 }
 
 #[tokio::test]

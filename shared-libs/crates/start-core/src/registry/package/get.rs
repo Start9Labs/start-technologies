@@ -426,7 +426,7 @@ pub struct ListedVersion {
 rpc_toolkit::reflect_ts!(ListedVersion);
 
 /// The release as the index saves it, without s9pk access.
-fn listed_release(info: &Model<PackageVersionInfo>) -> Value {
+fn listed_release(info: &Model<PackageVersionInfo>) -> OrdValue {
     let mut release = info.as_value().clone();
     if let Some(fields) = release.as_object_mut() {
         if let Some(s9pks) = fields.remove("s9pks") {
@@ -437,7 +437,7 @@ fn listed_release(info: &Model<PackageVersionInfo>) -> Value {
 }
 
 /// `PackageVersionInfo::strip_access`, leaving public assets' values untouched.
-fn without_access(mut s9pks: Value) -> Value {
+fn without_access(mut s9pks: OrdValue) -> OrdValue {
     const ACCESS: [&str; 2] = ["private", "readers"];
     let restricted: Vec<usize> = s9pks
         .as_array()
@@ -455,7 +455,7 @@ fn without_access(mut s9pks: Value) -> Value {
         if let Some(asset) = s9pks
             .get_mut(i)
             .and_then(|entry| entry.get_mut(1))
-            .and_then(Value::as_object_mut)
+            .and_then(OrdValue::as_object_mut)
         {
             for key in ACCESS {
                 asset.remove(key);
@@ -492,13 +492,13 @@ pub(crate) fn listing(
             .with_kind(ErrorKind::Serialization)?;
     }
     let superseded = superseded_revisions(Some(&releases), &other)?;
-    let versions: imbl_value::InOMap<_, _> = releases
+    let versions: imbl::OrdMap<_, _> = releases
         .keys()
         .chain(other.keys())
         .map(|version| {
             Ok::<_, Error>((
                 InternedString::from_display(version),
-                to_value(&ListedVersion {
+                to_ord_value(&ListedVersion {
                     superseded: superseded.contains(version),
                 })?,
             ))
@@ -513,7 +513,7 @@ pub(crate) fn listing(
         .as_packages()
         .as_idx(id)
         .or_not_found(lazy_format!("package {id}"))?;
-    let mut row = imbl_value::InOMap::new();
+    let mut row = imbl::OrdMap::new();
     row.insert(
         "detailsHash".into(),
         details_hash.finalize().to_hex().as_str().into(),
@@ -523,19 +523,19 @@ pub(crate) fn listing(
         package.as_categories().as_value().clone(),
     );
     if let Some(published) = first_published_at(index, id)? {
-        row.insert("firstPublishedAt".into(), to_value(&published)?);
+        row.insert("firstPublishedAt".into(), to_ord_value(&published)?);
     }
     row.insert(
         "releases".into(),
         releases
             .iter()
             .map(|(version, info)| (InternedString::from_display(version), listed_release(info)))
-            .collect::<imbl_value::InOMap<_, _>>()
+            .collect::<imbl::OrdMap<_, _>>()
             .into(),
     );
     row.insert("versions".into(), versions.into());
     if let Some(target) = update_target {
-        row.insert("updateTarget".into(), to_value(target)?);
+        row.insert("updateTarget".into(), to_ord_value(target)?);
     }
     Ok(Some(Model::from_value(row.into())))
 }
@@ -998,7 +998,7 @@ mod tests {
         let s9pks: Vec<_> = s9pks.into_iter().map(|hw| json!([hw, null])).collect();
         (
             v.parse().unwrap(),
-            json!({ "releaseNotes": v, "s9pks": s9pks }).into(),
+            OrdValue::from(json!({ "releaseNotes": v, "s9pks": s9pks })).into(),
         )
     }
 
@@ -1079,7 +1079,7 @@ mod tests {
         let values = |entries: BTreeMap<VersionString, Model<PackageVersionInfo>>| {
             entries
                 .into_iter()
-                .map(|(version, info)| (version, Value::from(info)))
+                .map(|(version, info)| (version, OrdValue::from(info)))
                 .collect::<BTreeMap<_, _>>()
         };
         assert_eq!(values(actual), values(versions(expected)));
@@ -1181,7 +1181,7 @@ mod tests {
 
         let (_, info) = version_info_signed_by(1);
         let info = to_value(&info).unwrap();
-        let index: Model<PackageIndex> = json!({
+        let index: Model<PackageIndex> = imbl_value::ord_json!({
             "categories": {},
             "packages": { "demo": {
                 "authorized": {},
@@ -1260,7 +1260,7 @@ mod tests {
 
         let (_, info) = version_info_signed_by(1);
         let info = to_value(&info).unwrap();
-        let index: Model<PackageIndex> = json!({
+        let index: Model<PackageIndex> = imbl_value::ord_json!({
             "categories": {},
             "packages": { "demo": {
                 "authorized": {},
@@ -1322,7 +1322,7 @@ mod tests {
         first.s9pks[0].1.published_at = "2026-01-01T00:00:00Z".parse().unwrap();
         let (_, mut second) = version_info_signed_by(2);
         second.s9pks[0].1.published_at = "2026-03-01T00:00:00Z".parse().unwrap();
-        let index: Model<PackageIndex> = json!({
+        let index: Model<PackageIndex> = imbl_value::ord_json!({
             "categories": {},
             "packages": { "demo": {
                 "authorized": {},

@@ -409,7 +409,7 @@ mod test {
     }
 
     fn db(server_host: imbl_value::Value, package_host: imbl_value::Value) -> DatabaseModel {
-        DatabaseModel::from(imbl_value::json!({
+        DatabaseModel::from(imbl_value::ord_json!({
             "public": {
                 "serverInfo": { "network": { "host": server_host } },
                 "packageData": { "nextcloud": { "hosts": { "ui": package_host } } },

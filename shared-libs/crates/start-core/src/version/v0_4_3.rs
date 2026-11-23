@@ -410,7 +410,7 @@ mod tests {
         let db = PatchDb::in_memory();
         db.put(&ROOT, &fixture).await.unwrap();
         Version.pre_init(&db).await.unwrap();
-        let migrated = db.dump(&ROOT).await.value;
+        let migrated = Value::from(db.dump(&ROOT).await.value);
         assert_eq!(migrated["public"]["sshPubkeys"], json!({}));
         assert!(migrated["private"].get("sshPubkeys").is_none());
         assert_eq!(
@@ -418,7 +418,7 @@ mod tests {
             json!(Version.migration_revision())
         );
         Version.pre_init(&db).await.unwrap();
-        assert_eq!(db.dump(&ROOT).await.value, migrated);
+        assert_eq!(Value::from(db.dump(&ROOT).await.value), migrated);
     }
 
     fn row(hostname: &str, public: bool, metadata: Value) -> Value {

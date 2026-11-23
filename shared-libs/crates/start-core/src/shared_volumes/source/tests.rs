@@ -224,7 +224,7 @@ fn password_edits_preserve_omissions_and_clear_explicit_empty_values() {
 fn observations_are_flattened_and_preserve_the_volume_definition() {
     let id = SharedVolumeId::new();
     let mut db = crate::db::model::DatabaseModel::from(
-        to_value(&serde_json::json!({
+        imbl_value::to_ord_value(&serde_json::json!({
             "public": { "sharedVolumes": {
                 id.to_string(): {
                     "name": "Photos",
@@ -279,7 +279,7 @@ fn observations_are_flattened_and_preserve_the_volume_definition() {
 #[test]
 fn a_finished_check_does_not_resurrect_a_removed_volume() {
     let mut db = crate::db::model::DatabaseModel::from(
-        to_value(&serde_json::json!({
+        imbl_value::to_ord_value(&serde_json::json!({
             "public": {"sharedVolumes": {}}
         }))
         .unwrap(),
@@ -296,7 +296,7 @@ fn a_finished_check_does_not_resurrect_a_removed_volume() {
 #[test]
 fn credential_changes_reject_checks_of_the_previous_source() {
     let id = SharedVolumeId::new();
-    let mut db = crate::db::model::DatabaseModel::from(to_value(&serde_json::json!({
+    let mut db = crate::db::model::DatabaseModel::from(imbl_value::to_ord_value(&serde_json::json!({
         "public": {"sharedVolumes": { id.to_string(): {
             "name": "Remote", "source": {"kind": "cifs", "hostname": "nas.local", "path": "/share", "username": "user"},
             "grants": {}, "availability": "unknown"

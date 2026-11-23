@@ -123,7 +123,7 @@ pub(crate) struct SubscriptionStart {
     pub epoch: Option<InternedString>,
     pub id: u64,
     #[serde(default)]
-    pub value: Value,
+    pub value: OrdValue,
     /// Present only when the registry resumed from the requested cursor.
     #[serde(default)]
     pub revisions: Option<Vec<Revision>>,
@@ -140,7 +140,7 @@ pub(crate) enum SubscriptionEvent {
 pub(crate) struct TrackedValue(Option<Dump>);
 
 impl TrackedValue {
-    pub(crate) fn apply(&mut self, event: SubscriptionEvent) -> Result<&Value, Error> {
+    pub(crate) fn apply(&mut self, event: SubscriptionEvent) -> Result<&OrdValue, Error> {
         match event {
             SubscriptionEvent::Start(start) => {
                 ensure_code!(
@@ -300,7 +300,7 @@ impl SubscriptionFollower {
 
     /// Returns the request ID and full subtree after each dump or revision.
     /// `None` once the registry ends a subscription or closes the socket.
-    pub(crate) async fn next(&mut self) -> Result<Option<(u64, Value)>, Error> {
+    pub(crate) async fn next(&mut self) -> Result<Option<(u64, OrdValue)>, Error> {
         let Some((id, event)) = self.next_event().await? else {
             return Ok(None);
         };

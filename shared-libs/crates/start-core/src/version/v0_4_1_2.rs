@@ -278,7 +278,7 @@ mod tests {
             .pre_init(&db)
             .await
             .unwrap();
-        let migrated = db.dump(&patch_db::json_ptr::ROOT).await.value;
+        let migrated = Value::from(db.dump(&patch_db::json_ptr::ROOT).await.value);
         let keys: TrustedKeys =
             from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
         assert_eq!(keys.len(), 3);

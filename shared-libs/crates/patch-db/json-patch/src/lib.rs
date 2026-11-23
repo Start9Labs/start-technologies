@@ -21,7 +21,7 @@
 //! use serde_json::from_str;
 //!
 //! # pub fn main() {
-//! let mut doc = json!([
+//! let mut doc = ord_json!([
 //!     { "name": "Andrew" },
 //!     { "name": "Maxim" }
 //! ]);
@@ -32,7 +32,7 @@
 //! ]"#).unwrap();
 //!
 //! patch(&mut doc, &p).unwrap();
-//! assert_eq!(doc, json!([
+//! assert_eq!(doc, ord_json!([
 //!   { "name": "Andrew", "happy": true },
 //!   { "name": "Maxim" }
 //! ]));
@@ -50,7 +50,7 @@
 //! use json_patch::merge;
 //!
 //! # pub fn main() {
-//! let mut doc = json!({
+//! let mut doc = ord_json!({
 //!   "title": "Goodbye!",
 //!   "author" : {
 //!     "givenName" : "John",
@@ -60,7 +60,7 @@
 //!   "content": "This will be unchanged"
 //! });
 //!
-//! let patch = json!({
+//! let patch = ord_json!({
 //!   "title": "Hello!",
 //!   "phoneNumber": "+01-123-456-7890",
 //!   "author": {
@@ -70,7 +70,7 @@
 //! });
 //!
 //! merge(&mut doc, &patch);
-//! assert_eq!(doc, json!({
+//! assert_eq!(doc, ord_json!({
 //!   "title": "Hello!",
 //!   "author" : {
 //!     "givenName" : "John"
@@ -89,7 +89,8 @@ extern crate imbl_value;
 use std::error::Error;
 use std::{fmt, mem};
 
-use imbl_value::{InOMap as Map, Value};
+use imbl_value::imbl::OrdMap;
+use imbl_value::OrdValue;
 use json_ptr::{JsonPointer, SegList};
 use serde::{Deserialize, Serialize};
 
@@ -178,7 +179,7 @@ pub struct AddOperation {
     /// within the target document where the operation is performed.
     pub path: JsonPointer<String>,
     /// Value to add to the target location.
-    pub value: Value,
+    pub value: OrdValue,
 }
 
 /// JSON Patch 'remove' operation representation
@@ -198,7 +199,7 @@ pub struct ReplaceOperation {
     /// within the target document where the operation is performed.
     pub path: JsonPointer<String>,
     /// Value to replace with.
-    pub value: Value,
+    pub value: OrdValue,
 }
 
 /// JSON Patch 'move' operation representation
@@ -233,7 +234,7 @@ pub struct TestOperation {
     /// within the target document where the operation is performed.
     pub path: JsonPointer<String>,
     /// Value to test against.
-    pub value: Value,
+    pub value: OrdValue,
 }
 
 /// JSON Patch single patch operation
@@ -278,28 +279,28 @@ impl fmt::Display for PatchError {
 }
 
 fn add<S: AsRef<str>, V: SegList>(
-    doc: &mut Value,
+    doc: &mut OrdValue,
     path: &JsonPointer<S, V>,
-    value: Value,
-) -> Result<Option<Value>, PatchError> {
+    value: OrdValue,
+) -> Result<Option<OrdValue>, PatchError> {
     path.insert(doc, value, false)
         .map_err(|_| PatchError::InvalidPointer)
 }
 
 fn remove<S: AsRef<str>, V: SegList>(
-    doc: &mut Value,
+    doc: &mut OrdValue,
     path: &JsonPointer<S, V>,
     allow_last: bool,
-) -> Result<Value, PatchError> {
+) -> Result<OrdValue, PatchError> {
     path.remove(doc, allow_last)
         .ok_or(PatchError::InvalidPointer)
 }
 
 fn replace<S: AsRef<str>, V: SegList>(
-    doc: &mut Value,
+    doc: &mut OrdValue,
     path: &JsonPointer<S, V>,
-    value: Value,
-) -> Result<Value, PatchError> {
+    value: OrdValue,
+) -> Result<OrdValue, PatchError> {
     if let Some(target) = path.get_mut(doc) {
         Ok(mem::replace(target, value))
     } else {
@@ -308,11 +309,11 @@ fn replace<S: AsRef<str>, V: SegList>(
 }
 
 fn mov<S0: AsRef<str>, S1: AsRef<str>>(
-    doc: &mut Value,
+    doc: &mut OrdValue,
     from: &JsonPointer<S0>,
     path: &JsonPointer<S1>,
     allow_last: bool,
-) -> Result<Option<Value>, PatchError> {
+) -> Result<Option<OrdValue>, PatchError> {
     if path == from {
         return Ok(None);
     }
@@ -325,18 +326,18 @@ fn mov<S0: AsRef<str>, S1: AsRef<str>>(
 }
 
 fn copy<S0: AsRef<str>, S1: AsRef<str>>(
-    doc: &mut Value,
+    doc: &mut OrdValue,
     from: &JsonPointer<S0>,
     path: &JsonPointer<S1>,
-) -> Result<Option<Value>, PatchError> {
+) -> Result<Option<OrdValue>, PatchError> {
     let source = from.get(doc).ok_or(PatchError::InvalidPointer)?.clone();
     add(doc, path, source)
 }
 
 fn test<S: AsRef<str>, V: SegList>(
-    doc: &Value,
+    doc: &OrdValue,
     path: &JsonPointer<S, V>,
-    expected: &Value,
+    expected: &OrdValue,
 ) -> Result<(), PatchError> {
     let target = path.get(doc).ok_or(PatchError::InvalidPointer)?;
     if *target == *expected {
@@ -349,7 +350,7 @@ fn test<S: AsRef<str>, V: SegList>(
 /// Create JSON Patch from JSON Value
 /// # Examples
 ///
-/// Create patch from `imbl_value::Value`:
+/// Create patch from `imbl_value::OrdValue`:
 ///
 /// ```rust
 /// #[macro_use]
@@ -359,7 +360,7 @@ fn test<S: AsRef<str>, V: SegList>(
 /// use json_patch::{Patch, from_value};
 ///
 /// # pub fn main() {
-/// let patch_value = json!([
+/// let patch_value = ord_json!([
 ///   { "op": "test", "path": "/0/name", "value": "Andrew" },
 ///   { "op": "add", "path": "/0/happy", "value": true }
 /// ]);
@@ -385,12 +386,12 @@ fn test<S: AsRef<str>, V: SegList>(
 /// let patch: Patch = from_str(patch_str).unwrap();
 /// # }
 /// ```
-pub fn from_value(value: Value) -> Result<Patch, imbl_value::Error> {
+pub fn from_value(value: OrdValue) -> Result<Patch, imbl_value::Error> {
     let patch = imbl_value::from_value::<Vec<PatchOperation>>(value)?;
     Ok(Patch(patch))
 }
 
-/// Patch provided JSON document (given as `imbl_value::Value`) in-place. If any of the patch is
+/// Patch provided JSON document (given as `imbl_value::OrdValue`) in-place. If any of the patch is
 /// failed, all previous operations are reverted. In case of internal error resulting in panic,
 /// document might be left in inconsistent state.
 ///
@@ -406,7 +407,7 @@ pub fn from_value(value: Value) -> Result<Patch, imbl_value::Error> {
 /// use serde_json::from_str;
 ///
 /// # pub fn main() {
-/// let mut doc = json!([
+/// let mut doc = ord_json!([
 ///     { "name": "Andrew" },
 ///     { "name": "Maxim" }
 /// ]);
@@ -417,25 +418,25 @@ pub fn from_value(value: Value) -> Result<Patch, imbl_value::Error> {
 /// ]"#).unwrap();
 ///
 /// patch(&mut doc, &p).unwrap();
-/// assert_eq!(doc, json!([
+/// assert_eq!(doc, ord_json!([
 ///   { "name": "Andrew", "happy": true },
 ///   { "name": "Maxim" }
 /// ]));
 ///
 /// # }
 /// ```
-pub fn patch<'a>(doc: &mut Value, patch: &'a Patch) -> Result<Undo<'a>, PatchError> {
+pub fn patch<'a>(doc: &mut OrdValue, patch: &'a Patch) -> Result<Undo<'a>, PatchError> {
     let mut undo = Undo(Vec::with_capacity(patch.0.len()));
     apply_patches(doc, &patch.0, &mut undo).map(|_| undo)
 }
 
-type UndoOperation<'a> = Box<dyn FnOnce(&mut Value) + Send + Sync + 'a>;
+type UndoOperation<'a> = Box<dyn FnOnce(&mut OrdValue) + Send + Sync + 'a>;
 
 /// Object that can be used to undo a patch if successful
 pub struct Undo<'a>(Vec<UndoOperation<'a>>);
 impl<'a> Undo<'a> {
     /// Apply the undo to the document
-    pub fn apply(mut self, doc: &mut Value) {
+    pub fn apply(mut self, doc: &mut OrdValue) {
         while let Some(undo) = self.0.pop() {
             undo(doc)
         }
@@ -445,7 +446,7 @@ impl<'a> Undo<'a> {
 // Apply patches while tracking all the changes being made so they can be reverted back in case
 // subsequent patches fail. Uses heap allocated closures to keep the state.
 fn apply_patches<'a>(
-    doc: &mut Value,
+    doc: &mut OrdValue,
     patches: &'a [PatchOperation],
     undo: &mut Undo<'a>,
 ) -> Result<(), PatchError> {
@@ -510,10 +511,10 @@ fn apply_patches<'a>(
     Ok(())
 }
 
-/// Patch provided JSON document (given as `imbl_value::Value`) in place.
+/// Patch provided JSON document (given as `imbl_value::OrdValue`) in place.
 /// Operations are applied in unsafe manner. If any of the operations fails, all previous
 /// operations are not reverted.
-pub fn patch_unsafe(doc: &mut Value, patch: &Patch) -> Result<(), PatchError> {
+pub fn patch_unsafe(doc: &mut OrdValue, patch: &Patch) -> Result<(), PatchError> {
     for op in &patch.0 {
         match *op {
             PatchOperation::Add(ref op) => {
@@ -539,7 +540,7 @@ pub fn patch_unsafe(doc: &mut Value, patch: &Patch) -> Result<(), PatchError> {
     Ok(())
 }
 
-/// Patch provided JSON document (given as `imbl_value::Value`) in place with JSON Merge Patch
+/// Patch provided JSON document (given as `imbl_value::OrdValue`) in place with JSON Merge Patch
 /// (RFC 7396).
 ///
 /// # Example
@@ -553,7 +554,7 @@ pub fn patch_unsafe(doc: &mut Value, patch: &Patch) -> Result<(), PatchError> {
 /// use json_patch::merge;
 ///
 /// # pub fn main() {
-/// let mut doc = json!({
+/// let mut doc = ord_json!({
 ///   "title": "Goodbye!",
 ///   "author" : {
 ///     "givenName" : "John",
@@ -563,7 +564,7 @@ pub fn patch_unsafe(doc: &mut Value, patch: &Patch) -> Result<(), PatchError> {
 ///   "content": "This will be unchanged"
 /// });
 ///
-/// let patch = json!({
+/// let patch = ord_json!({
 ///   "title": "Hello!",
 ///   "phoneNumber": "+01-123-456-7890",
 ///   "author": {
@@ -573,7 +574,7 @@ pub fn patch_unsafe(doc: &mut Value, patch: &Patch) -> Result<(), PatchError> {
 /// });
 ///
 /// merge(&mut doc, &patch);
-/// assert_eq!(doc, json!({
+/// assert_eq!(doc, ord_json!({
 ///   "title": "Hello!",
 ///   "author" : {
 ///     "givenName" : "John"
@@ -584,21 +585,21 @@ pub fn patch_unsafe(doc: &mut Value, patch: &Patch) -> Result<(), PatchError> {
 /// }));
 /// # }
 /// ```
-pub fn merge(doc: &mut Value, patch: &Value) {
+pub fn merge(doc: &mut OrdValue, patch: &OrdValue) {
     if !patch.is_object() {
         *doc = patch.clone();
         return;
     }
 
     if !doc.is_object() {
-        *doc = Value::Object(Map::new());
+        *doc = OrdValue::Object(OrdMap::new());
     }
     let map = doc.as_object_mut().unwrap();
     for (key, value) in patch.as_object().unwrap() {
         if value.is_null() {
             map.remove(key);
         } else {
-            merge(map.entry(key.clone()).or_insert(Value::Null), value);
+            merge(map.entry(key.clone()).or_insert(OrdValue::Null), value);
         }
     }
 }

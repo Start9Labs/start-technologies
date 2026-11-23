@@ -216,7 +216,7 @@ fn impl_fns(model_ty: &Type, children: &[ChildInfo], name: &Ident) -> Fns {
                 {
                     #[allow(unused_imports)]
                     use patch_db::value::index::Index;
-                    #accessor.index_into(v).unwrap_or(&patch_db::value::NULL)
+                    #accessor.index_into(v).unwrap_or(&patch_db::value::OrdValue::Null)
                 }
             }
         } else {
@@ -290,7 +290,7 @@ fn impl_fns(model_ty: &Type, children: &[ChildInfo], name: &Ident) -> Fns {
         from_parts: quote! {
             pub fn from_parts(#parts_args) -> Self {
                 use patch_db::ModelExt;
-                let mut res = patch_db::value::json!({});
+                let mut res = patch_db::value::ord_json!({});
                 let v = &mut res;
                 #parts_assignments
                 Self::from_value(res)
@@ -544,7 +544,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
                 });
                 tag_variants_unmatch.extend(quote_spanned! { variant_name.span() =>
                     #match_name::#variant_name(v) => Self::from_value({
-                        let mut a = patch_db::value::json!({ #tag: #variant_accessor });
+                        let mut a = patch_db::value::ord_json!({ #tag: #variant_accessor });
                         a[#content] = v.into_value();
                         a
                     }),
@@ -553,7 +553,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
                     Some(#variant_accessor) => #match_name_ref::#variant_name(self.transmute_ref(|v| {
                         #[allow(unused_imports)]
                         use patch_db::value::index::Index;
-                        #content.index_into(v).unwrap_or(&patch_db::value::NULL)
+                        #content.index_into(v).unwrap_or(&patch_db::value::OrdValue::Null)
                     })),
                 });
                 tag_variants_mut.extend(quote_spanned! { variant_name.span() =>
@@ -609,7 +609,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
                 tag_variants_unmatch.extend(quote_spanned! { variant_name.span() =>
                     #match_name::#variant_name(v) => Self::from_value({
                         let mut a = v.into_value();
-                        a[#tag] = patch_db::Value::String(std::sync::Arc::new(#variant_accessor.to_owned()));
+                        a[#tag] = patch_db::OrdValue::String(std::sync::Arc::new(#variant_accessor.to_owned()));
                         a
                     }),
                 });
@@ -670,7 +670,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
             });
             tag_variants_unmatch.extend(quote_spanned! { variant_name.span() =>
                 #match_name::#variant_name(v) => Self::from_value({
-                    let mut a = patch_db::value::json!({});
+                    let mut a = patch_db::value::ord_json!({});
                     a[#variant_accessor] = v.into_value();
                     a
                 }),
@@ -680,7 +680,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
                     #match_name_ref::#variant_name(self.transmute_ref(|v| {
                         #[allow(unused_imports)]
                         use patch_db::value::index::Index;
-                        #variant_accessor.index_into(v).unwrap_or(&patch_db::value::NULL)
+                        #variant_accessor.index_into(v).unwrap_or(&patch_db::value::OrdValue::Null)
                     }))
                 } else
             });
@@ -764,7 +764,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
         #[derive(Debug)]
         #vis enum #match_name {
             #model_variants
-            Error(patch_db::Value),
+            Error(patch_db::OrdValue),
         }
 
         impl #model_ty_name {
@@ -776,7 +776,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
         #[derive(Debug)]
         #vis enum #match_name_ref<'a> {
             #ref_model_variants
-            Error(&'a patch_db::Value),
+            Error(&'a patch_db::OrdValue),
         }
 
         impl #model_ty_name {
@@ -788,7 +788,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
         #[derive(Debug)]
         #vis enum #match_name_mut<'a> {
             #mut_model_variants
-            Error(&'a mut patch_db::Value),
+            Error(&'a mut patch_db::OrdValue),
         }
     }
 }

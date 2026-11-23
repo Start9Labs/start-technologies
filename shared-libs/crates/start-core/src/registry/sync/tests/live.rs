@@ -322,7 +322,9 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         db.as_private()
             .as_registry_indexes()
             .as_idx(&url)
-            .is_some_and(|index| index.as_name().as_value() == &json!("Grant barrier"))
+            .is_some_and(|index| {
+                index.as_name().as_value() == &imbl_value::ord_json!("Grant barrier")
+            })
     })
     .await;
     assert!(

@@ -54,21 +54,21 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
         assert!(message["result"].get("guid").is_none());
         views.insert(
             message["id"].as_u64().unwrap(),
-            message["result"]["value"].clone(),
+            OrdValue::from(message["result"]["value"].clone()),
         );
     }
     assert_eq!(
         views[&71]["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("English")
+        imbl_value::ord_json!("English")
     );
     assert!(views[&72]["os"]["versions"]["0.4.0.6"]["releaseNotes"].is_object());
     assert_eq!(
         views[&71]["os"]["versions"]["0.4.0.6"]["headline"],
-        json!("v0.4.0.6")
+        imbl_value::ord_json!("v0.4.0.6")
     );
     assert_eq!(
         views[&73]["os"]["versions"]["0.4.0.6"]["headline"],
-        json!("v0.4.0.6")
+        imbl_value::ord_json!("v0.4.0.6")
     );
     assert!(views[&73]["os"]["versions"]["0.4.0.6"]["releaseNotes"].is_object());
     assert!(
@@ -79,12 +79,12 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
     assert_eq!(
         views[&71]["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["dependencyMetadata"]["dependency"]
             ["icon"],
-        json!("data:image/png;base64,c2VjcmV0")
+        imbl_value::ord_json!("data:image/png;base64,c2VjcmV0")
     );
     assert_eq!(
         views[&72]["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["dependencyMetadata"]["dependency"]
             ["icon"],
-        json!(path)
+        imbl_value::ord_json!(path)
     );
     info.release_notes = from_value(json!({"en_US":"Updated", "pl_PL":"Nowe"})).unwrap();
     ctx.db
@@ -109,17 +109,17 @@ async fn subscribe_selects_each_messages_os_version_for_dumps_and_revisions() {
     }
     assert_eq!(
         views[&71]["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("Updated")
+        imbl_value::ord_json!("Updated")
     );
     assert_eq!(
         views[&72]["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!({"en_US":"Updated", "pl_PL":"Nowe"})
+        imbl_value::ord_json!({"en_US":"Updated", "pl_PL":"Nowe"})
     );
     for version in ["0.4.0.6", "0.4.0.7"] {
         for id in [71, 73] {
             assert_eq!(
                 views[&id]["os"]["versions"][version]["headline"],
-                json!(format!("v{version}"))
+                imbl_value::ord_json!(format!("v{version}"))
             );
         }
         assert!(

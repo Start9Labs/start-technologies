@@ -15,6 +15,7 @@ pub mod in_order_map;
 pub mod index;
 pub mod macros;
 mod object;
+mod ord_map_iter_mut;
 pub mod ser;
 
 #[cfg(feature = "arbitrary")]
@@ -23,6 +24,7 @@ mod arbitrary;
 pub use imbl;
 pub use in_order_map::InOMap;
 pub use object::{InOrder, ObjectKind, ObjectMap, Sorted};
+pub use ord_map_iter_mut::OrdMapIterMut;
 pub use serde_json::{Error as ErrorSource, Number};
 pub use yasi::InternedString;
 

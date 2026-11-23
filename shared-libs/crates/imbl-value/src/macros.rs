@@ -243,3 +243,11 @@ macro_rules! json_unexpected {
 macro_rules! json_expect_expr_comma {
     ($e:expr , $($tt:tt)*) => {};
 }
+
+/// Builds an [`OrdValue`](crate::OrdValue) from the same syntax as [`json!`].
+#[macro_export]
+macro_rules! ord_json {
+    ($($json:tt)+) => {
+        $crate::OrdValue::from($crate::json!($($json)+))
+    };
+}

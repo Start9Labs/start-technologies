@@ -493,7 +493,7 @@ mod tests {
         let db = PatchDb::in_memory();
         db.put(&ROOT, &fixture).await.unwrap();
         Current::default().pre_init(&db).await.unwrap();
-        let migrated = db.dump(&ROOT).await.value;
+        let migrated = Value::from(db.dump(&ROOT).await.value);
         assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
         assert_eq!(migrated["private"]["sessions"], saved_sessions);
         let migrated_trust: TrustedKeys =
@@ -532,7 +532,7 @@ mod tests {
         assert!(todos.contains_key("0.4.1.1"));
         assert!(todos.contains_key(Current::default().semver().to_string().as_str()));
         Current::default().pre_init(&db).await.unwrap();
-        assert_eq!(db.dump(&ROOT).await.value, migrated);
+        assert_eq!(Value::from(db.dump(&ROOT).await.value), migrated);
     }
 
     #[tokio::test]
@@ -566,7 +566,7 @@ mod tests {
             let db = PatchDb::in_memory();
             db.put(&ROOT, &fixture).await.unwrap();
             Current::default().pre_init(&db).await.unwrap();
-            let migrated = db.dump(&ROOT).await.value;
+            let migrated = Value::from(db.dump(&ROOT).await.value);
             let keyrings: TrustedKeys =
                 from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
             assert_eq!(crate::trusted_keys::os_signers(&keyrings), legacy);
@@ -582,7 +582,7 @@ mod tests {
             assert!(todos.contains_key("0.4.1.1"));
             assert!(todos.contains_key(Current::default().semver().to_string().as_str()));
             Current::default().pre_init(&db).await.unwrap();
-            assert_eq!(db.dump(&ROOT).await.value, migrated);
+            assert_eq!(Value::from(db.dump(&ROOT).await.value), migrated);
         }
     }
 }

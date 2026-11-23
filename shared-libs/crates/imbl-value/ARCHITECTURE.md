@@ -55,7 +55,9 @@ so consumers don't need to add those crates themselves.
   for an `OrdValue`) and `from_value::<T>(value) -> Result<T, Error>` are the primary entry points for
   converting between a value and arbitrary `Serialize`/`Deserialize` types.
 - **`ser.rs` / `de.rs`** implement (de)serialization for `Value` by hand rather than deferring to
-  `serde_json`. `ser.rs` also defines a custom `Serializer<K>` that drives the `T -> GenericValue<K>`
+  `serde_json`. Deserializing _from_ a value always walks it by reference: the owned `GenericValue`
+  deserializer and the borrowed `&GenericValue` one share one implementation and differ only in whether
+  strings are copied or lent. `ser.rs` also defines a custom `Serializer<K>` that drives the `T -> GenericValue<K>`
   conversion behind `to_value`; `de.rs` defines the visitors that build a `Value` from any deserializer.
 - **`from.rs`** carries the cheap, infallible conversions: `serde_json::Value` ↔ `GenericValue`,
   `Value` ↔ `OrdValue`, and slices/arrays/`&str` → `GenericValue`.

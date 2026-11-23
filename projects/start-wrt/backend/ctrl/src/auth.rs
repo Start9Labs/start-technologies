@@ -76,7 +76,7 @@ impl AuthDatabaseModel for Model<AuthDatabase> {
         self.transmute_ref(|v| {
             SESSION_PUBKEYS
                 .index_into(v)
-                .unwrap_or(&patch_db::value::NULL)
+                .unwrap_or(&patch_db::OrdValue::Null)
         })
     }
     fn as_session_pubkeys_mut(&mut self) -> &mut Model<AuthKeys> {

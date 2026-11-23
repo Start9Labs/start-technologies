@@ -6,7 +6,7 @@ use axum::extract::Request;
 use axum::response::Response;
 use exver::{Version, VersionRange};
 use http::HeaderValue;
-use imbl_value::InternedString;
+use imbl_value::{InternedString, ObjectMap};
 use patch_db::ModelExt;
 use rpc_toolkit::yajrc::RpcMethod;
 use rpc_toolkit::{Middleware, RpcRequest, RpcResponse};
@@ -117,9 +117,21 @@ impl DeviceInfo {
         params: Value,
         res: &mut Value,
     ) -> Result<(), Error> {
+        let mut filtered = OrdValue::from(std::mem::take(res));
+        let result = self.filter_ord_for_hardware(method, params, &mut filtered);
+        *res = Value::from(filtered);
+        result
+    }
+
+    fn filter_ord_for_hardware(
+        &self,
+        method: &str,
+        params: Value,
+        res: &mut OrdValue,
+    ) -> Result<(), Error> {
         match method {
             "package.get" => {
-                let params: Model<GetPackageParams> = ModelExt::from_value(params);
+                let params: Model<GetPackageParams> = ModelExt::from_value(params.into());
 
                 let other = params.as_other_versions().de()?;
                 if params.as_id().transpose_ref().is_some() {
@@ -129,7 +141,11 @@ impl DeviceInfo {
                         self.filter_package_get(ModelExt::value_as_mut(res))?;
                     }
                 } else {
-                    for (_, v) in res.as_object_mut().into_iter().flat_map(|o| o.iter_mut()) {
+                    for (_, v) in res
+                        .as_object_mut()
+                        .into_iter()
+                        .flat_map(|o| o.entries_mut())
+                    {
                         if other.unwrap_or_default() == PackageDetailLevel::Full {
                             self.filter_package_get_full(ModelExt::value_as_mut(v))?;
                         } else {
@@ -156,7 +172,7 @@ impl DeviceInfo {
         // beta.10 dropped the manifest `alerts` field; older clients require it present.
         if self.os.version < beta_10 {
             for (_, info) in versions.as_entries_mut()? {
-                info.as_value_mut()["alerts"] = imbl_value::json!({});
+                info.as_value_mut()["alerts"] = imbl_value::ord_json!({});
             }
         }
 

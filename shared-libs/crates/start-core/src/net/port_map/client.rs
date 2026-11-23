@@ -36,6 +36,7 @@ use igd_next::PortMappingProtocol;
 use igd_next::aio::Gateway;
 use igd_next::aio::tokio::Tokio;
 use imbl::OrdMap;
+use imbl_value::OrdMapIterMut;
 use ipnet::IpNet;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, interval};
@@ -51,7 +52,6 @@ use crate::net::port_map::{probe, upnp};
 use crate::net::transport::{Transport, TransportProtocol};
 use crate::net::utils::ipv6_is_link_local;
 use crate::prelude::*;
-use crate::util::collections::OrdMapIterMut;
 use crate::util::sync::{SyncMutex, Watch};
 
 /// Refresh cadence for active mappings and backoff-eligible retries.

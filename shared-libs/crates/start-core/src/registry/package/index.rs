@@ -127,7 +127,7 @@ fn is_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool,
 }
 
 impl S9pkAccess {
-    fn of(entry: &Value) -> Result<Self, Error> {
+    fn of(entry: &OrdValue) -> Result<Self, Error> {
         from_value(entry[1].clone())
     }
 }
@@ -665,7 +665,7 @@ pub(crate) mod tests {
         ]);
         let mut empty = public.clone();
         empty["s9pks"] = imbl_value::json!([]);
-        let index: Model<PackageIndex> = imbl_value::json!({
+        let index: Model<PackageIndex> = imbl_value::ord_json!({
             "categories": {}, "packages": {
                 "public": {"authorized": {}, "categories": [], "versions": {"1.0.0:0": public}},
                 "mixed": {"authorized": {}, "categories": [], "versions": {

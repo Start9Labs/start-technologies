@@ -6,15 +6,15 @@ use crate::sign::AnySignature;
 struct Fixture {
     dir: tempfile::TempDir,
     main: TypedPatchDb<RegistryDatabase>,
-    public_icon: Value,
+    public_icon: OrdValue,
 }
 
 fn wire(version: &str) -> WireCompatibility {
     WireCompatibility::for_startos(&version.parse().unwrap()).unwrap()
 }
 
-fn store(dir: &Path, data: &str) -> Value {
-    to_value(&store_icon(&icons_dir(dir), &data.parse().unwrap()).unwrap()).unwrap()
+fn store(dir: &Path, data: &str) -> OrdValue {
+    to_ord_value(&store_icon(&icons_dir(dir), &data.parse().unwrap()).unwrap()).unwrap()
 }
 
 async fn fixture() -> Fixture {
@@ -29,12 +29,12 @@ async fn fixture() -> Fixture {
     for (name, icon) in [("public", &public_icon), ("secret", &private_icon)] {
         let info = &mut state["index"]["package"]["packages"][name]["versions"]["1.0.0:0"];
         info["icon"] = icon.clone();
-        info["dependencyMetadata"] = json!({ "dep": { "icon": icon } });
-        info["s9pks"][0][1]["signatures"] = json!({
+        info["dependencyMetadata"] = imbl_value::ord_json!({ "dep": { "icon": icon } });
+        info["s9pks"][0][1]["signatures"] = imbl_value::ord_json!({
             key().interned_der64().to_string(): AnySignature::Ed25519ph(signature),
         });
     }
-    state["index"]["os"]["versions"] = json!({ "0.4.0.6": {
+    state["index"]["os"]["versions"] = imbl_value::ord_json!({ "0.4.0.6": {
         "headline": "Stored unused headline",
         "releaseNotes": { "en_US": "English", "pl_PL": "Polski" },
     } });
@@ -146,12 +146,12 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     let headline_view = headline.db.dump(&pointer).await.value;
     assert_eq!(
         headline_view["os"]["versions"]["0.4.0.6"]["headline"],
-        json!("v0.4.0.6")
+        imbl_value::ord_json!("v0.4.0.6")
     );
     assert!(headline_view["os"]["versions"]["0.4.0.6"]["releaseNotes"].is_object());
     assert_eq!(
         old_view["os"]["versions"]["0.4.0.6"]["headline"],
-        json!("v0.4.0.6")
+        imbl_value::ord_json!("v0.4.0.6")
     );
     assert!(
         new_view["os"]["versions"]["0.4.0.6"]
@@ -160,15 +160,18 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     );
     assert_eq!(
         old_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("English")
+        imbl_value::ord_json!("English")
     );
     assert!(new_view["os"]["versions"]["0.4.0.6"]["releaseNotes"].is_object());
     assert_eq!(
         middle_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("English")
+        imbl_value::ord_json!("English")
     );
     let public = &old_view["package"]["packages"]["public"]["versions"]["1.0.0:0"];
-    assert_eq!(public["icon"], json!("data:image/png;base64,cHVibGlj"));
+    assert_eq!(
+        public["icon"],
+        imbl_value::ord_json!("data:image/png;base64,cHVibGlj")
+    );
     assert_eq!(public["dependencyMetadata"]["dep"]["icon"], public["icon"]);
     assert_eq!(
         new_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["icon"],
@@ -185,7 +188,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
             .values()
             .next()
             .unwrap()["keys"][0],
-        json!(key().to_string())
+        imbl_value::ord_json!(key().to_string())
     );
     let signature: AnySignature =
         from_value(public["s9pks"][0][1]["signatures"][&key().to_string()].clone()).unwrap();
@@ -194,7 +197,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     assert!(!old_view.to_string().contains("c2VjcmV0"));
     assert_eq!(
         own_view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["icon"],
-        json!("data:image/png;base64,c2VjcmV0")
+        imbl_value::ord_json!("data:image/png;base64,c2VjcmV0")
     );
     assert!(
         own_view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]
@@ -204,8 +207,8 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
 
     let mut state = fixture.main.peek().await.into_value();
     state["index"]["os"]["versions"]["0.4.0.6"]["releaseNotes"] =
-        json!({ "en_US": "Updated", "pl_PL": "Nowe" });
-    secret_s9pk(&mut state)["readers"] = json!([]);
+        imbl_value::ord_json!({ "en_US": "Updated", "pl_PL": "Nowe" });
+    secret_s9pk(&mut state)["readers"] = imbl_value::ord_json!([]);
     fixture
         .main
         .put(&JsonPointer::<&str>::default(), &state)
@@ -225,19 +228,19 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     }
     assert_eq!(
         old_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("Updated")
+        imbl_value::ord_json!("Updated")
     );
     assert_eq!(
         own_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("Updated")
+        imbl_value::ord_json!("Updated")
     );
     assert_eq!(
         new_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!({ "en_US": "Updated", "pl_PL": "Nowe" })
+        imbl_value::ord_json!({ "en_US": "Updated", "pl_PL": "Nowe" })
     );
     assert_eq!(
         old_view["os"]["versions"]["0.4.0.6"]["headline"],
-        json!("v0.4.0.6")
+        imbl_value::ord_json!("v0.4.0.6")
     );
     assert!(
         new_view["os"]["versions"]["0.4.0.6"]
@@ -246,7 +249,7 @@ async fn equivalent_versions_share_replicas_and_versioned_privacy_survives_revis
     );
     assert_eq!(
         fixture.main.peek().await.into_value()["index"]["os"]["versions"]["0.4.0.6"]["headline"],
-        json!("Stored unused headline")
+        imbl_value::ord_json!("Stored unused headline")
     );
 }
 
@@ -301,7 +304,7 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
     .unwrap();
     let next_icon = store(fixture.dir.path(), "data:image/png;base64,bmV4dA==");
     let mut state = fixture.main.peek().await.into_value();
-    state["index"]["name"] = json!("Renamed");
+    state["index"]["name"] = imbl_value::ord_json!("Renamed");
     fixture
         .main
         .put(&JsonPointer::<&str>::default(), &state)
@@ -337,12 +340,12 @@ async fn collected_icon_in_an_older_revision_terminates_and_rebuilds_the_replica
     let view = fresh.db.dump(&JsonPointer::<&str>::default()).await.value;
     assert_eq!(
         view["index"]["package"]["packages"]["public"]["versions"]["1.0.0:0"]["icon"],
-        json!("data:image/png;base64,bmV4dA==")
+        imbl_value::ord_json!("data:image/png;base64,bmV4dA==")
     );
 }
 
-fn translated(en: &str, pl: &str) -> Value {
-    json!({ "en_US": en, "pl_PL": pl })
+fn translated(en: &str, pl: &str) -> OrdValue {
+    imbl_value::ord_json!({ "en_US": en, "pl_PL": pl })
 }
 
 #[tokio::test]
@@ -350,26 +353,27 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     let fixture = fixture().await;
     let mut state = fixture.main.peek().await.into_value();
     state["index"]["description"] = translated("Registry", "Rejestr");
-    state["index"]["defaultLocale"] = json!("pl_PL");
+    state["index"]["defaultLocale"] = imbl_value::ord_json!("pl_PL");
     state["index"]["package"]["categories"] =
-        json!({ "tools": { "name": translated("Tools", "Narzędzia") } });
+        imbl_value::ord_json!({ "tools": { "name": translated("Tools", "Narzędzia") } });
     let public = &mut state["index"]["package"]["packages"]["public"]["versions"]["1.0.0:0"];
-    public["description"] = json!({ "short": translated("Short", "Krótki"), "long": "Long" });
+    public["description"] =
+        imbl_value::ord_json!({ "short": translated("Short", "Krótki"), "long": "Long" });
     public["releaseNotes"] = translated("Notes", "Notatki");
-    public["defaultLocale"] = json!("en_US");
-    public["preDownloadAlert"] = json!({
+    public["defaultLocale"] = imbl_value::ord_json!("en_US");
+    public["preDownloadAlert"] = imbl_value::ord_json!({
         "message": translated("Back up", "Zrób kopię"),
         "when": { "sourceVersion": "*" },
     });
     public["dependencyMetadata"]["dep"]["title"] = translated("Dependency", "Zależność");
-    public["dependencyMetadata"]["dep"]["description"] = json!(null);
-    public["dependencyMetadata"]["dep"]["optional"] = json!(false);
+    public["dependencyMetadata"]["dep"]["description"] = imbl_value::ord_json!(null);
+    public["dependencyMetadata"]["dep"]["optional"] = imbl_value::ord_json!(false);
     let secret = &mut state["index"]["package"]["packages"]["secret"]["versions"]["1.0.0:0"];
-    secret["description"] = json!({ "short": "Short", "long": "Long" });
-    secret["releaseNotes"] = json!({ "en_US": "Notes", "ja_JP": "ノート" });
-    secret["dependencyMetadata"]["dep"]["title"] = json!(null);
-    secret["dependencyMetadata"]["dep"]["description"] = json!(null);
-    secret["dependencyMetadata"]["dep"]["optional"] = json!(false);
+    secret["description"] = imbl_value::ord_json!({ "short": "Short", "long": "Long" });
+    secret["releaseNotes"] = imbl_value::ord_json!({ "en_US": "Notes", "ja_JP": "ノート" });
+    secret["dependencyMetadata"]["dep"]["title"] = imbl_value::ord_json!(null);
+    secret["dependencyMetadata"]["dep"]["description"] = imbl_value::ord_json!(null);
+    secret["dependencyMetadata"]["dep"]["optional"] = imbl_value::ord_json!(false);
     fixture
         .main
         .put(&JsonPointer::<&str>::default(), &state)
@@ -423,7 +427,7 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     assert_eq!(
         japanese.db.dump(&"/index".parse().unwrap()).await.value["package"]["packages"]["secret"]["versions"]
             ["1.0.0:0"]["releaseNotes"],
-        json!("ノート")
+        imbl_value::ord_json!("ノート")
     );
     drop((japanese, reader_english));
     let legacy_polish = mirror(wire("0.4.0.2"), Some("pl_PL")).await.unwrap();
@@ -435,52 +439,67 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     let pointer: JsonPointer = "/index".parse().unwrap();
     let (dump, mut sub) = polish.db.dump_and_sub(pointer.clone()).await;
     let mut polish_view = dump.value;
-    assert_eq!(polish_view["description"], json!("Rejestr"));
+    assert_eq!(polish_view["description"], imbl_value::ord_json!("Rejestr"));
     assert_eq!(
         polish_view["package"]["categories"]["tools"]["name"],
-        json!("Narzędzia")
+        imbl_value::ord_json!("Narzędzia")
     );
     let version = &polish_view["package"]["packages"]["public"]["versions"]["1.0.0:0"];
-    assert_eq!(version["description"]["short"], json!("Krótki"));
-    assert_eq!(version["description"]["long"], json!("Long"));
-    assert_eq!(version["releaseNotes"], json!("Notatki"));
-    assert_eq!(version["preDownloadAlert"]["message"], json!("Zrób kopię"));
+    assert_eq!(
+        version["description"]["short"],
+        imbl_value::ord_json!("Krótki")
+    );
+    assert_eq!(
+        version["description"]["long"],
+        imbl_value::ord_json!("Long")
+    );
+    assert_eq!(version["releaseNotes"], imbl_value::ord_json!("Notatki"));
+    assert_eq!(
+        version["preDownloadAlert"]["message"],
+        imbl_value::ord_json!("Zrób kopię")
+    );
     assert_eq!(
         version["dependencyMetadata"]["dep"]["title"],
-        json!("Zależność")
+        imbl_value::ord_json!("Zależność")
     );
     assert_eq!(
         polish_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("Polski")
+        imbl_value::ord_json!("Polski")
     );
     let english_view = english.db.dump(&pointer).await.value;
-    assert_eq!(english_view["description"], json!("Registry"));
+    assert_eq!(
+        english_view["description"],
+        imbl_value::ord_json!("Registry")
+    );
     assert_eq!(
         english_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("English")
+        imbl_value::ord_json!("English")
     );
     assert_eq!(
         english_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["releaseNotes"],
-        json!("Notes")
+        imbl_value::ord_json!("Notes")
     );
     let default_view = default_view.db.dump(&pointer).await.value;
-    assert_eq!(default_view["description"], json!("Rejestr"));
+    assert_eq!(
+        default_view["description"],
+        imbl_value::ord_json!("Rejestr")
+    );
     assert_eq!(
         default_view["package"]["categories"]["tools"]["name"],
-        json!("Narzędzia")
+        imbl_value::ord_json!("Narzędzia")
     );
     assert_eq!(
         default_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["releaseNotes"],
-        json!("Notes")
+        imbl_value::ord_json!("Notes")
     );
     let legacy_view = legacy_polish.db.dump(&pointer).await.value;
     assert_eq!(
         legacy_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("Polski")
+        imbl_value::ord_json!("Polski")
     );
     assert_eq!(
         legacy_view["package"]["packages"]["public"]["versions"]["1.0.0:0"]["icon"],
-        json!("data:image/png;base64,cHVibGlj")
+        imbl_value::ord_json!("data:image/png;base64,cHVibGlj")
     );
     let canonical_view = canonical.db.dump(&pointer).await.value;
     assert_eq!(
@@ -501,7 +520,7 @@ async fn language_views_share_replicas_and_localize_snapshots_and_revisions() {
     patch_db::json_patch::patch(&mut polish_view, &revision.patch).unwrap();
     assert_eq!(
         polish_view["os"]["versions"]["0.4.0.6"]["releaseNotes"],
-        json!("Nowe")
+        imbl_value::ord_json!("Nowe")
     );
     assert_eq!(
         fixture.main.peek().await.into_value()["index"]["description"],

@@ -186,7 +186,7 @@ rpc_toolkit::reflect_ts!(SubscribeRes);
 pub struct SubscribeStart {
     pub epoch: InternedString,
     pub id: u64,
-    pub value: Option<Value>,
+    pub value: Option<OrdValue>,
     pub revisions: Option<Vec<Revision>>,
 }
 
@@ -399,21 +399,21 @@ async fn cli_apply(
             .await?
             .apply_function(|db| {
                 let res = apply_expr(
-                    serde_json::to_value(patch_db::Value::from(db))
+                    serde_json::to_value(patch_db::OrdValue::from(db))
                         .with_kind(ErrorKind::Deserialization)?
                         .into(),
                     &expr,
                 )?;
 
                 let value = if allow_model_mismatch {
-                    serde_json::from_value::<Value>(res.clone().into()).with_ctx(|_| {
+                    serde_json::from_value::<OrdValue>(res.clone().into()).with_ctx(|_| {
                         (
                             crate::ErrorKind::Deserialization,
                             "result does not match database model",
                         )
                     })?
                 } else {
-                    to_value(
+                    to_ord_value(
                         &serde_json::from_value::<model::Database>(res.clone().into()).with_ctx(
                             |_| {
                                 (
@@ -463,7 +463,7 @@ pub async fn apply(ctx: RpcContext, ApplyParams { expr }: ApplyParams) -> Result
     ctx.db
         .mutate(|db| {
             let res = apply_expr(
-                serde_json::to_value(patch_db::Value::from(db.clone()))
+                serde_json::to_value(patch_db::OrdValue::from(db.clone()))
                     .with_kind(ErrorKind::Deserialization)?
                     .into(),
                 &expr,

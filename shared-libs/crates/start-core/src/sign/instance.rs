@@ -15,7 +15,7 @@ pub async fn load(db: &PatchDb) -> Result<Signer, Error> {
                 .as_object()
                 .and_then(|object| object.get(IDENTITY_KEY))
                 .cloned()
-                .unwrap_or(Value::Null);
+                .unwrap_or(OrdValue::Null);
             if let Some(key) = from_value::<StoredIdentityKey>(saved)? {
                 return Ok::<_, Error>((root, key.0));
             }
@@ -27,7 +27,7 @@ pub async fn load(db: &PatchDb) -> Result<Signer, Error> {
                         ErrorKind::Database,
                     )
                 })?
-                .insert(IDENTITY_KEY.into(), to_value(&Der64::new_ref(&key))?);
+                .insert(IDENTITY_KEY.into(), to_ord_value(&Der64::new_ref(&key))?);
             Ok((root, key))
         })
         .await?;
@@ -46,9 +46,12 @@ mod tests {
     async fn open(path: &Path) -> PatchDb {
         let db = PatchDb::open(path).await.unwrap();
         if db.dump(&ROOT).await.value.is_null() {
-            db.put(&ROOT, &imbl_value::json!({"sibling": {"preserve": true}}))
-                .await
-                .unwrap();
+            db.put(
+                &ROOT,
+                &imbl_value::ord_json!({"sibling": {"preserve": true}}),
+            )
+            .await
+            .unwrap();
         }
         db
     }
@@ -61,7 +64,7 @@ mod tests {
         let first = load(&db).await.unwrap().verifying_key().await.unwrap();
         assert_eq!(
             db.dump(&ROOT).await.value["sibling"]["preserve"],
-            Value::Bool(true)
+            OrdValue::Bool(true)
         );
         assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
         assert_eq!(
@@ -99,9 +102,9 @@ mod tests {
             .parse::<patch_db::json_ptr::JsonPointer>()
             .unwrap();
         for invalid in [
-            imbl_value::json!("not a key"),
-            imbl_value::json!(42),
-            imbl_value::json!({}),
+            imbl_value::ord_json!("not a key"),
+            imbl_value::ord_json!(42),
+            imbl_value::ord_json!({}),
         ] {
             db.put(&pointer, &invalid).await.unwrap();
             assert!(load(&db).await.is_err());

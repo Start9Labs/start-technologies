@@ -369,7 +369,7 @@ mod tests {
         );
         let database = |catalog: &BTreeMap<SharedVolumeId, SharedVolume>| {
             DatabaseModel::from(
-                to_value(&serde_json::json!({
+                imbl_value::to_ord_value(&serde_json::json!({
                     "public": {"sharedVolumes": catalog},
                     "private": {"sharedVolumeCredentials": {
                         mine.to_string(): {"password": "old-password"}
@@ -505,7 +505,7 @@ mod tests {
                 },
             ),
         ]);
-        let mut db = DatabaseModel::from(imbl_value::json!({
+        let mut db = DatabaseModel::from(imbl_value::ord_json!({
             "public": { "sharedVolumes": to_value(&catalog).unwrap() },
             "private": { "sharedVolumeCredentials": to_value(&BTreeMap::from([
                 (id.clone(), SharedVolumeCredentials { password: Some("old-secret".into()) }),

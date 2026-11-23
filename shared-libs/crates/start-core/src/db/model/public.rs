@@ -5,10 +5,10 @@ use std::sync::{Arc, OnceLock};
 use chrono::{DateTime, Utc};
 use exver::{Version, VersionRange};
 use imbl::{OrdMap, OrdSet};
-use imbl_value::InternedString;
+use imbl_value::{InternedString, Value};
 use ipnet::IpNet;
 use isocountry::CountryCode;
-use patch_db::{HasModel, Value};
+use patch_db::HasModel;
 use serde::{Deserialize, Serialize};
 use url::Url;
 

@@ -8,7 +8,7 @@ use clap::Parser;
 use http::HeaderMap;
 use http::header::AUTHORIZATION;
 use imbl::OrdMap;
-use imbl_value::InternedString;
+use imbl_value::{InternedString, OrdMapIterMut};
 use include_dir::Dir;
 use ipnet::{IpNet, Ipv6Net};
 use patch_db::PatchDb;
@@ -41,7 +41,6 @@ use crate::tunnel::forward::address::ForwardAddress;
 use crate::tunnel::migrations::run_migrations;
 use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
 use crate::util::Invoke;
-use crate::util::collections::OrdMapIterMut;
 use crate::util::sync::{SyncMutex, Watch};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Parser)]

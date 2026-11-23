@@ -110,10 +110,10 @@ pub(crate) fn from_index(index: &Model<FullIndex>) -> Result<RegistryInfo, Error
 }
 
 /// `RegistryInfo` copied from the index's own values, without deserializing them.
-pub(crate) fn info_value(index: &Model<FullIndex>) -> Result<Value, Error> {
+pub(crate) fn info_value(index: &Model<FullIndex>) -> Result<OrdValue, Error> {
     use patch_db::ModelExt;
     let value = index.as_value();
-    let field = |name: &str| value.get(name).cloned().unwrap_or(Value::Null);
+    let field = |name: &str| value.get(name).cloned().unwrap_or(OrdValue::Null);
     let trusted: BTreeSet<Guid> = index.as_trust_signers().de()?;
     let signers = index.as_signers().as_value().as_object();
     let trust_signers = signers
@@ -121,7 +121,7 @@ pub(crate) fn info_value(index: &Model<FullIndex>) -> Result<Value, Error> {
         .flat_map(|signers| signers.iter())
         .filter(|(id, _)| id.parse::<Guid>().is_ok_and(|id| trusted.contains(&id)))
         .map(|(id, signer)| (id.clone(), signer.clone()))
-        .collect::<imbl_value::InOMap<_, _>>();
+        .collect::<imbl::OrdMap<_, _>>();
     Ok([
         ("name", field("name")),
         ("icon", field("icon")),
@@ -135,7 +135,7 @@ pub(crate) fn info_value(index: &Model<FullIndex>) -> Result<Value, Error> {
     ]
     .into_iter()
     .map(|(key, value)| (InternedString::intern(key), value))
-    .collect::<imbl_value::InOMap<_, _>>()
+    .collect::<imbl::OrdMap<_, _>>()
     .into())
 }
 

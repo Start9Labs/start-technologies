@@ -447,7 +447,7 @@ mod test {
     use crate::rpc_continuations::Guid;
 
     fn action_access_db(access: Option<ActionAccess>, dependencies: Value) -> DatabaseModel {
-        DatabaseModel::from(json!({
+        DatabaseModel::from(imbl_value::ord_json!({
             "public": {
                 "packageData": {
                     "caller": { "currentDependencies": dependencies },
@@ -511,7 +511,7 @@ mod test {
 
     #[test]
     fn action_access_defaults_omitted_access_to_user() {
-        let db = DatabaseModel::from(json!({
+        let db = DatabaseModel::from(imbl_value::ord_json!({
             "public": { "packageData": { "target": { "actions": { "configure": {} } } } },
         }));
         let error = check_action_access(

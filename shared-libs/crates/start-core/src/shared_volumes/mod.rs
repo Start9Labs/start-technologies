@@ -206,7 +206,7 @@ pub(crate) fn managed_local_paths(
 /// Restores pending local deletions as ungranted registrations for retry.
 pub(crate) fn recover_pending_deletions(
     volumes: &mut BTreeMap<SharedVolumeId, SharedVolume>,
-    private: &Value,
+    private: &OrdValue,
 ) -> Result<(), Error> {
     if let Some(saved) = private.get("retainedSharedVolumes") {
         let pending: BTreeMap<SharedVolumeId, String> = from_value(saved.clone())?;
@@ -739,7 +739,7 @@ mod tests {
         let local = SharedVolumeId::new();
         let cifs = SharedVolumeId::new();
         let disk = SharedVolumeId::new();
-        let mut db = DatabaseModel::from(to_value(&serde_json::json!({
+        let mut db = DatabaseModel::from(imbl_value::to_ord_value(&serde_json::json!({
             "public": { "sharedVolumes": {
                 local.to_string(): {"name":"Photos", "source":{"kind":"local"}, "grants":{"consumer":{"readonly":false}}},
                 cifs.to_string(): {"name":"Remote", "source":{"kind":"cifs","hostname":"nas","path":"/share"}, "grants":{}},
@@ -753,7 +753,7 @@ mod tests {
         assert!(matches!(source, Some(SharedVolumeSource::Local)));
         prepare_removal(&mut db, &cifs).unwrap();
         prepare_removal(&mut db, &disk).unwrap();
-        let reloaded = DatabaseModel::from(to_value(&db).unwrap());
+        let reloaded = DatabaseModel::from(imbl_value::to_ord_value(&db).unwrap());
         let volume = reloaded
             .as_public()
             .as_shared_volumes()
@@ -780,7 +780,7 @@ mod tests {
         let target = crate::backup::target::BackupTargetId::new();
         let remote = SharedVolumeId::new();
         let external = crate::backup::target::BackupTargetId::new();
-        let database = crate::db::model::DatabaseModel::from(imbl_value::json!({
+        let database = crate::db::model::DatabaseModel::from(imbl_value::ord_json!({
             "public": {
                 "sharedVolumes": {
                     volume.to_string(): {"source": {"kind": "local"}},
@@ -819,7 +819,7 @@ mod tests {
         let mut volumes = BTreeMap::new();
         recover_pending_deletions(
             &mut volumes,
-            &imbl_value::json!({
+            &imbl_value::ord_json!({
                 "retainedSharedVolumes": { id.to_string(): "Photos" }
             }),
         )
@@ -845,7 +845,7 @@ mod tests {
             "consumer".parse().unwrap(),
             SharedVolumeGrant { readonly: false },
         );
-        let model = crate::db::model::DatabaseModel::from(imbl_value::json!({
+        let model = crate::db::model::DatabaseModel::from(imbl_value::ord_json!({
             "public": { "sharedVolumes": {id.to_string(): to_value(&volume).unwrap()}, "packageData": {} },
             "private": { "sharedVolumeCredentials": {} }
         }));

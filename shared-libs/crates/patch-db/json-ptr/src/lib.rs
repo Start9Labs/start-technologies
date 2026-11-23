@@ -6,7 +6,7 @@ use std::ops::{Add, AddAssign, Bound, Range, RangeBounds};
 use std::str::FromStr;
 
 use imbl::Vector;
-use imbl_value::{InOMap, InternedString, Value};
+use imbl_value::{GenericValue, InternedString, ObjectKind, ObjectMap};
 use thiserror::Error;
 
 pub type JsonPointerRef<'a> = JsonPointer<&'a str, BorrowedSegList<'a>>;
@@ -284,7 +284,10 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
     pub fn len(&self) -> usize {
         self.segments.len()
     }
-    pub fn get<'a>(&self, mut doc: &'a Value) -> Option<&'a Value> {
+    pub fn get<'a, K: ObjectKind>(
+        &self,
+        mut doc: &'a GenericValue<K>,
+    ) -> Option<&'a GenericValue<K>> {
         for seg in self.iter() {
             doc = if doc.is_array() {
                 doc.get(parse_idx(seg).ok()?)?
@@ -294,7 +297,10 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
         }
         Some(doc)
     }
-    pub fn get_mut<'a>(&self, mut doc: &'a mut Value) -> Option<&'a mut Value> {
+    pub fn get_mut<'a, K: ObjectKind>(
+        &self,
+        mut doc: &'a mut GenericValue<K>,
+    ) -> Option<&'a mut GenericValue<K>> {
         for seg in self.iter() {
             doc = if doc.is_array() {
                 doc.get_mut(parse_idx(seg).ok()?)?
@@ -304,7 +310,7 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
         }
         Some(doc)
     }
-    pub fn take(&self, mut doc: &mut Value) -> Option<Value> {
+    pub fn take<K: ObjectKind>(&self, mut doc: &mut GenericValue<K>) -> Option<GenericValue<K>> {
         for seg in self.iter() {
             doc = if doc.is_array() {
                 doc.get_mut(parse_idx(seg).ok()?)?
@@ -314,23 +320,23 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
         }
         Some(doc.take())
     }
-    pub fn set(
+    pub fn set<K: ObjectKind>(
         &self,
-        mut doc: &mut Value,
-        value: Value,
+        mut doc: &mut GenericValue<K>,
+        value: GenericValue<K>,
         recursive: bool,
-    ) -> Result<Option<Value>, IndexError> {
+    ) -> Result<Option<GenericValue<K>>, IndexError> {
         for (idx, seg) in self.iter().enumerate() {
             doc = match doc {
-                Value::Array(ref mut l) => {
+                GenericValue::Array(ref mut l) => {
                     let num = if seg == "-" { l.len() } else { parse_idx(seg)? };
                     if num == l.len() {
                         if let Some(next) = self.get_segment(idx + 1) {
                             if recursive {
                                 if next == "0" {
-                                    l.push_back(Value::Array(Vector::new()));
+                                    l.push_back(GenericValue::Array(Vector::new()));
                                 } else {
-                                    l.push_back(Value::Object(InOMap::new()))
+                                    l.push_back(GenericValue::Object(K::Map::default()))
                                 }
                             }
                         } else {
@@ -340,22 +346,22 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                     }
                     l.get_mut(num).ok_or(IndexError::IndexOutOfBounds(num))?
                 }
-                Value::Bool(_) => return Err(IndexError::CouldNotIndexInto("boolean")),
-                Value::Null => return Err(IndexError::CouldNotIndexInto("null")),
-                Value::Number(_) => return Err(IndexError::CouldNotIndexInto("number")),
-                Value::Object(ref mut o) => {
+                GenericValue::Bool(_) => return Err(IndexError::CouldNotIndexInto("boolean")),
+                GenericValue::Null => return Err(IndexError::CouldNotIndexInto("null")),
+                GenericValue::Number(_) => return Err(IndexError::CouldNotIndexInto("number")),
+                GenericValue::Object(ref mut o) => {
                     if o.get(seg).is_none() {
                         if let Some(next) = self.get_segment(idx + 1) {
                             if recursive {
                                 if next == "0" {
                                     o.insert(
                                         InternedString::intern(seg),
-                                        Value::Array(Vector::new()),
+                                        GenericValue::Array(Vector::new()),
                                     );
                                 } else {
                                     o.insert(
                                         InternedString::intern(seg),
-                                        Value::Object(InOMap::new()),
+                                        GenericValue::Object(K::Map::default()),
                                     );
                                 }
                             }
@@ -366,27 +372,27 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                     }
                     o.get_mut(seg).unwrap()
                 }
-                Value::String(_) => return Err(IndexError::CouldNotIndexInto("string")),
+                GenericValue::String(_) => return Err(IndexError::CouldNotIndexInto("string")),
             }
         }
         Ok(Some(std::mem::replace(doc, value)))
     }
-    pub fn insert(
+    pub fn insert<K: ObjectKind>(
         &self,
-        mut doc: &mut Value,
-        value: Value,
+        mut doc: &mut GenericValue<K>,
+        value: GenericValue<K>,
         recursive: bool,
-    ) -> Result<Option<Value>, IndexError> {
+    ) -> Result<Option<GenericValue<K>>, IndexError> {
         for (idx, seg) in self.iter().enumerate() {
             doc = match doc {
-                Value::Array(ref mut l) => {
+                GenericValue::Array(ref mut l) => {
                     let num = if seg == "-" { l.len() } else { parse_idx(seg)? };
                     if let Some(next) = self.get_segment(idx + 1) {
                         if num == l.len() && recursive {
                             if next == "0" {
-                                l.insert(num, Value::Array(Vector::new()));
+                                l.insert(num, GenericValue::Array(Vector::new()));
                             } else {
-                                l.insert(num, Value::Object(InOMap::new()))
+                                l.insert(num, GenericValue::Object(K::Map::default()))
                             }
                         }
                     } else if num <= l.len() {
@@ -395,22 +401,22 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                     }
                     l.get_mut(num).ok_or(IndexError::IndexOutOfBounds(num))?
                 }
-                Value::Bool(_) => return Err(IndexError::CouldNotIndexInto("boolean")),
-                Value::Null => return Err(IndexError::CouldNotIndexInto("null")),
-                Value::Number(_) => return Err(IndexError::CouldNotIndexInto("number")),
-                Value::Object(ref mut o) => {
+                GenericValue::Bool(_) => return Err(IndexError::CouldNotIndexInto("boolean")),
+                GenericValue::Null => return Err(IndexError::CouldNotIndexInto("null")),
+                GenericValue::Number(_) => return Err(IndexError::CouldNotIndexInto("number")),
+                GenericValue::Object(ref mut o) => {
                     if o.get(seg).is_none() {
                         if let Some(next) = self.get_segment(idx + 1) {
                             if recursive {
                                 if next == "0" {
                                     o.insert(
                                         InternedString::intern(seg),
-                                        Value::Array(Vector::new()),
+                                        GenericValue::Array(Vector::new()),
                                     );
                                 } else {
                                     o.insert(
                                         InternedString::intern(seg),
-                                        Value::Object(InOMap::new()),
+                                        GenericValue::Object(K::Map::default()),
                                     );
                                 }
                             }
@@ -422,16 +428,20 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                     o.get_mut(seg)
                         .ok_or(IndexError::CouldNotIndexInto("undefined"))?
                 }
-                Value::String(_) => return Err(IndexError::CouldNotIndexInto("string")),
+                GenericValue::String(_) => return Err(IndexError::CouldNotIndexInto("string")),
             }
         }
         Ok(Some(std::mem::replace(doc, value)))
     }
-    pub fn remove(&self, mut doc: &mut Value, allow_last: bool) -> Option<Value> {
+    pub fn remove<K: ObjectKind>(
+        &self,
+        mut doc: &mut GenericValue<K>,
+        allow_last: bool,
+    ) -> Option<GenericValue<K>> {
         for (idx, seg) in self.iter().enumerate() {
             if self.get_segment(idx + 1).is_none() {
                 match doc {
-                    Value::Array(ref mut l) => {
+                    GenericValue::Array(ref mut l) => {
                         let num = if allow_last && seg == "-" && !l.is_empty() {
                             l.len() - 1
                         } else {
@@ -443,14 +453,14 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                             return None;
                         }
                     }
-                    Value::Object(ref mut o) => {
+                    GenericValue::Object(ref mut o) => {
                         return o.remove(seg);
                     }
                     _ => return None,
                 }
             } else {
                 doc = match doc {
-                    Value::Array(ref mut arr) => {
+                    GenericValue::Array(ref mut arr) => {
                         if allow_last && seg == "-" && !arr.is_empty() {
                             let arr_len = arr.len();
                             arr.get_mut(arr_len - 1)?
@@ -458,7 +468,7 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                             arr.get_mut(parse_idx(seg).ok()?)?
                         }
                     }
-                    Value::Object(ref mut o) => o.get_mut(seg)?,
+                    GenericValue::Object(ref mut o) => o.get_mut(seg)?,
                     _ => return None,
                 };
             }
