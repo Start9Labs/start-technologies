@@ -19,6 +19,9 @@ for i in 0 1; do
     ip route add table $table default via 10.$i.0.1 dev gw$i
 done
 ip netns exec peer ip addr add 10.64.0.1/32 dev lo
+for host in 10 11; do
+    ip netns exec peer ip addr add 192.0.2.$host/32 dev lo
+done
 STARTOS_ACME_DNS_RESPONDER=1 ip netns exec peer "$exe" --exact "$test" --nocapture &
 sleep 0.5
 STARTOS_ACME_DNS_NETNS=1 "$exe" --exact "$test" --nocapture

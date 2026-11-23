@@ -13,7 +13,7 @@ use hickory_server::net::runtime::Time;
 use hickory_server::proto::op::{Header, HeaderCounts, Metadata, ResponseCode};
 use hickory_server::proto::rr::{Name, Record, RecordType};
 use hickory_server::resolver::config::{
-    ConnectionConfig, NameServerConfig, ResolverConfig, ResolverOpts,
+    ConnectionConfig, LookupIpStrategy, NameServerConfig, ResolverConfig, ResolverOpts,
 };
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo, Server};
 use hickory_server::store::forwarder::{ForwardConfig, ForwardZoneHandler};
@@ -492,7 +492,8 @@ fn gateway_catalog(
     Ok(Arc::new(catalog))
 }
 
-/// Resolves names through one gateway's DNS servers, over that gateway alone.
+/// Resolves names through one gateway's DNS servers, over that gateway alone,
+/// to addresses of both families.
 #[derive(Clone)]
 pub(crate) struct GatewayDns(Arc<hickory_server::resolver::Resolver<GatewayRuntime>>);
 
@@ -502,6 +503,8 @@ impl GatewayDns {
         index: u32,
         servers: &VecDeque<SocketAddr>,
     ) -> Result<Self, Error> {
+        let mut options = forward_options();
+        options.ip_strategy = LookupIpStrategy::Ipv6AndIpv4;
         hickory_server::resolver::Resolver::builder_with_config(
             ResolverConfig::from_name_servers(
                 servers
@@ -511,7 +514,7 @@ impl GatewayDns {
             ),
             GatewayRuntime::new(gateway, index),
         )
-        .with_options(forward_options())
+        .with_options(options)
         .build()
         .map(|resolver| Self(Arc::new(resolver)))
         .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))

@@ -587,7 +587,8 @@ fn an_order_through_a_missing_gateway_fails_instead_of_using_another() {
     );
 }
 
-/// Answers an A query with 192.0.2.10 when asked from 10.0.0.2, else 192.0.2.11.
+/// Answers A and AAAA queries with host 10 of 192.0.2.0/24 and 2001:db8::/64 when asked
+/// from 10.0.0.2, else with host 11.
 #[cfg(target_os = "linux")]
 fn respond_by_source(socket: std::net::UdpSocket) -> ! {
     let mut buf = [0; 512];
@@ -599,19 +600,45 @@ fn respond_by_source(socket: std::net::UdpSocket) -> ! {
             qname_end += 1 + usize::from(query[qname_end]);
         }
         let question_end = qname_end + 5;
-        let is_a = query[qname_end + 1..qname_end + 3] == [0, 1];
+        let host = if from.ip() == IpAddr::from([10, 0, 0, 2]) {
+            10
+        } else {
+            11
+        };
+        let rdata = match query[qname_end + 1..qname_end + 3] {
+            [0, 1] => Some(vec![192, 0, 2, host]),
+            [0, 28] => Some([0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, host].to_vec()),
+            _ => None,
+        };
         let mut response = query[..2].to_vec();
-        response.extend([0x81, 0x80, 0, 1, 0, u8::from(is_a), 0, 0, 0, 0]);
+        response.extend([0x81, 0x80, 0, 1, 0, u8::from(rdata.is_some()), 0, 0, 0, 0]);
         response.extend(&query[12..question_end]);
-        if is_a {
-            let last = if from.ip() == IpAddr::from([10, 0, 0, 2]) {
-                10
-            } else {
-                11
-            };
-            response.extend([0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, last]);
+        if let Some(rdata) = rdata {
+            response.extend([0xc0, 0x0c]);
+            response.extend(&query[qname_end + 1..question_end]);
+            response.extend([0, 0, 0, 60, 0, rdata.len() as u8]);
+            response.extend(rdata);
         }
         socket.send_to(&response, from).unwrap();
+    }
+}
+
+/// Answers each HTTP request with the address it came from.
+#[cfg(target_os = "linux")]
+fn echo_source(listener: std::net::TcpListener) {
+    use std::io::{Read, Write};
+
+    for stream in listener.incoming() {
+        let mut stream = stream.unwrap();
+        let mut buf = [0; 1024];
+        let _ = stream.read(&mut buf).unwrap();
+        let source = stream.peer_addr().unwrap().ip().to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{source}",
+            source.len()
+        )
+        .unwrap();
     }
 }
 
@@ -626,6 +653,8 @@ fn gateways_sharing_a_dns_address_each_resolve_through_their_own_interface() {
 
     const NAME: &str = "gateways_sharing_a_dns_address_each_resolve_through_their_own_interface";
     if std::env::var_os("STARTOS_ACME_DNS_RESPONDER").is_some() {
+        let http = std::net::TcpListener::bind("0.0.0.0:8080").unwrap();
+        std::thread::spawn(move || echo_source(http));
         respond_by_source(std::net::UdpSocket::bind("10.64.0.1:5353").unwrap());
     }
     if std::env::var_os("STARTOS_ACME_DNS_NETNS").is_none() {
@@ -659,29 +688,48 @@ fn gateways_sharing_a_dns_address_each_resolve_through_their_own_interface() {
         return;
     }
     let servers = VecDeque::from(["10.64.0.1:5353".parse().unwrap()]);
-    let index = |iface| nix::net::if_::if_nametoindex(iface).unwrap();
+    let index = |iface: &str| nix::net::if_::if_nametoindex(iface).unwrap();
     let resolve = |iface: &str, index: u32| {
         let mut dns = GatewayDns::new(iface.parse().unwrap(), index, &servers).unwrap();
         async move {
             dns.call(Name::from_str("acme.test").unwrap())
                 .await
-                .map(|addrs| addrs.map(|addr| addr.ip()).collect::<Vec<_>>())
+                .map(|addrs| addrs.map(|addr| addr.ip()).collect::<BTreeSet<_>>())
         }
+    };
+    let source_through = |iface: &str| {
+        let client =
+            AcmeHttpClient::via_gateway(&iface.parse().unwrap(), index(iface), &servers).unwrap();
+        async move {
+            let response = client
+                .request(
+                    http::Request::builder()
+                        .uri("http://acme.test:8080/")
+                        .body(BodyWrapper::from(Vec::<u8>::new()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let mut body = response.body;
+            body.into_bytes().await.unwrap()
+        }
+    };
+    let host = |last: u8| {
+        BTreeSet::from([
+            IpAddr::from([192, 0, 2, last]),
+            IpAddr::from([0x2001, 0xdb8, 0, 0, 0, 0, 0, u16::from(last)]),
+        ])
     };
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(async {
-            assert_eq!(
-                resolve("gw0", index("gw0")).await.unwrap(),
-                [IpAddr::from([192, 0, 2, 10])]
-            );
-            assert_eq!(
-                resolve("gw1", index("gw1")).await.unwrap(),
-                [IpAddr::from([192, 0, 2, 11])]
-            );
+            assert_eq!(resolve("gw0", index("gw0")).await.unwrap(), host(10));
+            assert_eq!(resolve("gw1", index("gw1")).await.unwrap(), host(11));
             assert!(resolve("gw0", index("gw1")).await.is_err());
+            assert_eq!(source_through("gw0").await, "10.0.0.2");
+            assert_eq!(source_through("gw1").await, "10.1.0.2");
         });
 }
 
