@@ -10,6 +10,14 @@ export class FilterPackagesPipe implements PipeTransform {
   transform = filterPackages
 }
 
+export const NEW_ARRIVALS = 'new-arrivals'
+
+const NEW_ARRIVAL_MS = 30 * 24 * 60 * 60 * 1000
+
+export const isNewArrival = ({ firstPublishedAt }: MarketplacePkg) =>
+  !!firstPublishedAt &&
+  Date.now() - new Date(firstPublishedAt).valueOf() < NEW_ARRIVAL_MS
+
 const EXACT = 1
 const PREFIX = 0.8
 const WORD = 0.6
@@ -52,7 +60,11 @@ export function filterPackages(
   }
 
   return packages
-    .filter(p => category === 'all' || p.categories.includes(category!))
+    .filter(p =>
+      category === NEW_ARRIVALS
+        ? isNewArrival(p)
+        : category === 'all' || p.categories.includes(category!),
+    )
     .sort((a, b) => {
       switch (sort) {
         case 'a':

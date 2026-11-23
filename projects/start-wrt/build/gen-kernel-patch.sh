@@ -7,7 +7,7 @@
 set -euo pipefail
 
 VENDOR_URL=https://gitlab.com/jmontleon/kernel-ark.git
-VENDOR_REF=b9f88a74901a71a6bdf666c90d86ee7027f56b7d
+VENDOR_REF=421ac7d4996cadeef8a6df5d867e008adfcadd6f
 STABLE_URL=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
 
 # Fedora ARK packaging and patches the vendor tree carries beside the K1 work.

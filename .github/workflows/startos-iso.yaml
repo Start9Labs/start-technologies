@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       build-run-id:
-        description: build-products.yaml run whose compiled-<arch>.tar artifacts to publish
+        description: build-products.yaml run whose compiled-<arch>.tar.gz artifacts to publish
         type: string
         required: true
       commit:
@@ -132,9 +132,9 @@ jobs:
         run: ./scripts/manage-release.sh check-registry-notes-cli start-os
 
       - name: Set up developer key
-        run: |
-          mkdir -p ~/.startos
-          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
+        uses: Start9Labs/start-technologies/.github/actions/configure-developer-key@master
+        with:
+          key: ${{ secrets.DEV_KEY }}
 
       # A version entry lists only assets built from the commit it records. An
       # entry for another commit is removed, not relabeled: `version add` keeps
@@ -253,10 +253,10 @@ jobs:
             https://alpha-registry-x.start9.com
           # Spares every upload that is not indexed yet: another run's deploy
           # between its upload and its index, and a hand upload into a version
-          # directory that is already indexed — manage-release.sh's push-gz, or
-          # the per-platform hotfix that leaves one version legitimately
-          # referencing two commits. Hand uploads are interactive, so give it
-          # days. Orphans are permanent; waiting only costs storage.
+          # directory that is already indexed, such as the per-platform hotfix
+          # that leaves one version legitimately referencing two commits. Hand
+          # uploads are interactive, so give it days. Orphans are permanent;
+          # waiting only costs storage.
           MIN_AGE_DAYS: 14
         run: |
           set -euo pipefail

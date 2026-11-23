@@ -27,7 +27,7 @@ cd "$TMP"
 for IB_SUITE in trixie bookworm; do
     export IB_SUITE
     cat > "$TMP/expected" <<EOF
-Package: linux-image-* linux-headers-* linux-base *nvidia*
+Package: linux-image-* linux-headers-* linux-base* linux-binary-* linux-modules-* linux-kbuild-* *nvidia*
 Pin: release n=${IB_SUITE}-backports
 Pin-Priority: 500
 EOF

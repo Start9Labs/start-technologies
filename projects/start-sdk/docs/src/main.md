@@ -395,6 +395,8 @@ The `fn` returns an object with `result` and `message`:
 
 `loading` and `failure` require a `message` string. Other states accept an optional message.
 
+`fn` receives an `AbortSignal` that aborts when the check stops. Stopping never waits for a check in flight, so pass the signal to anything the check could block on, such as `subcontainer.exec(command, { abort: signal })`.
+
 ### Built-in Health Check Helpers
 
 Available on `sdk.healthCheck`:

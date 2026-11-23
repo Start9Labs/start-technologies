@@ -74,6 +74,30 @@ function mockStart9Key(
   }
 }
 
+const MOCK_UPDATE_TARGETS: Record<string, string> = {
+  bitcoind: '26.1.0:0.1.0',
+  lnd: '0.18.0:0.0.1',
+  'btc-rpc-proxy': '0.4.0:0',
+}
+
+function mockCatalog(): T.RegistryCache['catalog'] {
+  return Object.fromEntries(
+    Object.entries(Mock.RegistryPackages).map(([id, pkg]) => [
+      id,
+      {
+        categories: pkg.categories,
+        versions: Object.fromEntries([
+          ...Object.values(Mock.OtherPackageVersions[id] ?? {}).flatMap(res =>
+            Object.entries(res.best),
+          ),
+          ...Object.entries(pkg.best),
+        ]),
+        updateTarget: MOCK_UPDATE_TARGETS[id] ?? null,
+      },
+    ]),
+  )
+}
+
 /** The community registry mocks an unreachable registry. */
 export function mockRegistryCache(
   url: string,
@@ -82,11 +106,17 @@ export function mockRegistryCache(
   return sameUrl(url, defaultRegistries.community)
     ? {
         info,
-        packages: {},
+        catalog: {},
+        publishesOsUpdates: false,
         status: 'error',
         error: `error sending request for url (${registryUrl(url)}): connection timed out`,
       }
-    : { info, packages: Mock.RegistryPackages, status: 'connected' }
+    : {
+        info,
+        catalog: mockCatalog(),
+        publishesOsUpdates: true,
+        status: 'connected',
+      }
 }
 
 export function mockOsUpdateCache(
@@ -103,6 +133,16 @@ export function mockOsUpdateCache(
 }
 
 export const mockPatchData: DataModel = {
+  sshPubkeys: Object.fromEntries(
+    Mock.SshKeys.map(key => [
+      key.fingerprint,
+      {
+        created_at: key.createdAt,
+        updated_at: key.createdAt,
+        value: `${key.alg} mock ${key.hostname}`,
+      },
+    ]),
+  ),
   registryCache: {
     [defaultRegistries.start9]: mockRegistryCache(
       defaultRegistries.start9,
@@ -672,7 +712,7 @@ export const mockPatchData: DataModel = {
       outboundDns: null,
     },
     unreadNotificationCount: 5,
-    packageVersionCompat: '>=0.3.0 <=0.3.6',
+    packageVersionCompat: '>=0.3.0 <=0.4.0',
     postInitMigrationTodos: {},
     latestMigrationRevision: 0,
     statusInfo: {

@@ -3,12 +3,14 @@ import * as T from '@start9labs/start-core/types'
 import * as cp from 'child_process'
 import { promisify } from 'util'
 import { Buffer } from 'node:buffer'
+import { posix } from 'node:path'
 import { once } from '@start9labs/start-core/util/once'
 import { Drop } from '@start9labs/start-core/util/Drop'
 import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
 import { FileMounts } from './fileMounts'
 import { jsonEnv } from './jsonEnv'
+import { PathQueue } from './PathQueue'
 
 export const execFile = promisify(cp.execFile)
 const False = () => false
@@ -18,7 +20,7 @@ export type ExecOptions = {
   /** How long to wait before SIGKILL, in ms (default 30000). `null` waits as long as the command takes — use it whenever the runtime is set by the size of the data or the speed of a disk. */
   timeout?: number | null
   /** Aborting SIGKILLs the process */
-  abort?: AbortController
+  abort?: AbortController | AbortSignal
 }
 
 const TIMES_TO_WAIT_FOR_PROC = 100
@@ -441,6 +443,7 @@ export class SubContainerEager<
   private readonly fileMounts = new FileMounts()
   private sharedMounts = false
   private sharedVolumeDependency = false
+  private readonly sharedVolumeQueue = new PathQueue()
 
   private leader: cp.ChildProcess
   private leaderExited: boolean = false
@@ -597,11 +600,7 @@ export class SubContainerEager<
           options.readonly,
         )
         if (isFile) {
-          if (!this.sharedMounts) {
-            // Exec namespaces become slaves of this tree and receive its rebinds.
-            await execFile('mount', ['--make-rshared', this.rootfs])
-            this.sharedMounts = true
-          }
+          await this.shareMounts()
           let staged = false
           await this.fileMounts.add(from, path, async signal => {
             if (!staged) {
@@ -660,6 +659,13 @@ export class SubContainerEager<
     return this
   }
 
+  private async shareMounts(): Promise<void> {
+    if (!this.sharedMounts) {
+      await execFile('mount', ['--make-rshared', this.rootfs])
+      this.sharedMounts = true
+    }
+  }
+
   /** @internal Includes unsuccessful optional shared-volume mount attempts. */
   get dependsOnSharedVolumes(): boolean {
     return this.sharedVolumeDependency
@@ -678,11 +684,20 @@ export class SubContainerEager<
       )
     }
     this.sharedVolumeDependency = true
-    await prepBind(null, this.subpath(options.mountpoint), 'directory')
-    return this.effects.mountSharedVolume({
-      ...options,
-      subcontainer: this.guid,
-    })
+    const release = this.hold()
+    const target = posix.join(this.rootfs, options.mountpoint)
+    try {
+      return await this.sharedVolumeQueue.run(target, async () => {
+        await prepBind(null, target, 'directory')
+        await this.shareMounts()
+        return this.effects.mountSharedVolume({
+          ...options,
+          subcontainer: this.guid,
+        })
+      })
+    } finally {
+      await release()
+    }
   }
 
   /**
@@ -796,6 +811,7 @@ export class SubContainerEager<
       .catch(() => '{}')
       .then(JSON.parse)
     const { timeout = 30000, abort, ...spawnOptions } = options ?? {}
+    const abortSignal = abort instanceof AbortController ? abort.signal : abort
     const prepared = commandOptions(imageMeta, this.imageId, spawnOptions)
     const child = cp.spawn(
       'start-container',
@@ -822,7 +838,7 @@ export class SubContainerEager<
       }
       const cleanup = () => {
         clearTimeout(killTimeout)
-        abort?.signal.removeEventListener('abort', kill)
+        abortSignal?.removeEventListener('abort', kill)
       }
       const fail = (error: Error) => {
         cleanup()
@@ -861,8 +877,8 @@ export class SubContainerEager<
           kill()
         }, timeout)
       }
-      abort?.signal.addEventListener('abort', kill, { once: true })
-      if (abort?.signal.aborted) kill()
+      abortSignal?.addEventListener('abort', kill, { once: true })
+      if (abortSignal?.aborted) kill()
       // EOF-reading commands require closed stdin, including empty input.
       // Completion is observed before stdin closes, which can end the command.
       try {

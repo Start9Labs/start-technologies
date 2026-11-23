@@ -171,32 +171,18 @@ export class Variants<
         }
         for (const key in a) {
           const value = a[key]
-          const built = await value.spec.build(options as any)
+          const built = await value.spec.buildNested(options as any)
           variants[key] = {
             name: value.name,
             spec: built.spec,
           }
           validators[key] = built.validator
         }
-        const other = z
-          .looseObject(
-            Object.fromEntries(
-              Object.entries(validators).map(([k, v]) => [
-                k,
-                z.any().optional(),
-              ]),
-            ),
-          )
-          .optional()
         return {
           spec: variants,
           validator: z.union(
             Object.entries(validators).map(([k, v]) =>
-              z.looseObject({
-                selection: z.literal(k),
-                value: v,
-                other,
-              }),
+              z.object({ selection: z.literal(k), value: v }),
             ) as [z.ZodObject<any>, z.ZodObject<any>, ...z.ZodObject<any>[]],
           ) as any,
         }

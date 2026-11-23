@@ -298,6 +298,12 @@ and retain their selected `PROFILE`.
 | `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`)                                |
 | `make start-wrt-clean`                          | remove start-wrt build artifacts                                                   |
 
+`make start-wrt-ca-test` checks the built image's certificate stores: they must exclude
+emSign ECC Root CA - G3 and keep ISRG Root X1. It needs a completed `make start-wrt-image`
+and OpenSSL; image CI runs it after the build. A failed incremental build can leave the
+previous rootfs; the check verifies its certificates, not image freshness.
+`STARTWRT_CA_ROOTFS` selects an unpacked image root for artifact verification.
+
 The OpenWrt image build needs a consistent environment — Docker is recommended; native builds
 on some distros fail silently.
 
@@ -356,7 +362,7 @@ rebuilds. Every setup run:
 3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the _added_ files
    (mirroring upstream layout): `target/linux/spacemit/` (the K1 target, including its
    `patches-6.18/` kernel patches), `package/boot/{opensbi,uboot}-spacemit/`, the generic
-   6.18 kernel stubs, one mac80211 build patch, and a wireless-regdb patch. Additions live as plain files, not
+   6.18 kernel stubs, one mac80211 build patch, an mt76 patch, a wireless-regdb patch, and a ca-certificates patch. Additions live as plain files, not
    patches, so upstream bumps can never conflict with them. Most of this tree comes from
    SpaceMiT's BSP and from OpenWrt, and it is GPL-2.0-only rather than MIT — see
    [`openwrt-overlay/README.md`](openwrt-overlay/README.md) before editing it.

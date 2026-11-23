@@ -323,7 +323,7 @@ Some addresses are left out of the comparison, in the cases where StartOS can te
 
 ## Choosing a Primary URL
 
-A service that builds links, invites or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over a reader and a writer for the choice, wherever the package keeps it — a field of `store.json`, or the service's own config file:
+A service that builds links, invites, notifications or callbacks from one URL asks the user which of its addresses that is. `sdk.setupPrimaryUrl()` builds the "Set Primary URL" action over a reader and a writer for the choice, wherever the package keeps it — a field of `store.json`, or the service's own config file:
 
 ```typescript
 // primaryUrl.ts
@@ -752,7 +752,7 @@ const userTokens = (await storeJson.read(s => s.apiKeys).const(effects)) ?? []
 
 await sdk.MultiHost.of(effects, apiHostId).bindPort(apiPort, {
   protocol: 'http',
-  addSsl: {
+  proxy: {
     auth: {
       type: 'bearer',
       tokens: [...(apiKey ? [apiKey] : []), ...userTokens.map(k => k.token)],
@@ -768,7 +768,7 @@ await sdk.MultiHost.of(effects, apiHostId).bindPort(apiPort, {
 if (apiKey) {
   const apiOrigin = await sdk.MultiHost.of(effects, apiKeyHostId).bindPort(apiPort, {
     protocol: 'http',
-    addSsl: { auth: { type: 'bearer', tokens: [apiKey], realm: null } },
+    proxy: { auth: { type: 'bearer', tokens: [apiKey], realm: null } },
   })
   receipts.push(await apiOrigin.export([api])) // `type: 'api'`
 }

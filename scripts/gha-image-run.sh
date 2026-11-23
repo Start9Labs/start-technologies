@@ -1,13 +1,14 @@
 #!/bin/bash
 # Prints the newest successful image run on a branch holding an unexpired
-# <platform>.squashfs: <repo> <branch> <platform>.
+# startos-*_<platform>.squashfs: <repo> <branch> <platform>.
 
 set -euo pipefail
 
 repo=$1
 branch=$2
 platform=$3
-run_ids=$("$(dirname "${BASH_SOURCE[0]}")/gha-artifact-run-ids.sh" "$repo" "$platform.squashfs" "$branch")
+image="startos-*_$platform.squashfs"
+run_ids=$("$(dirname "${BASH_SOURCE[0]}")/gha-artifact-run-ids.sh" "$repo" "$image" "$branch")
 selected_id=$(
     for run_id in $run_ids; do
         gh api "repos/$repo/actions/runs/$run_id" || exit 1
@@ -19,7 +20,7 @@ selected_id=$(
 )
 
 if [ -z "$selected_id" ]; then
-    >&2 echo "No successful run on $branch has an unexpired $platform.squashfs artifact"
+    >&2 echo "No successful run on $branch has an unexpired $image artifact"
     exit 1
 fi
 printf '%s\n' "$selected_id"

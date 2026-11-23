@@ -59,7 +59,7 @@ A request is authorized through a verified encrypted peer or a compatibility cre
 
 Keyed CLI calls use the shared encrypted transport with `~/.startwrt/id.key.pem`; fresh hello signing precedes transport deadlines. Local-token calls and calls without an initialized key use a client-lifetime unpersisted proof identity on the same encrypted transport; local tokens remain loopback-only and grant their existing authority. A malformed key or rejected encrypted admission does not fall back to plaintext. CLI log/update commands return GUID responses for separate continuation consumers.
 
-Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.session.kill`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
+Endpoints registered with `authenticated: false` metadata answer without either. Enrolled keys persist in `/etc/startwrt/auth.db`, which sysupgrade keeps, and stay valid until revoked by `auth.logout`, `auth.key.remove`, or a password change, or until 24 hours after their `loggedIn` time, however recently they were used. The microSD wizard's Keep settings reflash does not carry them over. An expired key is rejected as unauthorized (code 34) on its next request. Before ntpd reports valid time the check judges age alone; afterwards a `loggedIn` more than 5 minutes in the future also counts as expired. The sweep that unenrolls expired keys runs hourly and waits for ntpd to report valid time.
 
 ### `auth.login`
 
@@ -90,41 +90,50 @@ unsigned local-token request is rejected as unnecessary.
 // Response: null
 ```
 
-### `auth.session.list`
+### `auth.key.add`
+
+Enrolls a key without a password or the login rate limit. The login page shows
+`startwrt-cli auth key add` with the browser's key and user agent when login is
+rate limited.
+
+```rust
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddKeyParams {
+    /// DER64 or PEM-encoded key to enroll
+    key: AnyVerifyingKey,
+    /// Shown in `auth.key.list`
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    user_agent: Option<String>,
+}
+// Response: null
+```
+
+### `auth.key.list`
 
 ```rust
 // Request: {}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionList {
+struct KeyList {
     /// The key that signed this request
     current: Option<String>,
-    sessions: Sessions,
-}
-
-struct Sessions {
     /// Enrolled keys by DER64 SPKI: { name, loggedIn, lastActive, userAgent }.
     /// `lastActive` is persisted at most hourly.
-    pubkeys: BTreeMap<String, Session>,
-    /// Empty on StartWRT.
-    tokens: BTreeMap<String, Session>,
+    keys: BTreeMap<String, Session>,
 }
 ```
 
-### `auth.session.kill`
-
-StartWRT revokes enrolled keys through `pubkeys`. The shared request also accepts
-`tokens`, but StartWRT has no bearer-token sessions.
+### `auth.key.remove`
 
 ```rust
 #[derive(Deserialize)]
-struct KillParams {
+struct RemoveKeyParams {
     /// DER64 or PEM-encoded keys to revoke
-    #[serde(default)]
-    pubkeys: Vec<AnyVerifyingKey>,
-    #[serde(default)]
-    tokens: Vec<String>,
+    keys: Vec<AnyVerifyingKey>,
 }
 // Response: null
 ```
@@ -1816,11 +1825,15 @@ struct WifiSetResult {
 // `InvalidValue` before anything is written; codes are upper-case, as in the
 // database, so `us` is rejected. `null` clears it and returns the radios to the
 // world domain.
-// A radio whose channel or width changes, or that is being enabled, is rejected
-// with `InvalidValue` unless `wifi.regulatory` lists that width for the channel
-// (`autoWidths` for "auto"), or when the radio's PHY mode cannot express the
-// width (HT stops at 40 MHz).
-// A call that changes `country` instead rejects any width above 80 MHz.
+// A radio whose band, channel or width changes, or that is being enabled, is
+// rejected with `InvalidValue` unless `wifi.regulatory` lists the channel in its
+// band with that width, or with any width when the radio has none (`autoWidths`
+// for "auto"), or when the radio's PHY mode cannot express the width (HT stops
+// at 40 MHz).
+// A call that changes `country` instead rejects any width above 80 MHz; once the
+// new country is in force, it moves a radio off a channel that country forbids
+// to "auto" and narrows a width its channel cannot carry, as the daemon does at
+// boot. Country changes apply even when a blackout defers the Wi-Fi reload.
 ```
 
 ### `wifi.blackout-get`
@@ -1919,7 +1932,7 @@ struct WifiRegulatory {
     countries: Vec<String>,
     /// What an access point may use under the country currently in force,
     /// keyed by band ("2g", "5g"). Re-read after a `wifi.set` that changes
-    /// `country`; a channel or width outside it leaves that radio down.
+    /// `country`.
     bands: HashMap<String, BandChannels>,
 }
 
@@ -1942,7 +1955,8 @@ struct ApChannel {
 // Response: WifiRegulatory
 // Backend: reads `iw phy <phy> channels` for every radio. A channel is usable
 // unless disabled or No IR; a width also needs the kernel's width flag on its
-// channels.
+// channels. Under the US and its territories, mt76 disables 5250-5730 MHz on an
+// MT7916 and keeps its 6 GHz channels No IR (the AW7916-NPD's FCC grant).
 ```
 
 ---
@@ -2499,8 +2513,9 @@ The daemon (`backend/ctrl/src/bins/daemon.rs`) also serves:
 | ----------------------------------- | --------------- | --------------------------- |
 | `auth.login`                        | Auth            | Rate-limited                |
 | `auth.logout`                       | Auth            |                             |
-| `auth.session.list`                 | Auth            |                             |
-| `auth.session.kill`                 | Auth            |                             |
+| `auth.key.add`                      | Auth            |                             |
+| `auth.key.list`                     | Auth            |                             |
+| `auth.key.remove`                   | Auth            |                             |
 | `auth.verify-password`              | Auth            |                             |
 | `auth.set-password`                 | Auth            |                             |
 | `auth.check-initialized`            | Auth            | No auth                     |

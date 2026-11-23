@@ -76,6 +76,63 @@ describe('values', () => {
       footnote: null,
     })
   })
+  describe('acknowledgement', () => {
+    const acknowledgement = () =>
+      Value.acknowledgement({ name: 'I hold the keys' })
+
+    test('accepts only true', async () => {
+      const value = await acknowledgement().build({} as any)
+      const validator = value.validator
+      validator.parse(true)
+      expect(() => validator.parse(false)).toThrow()
+      expect(() => validator.parse(undefined)).toThrow()
+      testOutput<typeof validator._output, true>()(null)
+      expect(value.spec).toEqual({
+        type: 'acknowledgement',
+        name: 'I hold the keys',
+        description: null,
+        warning: null,
+        footnote: null,
+      })
+    })
+
+    test('requires acceptance alongside the other fields', async () => {
+      const spec = InputSpec.of({
+        confirm: acknowledgement(),
+        address: Value.text({ name: 'Address', required: true, default: null }),
+      }).add({
+        amount: Value.number({
+          name: 'Amount',
+          required: true,
+          default: null,
+          integer: true,
+        }),
+      })
+      const built = await spec.build({} as any)
+      expect(() =>
+        built.validator.parse({ address: 'a', amount: 1, confirm: false }),
+      ).toThrow()
+      built.validator.parse({ address: 'a', amount: 1, confirm: true })
+    })
+
+    test('may not be nested', async () => {
+      const inner = InputSpec.of({ confirm: acknowledgement() })
+      const nested = [
+        Value.object({ name: 'Object' }, inner),
+        Value.union({
+          name: 'Union',
+          default: 'a',
+          variants: Variants.of({ a: { name: 'A', spec: inner } }),
+        }),
+        Value.list(List.obj({ name: 'List' }, { spec: inner })),
+      ]
+      for (const value of nested) {
+        await expect(value.build({} as any)).rejects.toThrow(
+          'must be at the top level',
+        )
+      }
+    })
+  })
   test('text', async () => {
     const value = await Value.text({
       name: 'Testing',
