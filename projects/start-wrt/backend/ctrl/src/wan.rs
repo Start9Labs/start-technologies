@@ -394,7 +394,7 @@ pub async fn ipv4_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await?;
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt"]).await?;
 
         let mut found = false;
         for section in &mut cfgs["network"].sections {
@@ -453,6 +453,7 @@ pub async fn ipv4_set<C: CtrlContext>(
             ));
         }
 
+        crate::vpn_client::apply_vpn_mtus(&mut cfgs, &arena);
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);
         match dump_result {
@@ -628,7 +629,7 @@ pub async fn ipv6_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await?;
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt"]).await?;
 
         let wan6_idx = cfgs["network"]
             .sections
@@ -715,6 +716,7 @@ pub async fn ipv6_set<C: CtrlContext>(
             }
         }
 
+        crate::vpn_client::apply_vpn_mtus(&mut cfgs, &arena);
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);
         match dump_result {

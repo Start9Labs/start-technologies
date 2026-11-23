@@ -214,7 +214,7 @@ How this VPN reaches its own VPN server: directly over the Internet, or through 
 
 ### DNS Servers
 
-Optional. Replaces the DNS servers in the config file. Profiles routed through this VPN resolve through the tunnel with these servers unless they set their own. With none here, in the config, or in the system's custom DNS, those profiles resolve through your ISP outside the tunnel.`,
+Optional. Replaces the DNS servers in the config file. Profiles routed through this VPN resolve through the tunnel with these servers unless they set their own. With none here, in the config, or in the system's custom DNS, those profiles resolve through the tunnel with 1.1.1.1 (Cloudflare).`,
   '/profiles': `## Profiles
 
 Security profiles define network segments with isolated permissions. Each profile controls internet access and communication with other profiles on your local network.
@@ -225,7 +225,7 @@ A descriptive name for the security profile, such as "Guest" or "IoT Devices".
 
 ### DNS
 
-Which DNS servers devices in this profile use — the system's ("System"), the profile's own custom servers ("Custom"), or, when routing through a VPN, the VPN's ("VPN"). "System (outside VPN)" means a VPN-routed profile has no DNS servers to use through the tunnel and resolves through your ISP outside it.
+Which DNS servers devices in this profile use — the system's ("System"), the profile's own custom servers ("Custom"), or, when routing through a VPN, the VPN's ("VPN"). "Fallback (1.1.1.1)" means a VPN-routed profile has no DNS servers of its own, its VPN's, or the system's, so it resolves through the tunnel with 1.1.1.1 (Cloudflare).
 
 ### Outbound
 

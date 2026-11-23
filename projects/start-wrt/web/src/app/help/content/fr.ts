@@ -214,7 +214,7 @@ Comment ce VPN atteint son propre serveur VPN : directement par internet, ou par
 
 ### Serveurs DNS
 
-Facultatif. Remplace les serveurs DNS du fichier de configuration. Les profils acheminés par ce VPN résolvent via le tunnel avec ces serveurs, sauf s’ils définissent les leurs. S’il n’y en a ni ici, ni dans la configuration, ni dans le DNS personnalisé du système, ces profils résolvent via votre fournisseur d’accès, hors du tunnel.`,
+Facultatif. Remplace les serveurs DNS du fichier de configuration. Les profils acheminés par ce VPN résolvent via le tunnel avec ces serveurs, sauf s’ils définissent les leurs. S’il n’y en a ni ici, ni dans la configuration, ni dans le DNS personnalisé du système, ces profils résolvent via le tunnel avec 1.1.1.1 (Cloudflare).`,
   '/profiles': `## Profils
 
 Les profils de sécurité définissent des segments de réseau aux autorisations isolées. Chaque profil contrôle l’accès à Internet et la communication avec les autres profils de votre réseau local.
@@ -225,7 +225,7 @@ Un nom descriptif pour le profil de sécurité, tel que « Invité » ou « Appa
 
 ### DNS
 
-Les serveurs DNS utilisés par les appareils de ce profil — ceux du système (« Système »), les serveurs personnalisés du profil (« Personnalisé »), ou, lors de l’acheminement par un VPN, ceux du VPN (« VPN »). « Système (hors VPN) » signifie qu’un profil acheminé par un VPN n’a aucun serveur DNS à utiliser via le tunnel et résout via votre fournisseur d’accès, hors du tunnel.
+Les serveurs DNS utilisés par les appareils de ce profil — ceux du système (« Système »), les serveurs personnalisés du profil (« Personnalisé »), ou, lors de l’acheminement par un VPN, ceux du VPN (« VPN »). « Secours (1.1.1.1) » signifie qu’un profil acheminé par un VPN n’a aucun serveur DNS propre, ni du VPN, ni du système, et résout donc via le tunnel avec 1.1.1.1 (Cloudflare).
 
 ### Sortant
 

@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core'
+import { Component, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms'
 import {
@@ -6,7 +6,6 @@ import {
   TuiDialogContext,
   TuiError,
   TuiInput,
-  TuiNotification,
   TuiTextfield,
   tuiTextfieldOptionsProvider,
 } from '@taiga-ui/core'
@@ -28,7 +27,6 @@ import {
   AddClientDialogData,
   configDnsServers,
   getAddOutboundVpnForm,
-  hasHostnameEndpoint,
   OUTBOUND_VALIDATION_ERRORS,
 } from './utils'
 
@@ -71,7 +69,7 @@ import {
       <tui-textfield tuiChevron [stringify]="stringifyTarget">
         <label tuiLabel>{{ 'Connects via' | i18n }}</label>
         <input tuiSelect formControlName="target" />
-        <tui-data-list-wrapper *tuiDropdown [items]="targets()" />
+        <tui-data-list-wrapper *tuiDropdown [items]="context.data.targets" />
       </tui-textfield>
       <tui-textfield>
         <label tuiLabel>{{ 'DNS servers' | i18n }}</label>
@@ -82,14 +80,6 @@ import {
         />
       </tui-textfield>
       <tui-error formControlName="dns" />
-      @if (dnsMissing()) {
-        <div tuiNotification appearance="warning">
-          {{
-            'No DNS servers: profiles using this VPN resolve through your ISP, outside the tunnel, unless system DNS uses custom servers.'
-              | i18n
-          }}
-        </div>
-      }
       <footer>
         <button
           tuiButton
@@ -121,7 +111,6 @@ import {
     TuiChevron,
     TuiButton,
     TuiInput,
-    TuiNotification,
     i18nPipe,
   ],
 })
@@ -141,33 +130,13 @@ class AddClient {
     { initialValue: '' },
   )
 
-  protected readonly targets = computed(() =>
-    hasHostnameEndpoint(this.config())
-      ? ['Internet']
-      : this.context.data.targets,
-  )
-
   protected readonly configDns = computed(() => configDnsServers(this.config()))
-
-  private readonly dns = toSignal(this.form.controls.dns.valueChanges, {
-    initialValue: '',
-  })
-
-  protected readonly dnsMissing = computed(
-    () => !!this.config() && !this.configDns().length && !this.dns().trim(),
-  )
 
   // Translates the 'Internet' option; user VPN labels pass through unchanged.
   protected readonly stringifyTarget = (v: string): string =>
     this.i18n.transform(v)
 
   constructor() {
-    effect(() => {
-      const { target } = this.form.controls
-      if (!this.targets().includes(target.value)) {
-        target.setValue('Internet')
-      }
-    })
     // The config control uses an async validator (WireGuard content check), so
     // its status settles to INVALID *after* the value changes — listen on
     // statusChanges, not valueChanges, or the error never gets marked touched

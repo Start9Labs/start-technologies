@@ -16,6 +16,9 @@ const STARTWRT: &str = "config profile 'voorv'
 \toption fullname 'Kids'
 \toption interface 'voorv'
 \toption vlan_tag '20'
+
+config vpn_client 'wg_inner'
+\toption server 'inner.example.com'
 ";
 
 const DDNS: &str = "config service 'wan'
@@ -312,6 +315,7 @@ fn owned_domains_keep_only_their_top_level_domain() {
         "ddns-scripts[3]: wan: Get registered/public IP for 'Home.Example.org' failed",
         "WARN port-control: dropping SNI route nas.home.example.org on 84.1.2.3:443 -> x",
         "endpoint VPN.EXAMPLE.NET unreachable",
+        "Could not look up 'inner.example.com' through 'Work'",
     ] {
         let out = redactor.line(line, false);
         assert!(!out.to_lowercase().contains("example"), "{out}");

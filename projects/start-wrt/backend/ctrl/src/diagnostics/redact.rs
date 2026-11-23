@@ -210,7 +210,7 @@ impl Known {
                 }
                 None => self.add_domain(&value),
             },
-            ("network", "endpoint_host") => self.add_domain(&value),
+            ("network", "endpoint_host") | ("startwrt", "server") => self.add_domain(&value),
             ("startwrt", "endpoint") => {
                 let host = value
                     .rsplit_once(':')

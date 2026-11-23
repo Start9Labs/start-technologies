@@ -214,7 +214,7 @@ Jak ten VPN dociera do własnego serwera VPN: bezpośrednio przez internet albo 
 
 ### Serwery DNS
 
-Opcjonalne. Zastępuje serwery DNS z pliku konfiguracyjnego. Profile kierowane przez tę sieć VPN rozwiązują nazwy przez tunel za pomocą tych serwerów, chyba że ustawią własne. Jeśli nie ma ich tutaj, w konfiguracji ani we własnym systemowym DNS, te profile rozwiązują nazwy przez dostawcę internetu, poza tunelem.`,
+Opcjonalne. Zastępuje serwery DNS z pliku konfiguracyjnego. Profile kierowane przez tę sieć VPN rozwiązują nazwy przez tunel za pomocą tych serwerów, chyba że ustawią własne. Jeśli nie ma ich tutaj, w konfiguracji ani we własnym systemowym DNS, te profile rozwiązują nazwy przez tunel za pomocą 1.1.1.1 (Cloudflare).`,
   '/profiles': `## Profile
 
 Profile bezpieczeństwa definiują segmenty sieci z izolowanymi uprawnieniami. Każdy profil kontroluje dostęp do internetu i komunikację z innymi profilami w Twojej sieci lokalnej.
@@ -225,7 +225,7 @@ Opisowa nazwa profilu bezpieczeństwa, taka jak „Goście” lub „Urządzenia
 
 ### DNS
 
-Których serwerów DNS używają urządzenia w tym profilu — systemowych („System”), własnych niestandardowych serwerów profilu („Niestandardowe”) lub, w przypadku kierowania przez VPN, serwerów VPN („VPN”). „System (poza VPN)” oznacza, że profil kierowany przez VPN nie ma serwerów DNS dostępnych przez tunel i rozwiązuje nazwy przez dostawcę internetu, poza tunelem.
+Których serwerów DNS używają urządzenia w tym profilu — systemowych („System”), własnych niestandardowych serwerów profilu („Niestandardowe”) lub, w przypadku kierowania przez VPN, serwerów VPN („VPN”). „Zapasowy (1.1.1.1)” oznacza, że profil kierowany przez VPN nie ma własnych serwerów DNS ani serwerów VPN czy systemu, więc rozwiązuje nazwy przez tunel za pomocą 1.1.1.1 (Cloudflare).
 
 ### Wychodzący
 

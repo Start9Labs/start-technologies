@@ -710,7 +710,7 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
             .map(|ip| format!("{ip}@{via}"))
             .collect(),
         dns::ProfileDns::System => vec![format!("127.0.0.1#{}", dns::SMARTDNS_SYSTEM_PORT)],
-        dns::ProfileDns::Isp | dns::ProfileDns::IspOutsideVpn => vec![],
+        dns::ProfileDns::Isp => vec![],
     };
 
     // Every profile has its own instance: its addn-hosts file is where the
@@ -8762,7 +8762,7 @@ config dhcp 'guest'
     }
 
     #[tokio::test]
-    async fn test_vpn_profile_without_any_dns_reports_outside_vpn() {
+    async fn test_vpn_profile_without_any_dns_uses_fallback_through_tunnel() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = TestContext(dir.path().to_path_buf());
         setup_configs_with_ipv6_vpn(dir.path());
@@ -8777,13 +8777,14 @@ config dhcp 'guest'
         .unwrap();
         set_config(ctx.clone(), &mut cfgs, &guest_via("wg_v4", Vec::new())).unwrap();
 
-        assert_eq!(
-            guest_dnsmasq_servers(&cfgs),
-            Some(vec!["/use-application-dns.net/".to_string()])
-        );
-        assert!(!guest_redirected(&cfgs));
+        assert!(guest_redirected(&cfgs));
+        let servers = guest_dnsmasq_servers(&cfgs).expect("per-profile dnsmasq");
+        assert!(servers.contains(&format!("127.0.0.1#{}", dns::smartdns_port_for_vlan(101))));
+        let group = guest_group(&cfgs).expect("profile SmartDNS group");
+        assert_eq!(group.interface.as_deref(), Some("wg_v4"));
+        assert_eq!(group.servers, dns::fallback_dns_servers());
         let guest = get_config(ctx, &cfgs, guest_via("wg_v4", Vec::new()).id).unwrap();
-        assert_eq!(guest.dns_source, "system-outside-vpn");
+        assert_eq!(guest.dns_source, "fallback");
     }
 
     #[tokio::test]

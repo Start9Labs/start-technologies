@@ -1,5 +1,4 @@
 import { Component, computed, effect, inject, signal } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
 import {
   NonNullableFormBuilder,
   ReactiveFormsModule,
@@ -13,7 +12,6 @@ import {
   TuiHint,
   TuiInput,
   TuiLink,
-  TuiNotification,
   TuiTextfield,
   tuiTextfieldOptionsProvider,
   TuiTitle,
@@ -101,14 +99,14 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
             <label tuiLabel>{{ 'MTU' | i18n }}</label>
             <input
               tuiInputNumber
-              [placeholder]="'Default' | i18n"
+              [placeholder]="data()?.default_mtu?.toString() ?? ''"
               formControlName="mtu"
             />
           </tui-textfield>
           <tui-error formControlName="mtu" />
           <small class="g-secondary">
             {{
-              'Leave blank to use the default: ~1420, or smaller for a VPN that connects through another. Lower to 1280 if the VPN connects but requests time out.'
+              "Leave blank to use the MTU shown: the largest that fits through what this VPN connects via. Lower it only if this VPN connects but sites won't load."
                 | i18n
             }}
           </small>
@@ -127,14 +125,6 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
                 | i18n
             }}
           </small>
-          @if (data() && !dns().trim()) {
-            <div tuiNotification appearance="warning">
-              {{
-                'No DNS servers: profiles using this VPN resolve through your ISP, outside the tunnel, unless system DNS uses custom servers.'
-                  | i18n
-              }}
-            </div>
-          }
         </div>
       </section>
       @if (data()) {
@@ -174,7 +164,6 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
     TuiHint,
     TuiInput,
     TuiInputNumber,
-    TuiNotification,
     Footer,
     Form,
     VPNSummary,
@@ -198,9 +187,6 @@ export default class OutboundVPN {
   readonly data = computed(
     () => this.service.data()?.find(v => v.id === this.vpnId) ?? null,
   )
-  protected readonly dns = toSignal(this.form.controls.dns.valueChanges, {
-    initialValue: '',
-  })
 
   readonly dependentVpns = computed(() => {
     const allVpns = this.service.data() ?? []

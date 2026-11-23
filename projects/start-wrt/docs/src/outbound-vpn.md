@@ -10,7 +10,7 @@ Route your network's Internet traffic through one or more WireGuard VPN provider
    - **Label** — A descriptive name of up to 12 characters (e.g. "Mullvad SE", "Proton US").
    - **Config File** — Upload a WireGuard `.conf` file from your VPN provider — drop it into the dialog or click to browse. Most providers (Mullvad, ProtonVPN, IVPN, etc.) offer WireGuard config file downloads from their account dashboard.
    - **Connects via** — How this VPN reaches its own VPN server. The dropdown lists **Internet** along with your existing VPNs. Select **Internet** to connect over your WAN, or select another VPN to carry this one's tunnel, so traffic passes through that VPN first for additional privacy.
-   - **DNS Servers** — Optional. Replaces the DNS servers in the config file's `DNS =` line. If the config has no DNS servers and you leave this blank, the dialog warns you — see [DNS](#dns).
+   - **DNS Servers** — Optional. Replaces the DNS servers in the config file's `DNS =` line. See [DNS](#dns).
 
 1. Click "Add VPN".
 
@@ -37,13 +37,14 @@ Neither provider holds both halves. To link you to your destination they would h
 
 A VPN can connect through another only when:
 
-- Its config's `Endpoint` is an IP address, not a hostname. A VPN whose server is a hostname offers only **Internet** under **Connects via**.
 - The tunnel of the VPN that it connects via can carry it: that VPN has an address of the same family (IPv4 or IPv6) and its `AllowedIPs` include this VPN's server address.
 - No other VPN uses the same server address.
 
+If a VPN's config names its server by hostname, the router looks the hostname up through the tunnel of the VPN it connects via, so the lookup never leaves through your WAN. It asks the DNS servers that profiles routed through that VPN use (see [DNS](#dns)), in plain DNS even when they are set to DNS-over-HTTPS. It uses the server's IPv4 address when that VPN can carry one, and looks the hostname up again if the server stops answering.
+
 If a VPN goes down, every VPN that connects via it stops rather than reconnecting to its server over your WAN, so your home IP is never shown to the provider you meant to hide it from.
 
-Each tunnel in a chain adds its own headers, so a VPN that connects via another gets a smaller MTU: the MTU of the VPN that it connects via, less 60 bytes for an IPv4 server or 80 for an IPv6 one (1360 via a VPN at the default 1420). You can still set the MTU yourself on its detail page.
+Each tunnel adds its own headers, so every VPN gets the largest MTU that fits through what it connects via: the MTU of that VPN, or of your WAN connection (1500, or 1492 for PPPoE), less 60 bytes for an IPv4 server or 80 for an IPv6 one. A server connecting over your WAN that is named by hostname counts as IPv6 while your WAN has IPv6. A VPN with an IPv4 server gets 1440 over the WAN, and 1380 via another VPN at 1440. The router recalculates these whenever a VPN or your WAN connection changes. It refuses a change that would leave a VPN an MTU below 1280: three VPNs chained through IPv6 servers need an IPv4 server for at least one of the two that connect via another.
 
 > [!NOTE]
 > VPN chaining adds latency since traffic passes through multiple servers. For most users, a single VPN provider is sufficient.
@@ -67,10 +68,9 @@ A profile routed through a VPN sends its DNS queries through the tunnel, using t
 1. The profile's own custom DNS servers, including DNS-over-HTTPS servers.
 1. The VPN's **DNS Servers** — from the config file's `DNS =` line, or set on the VPN's detail page.
 1. The custom servers in [WAN Settings](wan.md#dns).
+1. `1.1.1.1` (Cloudflare). The profile's DNS column then shows **Fallback (1.1.1.1)**.
 
-Like the rest of the profile's traffic, these queries fail closed: if the tunnel goes down, DNS stops rather than falling back to your WAN.
-
-If none of the three is set, the profile's DNS goes to your ISP's DNS servers outside the tunnel, and your ISP can see the names your devices look up. The profile's DNS column then shows **System (outside VPN)**. To fix this, enter DNS servers on the VPN's detail page — your provider's own servers, or a public resolver.
+Like the rest of the profile's traffic, these queries fail closed: if the tunnel goes down, DNS stops rather than falling back to your WAN. They never go to your ISP's DNS servers.
 
 ## VPN Detail Page
 
@@ -86,7 +86,7 @@ Click a VPN label in the table to open its detail page, which shows:
 - **Used by** — Which [Security Profiles](security-profiles.md) currently route their traffic through this VPN. Check this before making changes to understand the impact.
 - **Label** — Edit the display name.
 - **Connects via** — Change what this VPN connects via (Internet or another VPN). Only choices that would not create a circular chain are offered.
-- **MTU** — The tunnel's packet size limit. Leave blank to use the default: ~1420, or for a VPN connecting through another, the chained MTU described under [VPN Chaining](#vpn-chaining). Lower it — down to a minimum of 1280 — if the VPN connects but requests time out.
+- **MTU** — The tunnel's packet size limit. Leave it blank to use the largest MTU that fits, shown in the field and described under [VPN Chaining](#vpn-chaining). Lower it — down to a minimum of 1280 — only if the VPN connects but sites won't load. An MTU in the imported config file is kept only when it is smaller than what fits.
 
 To delete a VPN, click "Delete" on its detail page. If any Security Profiles route through the VPN, you will be asked to confirm — those profiles will switch to the regular WAN connection.
 

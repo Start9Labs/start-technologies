@@ -906,8 +906,7 @@ export const OutboundVpnUpdateRequest: z.ZodObject<{
   label: z.ZodString
   target: z.ZodString
   /**
-   * Desired interface MTU. `None` (or absent) restores the default: the
-   * chain MTU for a VPN connecting through another, else the kernel's.
+   * The user's MTU. `None` (or absent) uses `OutboundVpn::default_mtu`.
    */
   mtu: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
@@ -925,12 +924,11 @@ export const OutboundVpnUpdateRequest: z.ZodObject<{
   label: z.string(),
   target: z.string(),
   /**
-   * Desired interface MTU. `None` (or absent) restores the default: the
-   * chain MTU for a VPN connecting through another, else the kernel's.
+   * The user's MTU. `None` (or absent) uses `OutboundVpn::default_mtu`.
    */
   mtu: wire(z.int().nullable().optional(), z.int().nullable()).meta({
     description:
-      "Desired interface MTU. `None` (or absent) restores the default: the\nchain MTU for a VPN connecting through another, else the kernel's.",
+      "The user's MTU. `None` (or absent) uses `OutboundVpn::default_mtu`.",
   }),
   /**
    * Replaces the resolvers reached through the tunnel. Absent keeps them.
@@ -2281,20 +2279,19 @@ export const OutboundVpn: z.ZodObject<{
    */
   supports_ipv6: z.ZodBoolean
   /**
-   * Interface MTU, if explicitly set. `None` means the kernel default
-   * (1420 on a clean path) is in effect. Editable via `update`.
+   * The MTU the user set. `None` uses `default_mtu`.
    */
   mtu: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodInt>>,
     z.ZodNullable<z.ZodInt>
   >
   /**
-   * The server is named by hostname; only `Internet` is a valid target.
+   * The largest MTU whose packets fit through what this VPN connects via.
    */
-  hostname_endpoint: z.ZodBoolean
+  default_mtu: z.ZodInt
   /**
    * Resolvers reached through the tunnel. Empty leaves profiles routed through
-   * this VPN on the system DNS servers, or on the ISP's outside the tunnel.
+   * this VPN on the system DNS servers, or on 1.1.1.1.
    */
   dns: z.ZodArray<z.ZodString>
   status: typeof OutboundVpnStatus
@@ -2322,27 +2319,25 @@ export const OutboundVpn: z.ZodObject<{
       "True when the VPN's WireGuard interface has at least one IPv6 address;\nfalse means profiles routed through this VPN will have IPv6 disabled\n(per `outbound_supports_ipv6` in profiles.rs).",
   }),
   /**
-   * Interface MTU, if explicitly set. `None` means the kernel default
-   * (1420 on a clean path) is in effect. Editable via `update`.
+   * The MTU the user set. `None` uses `default_mtu`.
    */
   mtu: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Interface MTU, if explicitly set. `None` means the kernel default\n(1420 on a clean path) is in effect. Editable via `update`.',
+    description: 'The MTU the user set. `None` uses `default_mtu`.',
   }),
   /**
-   * The server is named by hostname; only `Internet` is a valid target.
+   * The largest MTU whose packets fit through what this VPN connects via.
    */
-  hostname_endpoint: z.boolean().meta({
+  default_mtu: z.int().meta({
     description:
-      'The server is named by hostname; only `Internet` is a valid target.',
+      'The largest MTU whose packets fit through what this VPN connects via.',
   }),
   /**
    * Resolvers reached through the tunnel. Empty leaves profiles routed through
-   * this VPN on the system DNS servers, or on the ISP's outside the tunnel.
+   * this VPN on the system DNS servers, or on 1.1.1.1.
    */
   dns: z.array(z.string()).meta({
     description:
-      "Resolvers reached through the tunnel. Empty leaves profiles routed through\nthis VPN on the system DNS servers, or on the ISP's outside the tunnel.",
+      'Resolvers reached through the tunnel. Empty leaves profiles routed through\nthis VPN on the system DNS servers, or on 1.1.1.1.',
   }),
   status: OutboundVpnStatus,
   /**
