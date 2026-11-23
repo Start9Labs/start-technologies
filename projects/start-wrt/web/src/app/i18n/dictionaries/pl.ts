@@ -597,5 +597,5 @@ export default {
   645: 'Zaloguj się z wiersza poleceń',
   646: 'Zarejestruj tę przeglądarkę',
   647: '{profile} nakłada się na sieć nadrzędną {network}',
-  648: 'Urządzenia w nim mogą stracić Internet lub dostęp do tego panelu. Zmień jego podsieć na leżącą poza tą siecią.',
+  648: 'Router nie może połączyć się z tą częścią sieci nadrzędnej i może stracić dostęp do Internetu. Zmień jego podsieć na leżącą poza tą siecią.',
 } satisfies i18n

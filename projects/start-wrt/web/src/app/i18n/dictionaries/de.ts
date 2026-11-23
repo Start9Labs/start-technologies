@@ -597,5 +597,5 @@ export default {
   645: 'Über die Befehlszeile anmelden',
   646: 'Diesen Browser registrieren',
   647: '{profile} überschneidet sich mit dem vorgelagerten Netzwerk {network}',
-  648: 'Geräte darin können das Internet oder dieses Dashboard verlieren. Ändern Sie sein Subnetz in eines außerhalb dieses Netzwerks.',
+  648: 'Der Router erreicht diesen Teil des vorgelagerten Netzwerks nicht und kann die Internetverbindung verlieren. Ändern Sie sein Subnetz in eines außerhalb dieses Netzwerks.',
 } satisfies i18n

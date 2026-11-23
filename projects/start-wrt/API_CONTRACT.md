@@ -473,9 +473,8 @@ struct WanIpv4SetRequest {
     device: Option<String>,
 }
 // Response: null
-// Backend: updates UCI network.wan, restarts network
-// Validation: a static address whose network overlaps any profile's /24 is
-//   InvalidRequest (see Subnet rules under profiles).
+// Backend: updates UCI network.wan, restarts network. network.wan keeps its
+//   metric, which ranks WAN routes behind a profile's equal connected route.
 ```
 
 ### `wan.ipv6-get`
@@ -2041,19 +2040,21 @@ struct Profile<ProfileIdOpt> {
 ### Subnet rules
 
 Every write that adds or moves a profile or LAN gateway (`profiles.create`,
-`profiles.set`, `lan.ipv4-set`, and the moves `profiles.resolve-wan-overlap`
-makes), or changes the static WAN address (`wan.ipv4-set`), is checked against
-the configuration it is about to save. Each added or moved `/24`:
+`profiles.set`, `lan.ipv4-set`) is checked against the configuration it is
+about to save. Each added or moved `/24`:
 
 - stays inside the LAN network block; the LAN itself must be an RFC 1918
   selection (`InvalidRequest`);
 - holds no other profile's `/24` (`SubnetCollision`);
-- overlaps no WAN IPv4 network, live or static (`InvalidRequest`);
 - leaves no DHCP reservation in the `/24` it moved off (`DhcpStaticHostsInSubnet`).
 
-A changed static WAN network is checked against every profile. Subnets the
-write leaves unchanged always pass, so an already conflicting configuration
-stays editable.
+Subnets the write leaves unchanged always pass, so an already conflicting
+configuration stays editable.
+
+A `/24` may overlap a WAN IPv4 network; `profiles.wan-overlaps` reports it. The
+WAN interface's route metric keeps a profile's route ahead of an equal or wider
+WAN route, so the profile's devices keep the router and the router loses that
+part of the upstream network.
 
 On create and set, `lan_access: "ALL"` stores `access_to_new_profiles: true`,
 `"SAME_PROFILE"` stores `false`, and `other_profiles` preserves the supplied flag.
@@ -2175,29 +2176,6 @@ struct WanOverlap {
     wan_network: String,  // the overlapping WAN network, e.g. "192.168.0.0/24"
 }
 // Backend: every profile whose /24 overlaps a live or static WAN IPv4 network.
-```
-
-### `profiles.resolve-wan-overlap`
-
-Internal endpoint, **not called from the frontend**. Run by the daemon at boot and by the
-`/etc/hotplug.d/iface/99-startwrt-wan-overlap` hook on `wan` `ifup`/`ifupdate`, in the
-`startwrt-cli` process.
-
-```rust
-// Request: {}
-// Response: null
-// Backend: under a lock shared by every run, moves each profile whose /24
-//   overlaps a WAN IPv4 network and is the LAN owner, or has no Wi-Fi password,
-//   LAN port, or inbound VPN server, to the lowest free /24 in the block from .10
-//   up. Every move is held to the Subnet rules and the inbound VPN peer guard; a
-//   refused move is logged to the Activity log and left for the user, and the
-//   rest proceed. All moves land in one write, then the moved interfaces are
-//   cycled, an active captive portal follows the LAN, and the LAN ports carrying
-//   the moved profiles are bounced. The WAN stays up. A run with nothing to move
-//   changes nothing. Eligibility, trial validation and publication share one
-//   UCI snapshot; concurrent assignments conflict and replan from fresh intent.
-//   Refused moves do not reserve free subnets. profiles.wan-overlaps reports
-//   every overlap.
 ```
 
 ---

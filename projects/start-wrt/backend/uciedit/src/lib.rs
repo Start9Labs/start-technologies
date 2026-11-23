@@ -388,7 +388,6 @@ impl<'a> ops::IndexMut<&str> for Configs<'a> {
 /// This type holds the text bytes and mtimes without any lifetime ties to an
 /// Arena. It is `Send`, so it can cross `.await` points freely. Use
 /// `ConfigBytes::parse` to convert it into a `Configs<'a>` with an Arena.
-#[derive(Clone)]
 pub struct ConfigBytes {
     entries: Vec<(String, Option<DateTime<Utc>>, String)>,
 }

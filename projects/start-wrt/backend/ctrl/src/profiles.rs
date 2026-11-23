@@ -138,10 +138,6 @@ pub fn profiles<C: CtrlContext>() -> ParentHandler<C> {
             "wan-overlaps",
             from_fn_async_local(crate::subnets::overlaps::<C>).with_display_serializable(),
         )
-        .subcommand(
-            "resolve-wan-overlap",
-            from_fn_async_local(crate::subnets::resolve::<C>).no_display(),
-        )
 }
 
 #[derive(
@@ -1481,7 +1477,7 @@ pub async fn set<C: CtrlContext>(
             vec![crate::lan::LAN_INTERFACE.to_string()]
         };
 
-        crate::subnets::check(&ctx, &before, &cfgs)?;
+        crate::subnets::check(&before, &cfgs)?;
 
         let ip_changed = old_state
             .as_ref()
@@ -1824,7 +1820,7 @@ pub async fn create<C: CtrlContext>(
             &profile,
             pre_allocated_interface.clone(),
         )
-        .and_then(|out| crate::subnets::check(&ctx, &before, &cfgs).map(|()| out))
+        .and_then(|out| crate::subnets::check(&before, &cfgs).map(|()| out))
         {
             Ok(out) => out,
             Err(e) => {

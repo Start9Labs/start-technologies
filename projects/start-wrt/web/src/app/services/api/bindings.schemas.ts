@@ -4002,12 +4002,6 @@ export const Api = {
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
-        'resolve-wan-overlap': {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ z.null(),
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
         'schedule-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(

@@ -597,5 +597,5 @@ export default {
   645: 'Iniciar sesión desde la línea de comandos',
   646: 'Registrar este navegador',
   647: '{profile} se superpone con la red superior {network}',
-  648: 'Sus dispositivos pueden perder Internet o este panel. Cambie su subred a una fuera de esa red.',
+  648: 'El router no puede alcanzar esa parte de la red superior y puede perder Internet. Cambie su subred a una fuera de esa red.',
 } satisfies i18n

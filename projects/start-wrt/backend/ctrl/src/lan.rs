@@ -231,7 +231,7 @@ pub async fn ipv4_set<C: CtrlContext>(
         };
 
         let ip_changed = old_address.map(|old| old != address).unwrap_or(false);
-        crate::subnets::check(&ctx, &before, &cfgs)?;
+        crate::subnets::check(&before, &cfgs)?;
 
         // Guard: check if IP change would break VPN peers
         let removed_vpns = if ip_changed {

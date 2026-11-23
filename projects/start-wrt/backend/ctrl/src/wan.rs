@@ -21,6 +21,11 @@ fn serde_name(v: &impl Serialize) -> String {
 }
 
 pub const WAN_INTERFACE: &str = "wan";
+/// Ranks the WAN's routes behind a profile's equal connected route.
+///
+/// A profile overlapping the WAN's network keeps its devices' path to the router;
+/// the router loses that part of the upstream network instead.
+pub const WAN_ROUTE_METRIC: u32 = 10;
 pub const WAN6_INTERFACE: &str = "wan6";
 /// netifd alias for the `wan` interface's layer-3 device.
 pub const WAN6_DEVICE: &str = "@wan";
@@ -394,8 +399,7 @@ pub async fn ipv4_set<C: CtrlContext>(
     let mut retries = 4;
     loop {
         let arena = Arena::new();
-        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network", "startwrt", "dhcp"]).await?;
-        let before = crate::subnets::Subnets::of(&cfgs);
+        let mut cfgs = parse_all(ctx.uci_root(), &arena, &["network"]).await?;
 
         let mut found = false;
         for section in &mut cfgs["network"].sections {
@@ -453,7 +457,6 @@ pub async fn ipv4_set<C: CtrlContext>(
                 ErrorKind::MissingWanInterface,
             ));
         }
-        crate::subnets::check(&ctx, &before, &cfgs)?;
 
         let dump_result = dump_all(ctx.uci_root(), cfgs).await;
         drop(arena);
@@ -1233,6 +1236,43 @@ mod tests {
         }
         fn effectful(&self) -> bool {
             false
+        }
+    }
+
+    #[tokio::test]
+    async fn every_wan_mode_keeps_the_factory_route_metric() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../firstboot_config/network"),
+            dir.path().join("network"),
+        )
+        .unwrap();
+        let ctx = TestContext(dir.path().into());
+        for mode in [WanIpv4Mode::Static, WanIpv4Mode::Pppoe, WanIpv4Mode::Dhcp] {
+            ipv4_set(
+                ctx.clone(),
+                DeserializeStdin(WanIpv4SetRequest {
+                    mode,
+                    address: Some("203.0.113.9".into()),
+                    netmask: Some("255.255.255.0".into()),
+                    gateway: Some("203.0.113.1".into()),
+                    username: Some("user".into()),
+                    password: Some("pass".into()),
+                    device: None,
+                }),
+            )
+            .await
+            .unwrap();
+            let arena = Arena::new();
+            let cfgs = parse_all(dir.path(), &arena, &["network"]).await.unwrap();
+            let wan = cfgs["network"]
+                .sections
+                .iter()
+                .find(|s| s.name().as_deref() == Some(WAN_INTERFACE))
+                .unwrap()
+                .get::<NetworkInterface>()
+                .unwrap();
+            assert_eq!(wan.metric, Some(WAN_ROUTE_METRIC));
         }
     }
 
