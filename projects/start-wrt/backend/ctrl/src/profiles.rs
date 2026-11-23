@@ -298,7 +298,7 @@ pub(crate) struct UciProfile {
 
 /// Snapshot of profile fields before an update, for activity log diffing.
 #[derive(Debug)]
-pub(crate) struct OldProfileState {
+struct OldProfileState {
     outbound: Option<String>,
     wan_access: Option<String>,
     access_to_new_profiles: bool,
@@ -1608,7 +1608,7 @@ pub(crate) fn get_lan_ip(cfgs: &uciedit::Configs) -> Option<Ipv4Addr> {
     None
 }
 
-pub(crate) fn set_config<C: CtrlContext>(
+fn set_config<C: CtrlContext>(
     ctx: C,
     cfgs: &mut Configs,
     profile: &Profile<ProfileIdOpt>,
