@@ -222,7 +222,7 @@ macro_rules! deserialize_number {
             V: Visitor<'de>,
         {
             match self.value {
-                GenericValue::Number(n) => n.deserialize_any(visitor),
+                GenericValue::Number(n) => n.$method(visitor),
                 _ => self.deserialize_any(visitor),
             }
         }
@@ -1031,6 +1031,19 @@ mod tests {
         let ord = OrdValue::from(doc());
         assert_eq!(Doc::deserialize(&ord).unwrap(), expected());
         assert_eq!(from_value::<Doc>(ord).unwrap(), expected());
+    }
+
+    #[test]
+    fn typed_numbers_match_serde_json() {
+        let number: crate::Number = "1.00000000000000001".parse().unwrap();
+        let expected = f64::deserialize(&number).unwrap();
+        let value = Value::Number(number.clone());
+        let ord = OrdValue::Number(number);
+
+        assert_eq!(from_value::<f64>(value.clone()).unwrap(), expected);
+        assert_eq!(f64::deserialize(&value).unwrap(), expected);
+        assert_eq!(from_value::<f64>(ord.clone()).unwrap(), expected);
+        assert_eq!(f64::deserialize(&ord).unwrap(), expected);
     }
 
     #[test]

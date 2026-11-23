@@ -13,6 +13,15 @@ export function toAuthorityUrl(name: string): string {
   return knownAuthorities.find(ca => ca.name === name)?.url || name
 }
 
+/** The first configured authority in `knownAuthorities` order, else any configured one. */
+export function defaultAuthority(configured: readonly string[]): string {
+  return (
+    knownAuthorities.find(ca => configured.includes(ca.url))?.url ||
+    configured[0] ||
+    'local'
+  )
+}
+
 export const knownAuthorities = [
   {
     name: `Let's Encrypt`,
