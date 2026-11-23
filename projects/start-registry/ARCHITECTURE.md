@@ -58,11 +58,18 @@ Subcommands (same module), each available over RPC and to the `start-registry` C
 
 ### Registry index subscriptions
 
-The public `db.subscribe` RPC accepts optional `pointer`, `osVersion` and `language` parameters. The pointer
+The public `db.subscribe` RPC accepts optional `pointer`, `osVersion`, `language` and `since` parameters. The pointer
 may select `/index` or any descendant; omitting it or passing `null` selects `/index`. Without
 `rpcstream` opt-in, the response contains an initial `{ id, value }` dump and a continuation
 `guid`. Connecting to `/rpc/v2/<guid>` streams revisions relative to the selected subtree. This
 contract also applies to ordinary calls on the shared WebSocket.
+
+With `rpcstream`, the initial response is `{ epoch, id, value, revisions }`. `since: { epoch, id }`
+from an earlier response replays the revisions after `id` in `revisions`, with `value` null, when
+the view that reported it is still the one serving the request and its retained history reaches
+back that far; otherwise the response is a dump with `revisions` null. Each view is its own
+in-memory database with a random epoch, so a cursor from another view, or from one released with
+its last subscriber and rebuilt, always dumps. Clients that read only `{ id, value }` are unaffected.
 
 `language` resolves every `LocaleString` in the view with `LocaleString::localize_for`:
 the exact or same-language translation, else the owner's declared default locale

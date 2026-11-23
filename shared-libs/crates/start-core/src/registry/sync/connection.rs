@@ -34,13 +34,21 @@ pub(super) fn response_config() -> WebSocketConfig {
 
 pub(super) fn subscription_request(
     subscription: &Subscription,
-    os_version: &exver::Version,
+    view: &RegistryView,
+    since: Option<&DbCursor>,
 ) -> Value {
-    db_subscribe_request(
+    let mut request = db_subscribe_request(
         subscription.request_id(),
         subscription.pointer(),
-        Some(os_version),
-    )
+        Some(&view.os_version),
+    );
+    if let Some(language) = &view.language {
+        request["params"]["language"] = imbl_value::json!(language);
+    }
+    if let Some(since) = since {
+        request["params"]["since"] = imbl_value::json!(since);
+    }
+    request
 }
 
 /// Streams the registry subtree at the pointer.
@@ -106,40 +114,98 @@ pub(super) async fn subscribe(
     receive_updates(socket, db, subscriptions, &device, backoff).await
 }
 
-struct WatchState {
-    dump: Option<Dump>,
+/// A subscription's first response: the subtree, or the revisions after the requested cursor.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SubscriptionStart {
+    /// Absent from registries that cannot resume.
+    #[serde(default)]
+    pub epoch: Option<InternedString>,
+    pub id: u64,
+    #[serde(default)]
+    pub value: Value,
+    /// Present only when the registry resumed from the requested cursor.
+    #[serde(default)]
+    pub revisions: Option<Vec<Revision>>,
 }
 
-fn update_dump(state: &mut WatchState, message: Value) -> Result<bool, Error> {
+#[derive(Debug)]
+pub(crate) enum SubscriptionEvent {
+    Start(SubscriptionStart),
+    Revision(Revision),
+}
+
+/// A subscription's subtree, kept current by applying each event.
+#[derive(Default)]
+pub(crate) struct TrackedValue(Option<Dump>);
+
+impl TrackedValue {
+    pub(crate) fn apply(&mut self, event: SubscriptionEvent) -> Result<&Value, Error> {
+        match event {
+            SubscriptionEvent::Start(start) => {
+                ensure_code!(
+                    start.revisions.is_none(),
+                    ErrorKind::Network,
+                    "{}",
+                    t!("registry.sync.unrequested-replay")
+                );
+                self.0 = Some(Dump {
+                    id: start.id,
+                    value: start.value,
+                });
+            }
+            SubscriptionEvent::Revision(revision) => {
+                let dump = self.0.as_mut().or_not_found("registry initial response")?;
+                ensure_code!(
+                    revision.id > dump.id,
+                    ErrorKind::Database,
+                    "out-of-order registry revision"
+                );
+                patch_db::json_patch::patch(&mut dump.value, &revision.patch)
+                    .with_kind(ErrorKind::Database)?;
+                dump.id = revision.id;
+            }
+        }
+        Ok(&self.0.as_ref().unwrap().value)
+    }
+}
+
+#[derive(Default)]
+struct WatchState {
+    started: bool,
+    tracked: TrackedValue,
+}
+
+/// `None` once the registry ends the subscription.
+fn subscription_event(
+    state: &mut WatchState,
+    message: Value,
+) -> Result<Option<SubscriptionEvent>, Error> {
     if message.get("rpcstream").is_some() {
         let event: RpcStreamResponse = from_value(message)?;
         let result = event.result?;
         if event.end {
-            return Ok(false);
+            return Ok(None);
         }
-        let dump = state
-            .dump
-            .as_mut()
-            .or_not_found("registry initial response")?;
-        let revision: Revision = from_value(result)?;
         ensure_code!(
-            revision.id > dump.id,
-            ErrorKind::Database,
-            "out-of-order registry revision"
+            state.started,
+            ErrorKind::Network,
+            "{}",
+            t!("registry.sync.revision-before-start")
         );
-        patch_db::json_patch::patch(&mut dump.value, &revision.patch)
-            .with_kind(ErrorKind::Database)?;
-        dump.id = revision.id;
+        Ok(Some(SubscriptionEvent::Revision(from_value(result)?)))
     } else {
         ensure_code!(
-            state.dump.is_none(),
+            !state.started,
             ErrorKind::Network,
             "duplicate registry initial response"
         );
         let response: RpcResponse = from_value(message)?;
-        state.dump = Some(from_value(response.result?)?);
+        state.started = true;
+        Ok(Some(SubscriptionEvent::Start(from_value(
+            response.result?,
+        )?)))
     }
-    Ok(true)
 }
 
 pub(super) async fn receive_updates(
@@ -153,21 +219,30 @@ pub(super) async fn receive_updates(
         .iter()
         .map(|subscription| (subscription.request_id(), subscription))
         .collect();
-    let mut follower = SubscriptionFollower::start(
-        socket,
-        subscriptions
-            .iter()
-            .map(|subscription| {
-                (
-                    subscription.request_id(),
-                    subscription_request(subscription, &device.os.version),
-                )
-            })
-            .collect(),
-    )
-    .await?;
-    while let Some((id, value)) = follower.next().await? {
-        publish(db, by_id[&id], &value, device).await?;
+    let view = RegistryView::new(device);
+    let saved = db.peek().await;
+    let requests = subscriptions
+        .iter()
+        .map(|subscription| {
+            let since = match subscription {
+                Subscription::Index(url) => resumable_cursor(&saved, url, &view)?,
+                Subscription::Os(_) => None,
+            };
+            Ok((
+                subscription.request_id(),
+                subscription_request(subscription, &view, since.as_ref()),
+            ))
+        })
+        .collect::<Result<_, Error>>()?;
+    drop(saved);
+    let mut follower = SubscriptionFollower::start(socket, requests).await?;
+    let mut os = TrackedValue::default();
+    while let Some((id, event)) = follower.next_event().await? {
+        let subscription = by_id[&id];
+        match subscription {
+            Subscription::Index(url) => ingest(db, url, &view, &event, device).await?,
+            Subscription::Os(_) => publish(db, subscription, os.apply(event)?, device).await?,
+        }
         *backoff = INITIAL_BACKOFF;
     }
     Ok(())
@@ -197,7 +272,7 @@ impl SubscriptionFollower {
             .await
             .with_kind(ErrorKind::Network)?
             .with_kind(ErrorKind::Network)?;
-            watches.insert(id, WatchState { dump: None });
+            watches.insert(id, WatchState::default());
         }
         let mut heartbeat = tokio::time::interval(Duration::from_secs(60));
         heartbeat.tick().await;
@@ -213,6 +288,16 @@ impl SubscriptionFollower {
     /// Returns the request ID and full subtree after each dump or revision.
     /// `None` once the registry ends a subscription or closes the socket.
     pub(crate) async fn next(&mut self) -> Result<Option<(u64, Value)>, Error> {
+        let Some((id, event)) = self.next_event().await? else {
+            return Ok(None);
+        };
+        let state = self.watches.get_mut(&id).or_not_found("registry watch")?;
+        Ok(Some((id, state.tracked.apply(event)?.clone())))
+    }
+
+    /// Returns the request ID and each start or revision as received.
+    /// `None` once the registry ends a subscription or closes the socket.
+    pub(crate) async fn next_event(&mut self) -> Result<Option<(u64, SubscriptionEvent)>, Error> {
         loop {
             tokio::select! {
                 message = self.socket.next() => {
@@ -222,8 +307,7 @@ impl SubscriptionFollower {
                             let message: Value = serde_json::from_str(&text).with_kind(ErrorKind::Deserialization)?;
                             let id = message.get("id").and_then(Value::as_u64).or_not_found("registry response id")?;
                             let state = self.watches.get_mut(&id).or_not_found("registry watch")?;
-                            if !update_dump(state, message)? { return Ok(None); }
-                            return Ok(Some((id, state.dump.as_ref().unwrap().value.clone())));
+                            return Ok(subscription_event(state, message)?.map(|event| (id, event)));
                         }
                         Some(Message::Ping(_)) => {
                             tokio::time::timeout(Duration::from_secs(15), self.socket.flush())
@@ -241,7 +325,7 @@ impl SubscriptionFollower {
                 _ = tokio::time::sleep_until(self.last_received + Duration::from_secs(120)) => {
                     return Err(Error::new(eyre!("registry heartbeat timed out"), ErrorKind::Network));
                 }
-                _ = tokio::time::sleep_until(self.initial_deadline), if self.watches.values().any(|state| state.dump.is_none()) => {
+                _ = tokio::time::sleep_until(self.initial_deadline), if self.watches.values().any(|state| !state.started) => {
                     return Err(Error::new(eyre!("registry initial response timed out"), ErrorKind::Network));
                 }
             }

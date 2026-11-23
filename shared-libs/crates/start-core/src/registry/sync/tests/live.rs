@@ -45,16 +45,23 @@ pub(super) async fn native_connection(
 
 #[test]
 fn channel_authenticated_watches_keep_distinct_ids_and_projection_versions() {
-    let version = device().os.version;
-    let index = subscription_request(&Subscription::Index(url()), &version);
-    let os = subscription_request(&Subscription::Os(url()), &version);
+    let view = RegistryView::new(&device());
+    let since = crate::db::DbCursor {
+        epoch: "epoch".into(),
+        id: 7,
+    };
+    let index = subscription_request(&Subscription::Index(url()), &view, Some(&since));
+    let os = subscription_request(&Subscription::Os(url()), &view, None);
     assert_ne!(index["id"], os["id"]);
     assert_eq!(index["params"]["pointer"], json!("/index"));
     assert_eq!(os["params"]["pointer"], json!("/index/os"));
+    assert_eq!(index["params"]["since"], json!({"epoch": "epoch", "id": 7}));
+    assert!(os["params"].get("since").is_none());
     for request in [index, os] {
         assert_eq!(request["method"], json!("db.subscribe"));
         assert_eq!(request["rpcstream"], json!(rpc_toolkit::RPCSTREAM_VERSION));
-        assert_eq!(request["params"]["osVersion"], json!(version));
+        assert_eq!(request["params"]["osVersion"], json!(view.os_version));
+        assert!(request["params"].get("language").is_none());
         assert!(request.get("signature").is_none());
     }
 }

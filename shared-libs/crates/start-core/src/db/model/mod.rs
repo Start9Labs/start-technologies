@@ -44,6 +44,7 @@ impl Database {
                 notifications: Notifications::new(),
                 os_security_notifications: BTreeMap::new(),
                 registry_indexes: BTreeMap::new(),
+                registry_cursors: BTreeMap::new(),
                 push: Default::default(),
                 cifs: CifsTargets::new(),
                 backup_history: BTreeMap::new(),

@@ -742,6 +742,139 @@ fn os_cache_excludes_other_platforms_and_incompatible_sources() {
     }
 }
 
+fn revision(id: u64, patch: Value) -> patch_db::Revision {
+    from_value(json!({ "id": id, "patch": patch })).unwrap()
+}
+
+#[test]
+fn index_patches_name_the_packages_they_change() {
+    let changed = |patch| changed_packages(&revision(1, patch).patch);
+    assert_eq!(
+        changed(json!([
+            {"op": "replace", "path": "/package/packages/test/versions/1.0.0:0/releaseNotes", "value": "x"},
+            {"op": "add", "path": "/os/versions/0.4.1", "value": {}},
+        ])),
+        Some(BTreeSet::from(["test".parse().unwrap()]))
+    );
+    assert_eq!(
+        changed(json!([{"op": "add", "path": "/os/versions/0.4.1", "value": {}}])),
+        Some(BTreeSet::new())
+    );
+    for path in ["/name", "/package/packages", "/package/categories/x", ""] {
+        assert_eq!(
+            changed(json!([{"op": "replace", "path": path, "value": null}])),
+            None,
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn index_revisions_patch_the_saved_index_and_resume_only_from_the_same_view() {
+    use connection::{SubscriptionEvent, SubscriptionStart};
+    let mut db = database();
+    let view = RegistryView::new(&device());
+    let start = |epoch: Option<&str>, id, value, revisions| {
+        SubscriptionEvent::Start(SubscriptionStart {
+            epoch: epoch.map(Into::into),
+            id,
+            value,
+            revisions,
+        })
+    };
+    let rename = |id, name: &str| {
+        revision(
+            id,
+            json!([{"op": "replace", "path": "/name", "value": name}]),
+        )
+    };
+    let cursor = |db: &DatabaseModel| resumable_cursor(db, &url(), &view).unwrap();
+    let name = |db: &DatabaseModel| {
+        db.as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .de()
+            .unwrap()
+            .info
+            .name
+    };
+    let ingest = |db: &mut DatabaseModel, event| ingest_event(db, &url(), &view, &event, &device());
+
+    assert_eq!(cursor(&db), None);
+    ingest(
+        &mut db,
+        start(Some("a"), 3, to_value(&index()).unwrap(), None),
+    )
+    .unwrap();
+    assert_eq!(
+        cursor(&db),
+        Some(DbCursor {
+            epoch: "a".into(),
+            id: 3
+        })
+    );
+    ingest(&mut db, SubscriptionEvent::Revision(rename(4, "Renamed"))).unwrap();
+    assert_eq!(name(&db).as_deref(), Some("Renamed"));
+    assert_eq!(cursor(&db).unwrap().id, 4);
+    assert!(ingest(&mut db, SubscriptionEvent::Revision(rename(4, "Stale"))).is_err());
+
+    ingest(
+        &mut db,
+        start(
+            Some("a"),
+            6,
+            Value::Null,
+            Some(vec![rename(5, "Resumed"), rename(6, "Again")]),
+        ),
+    )
+    .unwrap();
+    assert_eq!(name(&db).as_deref(), Some("Again"));
+    assert_eq!(cursor(&db).unwrap().id, 6);
+    assert!(
+        ingest(
+            &mut db,
+            start(Some("b"), 7, Value::Null, Some(vec![rename(7, "Other")]))
+        )
+        .is_err()
+    );
+    assert_eq!(name(&db).as_deref(), Some("Again"));
+
+    let mut localized = view.clone();
+    localized.language = Some("de_DE".into());
+    let mut upgraded = view.clone();
+    upgraded.os_version = "0.4.0.6".parse().unwrap();
+    for other in [localized, upgraded] {
+        assert_eq!(resumable_cursor(&db, &url(), &other).unwrap(), None);
+    }
+
+    ingest(&mut db, start(None, 1, to_value(&index()).unwrap(), None)).unwrap();
+    assert_eq!(cursor(&db), None);
+    assert_eq!(name(&db).as_deref(), Some("Test Registry"));
+
+    ingest(
+        &mut db,
+        start(Some("c"), 1, to_value(&index()).unwrap(), None),
+    )
+    .unwrap();
+    db.as_public_mut()
+        .as_server_info_mut()
+        .mutate(|info| {
+            info.registries.clear();
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+    let desired = subscriptions(&db.as_public().as_server_info().de().unwrap());
+    reconcile(&mut db, &desired, false).unwrap();
+    assert!(
+        db.as_private()
+            .as_registry_cursors()
+            .de()
+            .unwrap()
+            .is_empty()
+    );
+}
+
 #[tokio::test]
 async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
     let temp = tempfile::tempdir().unwrap();

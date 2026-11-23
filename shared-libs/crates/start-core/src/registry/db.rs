@@ -8,7 +8,7 @@ use clap::Parser;
 use exver::Version;
 use itertools::Itertools;
 use patch_db::json_ptr::{JsonPointer, ROOT};
-use patch_db::{Dump, JsonSubscriber};
+use patch_db::{Dump, JsonCatchup, JsonSubscriber};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -16,8 +16,8 @@ use tracing::instrument;
 
 use crate::context::CliContext;
 pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeRes,
-    SubscribeResult as SubscribeIndexResult,
+    ApplyWithPathParams as ApplyParams, DbCursor, DumpParams, SubscribeRes, SubscribeStart,
+    SubscribeStartResult as SubscribeIndexResult,
 };
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
@@ -125,20 +125,54 @@ fn subscription_pointer(pointer: Option<JsonPointer>) -> Result<JsonPointer, Err
     Ok(pointer)
 }
 
+const SUBSCRIPTION_CAPACITY: NonZeroUsize = NonZeroUsize::new(32).unwrap();
+
 async fn subscription(
     db: &PatchDb,
     pointer: Option<JsonPointer>,
 ) -> Result<(Dump, JsonSubscriber), Error> {
     let (dump, sub) = db
-        .dump_and_sub_json(
-            subscription_pointer(pointer)?,
-            NonZeroUsize::new(32).unwrap(),
-        )
+        .dump_and_sub_json(subscription_pointer(pointer)?, SUBSCRIPTION_CAPACITY)
         .await?;
     Ok((
         serde_json::from_slice(&dump).with_kind(ErrorKind::Deserialization)?,
         sub,
     ))
+}
+
+/// Each view's mirror has its own epoch, so a cursor from another view, or from a
+/// released and rebuilt one, dumps.
+async fn subscription_start(
+    db: &PatchDb,
+    pointer: Option<JsonPointer>,
+    since: Option<&DbCursor>,
+) -> Result<(SubscribeStart, JsonSubscriber), Error> {
+    let (epoch, catchup, sub) = db
+        .catch_up_and_sub_json(
+            subscription_pointer(pointer)?,
+            since.map(|since| (&*since.epoch, since.id)),
+            SUBSCRIPTION_CAPACITY,
+        )
+        .await?;
+    let start = match catchup {
+        JsonCatchup::Dump(json) => {
+            let Dump { id, value } =
+                serde_json::from_slice(&json).with_kind(ErrorKind::Deserialization)?;
+            SubscribeStart {
+                epoch,
+                id,
+                value: Some(value),
+                revisions: None,
+            }
+        }
+        JsonCatchup::Replay { id, revisions } => SubscribeStart {
+            epoch,
+            id,
+            value: None,
+            revisions: Some(revisions),
+        },
+    };
+    Ok((start, sub))
 }
 
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
@@ -149,22 +183,20 @@ pub struct SubscribeIndexParams {
     pub os_version: Option<Version>,
     /// Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
     pub language: Option<InternedString>,
+    /// The subscriber's last revision; resumes only within the epoch of the view that reported it.
+    pub since: Option<DbCursor>,
     #[serde(flatten)]
     pub reader: ReaderParams,
 }
 
 rpc_toolkit::reflect_ts!(SubscribeIndexParams);
 
-async fn visible_subscription(
+async fn visible_mirror(
     ctx: &RegistryContext,
-    SubscribeIndexParams {
-        pointer,
-        os_version,
-        language,
-        reader,
-    }: SubscribeIndexParams,
-) -> Result<(Arc<IndexMirror>, Dump, JsonSubscriber), Error> {
-    let pointer = subscription_pointer(pointer)?;
+    os_version: Option<Version>,
+    language: Option<InternedString>,
+    reader: ReaderParams,
+) -> Result<Arc<IndexMirror>, Error> {
     let wire = os_version
         .as_ref()
         .map(WireCompatibility::for_startos)
@@ -183,9 +215,7 @@ async fn visible_subscription(
             (key, view)
         }
     };
-    let mirror = index_mirror(&ctx.index_mirrors, &ctx.db, key, view, &ctx.datadir).await?;
-    let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
-    Ok((mirror, dump, sub))
+    index_mirror(&ctx.index_mirrors, &ctx.db, key, view, &ctx.datadir).await
 }
 
 pub async fn subscribe(
@@ -201,11 +231,21 @@ pub async fn subscribe(
         patch_db::Revision,
     >,
 ) -> Result<SubscribeIndexResult, Error> {
-    let (mirror, dump, sub) = visible_subscription(&context, params).await?;
+    let SubscribeIndexParams {
+        pointer,
+        os_version,
+        language,
+        since,
+        reader,
+    } = params;
+    let pointer = subscription_pointer(pointer)?;
+    let mirror = visible_mirror(&context, os_version, language, reader).await?;
     if let Some(stream) = rpc_stream {
+        let (start, sub) = subscription_start(&mirror.db, Some(pointer), since.as_ref()).await?;
         stream_subscription(stream, mirror, sub);
-        Ok(SubscribeIndexResult::Stream(dump))
+        Ok(SubscribeIndexResult::Stream(start))
     } else {
+        let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
         let guid = legacy_subscription(&context, mirror, sub).await;
         Ok(SubscribeIndexResult::Continuation(SubscribeRes {
             dump,
@@ -309,12 +349,12 @@ mod tests {
             .await
             .unwrap();
         crate::sign::instance::load(&db).await.unwrap();
-        let (dump, mut sub) = subscription(&db, None).await.unwrap();
-        assert_eq!(dump.value, imbl_value::json!({"name": "registry"}));
-        assert_eq!(
-            serde_json::to_value(SubscribeIndexResult::Stream(dump.clone())).unwrap(),
-            serde_json::json!({"id": dump.id, "value": {"name": "registry"}})
-        );
+        let (start, mut sub) = subscription_start(&db, None, None).await.unwrap();
+        let wire = serde_json::to_value(SubscribeIndexResult::Stream(start)).unwrap();
+        assert_eq!(wire["value"], serde_json::json!({"name": "registry"}));
+        assert!(wire["revisions"].is_null());
+        assert!(wire["epoch"].is_string());
+        let dump: Dump = serde_json::from_value(wire).unwrap();
         db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &"renamed")
             .await
             .unwrap();
@@ -324,6 +364,44 @@ mod tests {
         let mut value = dump.value;
         patch_db::json_patch::patch(&mut value, &revision.patch).unwrap();
         assert_eq!(value, imbl_value::json!({"name": "renamed"}));
+    }
+
+    #[tokio::test]
+    async fn subscription_replays_only_within_its_epoch() {
+        let db = PatchDb::in_memory();
+        db.put(&ROOT, &imbl_value::json!({"index": {"name": "registry"}}))
+            .await
+            .unwrap();
+        let (start, _) = subscription_start(&db, None, None).await.unwrap();
+        db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &"renamed")
+            .await
+            .unwrap();
+        let cursor = DbCursor {
+            epoch: start.epoch.clone(),
+            id: start.id,
+        };
+        let (resumed, mut sub) = subscription_start(&db, None, Some(&cursor)).await.unwrap();
+        assert!(resumed.value.is_none());
+        let revisions = resumed.revisions.unwrap();
+        assert_eq!(revisions.len(), 1);
+        assert_eq!(resumed.id, start.id + 1);
+        db.put(&"/index/name".parse::<JsonPointer>().unwrap(), &"again")
+            .await
+            .unwrap();
+        let next: patch_db::Revision =
+            serde_json::from_slice(&sub.recv().await.unwrap().unwrap()).unwrap();
+        assert_eq!(next.id, resumed.id + 1);
+
+        let view = PatchDb::in_memory();
+        view.put(&ROOT, &imbl_value::json!({"index": {"name": "registry"}}))
+            .await
+            .unwrap();
+        let (other, _) = subscription_start(&view, None, Some(&cursor))
+            .await
+            .unwrap();
+        assert_ne!(other.epoch, start.epoch);
+        assert!(other.revisions.is_none());
+        assert_eq!(other.value, Some(imbl_value::json!({"name": "registry"})));
     }
 
     #[tokio::test]
