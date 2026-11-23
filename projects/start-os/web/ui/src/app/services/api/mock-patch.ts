@@ -80,21 +80,61 @@ const MOCK_UPDATE_TARGETS: Record<string, string> = {
   'btc-rpc-proxy': '0.4.0:0',
 }
 
-function mockCatalog(): T.RegistryCache['catalog'] {
+const flavorOf = (version: string) =>
+  version.startsWith('#') ? version.slice(1, version.indexOf(':')) : null
+
+function mockRelease({
+  description,
+  sourceVersion,
+  gitHash,
+  ...info
+}: T.PackageVersionInfo): T.ListedRelease {
+  return {
+    title: info.title,
+    defaultLocale: info.defaultLocale,
+    icon: info.icon,
+    shortDescription: description.short,
+    releaseNotes: info.releaseNotes,
+    preDownloadAlert: info.preDownloadAlert,
+    osVersion: info.osVersion,
+    sourceVersion: sourceVersion ?? undefined,
+    satisfies: info.satisfies,
+    gitHash: gitHash ?? undefined,
+    s9pks: info.s9pks,
+  }
+}
+
+function mockListings(): T.RegistryCache['listings'] {
   return Object.fromEntries(
-    Object.entries(Mock.RegistryPackages).map(([id, pkg]) => [
-      id,
-      {
-        categories: pkg.categories,
-        versions: Object.fromEntries([
+    Object.entries(Mock.RegistryPackages).map(([id, pkg]) => {
+      const updateTarget = MOCK_UPDATE_TARGETS[id]
+      const versions: Record<string, T.PackageVersionInfo> = Object.fromEntries(
+        [
           ...Object.values(Mock.OtherPackageVersions[id] ?? {}).flatMap(res =>
             Object.entries(res.best),
           ),
           ...Object.entries(pkg.best),
-        ]),
-        updateTarget: MOCK_UPDATE_TARGETS[id] ?? null,
-      },
-    ]),
+        ],
+      )
+      const listed = Object.keys(pkg.best).filter(
+        v =>
+          !updateTarget ||
+          !versions[updateTarget] ||
+          flavorOf(v) !== flavorOf(updateTarget),
+      )
+      if (updateTarget && versions[updateTarget]) listed.push(updateTarget)
+      return [
+        id,
+        {
+          categories: pkg.categories,
+          firstPublishedAt: pkg.firstPublishedAt,
+          releases: Object.fromEntries(
+            listed.map(v => [v, mockRelease(versions[v]!)]),
+          ),
+          updateTarget,
+        },
+      ]
+    }),
   )
 }
 
@@ -106,14 +146,14 @@ export function mockRegistryCache(
   return sameUrl(url, defaultRegistries.community)
     ? {
         info,
-        catalog: {},
+        listings: {},
         publishesOsUpdates: false,
         status: 'error',
         error: `error sending request for url (${registryUrl(url)}): connection timed out`,
       }
     : {
         info,
-        catalog: mockCatalog(),
+        listings: mockListings(),
         publishesOsUpdates: true,
         status: 'connected',
       }

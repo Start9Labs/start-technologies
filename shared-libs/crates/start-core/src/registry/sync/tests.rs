@@ -360,8 +360,8 @@ fn package_and_signer_changes_publish_atomically_without_granting_trust() {
     assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Test Registry"));
     assert!(
-        cache.catalog["test"]
-            .versions
+        cache.listings["test"]
+            .releases
             .contains_key(&"2.0.0:0".parse::<crate::util::VersionString>().unwrap())
     );
     let key = db
@@ -516,7 +516,7 @@ fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connecting);
     assert_eq!(cache.info.name.as_deref(), Some("Test Registry"));
-    assert!(!cache.catalog.is_empty());
+    assert!(!cache.listings.is_empty());
 }
 
 #[test]
@@ -537,7 +537,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
             .de()
             .unwrap();
         assert_eq!(cache.status, status);
-        assert!(cache.catalog.is_empty());
+        assert!(cache.listings.is_empty());
     }
     publish_snapshot(
         &mut db,
@@ -554,7 +554,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
         .de()
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connected);
-    assert!(cache.catalog.is_empty());
+    assert!(cache.listings.is_empty());
     publish_snapshot(
         &mut db,
         &subscription,
@@ -569,7 +569,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
         .unwrap()
         .de()
         .unwrap()
-        .catalog;
+        .listings;
     assert!(!packages.is_empty());
     for status in [RegistryStatus::Error, RegistryStatus::Connecting] {
         set_status(&mut db, &subscription, status, None).unwrap();
@@ -582,7 +582,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
             .unwrap();
         assert_eq!(cache.status, status);
         assert_eq!(
-            to_value(&cache.catalog).unwrap(),
+            to_value(&cache.listings).unwrap(),
             to_value(&packages).unwrap()
         );
     }
@@ -1002,7 +1002,7 @@ fn update_target(db: &DatabaseModel) -> Option<String> {
         .unwrap()
         .de()
         .unwrap()
-        .catalog
+        .listings
         .get(&"test".parse::<crate::PackageId>().unwrap())
         .and_then(|package| package.update_target.as_ref())
         .map(ToString::to_string)
@@ -1046,8 +1046,8 @@ fn update_targets_follow_the_installed_version_through_migration_and_os_ranges()
         .de()
         .unwrap();
     assert!(
-        cache.catalog["test"]
-            .versions
+        cache.listings["test"]
+            .releases
             .contains_key(&"3.0.0:0".parse::<crate::util::VersionString>().unwrap())
     );
     let mut strict: GetPackageParams =

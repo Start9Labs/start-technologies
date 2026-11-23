@@ -1,5 +1,5 @@
 import { inject, Pipe, PipeTransform } from '@angular/core'
-import { MarketplacePkg } from '@start9labs/marketplace'
+import { MarketplaceListing } from '@start9labs/marketplace'
 import { Exver } from '@start9labs/shared'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
 
@@ -10,10 +10,10 @@ export class FilterUpdatesPipe implements PipeTransform {
   private readonly exver = inject(Exver)
 
   transform(
-    pkgs: MarketplacePkg[],
+    pkgs: MarketplaceListing[],
     local: Record<string, PackageDataEntry> = {},
     hidden: Record<string, string[]> = {},
-  ): MarketplacePkg[] {
+  ): MarketplaceListing[] {
     return pkgs.filter(({ id, flavor, version }) => {
       const localPkg = local[id]
       return (

@@ -4190,7 +4190,7 @@ test('a late registry cache update cannot restore a removed registry', async t =
     'https://registry.test/': {
       status: 'connected',
       info: { name: 'New name' },
-      catalog: {},
+      listings: {},
     },
   })
   await new Promise(setImmediate)
@@ -4209,7 +4209,7 @@ test('registry status keeps its last known observation while the server is disco
       status: 'error',
       error: 'connection timed out',
       info: { name: 'Test' },
-      catalog: {},
+      listings: {},
     },
   })
   const registries = of({ 'https://registry.test': 'Test' })
@@ -4478,10 +4478,10 @@ const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
     categories: { bitcoin: { name: 'Bitcoin' } },
     icon: null,
   },
-  catalog: {
+  listings: {
     example: {
       categories: ['bitcoin'],
-      versions: { [version]: { title: version } },
+      releases: { [version]: { title: version, shortDescription: '' } },
     },
   },
 })
@@ -4501,6 +4501,8 @@ function marketplaceFixture(t, entries = {}) {
   patch.start()
   const queries = []
   const responses = []
+  const packageQueries = []
+  const details = { best: {}, otherVersions: {}, missing: new Set() }
   const refreshes = []
   const connections = []
   const iconRequests = []
@@ -4563,6 +4565,19 @@ function marketplaceFixture(t, entries = {}) {
         rpc: {
           server: {
             registries: {
+              package: async params => {
+                packageQueries.push(params)
+                const version = params.targetVersion.slice(1)
+                return {
+                  categories: [],
+                  best: details.missing.has(version)
+                    ? {}
+                    : {
+                        [version]: details.best[version] ?? { title: version },
+                      },
+                  otherVersions: details.otherVersions,
+                }
+              },
               refresh: async params => {
                 refreshes.push(params)
               },
@@ -4603,6 +4618,8 @@ function marketplaceFixture(t, entries = {}) {
     connection,
     queries,
     responses,
+    packageQueries,
+    details,
     refreshes,
     connections,
     iconRequests,
@@ -4642,7 +4659,7 @@ test('registry availability distinguishes first sync, empty success and cached r
   const packages = f.watch(f.service.getPackage$('missing', null, null))
   assert.equal(rows.at(-1)[0].status, 'connecting')
   assert.deepEqual(errors.at(-1), [])
-  const entry = { ...registryEntry(), status: 'connecting', catalog: {} }
+  const entry = { ...registryEntry(), status: 'connecting', listings: {} }
   f.replace('/registryCache', { 'https://registry.test/': entry })
   assert.equal(
     isRegistryLoading(stores.at(-1).status, stores.at(-1).packages.length),
@@ -4773,7 +4790,7 @@ for (const status of ['connected', 'connecting', 'error']) {
 test('the visible refresh action retries failed icons when the refreshed cache arrives and shares successful loads', async t => {
   const entry = registryEntry()
   const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
-  entry.catalog.example.versions['1.0.0:0'].icon = icon
+  entry.listings.example.releases['1.0.0:0'].icon = icon
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
   f.makePage()
   const refresh = f.makeRefresh('https://registry.test/')
@@ -4941,7 +4958,7 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   assert.deepEqual(f.queries, [])
 })
 
-test('marketplace tolerates browser snapshots without a catalog and consumes the live replacement', async t => {
+test('marketplace tolerates browser snapshots without listings and consumes the live replacement', async t => {
   const legacy = {
     status: 'connected',
     info: registryEntry().info,
@@ -4961,63 +4978,65 @@ test('marketplace tolerates browser snapshots without a catalog and consumes the
   assert.deepEqual(marketplace.at(-1)['https://registry.test/'].packages, [])
   assert.deepEqual(stores.at(-1).packages, [])
   assert.equal(packages.at(-1), null)
-  assert.equal(legacy.catalog, undefined)
+  assert.equal(legacy.listings, undefined)
 
   f.replace('/registryCache', { 'https://registry.test/': registryEntry() })
   assert.equal(marketplace.at(-1)['https://registry.test/'].packages.length, 1)
   assert.equal(stores.at(-1).packages[0].version, '1.0.0:0')
+  await tick()
   assert.equal(packages.at(-1).version, '1.0.0:0')
   assert.deepEqual(f.queries, [])
 })
 
-test('marketplace lists the update target as the installable update and keeps the newer release selectable', async t => {
-  const entry = registryEntry('3.0.0:0')
-  entry.catalog.example.versions = {
-    '3.0.0:0': { title: '3.0.0:0', releaseNotes: 'Latest' },
-    '2.0.0:0': { title: '2.0.0:0', releaseNotes: 'Stepping stone' },
-    '1.0.0:0': { title: '1.0.0:0', releaseNotes: 'Revision', superseded: true },
-  }
-  entry.catalog.example.updateTarget = '2.0.0:0'
+test('marketplace lists the update target as the installable update and fetches its details lazily', async t => {
+  const entry = registryEntry('2.0.0:0')
+  entry.listings.example.releases['2.0.0:0'].releaseNotes = 'Stepping stone'
+  entry.listings.example.updateTarget = '2.0.0:0'
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  f.details.otherVersions = {
+    '3.0.0:0': { releaseNotes: 'Latest' },
+  }
   await f.service.connect('https://registry.test')
   const store = await firstValueFrom(f.service.currentRegistry$)
   assert.deepEqual(
     store.updates.map(({ version }) => version),
     ['2.0.0:0'],
   )
+  assert.equal(store.updates[0].releaseNotes, 'Stepping stone')
+  assert.deepEqual(f.packageQueries, [])
   const pkg = await firstValueFrom(f.service.getPackage$('example', null, null))
   assert.equal(pkg.version, '2.0.0:0')
   assert.equal(pkg.title, '2.0.0:0')
-  assert.equal(pkg.superseded, undefined)
-  assert.deepEqual(pkg.otherVersions, {
-    '1.0.0:0': {
-      releaseNotes: 'Revision',
-      defaultLocale: undefined,
-      superseded: true,
+  assert.deepEqual(pkg.otherVersions, f.details.otherVersions)
+  assert.deepEqual(f.packageQueries, [
+    {
+      registry: 'https://registry.test/',
+      id: 'example',
+      targetVersion: '=2.0.0:0',
     },
-    '3.0.0:0': {
-      releaseNotes: 'Latest',
-      defaultLocale: undefined,
-      superseded: undefined,
-    },
-  })
+  ])
   assert.deepEqual(f.queries, [])
 })
 
-test('an exact version reads the registry cache and tracks its revisions without querying', async t => {
-  const entry = registryEntry('2.0.0:0')
-  entry.catalog.example.versions['1.0.0:0'] = { title: 'Older' }
+test('an exact version is fetched once its package is listed and again when its row changes', async t => {
   const f = marketplaceFixture(t)
+  f.details.best['1.0.0:0'] = { title: 'Older' }
   await f.service.connect('https://registry.test')
   const values = f.watch(f.service.getPackage$('example', '1.0.0:0', null))
   assert.deepEqual(values, [])
-  f.replace('/registryCache', { 'https://registry.test/': entry })
-  assert.equal(values.at(-1).version, '1.0.0:0')
-  assert.equal(values.at(-1).title, 'Older')
   f.replace('/registryCache', {
     'https://registry.test/': registryEntry('2.0.0:0'),
   })
+  await tick()
+  assert.equal(values.at(-1).version, '1.0.0:0')
+  assert.equal(values.at(-1).title, 'Older')
+  f.details.missing.add('1.0.0:0')
+  f.replace('/registryCache', {
+    'https://registry.test/': registryEntry('3.0.0:0'),
+  })
+  await tick()
   assert.equal(values.at(-1), null)
+  assert.equal(f.packageQueries.length, 2)
   assert.deepEqual(f.queries, [])
 })
 

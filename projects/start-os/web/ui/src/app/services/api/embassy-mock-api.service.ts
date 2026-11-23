@@ -378,6 +378,15 @@ export class MockApiService extends ApiService implements StartupApiService {
       await this.publishTrust()
       return null
     },
+    'server.registries.package': async ({ id, targetVersion }) => {
+      await pauseFor(500)
+      const pkg = Mock.RegistryPackages[id]
+      if (!pkg) return { categories: [], best: {}, otherVersions: {} }
+      const exact = targetVersion
+        ? Mock.OtherPackageVersions[id]?.[targetVersion]
+        : undefined
+      return exact ? { ...pkg, best: exact.best } : pkg
+    },
     'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
       if (sameUrl(url, mockPatchData.serverInfo.osRegistry))

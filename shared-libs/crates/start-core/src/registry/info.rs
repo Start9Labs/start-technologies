@@ -106,29 +106,37 @@ pub async fn get_info(ctx: RegistryContext) -> Result<RegistryInfo, Error> {
 }
 
 pub(crate) fn from_index(index: &Model<FullIndex>) -> Result<RegistryInfo, Error> {
-    let index = index.de()?;
-    let trust_signers = proposed_signers(&index);
-    Ok(RegistryInfo {
-        name: index.name,
-        icon: index.icon,
-        description: index.description,
-        default_locale: index.default_locale,
-        categories: index.package.categories,
-        trust_signers,
-    })
+    Ok(from_value(info_value(index)?)?)
 }
 
-fn proposed_signers(index: &FullIndex) -> BTreeMap<Guid, SignerInfo> {
-    index
-        .trust_signers
-        .iter()
-        .filter_map(|id| {
-            index
-                .signers
-                .get(id)
-                .map(|signer| (id.clone(), signer.clone()))
-        })
-        .collect()
+/// `RegistryInfo` copied from the index's own values, without deserializing them.
+pub(crate) fn info_value(index: &Model<FullIndex>) -> Result<Value, Error> {
+    use patch_db::ModelExt;
+    let value = index.as_value();
+    let field = |name: &str| value.get(name).cloned().unwrap_or(Value::Null);
+    let trusted: BTreeSet<Guid> = index.as_trust_signers().de()?;
+    let signers = index.as_signers().as_value().as_object();
+    let trust_signers = signers
+        .into_iter()
+        .flat_map(|signers| signers.iter())
+        .filter(|(id, _)| id.parse::<Guid>().is_ok_and(|id| trusted.contains(&id)))
+        .map(|(id, signer)| (id.clone(), signer.clone()))
+        .collect::<imbl_value::InOMap<_, _>>();
+    Ok([
+        ("name", field("name")),
+        ("icon", field("icon")),
+        ("description", field("description")),
+        ("defaultLocale", field("defaultLocale")),
+        (
+            "categories",
+            index.as_package().as_categories().as_value().clone(),
+        ),
+        ("trustSigners", trust_signers.into()),
+    ]
+    .into_iter()
+    .map(|(key, value)| (InternedString::intern(key), value))
+    .collect::<imbl_value::InOMap<_, _>>()
+    .into())
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
