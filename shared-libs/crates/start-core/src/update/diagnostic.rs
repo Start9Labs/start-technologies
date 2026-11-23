@@ -14,6 +14,7 @@ use tokio::sync::oneshot;
 use tracing::instrument;
 
 use crate::context::{CliContext, DiagnosticContext};
+use crate::diagnostic::{call_with_password, prompt_server_password};
 use crate::middleware::auth::signature;
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, ProgressUnits};
@@ -263,15 +264,19 @@ pub async fn cli_update_system(
     let method = parent_method.into_iter().chain(method).join(".");
     if !progress {
         super::display_update_started(from_value(
-            context
-                .call_remote::<DiagnosticContext>(&method, raw_params)
-                .await?,
+            call_with_password(raw_params, prompt_server_password, |params| async {
+                Ok(context
+                    .call_remote::<DiagnosticContext>(&method, params)
+                    .await?)
+            })
+            .await?,
         )?);
         return Ok(());
     }
-    let response = context
-        .call_diagnostic_stream::<FullProgress, ()>(&method, raw_params)
-        .await?;
+    let response = call_with_password(raw_params, prompt_server_password, |params| {
+        context.call_diagnostic_stream::<FullProgress, ()>(&method, params)
+    })
+    .await?;
     super::render_update_progress(response).await
 }
 

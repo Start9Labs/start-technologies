@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use itertools::Itertools;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
-    CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async,
+    CallRemoteHandler, Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn,
+    from_fn_async,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +28,31 @@ pub struct DiagnosticPasswordParams {
     pub password: Option<String>,
 }
 rpc_toolkit::reflect_ts!(DiagnosticPasswordParams);
+
+/// Retries once with a password from the prompt after the server rejects the call for lacking one.
+pub(crate) async fn call_with_password<T, Fut>(
+    params: Value,
+    prompt: impl FnOnce() -> Result<String, Error>,
+    mut call: impl FnMut(Value) -> Fut,
+) -> Result<T, Error>
+where
+    Fut: Future<Output = Result<T, Error>>,
+{
+    match call(params.clone()).await {
+        Err(e) if e.kind == ErrorKind::IncorrectPassword => {
+            let mut params = params;
+            params[crate::middleware::auth::password::PASSWORD_PARAM] =
+                Value::String(prompt()?.into());
+            call(params).await
+        }
+        res => res,
+    }
+}
+
+/// Reads the server password from `PASSWORD` or a hidden terminal prompt.
+pub(crate) fn prompt_server_password() -> Result<String, Error> {
+    crate::util::tui::read_password("PASSWORD", &t!("diagnostic.prompt-server-password"))
+}
 
 pub fn diagnostic<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -78,9 +105,13 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
             "rebuild",
             from_fn_async(rebuild)
                 .with_metadata("authenticated", Value::Bool(true))
+                .no_cli(),
+        )
+        .subcommand(
+            "rebuild",
+            from_fn_async(cli_rebuild)
                 .no_display()
-                .with_about("about.teardown-rebuild-containers")
-                .with_call_remote::<CliContext>(),
+                .with_about("about.teardown-rebuild-containers"),
         )
         .subcommand(
             "update",
@@ -114,6 +145,25 @@ pub fn restart(ctx: DiagnosticContext) -> Result<(), Error> {
 pub async fn rebuild(ctx: DiagnosticContext, _: DiagnosticPasswordParams) -> Result<(), Error> {
     tokio::fs::write(SYSTEM_REBUILD_PATH, b"").await?;
     restart(ctx)
+}
+
+async fn cli_rebuild(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        raw_params,
+        ..
+    }: HandlerArgs<CliContext, DiagnosticPasswordParams>,
+) -> Result<(), Error> {
+    let method = parent_method.into_iter().chain(method).join(".");
+    call_with_password(raw_params, prompt_server_password, |params| async {
+        Ok(context
+            .call_remote::<DiagnosticContext>(&method, params)
+            .await?)
+    })
+    .await?;
+    Ok(())
 }
 
 pub fn disk<C: Context>() -> ParentHandler<C> {
@@ -158,6 +208,7 @@ pub async fn forget_disk<C: Context>(_: C) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+    use imbl_value::json;
     use rpc_toolkit::HandlerFor;
 
     use super::*;
@@ -206,6 +257,48 @@ mod tests {
                 cli.method_from_dots(method).is_some(),
                 "{method} missing from CLI",
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn cli_prompts_once_after_a_password_rejection() {
+        let rejected = || Error::new(eyre!("rejected"), ErrorKind::IncorrectPassword);
+        let mut sent = Vec::new();
+        let res = call_with_password(
+            json!({ "x": 1 }),
+            || Ok("pw".into()),
+            |params| {
+                sent.push(params.clone());
+                let first = sent.len() == 1;
+                async move { if first { Err(rejected()) } else { Ok(()) } }
+            },
+        )
+        .await;
+        res.unwrap();
+        assert_eq!(
+            sent,
+            [json!({ "x": 1 }), json!({ "x": 1, "password": "pw" })]
+        );
+
+        for error in [ErrorKind::IncorrectPassword, ErrorKind::Filesystem] {
+            let mut calls = 0;
+            let mut prompted = false;
+            let res: Result<(), Error> = call_with_password(
+                json!({}),
+                || {
+                    prompted = true;
+                    Ok("pw".into())
+                },
+                |_| {
+                    calls += 1;
+                    async move { Err(Error::new(eyre!("failed"), error)) }
+                },
+            )
+            .await;
+            assert_eq!(res.unwrap_err().kind, error);
+            let rejected_for_password = error == ErrorKind::IncorrectPassword;
+            assert_eq!(prompted, rejected_for_password);
+            assert_eq!(calls, if rejected_for_password { 2 } else { 1 });
         }
     }
 

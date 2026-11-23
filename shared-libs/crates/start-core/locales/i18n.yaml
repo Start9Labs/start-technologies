@@ -3916,6 +3916,14 @@ middleware.auth.unauthorized:
   fr_FR: "NON AUTORISÉ"
   pl_PL: "BRAK AUTORYZACJI"
 
+# diagnostic.rs
+diagnostic.prompt-server-password:
+  en_US: "Server password: "
+  de_DE: "Serverpasswort: "
+  es_ES: "Contraseña del servidor: "
+  fr_FR: "Mot de passe du serveur : "
+  pl_PL: "Hasło serwera: "
+
 # middleware/auth/password.rs
 middleware.auth.password-required:
   en_US: "The server password is required."
