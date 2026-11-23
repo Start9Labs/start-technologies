@@ -240,7 +240,7 @@ impl ClientConfig<'_> {
              [Interface]\n\
              PrivateKey = {privkey}\n\
              Address = {address}\n\
-             DNS = {dns}\n\
+             DNS = {dns}, {search}\n\
              \n\
              [Peer]\n\
              PublicKey = {server_pubkey}\n\
@@ -252,6 +252,7 @@ impl ClientConfig<'_> {
             privkey = self.private_key.unwrap_or(CLIENT_PRIVATE_KEY_PLACEHOLDER),
             address = self.address,
             dns = self.dns,
+            search = crate::dns::LAN_DOMAIN,
             server_pubkey = self.server_public_key,
             psk = self.preshared_key,
             endpoint = self.endpoint,
@@ -4284,7 +4285,7 @@ config zone
         for expected in [
             "PrivateKey = <PRIVATE_KEY>",
             "Address = 192.168.0.200/32",
-            "DNS = 192.168.0.1",
+            "DNS = 192.168.0.1, lan",
             "PublicKey = c2VydmVy",
             "PresharedKey = cHNr",
             "Endpoint = router.example.com:51820",

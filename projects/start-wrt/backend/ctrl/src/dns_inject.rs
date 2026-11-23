@@ -43,6 +43,7 @@ use tokio_util::sync::CancellationToken;
 use uciedit::openwrt::{DhcpHost, FirewallForwarding, FirewallZone, NetworkInterface};
 use uciedit::{parse_all, Arena, Configs, Line, LineComment, Section, Token};
 
+use crate::dns::LAN_DOMAIN;
 use crate::error::ErrorKind;
 use crate::invoke::Invoke;
 use crate::port_control::{supervise, uci_task};
@@ -67,8 +68,6 @@ const TCP_MAX_CLIENTS: usize = 16;
 /// Refusal log lines per second, box-wide.
 const REFUSAL_LOG_RATE: u32 = 20;
 const INJECT_FILE_PREFIX: &str = "startwrt-dns-inject.dns_";
-/// The domain every profile instance serves its devices under.
-const LAN_DOMAIN: &str = "lan";
 
 /// The daemon's DNS-injection service; unset in CLI / `--configs-only` mode.
 pub static DNS_INJECT: OnceLock<Arc<DnsInject>> = OnceLock::new();
