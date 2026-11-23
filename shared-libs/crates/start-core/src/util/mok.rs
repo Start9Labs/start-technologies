@@ -50,8 +50,8 @@ pub async fn sign_unsigned_modules(root: &Path) -> Result<(), Error> {
 /// Enroll the DKMS MOK certificate, protected by the start9 user's password.
 /// `root` holds both the certificate and `etc/shadow`: `/` at runtime, or the target
 /// overlay during install. Idempotent: skips if already enrolled, or if the password
-/// is not yet set — so it must also be called once the password is written, not only
-/// at boot. Returns true if a new enrollment was staged.
+/// is unset or locked — so it must also be called once the password is written, not
+/// only at boot. Returns true if a new enrollment was staged.
 pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
     let mok_pub = &root.join(DKMS_MOK_PUB.trim_start_matches('/'));
     tracing::info!("enroll_mok: checking EFI and mok_pub={}", mok_pub.display());
@@ -78,11 +78,7 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         return Ok(false);
     }
 
-    let Some(hash) = crate::auth::start9_shadow_field(root)
-        .await?
-        .map(|hash| hash.trim_start_matches('!').to_owned())
-        .filter(|hash| hash.starts_with('$'))
-    else {
+    let Some(hash) = crate::auth::start9_password_hash(root).await? else {
         tracing::info!("enroll_mok: start9 user password not set, skipping");
         return Ok(false);
     };
