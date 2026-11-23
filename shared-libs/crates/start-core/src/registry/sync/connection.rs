@@ -254,7 +254,7 @@ pub(super) async fn receive_updates(
             if let Subscription::Index(url) = subscription
                 && !follower.watches[&id].started
             {
-                db.mutate(|db| forget_cursor(db, url)).await.result?;
+                let _ = db.mutate(|db| forget_cursor(db, url)).await.result;
             }
         }
     }
