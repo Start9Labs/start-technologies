@@ -397,6 +397,12 @@ mod tests {
         assert!(SetTrustSignersParams::try_parse_from(["set-trust-signers", "invalid"]).is_err());
     }
 
+    fn proposed_signers(index: &FullIndex) -> BTreeMap<Guid, SignerInfo> {
+        from_index(&Model::new(index).unwrap())
+            .unwrap()
+            .trust_signers
+    }
+
     #[test]
     fn registry_proposes_only_the_selected_existing_signers() {
         use crate::registry::signer::SignerInfo;
