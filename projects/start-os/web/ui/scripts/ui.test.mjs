@@ -5179,6 +5179,56 @@ test('patch cache stores a keyed root that is not a map whole', async t => {
   assert.deepEqual(control.puts, ['/packageData', '/packageData/y'])
 })
 
+test(
+  'a blocked patch cache upgrade yields an empty baseline without waiting for the old tab',
+  { timeout: 1000 },
+  async t => {
+    t.mock.method(console, 'error', () => {})
+    const request = {}
+    const win = {
+      indexedDB: {
+        open: () => {
+          queueMicrotask(() => request.onblocked())
+          return request
+        },
+      },
+    }
+    const cache = await patchDbCache(t, win)
+    assert.deepEqual(await cache.read(), { id: 0, value: {} })
+    assert.equal(cache.epoch, null)
+
+    let closed = false
+    request.result = {
+      close: () => {
+        closed = true
+      },
+    }
+    request.onsuccess()
+    assert.equal(closed, true)
+  },
+)
+
+test('patch cache releases its connection for a later schema upgrade', async t => {
+  const { win } = fakeIndexedDb()
+  const open = win.indexedDB.open
+  let db
+  let closed = false
+  win.indexedDB.open = (...args) => {
+    const request = open(...args)
+    queueMicrotask(() => {
+      db = request.result
+      db.close = () => {
+        closed = true
+      }
+    })
+    return request
+  }
+  const cache = await patchDbCache(t, win)
+  await cache.read()
+  db.onversionchange()
+  assert.equal(closed, true)
+})
+
 test('patch cache drops a store written in the top-level layout', async t => {
   const { win } = fakeIndexedDb()
   const calls = []

@@ -1,6 +1,6 @@
 import { inject, Service } from '@angular/core'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { Dump } from 'patch-db-client'
+import { arrayFromPath, Dump, pathFromArray } from 'patch-db-client'
 import { DataModel } from './data-model'
 
 const VALUES = 'values'
@@ -18,6 +18,7 @@ export class PatchDbCache {
   private saved?: Cursor & { value: DataModel }
   epoch: string | null = null
 
+  /** Unavailable persistence yields an empty baseline for live synchronization. */
   async read(): Promise<Dump<DataModel>> {
     try {
       const { keys, values, cursor } = await this.transaction(
@@ -110,11 +111,11 @@ export class PatchDbCache {
 function toEntries(value: DataModel): Map<string, unknown> {
   const entries = new Map<string, unknown>()
   Object.entries(value).forEach(([key, v]) => {
-    const pointer = `/${encodeToken(key)}`
+    const pointer = pathFromArray([key])
     if (KEYED.includes(key) && isMap(v)) {
       entries.set(pointer, KEYED_ROOT)
       Object.entries(v).forEach(([child, c]) =>
-        entries.set(`${pointer}/${encodeToken(child)}`, c),
+        entries.set(pathFromArray([key, child]), c),
       )
     } else {
       entries.set(pointer, v)
@@ -126,12 +127,12 @@ function toEntries(value: DataModel): Map<string, unknown> {
 function fromEntries(entries: [string, unknown][]): DataModel {
   const value: Record<string, unknown> = {}
   entries.forEach(([pointer, v]) => {
-    const [key = '', child] = pointer.slice(1).split('/').map(decodeToken)
+    const [key = '', child] = arrayFromPath(pointer)
     if (child === undefined)
       value[key] = KEYED.includes(key) && isMap(v) ? {} : v
   })
   entries.forEach(([pointer, v]) => {
-    const [key = '', child] = pointer.slice(1).split('/').map(decodeToken)
+    const [key = '', child] = arrayFromPath(pointer)
     const root = value[key]
     if (child !== undefined && isMap(root)) root[child] = v
   })
@@ -140,14 +141,6 @@ function fromEntries(entries: [string, unknown][]): DataModel {
 
 function isMap(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
-function encodeToken(token: string): string {
-  return token.replaceAll('~', '~0').replaceAll('/', '~1')
-}
-
-function decodeToken(token: string): string {
-  return token.replaceAll('~1', '/').replaceAll('~0', '~')
 }
 
 function open(win: Window): Promise<IDBDatabase> {
@@ -162,7 +155,15 @@ function open(win: Window): Promise<IDBDatabase> {
       db.createObjectStore(VALUES)
       db.createObjectStore(META)
     }
-    request.onsuccess = () => resolve(request.result)
+    request.onblocked = () => {
+      request.onsuccess = () => request.result.close()
+      reject(new Error('PatchDB cache upgrade is blocked by another tab'))
+    }
+    request.onsuccess = () => {
+      const db = request.result
+      db.onversionchange = () => db.close()
+      resolve(db)
+    }
     request.onerror = () => reject(request.error)
   })
 }
