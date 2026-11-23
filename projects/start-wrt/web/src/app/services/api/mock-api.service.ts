@@ -687,16 +687,21 @@ export class MockApiService extends ApiService {
 
   async wifiRegulatory(): Promise<WifiRegulatory> {
     await pauseFor(100)
-    const world = this.mockWifi.country === null
-    const channels24 = world
-      ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-      : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-    const channels5 = world
-      ? [36, 40, 44, 48]
-      : [
-          36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124,
-          128, 132, 136, 140, 144, 149, 153, 157, 161, 165,
-        ]
+    const { country } = this.mockWifi
+    const channels24 =
+      country === null || country === 'US'
+        ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+    // The AW7916-NPD's FCC grant leaves out 52-144.
+    const channels5 =
+      country === null
+        ? [36, 40, 44, 48]
+        : country === 'US'
+          ? [36, 40, 44, 48, 149, 153, 157, 161, 165]
+          : [
+              36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124,
+              128, 132, 136, 140, 144, 149, 153, 157, 161, 165,
+            ]
     return {
       countries: ['CA', 'CR', 'DE', 'FR', 'GB', 'MX', 'US'],
       bands: {
