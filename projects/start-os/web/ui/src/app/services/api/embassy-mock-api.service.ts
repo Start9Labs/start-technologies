@@ -890,13 +890,19 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
-    'server.set-smtp': async params => {
+    'server.set-smtp': async ({ password, keepPassword, ...params }) => {
       await pauseFor(2000)
       const patch = [
         {
           op: PatchOp.REPLACE,
           path: '/serverInfo/smtp',
-          value: params,
+          value: {
+            ...params,
+            passwordSet:
+              !!password ||
+              (!!keepPassword &&
+                !!this.mockData('/serverInfo/smtp')?.passwordSet),
+          },
         },
       ]
       this.mockRevision(patch)

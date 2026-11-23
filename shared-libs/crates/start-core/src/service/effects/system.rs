@@ -19,9 +19,7 @@ pub async fn get_system_smtp(
 ) -> Result<Option<SmtpValue>, Error> {
     let context = context.deref()?;
 
-    let ptr = "/public/serverInfo/smtp"
-        .parse()
-        .expect("valid json pointer");
+    let ptr = "/private/smtp".parse().expect("valid json pointer");
     let mut watch = context.seed.ctx.db.watch(ptr).await;
 
     let res = imbl_value::from_value(watch.peek_and_mark_seen()?)
