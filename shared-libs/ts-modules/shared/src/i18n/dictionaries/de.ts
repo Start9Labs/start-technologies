@@ -1102,4 +1102,6 @@ export default {
   1308: 'Dieser Browser ist noch nicht registriert',
   1309: 'Über die Befehlszeile anmelden',
   1310: 'Diesen Browser registrieren',
+  1313: 'Zuletzt synchronisiert',
+  1314: 'gerade eben',
 } satisfies i18n

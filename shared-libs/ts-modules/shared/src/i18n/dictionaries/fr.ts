@@ -1102,4 +1102,6 @@ export default {
   1308: "Ce navigateur n'est pas encore enregistré",
   1309: 'Se connecter depuis la ligne de commande',
   1310: 'Enregistrer ce navigateur',
+  1313: 'Dernière synchronisation',
+  1314: "à l'instant",
 } satisfies i18n

@@ -1,4 +1,4 @@
-import { inject, Service } from '@angular/core'
+import { inject, Service, signal } from '@angular/core'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import { arrayFromPath, Dump, pathFromArray } from 'patch-db-client'
 import { DataModel } from './data-model'
@@ -6,6 +6,7 @@ import { DataModel } from './data-model'
 const VALUES = 'values'
 const META = 'meta'
 const CURSOR = 'cursor'
+const SYNCED = 'synced'
 const KEYED: readonly string[] = ['packageData', 'registryCache']
 const KEYED_ROOT = Object.freeze({})
 
@@ -17,18 +18,21 @@ export class PatchDbCache {
   private db?: Promise<IDBDatabase>
   private saved?: Cursor & { value: DataModel }
   epoch: string | null = null
+  readonly synced = signal<number | null>(null)
 
   /** Unavailable persistence yields an empty baseline for live synchronization. */
   async read(): Promise<Dump<DataModel>> {
     try {
-      const { keys, values, cursor } = await this.transaction(
+      const { keys, values, cursor, synced } = await this.transaction(
         'readonly',
         tx => ({
           keys: tx.objectStore(VALUES).getAllKeys(),
           values: tx.objectStore(VALUES).getAll(),
           cursor: tx.objectStore(META).get(CURSOR),
+          synced: tx.objectStore(META).get(SYNCED),
         }),
       )
+      this.synced.set(typeof synced.result === 'number' ? synced.result : null)
       const { id, epoch } = (cursor.result ?? {}) as Partial<Cursor>
       if (!id) {
         this.saved = undefined
@@ -85,9 +89,19 @@ export class PatchDbCache {
     }
   }
 
+  async markSynced(): Promise<void> {
+    if (!this.saved) return
+    const time = Date.now()
+    this.synced.set(time)
+    await this.transaction('readwrite', tx =>
+      tx.objectStore(META).put(time, SYNCED),
+    ).catch(console.error)
+  }
+
   async clear(): Promise<void> {
     this.saved = undefined
     this.epoch = null
+    this.synced.set(null)
     await this.transaction('readwrite', tx => {
       tx.objectStore(VALUES).clear()
       tx.objectStore(META).clear()
