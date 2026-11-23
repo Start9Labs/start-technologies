@@ -2,14 +2,16 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use clap::Parser;
+use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 
 use super::BackupTargetId;
-use crate::context::RpcContext;
+use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
-use crate::disk::mount::filesystem::cifs::Cifs;
+use crate::disk::mount::filesystem::cifs::{Cifs, CifsUpdatePasswordArgs};
 use crate::disk::mount::filesystem::{MountType, ReadOnly};
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard, WeakMountGuard};
 use crate::disk::util::{StartOsRecoveryInfo, has_legacy_backup, recovery_info};
@@ -241,17 +243,24 @@ fn register_found(
     Ok(added)
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct TargetParams {
+    #[arg(help = "help.arg.backup-target-id")]
     pub id: BackupTargetId,
 }
 rpc_toolkit::reflect_ts!(TargetParams);
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct RenameTargetParams {
+    #[arg(help = "help.arg.backup-target-id")]
     pub id: BackupTargetId,
+    #[arg(help = "help.arg.backup-target-name")]
     pub name: String,
 }
 rpc_toolkit::reflect_ts!(RenameTargetParams);
@@ -274,18 +283,54 @@ pub async fn rename(
         .result
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct UpdateCifsTargetParams {
+    #[arg(help = "help.arg.backup-target-id")]
     pub id: BackupTargetId,
+    #[arg(help = "help.arg.cifs-hostname")]
     pub hostname: String,
+    #[arg(help = "help.arg.cifs-path")]
     pub path: PathBuf,
+    #[arg(help = "help.arg.cifs-username")]
     pub username: String,
     /// Omitted keeps the stored password; empty clears it.
+    #[arg(skip)]
     #[serde(default)]
     pub password: Option<String>,
 }
 rpc_toolkit::reflect_ts!(UpdateCifsTargetParams);
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
+pub struct CliUpdateCifsTargetParams {
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub update: UpdateCifsTargetParams,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub password: CifsUpdatePasswordArgs,
+}
+
+pub(super) async fn cli_update_cifs(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params: CliUpdateCifsTargetParams {
+            mut update,
+            password,
+        },
+        ..
+    }: HandlerArgs<CliContext, CliUpdateCifsTargetParams>,
+) -> Result<(), Error> {
+    update.password = password.read()?;
+    context.call_fronted(parent_method, method, &update).await
+}
 
 pub async fn update_cifs(ctx: RpcContext, params: UpdateCifsTargetParams) -> Result<(), Error> {
     ctx.db

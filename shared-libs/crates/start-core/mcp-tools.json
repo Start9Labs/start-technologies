@@ -1064,8 +1064,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     }
   },
   {
@@ -1190,7 +1199,24 @@
     "name": "backup.target.inspect",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/TargetParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "TargetParams": {
           "type": "object",
           "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
@@ -1202,10 +1228,7 @@
           "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
         }
       },
-      "type": "object",
-      "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
-      "required": ["id"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2083,8 +2106,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3323,8 +3355,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     }
   },
   {
@@ -3610,9 +3651,7 @@
             "ptySize": {
               "anyOf": [{ "$ref": "#/$defs/TermSize" }, { "type": "null" }]
             },
-            "subcontainer": {
-              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
-            },
+            "subcontainer": { "type": ["string", "null"] },
             "name": { "type": ["string", "null"] },
             "imageId": {
               "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
@@ -3663,7 +3702,6 @@
           "required": ["rows", "cols"],
           "additionalProperties": true
         },
-        "Guid": { "type": "string" },
         "ImageId": { "type": "string" }
       },
       "type": "object",
@@ -3679,9 +3717,7 @@
         "ptySize": {
           "anyOf": [{ "$ref": "#/$defs/TermSize" }, { "type": "null" }]
         },
-        "subcontainer": {
-          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
-        },
+        "subcontainer": { "type": ["string", "null"] },
         "name": { "type": ["string", "null"] },
         "imageId": {
           "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
@@ -3751,7 +3787,24 @@
     "name": "package.exec",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/ExecParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "ExecParams": {
           "type": "object",
           "properties": {
@@ -3778,7 +3831,7 @@
             },
             "subcontainer": {
               "description": "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
-              "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
+              "type": ["string", "null"]
             },
             "name": {
               "description": "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
@@ -3797,51 +3850,9 @@
           "additionalProperties": true
         },
         "PackageId": { "type": "string" },
-        "Guid": { "type": "string" },
         "ImageId": { "type": "string" }
       },
-      "type": "object",
-      "properties": {
-        "id": { "$ref": "#/$defs/PackageId" },
-        "command": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Program and arguments, run without a shell. Empty runs the user's login shell."
-        },
-        "stdin": {
-          "description": "Written to the command's standard input, which is otherwise empty.",
-          "type": ["string", "null"]
-        },
-        "timeoutSecs": {
-          "description": "Seconds before the command is terminated. Defaults to 120.",
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            { "type": "null" }
-          ]
-        },
-        "subcontainer": {
-          "description": "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
-          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
-        },
-        "name": {
-          "description": "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
-          "type": ["string", "null"]
-        },
-        "imageId": {
-          "description": "Part of the subcontainer's image ID, case-insensitive.",
-          "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
-        },
-        "user": {
-          "description": "Defaults to the image's user, else root.",
-          "type": ["string", "null"]
-        }
-      },
-      "required": ["id", "command"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7818,7 +7829,24 @@
     "name": "server.nut-list-ups",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/ListNutUpsParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "ListNutUpsParams": {
           "type": "object",
           "properties": {
@@ -7834,18 +7862,7 @@
           "description": "Address of the NUT server to list UPS devices from."
         }
       },
-      "type": "object",
-      "properties": {
-        "host": { "type": "string" },
-        "port": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": ["host"],
-      "additionalProperties": true,
-      "description": "Address of the NUT server to list UPS devices from."
+      "type": "object"
     }
   },
   {
@@ -7853,8 +7870,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     }
   },
   {
@@ -7862,8 +7888,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9190,7 +9225,24 @@
     "name": "volumes.inspect",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/SharedVolumeParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "SharedVolumeParams": {
           "type": "object",
           "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
@@ -9202,10 +9254,7 @@
           "description": "A 32-character uppercase base32 volume identity."
         }
       },
-      "type": "object",
-      "properties": { "id": { "$ref": "#/$defs/SharedVolumeId" } },
-      "required": ["id"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9253,6 +9302,140 @@
       },
       "required": ["availability", "available", "error", "checkedAt"],
       "additionalProperties": true
+    }
+  },
+  {
+    "name": "volumes.list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": { "$ref": "#/$defs/SharedVolume" },
+      "$defs": {
+        "SharedVolume": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "source": { "$ref": "#/$defs/SharedVolumeSource" },
+                "grants": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/SharedVolumeGrant"
+                  }
+                }
+              },
+              "required": ["name", "source", "grants"],
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/SharedVolumeInspection" }
+          ]
+        },
+        "SharedVolumeSource": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "local",
+                  "description": "Managed Btrfs subvolume on the encrypted data partition."
+                }
+              },
+              "required": ["kind"],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "disk" },
+                "logicalname": { "type": "string" },
+                "path": { "type": "string" },
+                "drive": {
+                  "description": "The drive as reported when the source was created, for display.",
+                  "anyOf": [
+                    { "$ref": "#/$defs/SharedVolumeDrive" },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "required": ["kind", "logicalname", "path", "drive"]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "const": "cifs" },
+                "hostname": { "type": "string" },
+                "path": { "type": "string" },
+                "username": { "type": "string" }
+              },
+              "required": ["kind", "hostname", "path", "username"]
+            }
+          ]
+        },
+        "SharedVolumeDrive": {
+          "type": "object",
+          "properties": {
+            "vendor": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
+            "label": { "type": ["string", "null"] },
+            "capacity": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["vendor", "model", "label", "capacity"],
+          "additionalProperties": true
+        },
+        "SharedVolumeGrant": {
+          "type": "object",
+          "properties": { "readonly": { "type": "boolean" } },
+          "required": ["readonly"],
+          "additionalProperties": true
+        },
+        "SharedVolumeInspection": {
+          "type": "object",
+          "properties": {
+            "availability": { "$ref": "#/$defs/SharedVolumeAvailability" },
+            "available": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "error": { "type": ["string", "null"] },
+            "checkedAt": { "type": ["string", "null"] }
+          },
+          "required": ["availability", "available", "error", "checkedAt"],
+          "additionalProperties": true
+        },
+        "SharedVolumeAvailability": {
+          "type": "string",
+          "enum": ["unknown", "available", "unavailable"]
+        }
+      }
     }
   },
   {

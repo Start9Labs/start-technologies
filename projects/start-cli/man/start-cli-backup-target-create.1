@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-target-create 1  "create "
+.SH NAME
+start\-cli\-backup\-target\-create \- Create a backup target
+.SH SYNOPSIS
+\fBstart\-cli backup target create\fR [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> <\fIsubcommands\fR>
+.SH DESCRIPTION
+Create a backup target
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fINAME\fR>
+Shared volume name
+.SH SUBCOMMANDS
+.TP
+start\-cli\-backup\-target\-create\-local(1)
+Create the volume on the data drive
+.TP
+start\-cli\-backup\-target\-create\-disk(1)
+Create the volume on an external drive partition
+.TP
+start\-cli\-backup\-target\-create\-cifs(1)
+Create the volume on a CIFS network share

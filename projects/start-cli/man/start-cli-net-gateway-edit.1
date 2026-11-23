@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-net-gateway-edit 1  "edit "
+.SH NAME
+start\-cli\-net\-gateway\-edit \- Rename a gateway or change its DNS servers
+.SH SYNOPSIS
+\fBstart\-cli net gateway edit\fR [\fB\-\-name\fR] [\fB\-\-dns\fR] [\fB\-\-automatic\-dns\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR>
+.SH DESCRIPTION
+Rename a gateway or change its DNS servers
+.SH OPTIONS
+.TP
+\fB\-\-name\fR \fI<NAME>\fR
+Name of the gateway
+.TP
+\fB\-\-dns\fR \fI<DNS>\fR
+Static DNS server; repeat for several
+.TP
+\fB\-\-automatic\-dns\fR
+Use the DNS servers the gateway provides
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Gateway identifier
