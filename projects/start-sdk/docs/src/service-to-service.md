@@ -6,7 +6,7 @@ There is exactly one supported way to do this, and three once-common patterns th
 
 ## The host bridge
 
-Every StartOS service runs in its own container on a single internal bridge, `lxcbr0`. The bridge gateway — the OS itself — always sits at a fixed address you read with:
+Every StartOS service runs in its own container on a single internal bridge, `lxcbr0`. Containers reach the bridge gateway — the OS itself — by the name `startos.internal`, which StartOS resolves and certifies for every container. Where a setting accepts only an IP address — a trusted-proxy list, a DNS server, an allowlist — read the gateway's fixed address with:
 
 ```typescript
 const osIp = await sdk.getOsIp(effects) // "10.0.3.1" — a plain Promise, not reactive
@@ -14,7 +14,7 @@ const osIp = await sdk.getOsIp(effects) // "10.0.3.1" — a plain Promise, not r
 
 `getOsIp` is a one-shot read of a compile-time constant. It never changes and never needs watching.
 
-Every port a service **binds** (via `sdk.MultiHost.of(...).bindPort(...)` in [interfaces.ts](interfaces.md)) is reachable from other containers at `10.0.3.1:<assigned external port>`. This holds even for a binding with **no exported interface** — binding a port is enough to make it reachable on the bridge (see [Exposing a bridge-only port](#exposing-a-bridge-only-port) below).
+Every port a service **binds** (via `sdk.MultiHost.of(...).bindPort(...)` in [interfaces.ts](interfaces.md)) is reachable from other containers at `startos.internal:<assigned external port>`. This holds even for a binding with **no exported interface** — binding a port is enough to make it reachable on the bridge (see [Exposing a bridge-only port](#exposing-a-bridge-only-port) below).
 
 > [!IMPORTANT]
 > The bridge exposes a service at its **assigned external port**, which you must not assume. `preferredExternalPort` is a request, not a guarantee: the first service to claim a given external port gets it and later claimants fall back to a random port, and when `preferredExternalPort` is omitted it defaults to the protocol default (`http` → 80). So the external port is only knowable at runtime, by reading the dependency's live binding. What _is_ stable is the dependency's **internal** port and **host id** — import those as constants from the dependency's package.
@@ -42,7 +42,7 @@ Three things make this correct, and each matters:
 
    `rpcHostId` and `rpcInternalPort` are imported from the dependency's package (`bitcoin-core-startos/startos/utils`), not hardcoded — the internal port and host id are the stable contract.
 
-   **On `ssl`:** most bindings publish one bridge address and need no discriminator. A binding that uses `protocol: 'http'`/`'ws'`, or `secure: null` with `addSsl`, publishes **two** — bitcoind's RPC is reachable at both `10.0.3.1:8332` (plaintext) and `10.0.3.1:54404` (TLS-terminated). Only there does filtering on `ssl` matter; adding it elsewhere selects nothing and re-introduces the very assumption this rule removes.
+   **On `ssl`:** most bindings publish one bridge address and need no discriminator. A binding that uses `protocol: 'http'`/`'ws'`, or `secure: null` with `addSsl`, publishes **two** — bitcoind's RPC is reachable at both `startos.internal:8332` (plaintext) and `startos.internal:54404` (TLS-terminated). Only there does filtering on `ssl` matter; adding it elsewhere selects nothing and re-introduces the very assumption this rule removes.
 
 2. **`.const()` on a minimal mapped value.** `.const()` re-runs `main` only when the **mapped** value changes, not on every churn of the dependency's host record. Because the mapped value is just the address string, the restart behavior is exactly what you want:
 
@@ -128,12 +128,12 @@ const torSocks = await sdk.host
     packageId: 'tor',
     hostId: socksHostId,
     internalPort: socksPort, // 9050
-    fallbackPort: socksPort, // keeps the value at `${osIp}:9050` when Tor is absent
+    fallbackPort: socksPort, // keeps the value at `startos.internal:9050` when Tor is absent
   })
   .const()
 ```
 
-Tor's SOCKS port (9050) is the one external port StartOS guarantees is claimable, so `${osIp}:9050` is always valid. This is not a license to fabricate addresses generally (see rule 3 above) — it applies to Tor's SOCKS proxy, whose address is fixed and whose flag is inert when unreachable.
+Tor's SOCKS port (9050) is the one external port StartOS guarantees is claimable, so `startos.internal:9050` is always valid. This is not a license to fabricate addresses generally (see rule 3 above) — it applies to Tor's SOCKS proxy, whose address is fixed and whose flag is inert when unreachable.
 
 Track a dependency's _presence_ (for a health check, say) with `sdk.getStatus(effects, { packageId }).onChange(...)`, registered **unconditionally** — it returns `null` when the dependency is uninstalled and re-fires when it's installed. Never gate the watch itself behind a startup-time presence check.
 

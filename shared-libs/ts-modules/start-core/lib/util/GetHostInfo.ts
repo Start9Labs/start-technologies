@@ -4,6 +4,9 @@ import { deepEqual } from './deepEqual'
 import { fillHost, filledAddress, FilledHost } from './filledAddress'
 import { MappedWatchable, Watchable } from './Watchable'
 
+/** The name containers reach the server by on the bridge. */
+export const OS_HOSTNAME = 'startos.internal'
+
 export class GetHostInfo<Mapped = FilledHost | null> extends MappedWatchable<
   FilledHost | null,
   Mapped
@@ -111,7 +114,7 @@ export function getHost<Mapped>(
  * passing the wrong value resolves `null` — a TLS-passthrough binding
  * (`secure: {ssl: true}` with `addSsl: null`, e.g. LND's gRPC) publishes its one
  * address flagged `ssl: true`, so `ssl: false` there resolves nothing.
- * @param opts.fallbackPort - Resolve to `<osIp>:<fallbackPort>` instead of
+ * @param opts.fallbackPort - Resolve to `startos.internal:<fallbackPort>` instead of
  * `null` while the dependency is absent. Only for a flag that should be passed
  * unconditionally against an allocator-guaranteed port, such as tor's 9050.
  */
@@ -149,9 +152,9 @@ export class GetBridgeAddress<
         kind: 'ipv4',
         predicate: a => ssl === undefined || a.ssl === ssl,
       }).hostnames[0]
-    if (addr?.port != null) return `${addr.hostname}:${addr.port}` as A
+    if (addr?.port != null) return `${OS_HOSTNAME}:${addr.port}` as A
     if (fallbackPort === undefined) return null as A
-    return `${await this.effects.getOsIp()}:${fallbackPort}` as A
+    return `${OS_HOSTNAME}:${fallbackPort}` as A
   }
 }
 

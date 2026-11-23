@@ -427,7 +427,7 @@ Each internal port a host currently binds belongs to one claim. A `bindPortRange
 
 `setupInterfaces()` ends every pass by **disabling** each binding it did not just declare — it does not delete it. Disabling is the right default: it keeps the row, the external port number, and the user's per-address choices, so a binding your package declares conditionally comes back at the same address they already bookmarked.
 
-The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `10.0.3.1:<port>` that nothing listens on. Retire it explicitly:
+The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `startos.internal:<port>` that nothing listens on. Retire it explicitly:
 
 ```typescript
 await sdk.MultiHost.of(effects, 'ui-multi').retire() // the whole host
@@ -583,7 +583,7 @@ For unproxied service TLS, StartOS preserves the client source IP when it routes
 
 **The SANs are the whole contract.** Nothing rewrites the handshake, so the certificate must be valid for every address a client actually dials — there is no proxy to paper over a mismatch:
 
-- `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
+- `startos.internal` and `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
 - `127.0.0.1` — your own subcontainers, which share the service's network namespace
 - `sdk.getContainerIp` — the container itself
 - **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported

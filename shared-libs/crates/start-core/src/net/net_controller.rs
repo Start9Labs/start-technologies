@@ -17,7 +17,7 @@ use tracing::instrument;
 use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
-use crate::net::dns::DnsController;
+use crate::net::dns::{DnsController, OS_HOSTNAME};
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
     ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
@@ -639,6 +639,25 @@ impl NetServiceData {
                             public_v6: server_public_v6,
                             public_v6_gateways: BTreeSet::new(),
                             private: server_private_ips,
+                            acme: None,
+                            ..target.clone()
+                        },
+                    );
+                }
+
+                let internal = ssl_vhost_internal_ips(enabled_addresses.iter().copied());
+                if !internal.is_empty() {
+                    vhosts.insert(
+                        (
+                            Some(InternedString::from_static(OS_HOSTNAME)),
+                            assigned_ssl_port,
+                            false,
+                        ),
+                        ProxyTarget {
+                            public_v4: BTreeSet::new(),
+                            public_v6: BTreeSet::new(),
+                            public_v6_gateways: BTreeSet::new(),
+                            private: internal,
                             acme: None,
                             ..target.clone()
                         },
