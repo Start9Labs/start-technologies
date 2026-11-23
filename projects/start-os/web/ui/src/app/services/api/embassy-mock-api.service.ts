@@ -3,6 +3,8 @@ import { inject, Injectable } from '@angular/core'
 import { WA_CRYPTO, WA_SESSION_STORAGE } from '@ng-web-apis/common'
 import { FALLBACK_ICON, registrySigningKeys } from '@start9labs/marketplace'
 import {
+  DatabaseCursor,
+  DatabaseUpdate,
   FullKeyboard,
   i18nPipe,
   pauseFor,
@@ -26,14 +28,17 @@ import {
   AddOperation,
   applyOperation,
   Dump,
+  getValueByPointer,
   Operation,
   PatchOp,
   pathFromArray,
+  scopeOperations,
   RemoveOperation,
   ReplaceOperation,
   Revision,
 } from 'patch-db-client'
 import {
+  defer,
   endWith,
   finalize,
   from,
@@ -43,6 +48,7 @@ import {
   shareReplay,
   startWith,
   Subject,
+  switchMap,
 } from 'rxjs'
 import { WebSocketSubject } from 'rxjs/webSocket'
 import {
@@ -55,7 +61,6 @@ import {
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { ConfigService } from 'src/app/services/config.service'
-import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
 import { getDriveName } from 'src/app/utils/get-drive-name'
@@ -144,7 +149,15 @@ export class MockApiService extends ApiService implements StartupApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
-  private readonly cache = inject(PATCH_CACHE)
+  private mockDocument?: Promise<Dump<DataModel>>
+  private mockDoc?: Dump<DataModel>
+
+  private get document(): Dump<DataModel> {
+    return (this.mockDoc ??= {
+      id: this.sequence,
+      value: structuredClone(mockPatchData),
+    })
+  }
   private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
@@ -2084,11 +2097,22 @@ export class MockApiService extends ApiService implements StartupApiService {
           return this.initSubscriptionStream(options)
         case 'diagnostic.update':
           return this.diagnosticUpdateStream(options)
+        case 'server.registries.package':
+          return {
+            initial: await this.handlers['server.registries.package']!(
+              params as Params<'server.registries.package'>,
+            ),
+            items: this.idle(options?.signal),
+          }
         default:
           throw new Error(`No mock stream for ${method}`)
       }
     },
   })
+
+  private async *idle(signal?: AbortSignal): AsyncGenerator<never, null> {
+    while (true) await pauseFor(60_000, signal)
+  }
 
   private async metricsFollow(signal?: AbortSignal) {
     await pauseFor(2000, signal)
@@ -3289,12 +3313,47 @@ export class MockApiService extends ApiService implements StartupApiService {
   }
 
   private mockData(path: string): any {
-    const parts = path.split('/').filter(Boolean)
-    let obj: any = this.cache.value.value
-    for (const part of parts) {
-      obj = obj[part]
-    }
-    return obj
+    return getValueByPointer(this.document.value as any, path)
+  }
+
+  override watchDb$(
+    path: string[],
+    _since: DatabaseCursor | null,
+  ): Observable<DatabaseUpdate<unknown>> {
+    const pointer = pathFromArray(path)
+    return defer(
+      () =>
+        (this.mockDocument ??= this.handlers['db.subscribe']!({}).then(
+          result => {
+            const { value } = (result as { dump: Dump<DataModel> }).dump
+            const document = this.document
+            document.value = {
+              ...document.value,
+              ui: value.ui,
+              registryCache: value.registryCache,
+              osUpdateCache: value.osUpdateCache,
+              serverInfo: {
+                ...document.value.serverInfo,
+                gitHash: value.serverInfo.gitHash,
+              },
+            }
+            return document
+          },
+        )),
+    ).pipe(
+      switchMap(document =>
+        this.mockWsSource$.pipe(
+          map(({ id, patch }) => ({
+            id,
+            patch: scopeOperations(patch, pointer),
+          })),
+          startWith({
+            id: document.id,
+            value: getValueByPointer(document.value as any, pointer) ?? null,
+          }),
+        ),
+      ),
+    )
   }
 
   private async mockRevision<T>(patch: Operation<T>[]): Promise<void> {
@@ -3302,6 +3361,13 @@ export class MockApiService extends ApiService implements StartupApiService {
       id: ++this.sequence,
       patch,
     }
+    const document = this.document
+    patch.forEach(op => {
+      try {
+        applyOperation(document, op)
+      } catch {}
+    })
+    document.id = revision.id
     this.mockWsSource$.next(revision)
   }
 

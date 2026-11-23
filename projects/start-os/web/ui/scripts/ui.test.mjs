@@ -4513,6 +4513,7 @@ function marketplaceFixture(t, entries = {}) {
     missing: new Set(),
     error: null,
   }
+  const detailsWaiters = new Set()
   const errors = []
   const refreshes = []
   const connections = []
@@ -4577,14 +4578,14 @@ function marketplaceFixture(t, entries = {}) {
           iconResponses.push(response)
           return response.promise
         },
-        rpc: {
+        streams: {
           server: {
             registries: {
-              package: async params => {
+              package: async (params, options) => {
                 packageQueries.push(params)
                 if (details.error) throw details.error
                 const version = params.targetVersion.slice(1)
-                return {
+                const select = () => ({
                   categories: [],
                   best: details.missing.has(version)
                     ? {}
@@ -4592,8 +4593,28 @@ function marketplaceFixture(t, entries = {}) {
                         [version]: details.best[version] ?? { title: version },
                       },
                   otherVersions: details.otherVersions,
+                })
+                async function* items() {
+                  while (true) {
+                    await new Promise((resolve, reject) => {
+                      detailsWaiters.add(resolve)
+                      options?.signal?.addEventListener(
+                        'abort',
+                        () => reject(options.signal.reason),
+                        { once: true },
+                      )
+                    })
+                    yield select()
+                  }
                 }
+                return { initial: select(), items: items() }
               },
+            },
+          },
+        },
+        rpc: {
+          server: {
+            registries: {
               refresh: async params => {
                 refreshes.push(params)
               },
@@ -4661,6 +4682,11 @@ function marketplaceFixture(t, entries = {}) {
     },
     replace(path, value) {
       source.next([{ id: ++revision, patch: [{ op: 'replace', path, value }] }])
+    },
+    pushDetails() {
+      const waiters = [...detailsWaiters]
+      detailsWaiters.clear()
+      waiters.forEach(resolve => resolve())
     },
   }
 }
@@ -5083,7 +5109,7 @@ test('details recover after transport loss', async t => {
   assert.equal(f.packageQueries.length, 2)
 })
 
-test('an application error is reported and does not end the other-version observation', async t => {
+test('an application error is reported and the other-version observation resumes once connected', async t => {
   const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
   await f.service.connect('https://registry.test')
   f.details.error = new Error('Failed to read saved package')
@@ -5092,16 +5118,14 @@ test('an application error is reported and does not end the other-version observ
   assert.equal(values.at(-1), null)
   assert.deepEqual(f.errors, [f.details.error])
   f.details.error = null
-  f.replace('/registryCache', {
-    'https://registry.test/': registryEntry('2.0.0:0'),
-  })
+  f.connection.next(false)
+  f.connection.next(true)
   await tick()
   assert.equal(values.at(-1).version, '0.9.0:0')
 })
 
-test('expanded details refetch when listed release notes change without reconnecting', async t => {
+test('expanded details follow the server stream without refetching', async t => {
   const entry = registryEntry('2.0.0:0')
-  entry.listings.example.releases['2.0.0:0'].releaseNotes = 'Before'
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
   f.details.best['2.0.0:0'] = { title: 'Example', releaseNotes: 'Before' }
   f.details.otherVersions = { '1.5.0:0': { releaseNotes: 'Intermediate' } }
@@ -5110,19 +5134,19 @@ test('expanded details refetch when listed release notes change without reconnec
   )
   await tick()
   assert.equal(values.at(-1).releaseNotes, 'Before')
-  f.details.best['2.0.0:0'] = { title: 'Example', releaseNotes: 'After' }
+  f.details.otherVersions = { '1.5.0:0': { releaseNotes: 'Edited' } }
   f.replace(
     '/registryCache/https:~1~1registry.test~1/listings/example/releases/2.0.0:0/releaseNotes',
     'After',
   )
+  f.pushDetails()
   await tick()
-  assert.equal(f.packageQueries.length, 2)
-  assert.equal(values.at(-1).releaseNotes, 'After')
+  assert.equal(f.packageQueries.length, 1)
+  assert.equal(values.at(-1).otherVersions['1.5.0:0'].releaseNotes, 'Edited')
 })
 
-test('an older release refetches signatures when only its details marker changes', async t => {
+test('an older release follows its streamed signatures without refetching on row changes', async t => {
   const entry = registryEntry('2.0.0:0')
-  entry.listings.example.detailsHash = 'before'
   entry.listings.example.versions['1.0.0:0'] = {}
   const f = marketplaceFixture(t, { 'https://registry.test/': entry })
   const release = signatures => ({
@@ -5134,23 +5158,24 @@ test('an older release refetches signatures when only its details marker changes
   const values = f.watch(f.service.getPackage$('example', '1.0.0:0', null))
   await tick()
   assert.deepEqual(Object.keys(values.at(-1).s9pks[0][1].signatures), ['first'])
-  f.details.best['1.0.0:0'] = release({
-    first: 'signature',
-    second: 'signature',
-  })
   f.replace(
     '/registryCache/https:~1~1registry.test~1/listings/example/detailsHash',
     'after',
   )
+  f.details.best['1.0.0:0'] = release({
+    first: 'signature',
+    second: 'signature',
+  })
+  f.pushDetails()
   await tick()
-  assert.equal(f.packageQueries.length, 2)
+  assert.equal(f.packageQueries.length, 1)
   assert.deepEqual(Object.keys(values.at(-1).s9pks[0][1].signatures), [
     'first',
     'second',
   ])
 })
 
-test('an exact version is fetched once its package is listed and again when its row changes', async t => {
+test('an exact version is subscribed once its package is listed and follows the stream across row changes', async t => {
   const f = marketplaceFixture(t)
   f.details.best['1.0.0:0'] = { title: 'Older' }
   await f.service.connect('https://registry.test')
@@ -5162,13 +5187,15 @@ test('an exact version is fetched once its package is listed and again when its 
   await tick()
   assert.equal(values.at(-1).version, '1.0.0:0')
   assert.equal(values.at(-1).title, 'Older')
-  f.details.missing.add('1.0.0:0')
   f.replace('/registryCache', {
     'https://registry.test/': registryEntry('3.0.0:0'),
   })
   await tick()
+  assert.equal(f.packageQueries.length, 1)
+  f.details.missing.add('1.0.0:0')
+  f.pushDetails()
+  await tick()
   assert.equal(values.at(-1), null)
-  assert.equal(f.packageQueries.length, 2)
   assert.deepEqual(f.queries, [])
 })
 
@@ -5225,7 +5252,7 @@ function fakeIndexedDb() {
   return { win, control }
 }
 
-async function patchDbCache(t, win) {
+async function rawPatchDbCache(t, win) {
   const { PatchDbCache } =
     await import('src/app/services/patch-db/patch-db-cache')
   const injector = createEnvironmentInjector([
@@ -5235,12 +5262,27 @@ async function patchDbCache(t, win) {
   return runInInjectionContext(injector, () => new PatchDbCache())
 }
 
+const ROOTS = { '/ui': { epoch: 'boot', id: 1 } }
+
+async function patchDbCache(t, win) {
+  const cache = await rawPatchDbCache(t, win)
+  return {
+    roots: ROOTS,
+    read: async () => (await cache.read()).dump,
+    write(dump) {
+      return cache.write(dump, this.roots)
+    },
+    markSynced: () => cache.markSynced(),
+    clear: () => cache.clear(),
+    synced: () => cache.synced(),
+  }
+}
+
 test('patch cache rewrites only replaced top-level values', async t => {
   const { win, control } = fakeIndexedDb()
   t.mock.method(console, 'error', () => {})
   const writer = await patchDbCache(t, win)
   assert.deepEqual(await writer.read(), { id: 0, value: {} })
-  writer.epoch = 'boot'
   await writer.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
   assert.deepEqual(control.puts, ['/ui', '/packageData'])
 
@@ -5250,7 +5292,6 @@ test('patch cache rewrites only replaced top-level values', async t => {
     id: 3,
     value: { ui: { a: 1 }, packageData: {} },
   })
-  assert.equal(reader.epoch, 'boot')
   control.puts = []
   await reader.write({
     id: 4,
@@ -5267,52 +5308,60 @@ test('patch cache rewrites only replaced top-level values', async t => {
 test('patch cache stores keyed maps one entry per child', async t => {
   const { win, control } = fakeIndexedDb()
   const writer = await patchDbCache(t, win)
-  const alpha = { info: { name: 'Alpha' } }
-  const beta = { info: { name: 'Beta' } }
+  const alpha = { title: 'Alpha' }
+  const beta = { title: 'Beta' }
   await writer.write({
     id: 3,
-    value: {
-      ui: { a: 1 },
-      registryCache: { 'https://a.test/': alpha, 'https://b~c.test/': beta },
-      packageData: { x: { v: 1 }, y: { v: 1 } },
-    },
+    value: { ui: { a: 1 }, packageData: { 'a/b': alpha, 'b~c': beta } },
   })
   assert.deepEqual(control.puts, [
     '/ui',
-    '/registryCache',
-    '/registryCache/https:~1~1a.test~1',
-    '/registryCache/https:~1~1b~0c.test~1',
     '/packageData',
-    '/packageData/x',
-    '/packageData/y',
+    '/packageData/a~1b',
+    '/packageData/b~0c',
   ])
   const reader = await patchDbCache(t, win)
   const cached = await reader.read()
-  assert.deepEqual(cached.value.registryCache, {
-    'https://a.test/': alpha,
-    'https://b~c.test/': beta,
-  })
+  assert.deepEqual(cached.value.packageData, { 'a/b': alpha, 'b~c': beta })
   control.puts = []
-  const { y: _, ...rest } = cached.value.packageData
+  const { 'b~c': _, ...rest } = cached.value.packageData
   await reader.write({
     id: 4,
     value: {
       ...cached.value,
-      registryCache: {
-        ...cached.value.registryCache,
-        'https://a.test/': { info: { name: 'Alpha 2' } },
-      },
-      packageData: rest,
+      packageData: { ...rest, 'a/b': { title: 'A2' } },
     },
   })
-  assert.deepEqual(control.puts, ['/registryCache/https:~1~1a.test~1'])
+  assert.deepEqual(control.puts, ['/packageData/a~1b'])
   assert.deepEqual((await (await patchDbCache(t, win)).read()).value, {
     ui: { a: 1 },
-    registryCache: {
-      'https://a.test/': { info: { name: 'Alpha 2' } },
-      'https://b~c.test/': beta,
+    packageData: { 'a/b': { title: 'A2' } },
+  })
+})
+
+test('patch cache never persists registry or OS update data, or their cursors', async t => {
+  const { win, control } = fakeIndexedDb()
+  const cache = await rawPatchDbCache(t, win)
+  const roots = {
+    '/serverInfo': { epoch: 'boot', id: 3 },
+    '/registryCache': { epoch: 'boot', id: 3 },
+    '/osUpdateCache': { epoch: 'boot', id: 3 },
+  }
+  await cache.write(
+    {
+      id: 3,
+      value: {
+        serverInfo: { a: 1 },
+        registryCache: { 'https://a.test/': {} },
+        osUpdateCache: { versions: {} },
+      },
     },
-    packageData: { x: { v: 1 } },
+    roots,
+  )
+  assert.deepEqual(control.puts, ['/serverInfo'])
+  assert.deepEqual(await (await rawPatchDbCache(t, win)).read(), {
+    dump: { id: 3, value: { serverInfo: { a: 1 } } },
+    cursors: { '/serverInfo': { epoch: 'boot', id: 3 } },
   })
 })
 
@@ -5346,7 +5395,6 @@ test(
     }
     const cache = await patchDbCache(t, win)
     assert.deepEqual(await cache.read(), { id: 0, value: {} })
-    assert.equal(cache.epoch, null)
 
     let closed = false
     request.result = {
@@ -5399,7 +5447,7 @@ test('patch cache drops a store written in the top-level layout', async t => {
   }
   await (await patchDbCache(t, win)).read()
   assert.deepEqual(calls, [
-    ['open', 2],
+    ['open', 3],
     ['delete', 'values'],
     ['delete', 'meta'],
     ['create', 'values'],
@@ -5429,10 +5477,10 @@ test('patch cache rewrites every key when another tab stored the same revision f
   const { win } = fakeIndexedDb()
   const rebooted = await patchDbCache(t, win)
   const stale = await patchDbCache(t, win)
-  rebooted.epoch = 'boot-1'
+  rebooted.roots = { '/ui': { epoch: 'boot-1', id: 3 } }
   await rebooted.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
   const cached = await stale.read()
-  rebooted.epoch = 'boot-2'
+  rebooted.roots = { '/ui': { epoch: 'boot-2', id: 3 } }
   await rebooted.write({
     id: 3,
     value: { ui: { a: 9 }, packageData: { x: 9 } },
@@ -5444,7 +5492,6 @@ test('patch cache rewrites every key when another tab stored the same revision f
   await stale.write(delayed)
   const reader = await patchDbCache(t, win)
   assert.deepEqual(await reader.read(), delayed)
-  assert.equal(reader.epoch, 'boot-1')
 })
 
 test('patch cache restores every key after another tab clears the snapshot', async t => {
@@ -5537,7 +5584,6 @@ test('patch cache discards its snapshot after a failed write and clears on deman
   const { win, control } = fakeIndexedDb()
   t.mock.method(console, 'error', () => {})
   const cache = await patchDbCache(t, win)
-  cache.epoch = 'boot'
   const value = { ui: { a: 1 }, packageData: {} }
   await cache.write({ id: 3, value })
   control.fail = true
@@ -5550,7 +5596,6 @@ test('patch cache discards its snapshot after a failed write and clears on deman
   await cache.write({ id: 5, value })
   assert.deepEqual(control.puts, ['/ui', '/packageData'])
   await cache.clear()
-  assert.equal(cache.epoch, null)
   assert.deepEqual(await (await patchDbCache(t, win)).read(), {
     id: 0,
     value: {},

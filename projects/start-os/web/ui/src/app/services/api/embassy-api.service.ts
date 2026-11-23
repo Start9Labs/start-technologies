@@ -1,11 +1,5 @@
-import {
-  DatabaseCursor,
-  DatabaseUpdate,
-  legacyDatabaseSubscription,
-} from '@start9labs/shared'
+import { DatabaseCursor, DatabaseUpdate } from '@start9labs/shared'
 import type { RPC, RpcStreamClient } from '@start9labs/start-core'
-import type { Revision } from 'patch-db-client'
-import type { DataModel } from '../patch-db/data-model'
 import { Observable } from 'rxjs'
 import { ApiClient, Params, WebsocketConfig } from './api.types'
 
@@ -22,14 +16,11 @@ export abstract class ApiService {
   /** Waits for initiating PatchDB fences; database observation belongs to watchDb$. */
   abstract readonly streams: Omit<RpcStreamClient<RPC.StartOS>, 'db'>
 
-  watchDb$(
-    _since?: () => DatabaseCursor | null,
-  ): Observable<DatabaseUpdate<DataModel>> {
-    return legacyDatabaseSubscription<DataModel>(
-      () => this.rpc.db.subscribe({}),
-      guid => this.openWebsocket$<Revision>(guid),
-    )
-  }
+  /** Streams the public database subtree at `path`, resuming after `since` when it can. */
+  abstract watchDb$(
+    path: string[],
+    since: DatabaseCursor | null,
+  ): Observable<DatabaseUpdate<unknown>>
 
   abstract uploadFile(
     guid: string,

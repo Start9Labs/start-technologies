@@ -37,6 +37,7 @@ export function databaseSubscription<T>(
   authKeys: AuthKeyService,
   identity: ServerIdentityService,
   since: () => DatabaseCursor | null = () => null,
+  pointer?: string,
 ): Observable<DatabaseUpdate<T>> {
   return withAbortSignal(signal => {
     const client = createRpcStreamClient<RpcStreamClient<RPC.StartOS>>(
@@ -46,7 +47,10 @@ export function databaseSubscription<T>(
       (async function* () {
         const cursor = since()
         const { initial, items } = await client.db.subscribe(
-          cursor ? { since: cursor } : {},
+          {
+            ...(cursor ? { since: cursor } : {}),
+            ...(pointer ? { pointer } : {}),
+          },
           { signal },
         )
         yield initial as DatabaseStart<T>

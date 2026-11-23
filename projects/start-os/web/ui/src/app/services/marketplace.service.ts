@@ -17,12 +17,14 @@ import {
   isNetworkError,
   registryUrl,
   sameUrl,
+  withAbortSignal,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
   catchError,
   combineLatest,
+  defer,
   distinctUntilChanged,
   filter,
   from,
@@ -146,7 +148,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
     ]),
   )
 
-  /** Listed releases follow the live cache; any other version is fetched. */
+  /** Listed releases follow the live cache; any other version follows its server stream. */
   getPackage$(
     id: string,
     version: string | null,
@@ -157,14 +159,26 @@ export class MarketplaceService extends AbstractMarketplaceService {
       distinctUntilChanged(),
       switchMap(url =>
         this.watchListing$(url, id).pipe(
-          switchMap(row => {
+          map(row => {
             const selected =
               version ?? (row && newestReleases(this.exver, row)[flavor ?? ''])
-            if (!row || !selected) return of(null)
+            return row && selected ? { row, selected } : null
+          }),
+          distinctUntilChanged(
+            (a, b) =>
+              !!a &&
+              !!b &&
+              a.selected === b.selected &&
+              !a.row.releases[a.selected] &&
+              !b.row.releases[b.selected],
+          ),
+          switchMap(listing => {
+            if (!listing) return of(null)
+            const { row, selected } = listing
             const release = row.releases[selected]
             return release
               ? of(toPkg(this.exver, id, selected, row, release))
-              : this.fetchOnConnection$(id, selected, url)
+              : this.watchDetails$(id, selected, url)
           }),
         ),
       ),
@@ -178,13 +192,16 @@ export class MarketplaceService extends AbstractMarketplaceService {
     registry: string,
   ): Observable<MarketplacePkg | null> {
     return this.watchListing$(registry, id).pipe(
-      switchMap(row =>
-        row ? this.fetchOnConnection$(id, version, registry) : of(null),
+      map(row => !!row),
+      distinctUntilChanged(),
+      switchMap(listed =>
+        listed ? this.watchDetails$(id, version, registry) : of(null),
       ),
     )
   }
 
-  private fetchOnConnection$(
+  /** The server streams each change to these details; a failure resubscribes once connected. */
+  private watchDetails$(
     id: string,
     version: string,
     registry: string,
@@ -192,7 +209,19 @@ export class MarketplaceService extends AbstractMarketplaceService {
     return this.connection.pipe(
       filter(Boolean),
       switchMap(() =>
-        from(this.fetchPackage(registry, id, version)).pipe(
+        withAbortSignal(signal =>
+          defer(() =>
+            this.api.streams.server.registries.package(
+              { registry, id, targetVersion: `=${version}` },
+              { signal },
+            ),
+          ).pipe(
+            switchMap(({ initial, items }) =>
+              from(items).pipe(startWith(initial)),
+            ),
+          ),
+        ).pipe(
+          map(details => this.toDetails(details, id, version)),
           catchError(error => {
             if (!isNetworkError(error)) this.errors.handleError(error)
             return of(null)
@@ -202,18 +231,12 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
-  private async fetchPackage(
-    registry: string,
+  private toDetails(
+    details: T.GetPackageResponse,
     id: string,
     version: string,
-  ): Promise<MarketplacePkg | null> {
-    const pkg = packageResponse(
-      await this.api.rpc.server.registries.package({
-        registry,
-        id,
-        targetVersion: `=${version}`,
-      }),
-    )
+  ): MarketplacePkg | null {
+    const pkg = packageResponse(details)
     const best = pkg.best[version]
     return best
       ? {

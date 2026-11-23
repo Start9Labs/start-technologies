@@ -3,7 +3,7 @@ import { EMPTY, merge, Observable, timer } from 'rxjs'
 import { filter, finalize, map, share, switchMap } from 'rxjs/operators'
 import { ConnectionService } from 'src/app/services/connection.service'
 import { PatchDbCache } from './patch-db/patch-db-cache'
-import { PATCH_CACHE } from './patch-db/patch-db-source'
+import { PATCH_CACHE, PATCH_DB } from './patch-db/patch-db-source'
 
 @Injectable({
   providedIn: 'root',
@@ -11,6 +11,7 @@ import { PATCH_CACHE } from './patch-db/patch-db-source'
 export class PatchDataService extends Observable<void> {
   private readonly cache = inject(PatchDbCache)
   private readonly dump$ = inject(PATCH_CACHE)
+  private readonly patch = inject(PATCH_DB)
   private readonly stream$ = inject(ConnectionService).pipe(
     switchMap(live =>
       live
@@ -18,7 +19,7 @@ export class PatchDataService extends Observable<void> {
             this.dump$.pipe(
               filter(({ id }) => !!id),
               map(dump => {
-                this.cache.write(dump)
+                this.cache.write(dump, this.patch.snapshotCursors())
               }),
             ),
             timer(0, 30_000).pipe(

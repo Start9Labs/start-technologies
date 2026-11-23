@@ -8,6 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use patch_db::ModelExt;
+use patch_db::json_ptr::JsonPointer;
+use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -1026,30 +1028,114 @@ pub struct SyncedPackageParams {
     /// Absent selects the newest release of each flavor.
     #[serde(default)]
     pub target_version: Option<exver::VersionRange>,
+    #[visit(ts(skip))]
+    #[serde(rename = "__Auth_signer")]
+    pub signer: Option<InternedString>,
 }
 
 rpc_toolkit::reflect_ts!(SyncedPackageParams);
 
-/// A package from a saved registry's synchronized index, with short details of its other
-/// versions, for the releases this server can list.
-pub async fn synced_package(
-    ctx: RpcContext,
-    SyncedPackageParams {
-        registry,
+fn select_synced_package(
+    db: &DatabaseModel,
+    registry: &Url,
+    id: &PackageId,
+    target_version: Option<&exver::VersionRange>,
+    device: &DeviceInfo,
+) -> Result<GetPackageResponse, Error> {
+    let empty = Model::new(&PackageIndex::default())?;
+    select_package_details(
+        synced_package_index(db, registry)?.unwrap_or(&empty),
         id,
         target_version,
-    }: SyncedPackageParams,
+        device,
+    )
+}
+
+/// A package from a saved registry's synchronized index, with short details of its other
+/// versions, for the releases this server can list. An rpcstream caller then receives each
+/// changed selection until the registry is removed.
+pub async fn synced_package(
+    HandlerArgs {
+        context: ctx,
+        params:
+            SyncedPackageParams {
+                registry,
+                id,
+                target_version,
+                signer,
+            },
+        rpc_stream,
+        ..
+    }: HandlerArgs<RpcContext, SyncedPackageParams, rpc_toolkit::Empty, GetPackageResponse>,
 ) -> Result<GetPackageResponse, Error> {
     let mut device = DeviceInfo::load(&ctx).await?.for_listing();
     device.os.language = None;
-    let snapshot = ctx.db.peek().await;
-    let empty = Model::new(&PackageIndex::default())?;
-    select_package_details(
-        synced_package_index(&snapshot, &registry_url(&registry)?)?.unwrap_or(&empty),
-        &id,
-        target_version.as_ref(),
-        &device,
-    )
+    let registry = registry_url(&registry)?;
+    let Some(stream) = rpc_stream else {
+        return select_synced_package(
+            &ctx.db.peek().await,
+            &registry,
+            &id,
+            target_version.as_ref(),
+            &device,
+        );
+    };
+    let (current, changes) =
+        watch_synced_package(ctx.db.clone(), registry, id, target_version, device).await?;
+    crate::auth::continuation_subscription(&ctx, signer)
+        .await?
+        .forward_stream(stream, changes);
+    Ok(current)
+}
+
+/// The package's current selection, then each different selection after a change to the
+/// registry's saved index. A selection that fails ends the stream with that error.
+pub(crate) async fn watch_synced_package(
+    db: TypedPatchDb<Database>,
+    registry: Url,
+    id: PackageId,
+    target_version: Option<exver::VersionRange>,
+    device: DeviceInfo,
+) -> Result<
+    (
+        GetPackageResponse,
+        impl futures::Stream<Item = Result<GetPackageResponse, Error>> + Send + 'static,
+    ),
+    Error,
+> {
+    let mut pointer = JsonPointer::<String>::default();
+    pointer.push_end("private");
+    pointer.push_end("registryIndexes");
+    pointer.push_end(registry.as_str());
+    let mut revisions = db.subscribe(pointer).await;
+    let select = move |db: &DatabaseModel| {
+        select_synced_package(db, &registry, &id, target_version.as_ref(), &device)
+    };
+    let current = select(&db.peek().await)?;
+    let mut last = to_value(&current)?;
+    let changes = async_stream::stream! {
+        while revisions.recv().await.is_some() {
+            while revisions.try_recv().is_ok() {}
+            match select(&db.peek().await) {
+                Ok(next) => match to_value(&next) {
+                    Ok(value) if value == last => {}
+                    Ok(value) => {
+                        last = value;
+                        yield Ok(next);
+                    }
+                    Err(error) => {
+                        yield Err(error);
+                        break;
+                    }
+                },
+                Err(error) => {
+                    yield Err(error);
+                    break;
+                }
+            }
+        }
+    };
+    Ok((current, changes))
 }
 
 /// The selected StartOS update source's synchronized releases for this server.
