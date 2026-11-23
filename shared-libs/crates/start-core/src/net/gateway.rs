@@ -2061,20 +2061,18 @@ async fn reconcile_local_outbound_mark(selected: bool) -> Result<(), Error> {
     Ok(())
 }
 
-/// An interface absent from the table stays absent.
+/// Observed inactivity does not acknowledge completed rule retirement.
 async fn disconnected(
     write_to: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
     iface: &GatewayId,
 ) {
-    let cleared = write_to.send_if_modified(|m| {
+    write_to.send_if_modified(|m| {
         m.get_mut(iface)
             .filter(|i| i.ip_info.is_some())
             .map(|i| i.ip_info = None)
             .is_some()
     });
-    if cleared {
-        reconcile_main_rules(write_to).await.log_err();
-    }
+    reconcile_main_rules(write_to).await.log_err();
 }
 
 #[instrument(skip(connection, device_proxy, write_to, db))]
@@ -3836,44 +3834,15 @@ mod policy_rule_tests {
     }
 
     #[cfg(target_os = "linux")]
-    #[tokio::test]
-    async fn failed_main_rule_add_preserves_existing_rules() {
+    fn run_with_mock_ip(test: &str, script: &str) {
         use std::os::unix::fs::PermissionsExt;
-
-        if let Some(log) = std::env::var_os("STARTOS_MAIN_RULE_LOG") {
-            let desired = [MainRule {
-                not: false,
-                to: Some("10.0.0.0/8".parse().unwrap()),
-            }]
-            .into_iter()
-            .collect();
-            assert!(reconcile_main_rules_family(false, &desired).await.is_err());
-            let commands = std::fs::read_to_string(log).unwrap();
-            assert!(commands.contains("rule add "), "{commands}");
-            assert!(!commands.contains("rule del "), "{commands}");
-            return;
-        }
 
         let temp = tempfile::tempdir().unwrap();
         let ip = temp.path().join("ip");
-        std::fs::write(
-            &ip,
-            r#"#!/bin/bash
-printf '%s\n' "$*" >> "$STARTOS_MAIN_RULE_LOG"
-case "$2" in
-  show) echo '50: from all lookup main suppress_prefixlength 0' ;;
-  add) exit 1 ;;
-esac
-"#,
-        )
-        .unwrap();
+        std::fs::write(&ip, script).unwrap();
         std::fs::set_permissions(&ip, std::fs::Permissions::from_mode(0o755)).unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "net::gateway::policy_rule_tests::failed_main_rule_add_preserves_existing_rules",
-                "--nocapture",
-            ])
+            .args(["--exact", test, "--nocapture"])
             .env("STARTOS_MAIN_RULE_LOG", temp.path().join("commands"))
             .env(
                 "PATH",
@@ -3890,6 +3859,90 @@ esac
             "{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn failed_main_rule_add_preserves_existing_rules() {
+        if let Some(log) = std::env::var_os("STARTOS_MAIN_RULE_LOG") {
+            let desired = [MainRule {
+                not: false,
+                to: Some("10.0.0.0/8".parse().unwrap()),
+            }]
+            .into_iter()
+            .collect();
+            assert!(reconcile_main_rules_family(false, &desired).await.is_err());
+            let commands = std::fs::read_to_string(log).unwrap();
+            assert!(commands.contains("rule add "), "{commands}");
+            assert!(!commands.contains("rule del "), "{commands}");
+            return;
+        }
+
+        run_with_mock_ip(
+            "net::gateway::policy_rule_tests::failed_main_rule_add_preserves_existing_rules",
+            r#"#!/bin/bash
+printf '%s\n' "$*" >> "$STARTOS_MAIN_RULE_LOG"
+case "$2" in
+  show) echo '50: from all lookup main suppress_prefixlength 0' ;;
+  add) exit 1 ;;
+esac
+"#,
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn inactive_interface_retries_failed_rule_retirement() {
+        if let Some(log) = std::env::var_os("STARTOS_MAIN_RULE_LOG") {
+            let iface: GatewayId = "wg0".parse().unwrap();
+            let interfaces = Watch::new(
+                [(
+                    iface.clone(),
+                    NetworkInterfaceInfo {
+                        ip_info: Some(Arc::new(IpInfo {
+                            device_type: Some(NetworkInterfaceType::Wireguard),
+                            subnets: ["2001:db8:100::2/56".parse::<IpNet>().unwrap()]
+                                .into_iter()
+                                .collect(),
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            );
+            disconnected(&interfaces, &iface).await;
+            assert!(interfaces.peek(|m| m.get(&iface).unwrap().ip_info.is_none()));
+            disconnected(&interfaces, &iface).await;
+            let commands = std::fs::read_to_string(log).unwrap();
+            assert_eq!(commands.matches("-j -6 route show table main\n").count(), 2);
+            assert!(
+                commands.contains(&format!(
+                    "-6 rule del priority {} to 2001:db8:100::/56 ",
+                    MAIN_RULE_PRIORITY,
+                )),
+                "{commands}"
+            );
+            return;
+        }
+
+        run_with_mock_ip(
+            "net::gateway::policy_rule_tests::inactive_interface_retries_failed_rule_retirement",
+            r#"#!/bin/bash
+printf '%s\n' "$*" >> "$STARTOS_MAIN_RULE_LOG"
+if [ "$1" = '-j' ]; then
+  if [ ! -e "$STARTOS_MAIN_RULE_LOG.first-dump" ]; then
+    : > "$STARTOS_MAIN_RULE_LOG.first-dump"
+    exit 1
+  fi
+  echo '[]'
+elif [ "$1 $2 $3" = '-6 rule show' ]; then
+  echo '50: from all to 2001:db8:100::/56 lookup main suppress_prefixlength 0'
+fi
+exit 0
+"#,
         );
     }
 
