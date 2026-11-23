@@ -608,4 +608,6 @@ export const ENGLISH: Record<string, number> = {
   'VLAN IDs': 651,
   'VLAN ID': 652,
   "{port} sends each security profile to the switch tagged with its VLAN ID. Set up the switch's VLANs with these IDs.": 653,
+  '{profile} overlaps the upstream network {network}': 654,
+  'The router may lose upstream or Internet access. A more-specific WAN network can also block devices from this dashboard. Change its subnet to one outside that network.': 655,
 }

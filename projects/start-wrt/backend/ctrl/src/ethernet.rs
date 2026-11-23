@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use rpc_toolkit::{from_fn_async_local, HandlerExt, ParentHandler};
@@ -190,22 +190,38 @@ pub async fn get<C: CtrlContext>(ctx: C) -> Result<Ethernet, Error> {
     get_config(ctx, &cfgs)
 }
 
-/// Each bridge port's untagged VLAN; a primary (PVID) entry wins.
+fn lan_bridge_vlans(cfgs: &Configs) -> Result<Vec<NetworkBridgeVlan>, Error> {
+    let bridge = find_lan_bridge(cfgs)?
+        .map(|bridge| bridge.name)
+        .unwrap_or_else(|| DEFAULT_LAN_BRIDGE.into());
+    let mut vlans = Vec::new();
+    cfgs["network"].try_each(|_, vlan: NetworkBridgeVlan| {
+        if vlan.device == bridge {
+            vlans.push(vlan);
+        }
+        Ok::<_, Error>(())
+    })?;
+    Ok(vlans)
+}
+
+fn is_wired_port(name: &str) -> bool {
+    !name.starts_with("wlan") && !name.starts_with("phy")
+}
+
+/// Each LAN bridge port's untagged VLAN; a primary (PVID) entry wins.
 pub(crate) fn port_vlans(cfgs: &Configs) -> Result<HashMap<String, u16>, Error> {
     let mut vlan_ports = HashMap::new();
-    for section in &cfgs["network"].sections {
-        if let Some(vlan) = section.get_typed::<NetworkBridgeVlan>()? {
-            for port in vlan.ports {
-                match port.tagging {
-                    None | Some(NetworkVlanPortTagging::TAGGED) => (),
-                    Some(NetworkVlanPortTagging::UNTAGGED) => {
-                        vlan_ports.entry(port.port).or_insert((vlan.vlan, false));
-                    }
-                    Some(NetworkVlanPortTagging::PRIMARY) => {
-                        let entry = vlan_ports.entry(port.port).or_insert((vlan.vlan, true));
-                        if !entry.1 {
-                            entry.0 = vlan.vlan;
-                        }
+    for vlan in lan_bridge_vlans(cfgs)? {
+        for port in vlan.ports {
+            match port.tagging {
+                None | Some(NetworkVlanPortTagging::TAGGED) => (),
+                Some(NetworkVlanPortTagging::UNTAGGED) => {
+                    vlan_ports.entry(port.port).or_insert((vlan.vlan, false));
+                }
+                Some(NetworkVlanPortTagging::PRIMARY) => {
+                    let entry = vlan_ports.entry(port.port).or_insert((vlan.vlan, true));
+                    if !entry.1 {
+                        entry.0 = vlan.vlan;
                     }
                 }
             }
@@ -229,7 +245,7 @@ fn get_config(ctx: impl CtrlContext, cfgs: &Configs) -> Result<Ethernet, Error> 
     let all_ports: HashSet<String> = found_bridge
         .ports
         .into_iter()
-        .filter(|p| !p.starts_with("wlan") && !p.starts_with("phy"))
+        .filter(|p| is_wired_port(p))
         .collect();
     let vlan_ports = port_vlans(cfgs)?;
     for section in &cfgs["network"].sections {
@@ -511,8 +527,47 @@ async fn bounce_changed_ports(old_ports: &HashMap<String, Option<u16>>, new_ethe
             to_bounce.push(name.clone());
         }
     }
+    bounce_ports(&to_bounce).await;
+}
+
+/// Includes tagged memberships and flat bridges; excludes the configured WAN port.
+pub(crate) fn ports_for_interfaces(
+    cfgs: &Configs,
+    interfaces: &[String],
+) -> Result<Vec<String>, Error> {
+    let Some(bridge) = find_lan_bridge(cfgs)? else {
+        return Ok(Vec::new());
+    };
+    let mut devices = HashSet::new();
+    let mut wan = None;
+    cfgs["network"].try_each(|name, iface: NetworkInterface| {
+        if name.is_some_and(|name| interfaces.iter().any(|i| i == name)) {
+            devices.insert(iface.device.clone());
+        }
+        if name == Some(DEFAULT_WAN_INTERFACE) {
+            wan = Some(iface.device);
+        }
+        Ok::<_, Error>(())
+    })?;
+    let mut ports = BTreeSet::new();
+    if devices.contains(&bridge.name) {
+        ports.extend(bridge.ports);
+    }
+    for vlan in lan_bridge_vlans(cfgs)? {
+        if devices.contains(&format!("{}.{}", vlan.device, vlan.vlan)) {
+            ports.extend(vlan.ports.into_iter().map(|port| port.port));
+        }
+    }
+    Ok(ports
+        .into_iter()
+        .filter(|port| is_wired_port(port) && wan.as_ref() != Some(port))
+        .collect())
+}
+
+/// Takes the links down long enough for clients to notice, then up again.
+pub(crate) async fn bounce_ports(ports: &[String]) {
     let sys = crate::usb_ports::Sys::host();
-    let targets: Vec<crate::usb_ports::LinkTarget> = to_bounce
+    let targets: Vec<crate::usb_ports::LinkTarget> = ports
         .iter()
         .flat_map(|port| crate::usb_ports::link_targets(&sys, port))
         .collect();
@@ -823,9 +878,77 @@ mod tests {
 
     use super::*;
 
-    /// Test shim: the production `set` now takes an `EthernetSetRequest` and
-    /// returns `EthernetSetResult`; these tests predate that and pass a bare
-    /// `Ethernet`. Wrap it so the existing call sites stay unchanged.
+    #[tokio::test]
+    async fn renumbered_interfaces_select_wired_memberships_without_the_wan() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config device
+    option name 'br-lan'
+    option type 'bridge'
+    list ports 'eth0'
+    list ports 'eth1'
+    list ports 'eth2'
+    list ports 'eth3'
+    list ports 'wlan0'
+
+config interface 'lan'
+    option device 'br-lan'
+
+config interface 'guest'
+    option device 'br-lan.3'
+
+config interface 'wan'
+    option device 'eth2'
+
+config bridge-vlan
+    option device 'br-lan'
+    option vlan '1'
+    list ports 'eth0:u*'
+    list ports 'eth1:t'
+    list ports 'eth2:t'
+
+config bridge-vlan
+    option device 'br-lan'
+    option vlan '3'
+    list ports 'eth1:u*'
+
+config bridge-vlan
+    option device 'br-other'
+    option vlan '1'
+    list ports 'eth9:u*'
+",
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let mut flat = parse_all(dir.path(), &arena, &["network"]).await.unwrap();
+        flat["network"]
+            .sections
+            .retain(|section| section.ty() != "bridge-vlan");
+        assert_eq!(
+            ports_for_interfaces(&flat, &["lan".into()]).unwrap(),
+            ["eth0", "eth1", "eth3"]
+        );
+        let mut cfgs = parse_all(dir.path(), &arena, &["network"]).await.unwrap();
+        for section in &mut cfgs["network"].sections {
+            if section.name().as_deref() == Some("lan") {
+                let mut iface = section.get::<NetworkInterface>().unwrap();
+                iface.device = "br-lan.1".into();
+                section.set(&iface).unwrap();
+            }
+        }
+        assert_eq!(
+            ports_for_interfaces(&cfgs, &["lan".into()]).unwrap(),
+            ["eth0", "eth1"]
+        );
+        assert_eq!(
+            ports_for_interfaces(&cfgs, &["guest".into()]).unwrap(),
+            ["eth1"]
+        );
+        assert!(!port_vlans(&cfgs).unwrap().contains_key("eth9"));
+    }
+
     async fn set(
         ctx: TestContext,
         e: DeserializeStdin<Ethernet<ProfileIdOpt>>,
