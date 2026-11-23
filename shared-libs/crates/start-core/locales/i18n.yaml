@@ -7,6 +7,13 @@ about.clear-nut:
   fr_FR: "Désactiver la surveillance de l'onduleur et effacer ses paramètres"
   pl_PL: "Wyłącz monitorowanie UPS i wyczyść jego ustawienia"
 
+about.commands-push-subscriptions:
+  en_US: "Commands for managing browser push notification subscriptions"
+  de_DE: "Befehle zur Verwaltung von Browser-Push-Benachrichtigungsabonnements"
+  es_ES: "Comandos para gestionar las suscripciones a notificaciones push del navegador"
+  fr_FR: "Commandes pour gérer les abonnements aux notifications push du navigateur"
+  pl_PL: "Polecenia do zarządzania subskrypcjami powiadomień push przeglądarki"
+
 about.commands-shared-volumes:
   en_US: "Commands for managing shared volumes"
   de_DE: "Befehle zur Verwaltung gemeinsamer Volumes"

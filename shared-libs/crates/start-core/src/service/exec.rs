@@ -41,7 +41,7 @@ impl SubcontainerTarget {
     pub(super) async fn resolve(
         ctx: &RpcContext,
         id: &PackageId,
-        subcontainer: Option<Guid>,
+        subcontainer: Option<InternedString>,
         name: Option<InternedString>,
         image_id: Option<ImageId>,
         user: Option<InternedString>,
@@ -218,8 +218,8 @@ pub struct ExecParams {
     #[arg(long, help = "help.arg.exec-timeout-secs")]
     timeout_secs: Option<u64>,
     /// Part of the subcontainer's ID. Overrides `name` and `imageId`.
-    #[arg(long, value_parser = parse_guid, help = "help.arg.subcontainer-name")]
-    subcontainer: Option<Guid>,
+    #[arg(long, help = "help.arg.subcontainer-name")]
+    subcontainer: Option<InternedString>,
     /// Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
     #[arg(long, help = "help.arg.container-name")]
     name: Option<InternedString>,
@@ -231,9 +231,6 @@ pub struct ExecParams {
     user: Option<InternedString>,
 }
 
-fn parse_guid(value: &str) -> Result<Guid, String> {
-    value.parse().map_err(|error: Error| error.to_string())
-}
 rpc_toolkit::reflect_ts!(ExecParams);
 
 #[derive(Debug, Default, Deserialize, Serialize, VisitFields)]
@@ -442,9 +439,29 @@ mod test {
         .unwrap();
         assert_eq!(params.command, ["ls", "-la", "/data"]);
         assert_eq!(params.user.as_deref(), Some("root"));
-        assert!(
-            ExecParams::try_parse_from(["exec", "hello-world", "--subcontainer", "x"]).is_err()
-        );
+    }
+
+    #[test]
+    fn exec_cli_preserves_partial_subcontainer_selectors_in_rpc_params() {
+        use clap::Parser;
+        for selector in ["ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", "ABCDEFGH", "abcdefgh"] {
+            let params = ExecParams::try_parse_from([
+                "exec", "--subcontainer", selector, "hello-world", "true",
+            ])
+            .unwrap();
+            assert_eq!(params.subcontainer.as_deref(), Some(selector));
+            let decoded: ExecParams = from_value(to_value(&params).unwrap()).unwrap();
+            assert_eq!(decoded.subcontainer.as_deref(), Some(selector));
+            let attach: crate::service::AttachParams = serde_json::from_value(serde_json::json!({
+                "id": "hello-world",
+                "command": [],
+                "tty": false,
+                "stderrTty": false,
+                "subcontainer": selector,
+            }))
+            .unwrap();
+            assert_eq!(attach.subcontainer.as_deref(), Some(selector));
+        }
     }
 
     fn sh(script: &str) -> Command {
