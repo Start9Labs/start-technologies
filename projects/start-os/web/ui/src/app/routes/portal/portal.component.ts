@@ -12,11 +12,9 @@ import {
   TuiScrollbar,
 } from '@taiga-ui/core'
 import { TuiActionBar, TuiProgress } from '@taiga-ui/kit'
-import { PatchDB } from 'patch-db-client'
 import { TabsComponent } from 'src/app/routes/portal/components/tabs.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { OSService } from 'src/app/services/os.service'
-import { DataModel } from 'src/app/services/patch-db/data-model'
 import { PluginsService } from 'src/app/services/plugins.service'
 import { BrowserPushSync, PushService } from 'src/app/services/push.service'
 import { HeaderComponent } from './components/header/header.component'
@@ -169,15 +167,13 @@ import { HeaderComponent } from './components/header/header.component'
 })
 export class PortalComponent {
   private readonly tasks = inject(TaskService)
-  private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly api = inject(ApiService)
+  private readonly os = inject(OSService)
 
   readonly mobile = inject(WA_IS_MOBILE)
   readonly plugins = inject(PluginsService)
-  readonly update = toSignal(inject(OSService).updating$)
-  readonly restartReason = toSignal(
-    this.patch.watch$('serverInfo', 'statusInfo', 'restart'),
-  )
+  readonly update = toSignal(this.os.updating$)
+  readonly restartReason = toSignal(this.os.restartReason$)
   readonly bar = signal(true)
 
   getProgress(size: number, downloaded: number): number {

@@ -107,6 +107,8 @@ mod tests {
             signatures: [(key.clone(), signature.clone())].into_iter().collect(),
             published_at: chrono::Utc::now(),
             urls: vec!["https://example.com/asset".parse().unwrap()],
+            private: None,
+            readers: Default::default(),
         };
         let mut response = json!({
             "signers": { "a": { "keys": [key.clone()] } },

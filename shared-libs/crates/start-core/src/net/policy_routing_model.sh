@@ -1,35 +1,44 @@
 #!/bin/bash
 # Model of the StartOS policy-routing ladder, checked against the invariants in
 # policy-routing.md. Runs inside `unshare -rn`; the priorities arrive in the
-# environment from the constants in net/mod.rs.
+# environment from the constants in net/mod.rs, and NON_PUBLIC_V4 from the
+# list in net/gateway.rs.
 #
 #   eth0    LAN gateway, v4 + GUA + ULA        wg0  tunnel gateway, v4 + GUA
 #   lxcbr0  container bridge, 10.0.3.5 pinned   wg1  tunnel gateway, v4 only
-#           and the OS listen addresses
+#           and the OS listen addresses         wg2  tunnel gateway, GUA only
 
 fail=0
 ip link set lo up
 sysctl -qw net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1
 sysctl -qw net.ipv4.conf.all.rp_filter=0
-for dev in eth0 wg0 wg1 lxcbr0; do
+for dev in eth0 wg0 wg1 wg2 lxcbr0; do
   ip link add $dev type dummy
   ip link set $dev up
   sysctl -qw net/ipv4/conf/$dev/rp_filter=2
 done
-for gateway in eth0 wg0 wg1; do
+for gateway in eth0 wg0 wg1 wg2; do
   sysctl -qw net/ipv4/conf/$gateway/src_valid_mark=1
 done
 
 table() { echo $((1000 + $(ip -o link show $1 | cut -d: -f1))); }
-T_ETH=$(table eth0) T_WG0=$(table wg0) T_WG1=$(table wg1)
+T_ETH=$(table eth0) T_WG0=$(table wg0) T_WG1=$(table wg1) T_WG2=$(table wg2)
 WG_FWMARK=51820 DIVERT_MARK=0x540001 DIVERT_TABLE=5344
 
 ip addr add 192.168.1.5/24 dev eth0
+ip addr add 198.51.100.5/24 dev eth0
 ip -6 addr add 2001:db8:1::5/64 dev eth0 nodad
+ip -6 addr add 2001:db8:2::5/128 dev eth0 nodad
+ip -6 route add 2001:db8:2::/64 dev eth0 proto ra
+ip route add 192.0.0.0/24 via 192.168.1.1 dev eth0
+ip route add 198.18.0.0/15 via 192.168.1.1 dev eth0
+ip route add 240.0.0.0/4 via 192.168.1.1 dev eth0
 ip -6 addr add fd12:3456::5/64 dev eth0 nodad
 ip addr add 10.59.0.2/24 dev wg0
 ip -6 addr add 2001:db8:59::2/124 dev wg0 nodad
+ip -6 addr add 2001:db8:100::2/56 dev wg0 nodad
 ip addr add 10.60.0.2/24 dev wg1
+ip -6 addr add 2001:db8:62::2/124 dev wg2 nodad
 ip addr add 10.0.3.1/24 dev lxcbr0
 ip -6 addr add fd00:3::1/64 dev lxcbr0 nodad
 ip addr add "$OS_LISTEN_V4/32" dev lxcbr0
@@ -43,25 +52,37 @@ ip route add default dev wg0 scope link table $T_WG0
 ip -6 route add default dev wg0 table $T_WG0
 ip route add default dev wg1 scope link table $T_WG1
 ip -6 route add blackhole default table $T_WG1
+ip route add blackhole default table $T_WG2
+ip -6 route add default dev wg2 table $T_WG2
 ip route add local default dev lo table $DIVERT_TABLE
 ip -6 route add local default dev lo table $DIVERT_TABLE
 
 for family in -4 -6; do
   ip $family rule add fwmark $DIVERT_MARK lookup $DIVERT_TABLE priority $DIVERT
-  ip $family rule add lookup main suppress_prefixlength 0 priority $MAIN
-  for t in $T_ETH $T_WG0 $T_WG1; do
+  for t in $T_ETH $T_WG0 $T_WG1 $T_WG2; do
     ip $family rule add fwmark $t lookup $t priority $REPLY
   done
   ip $family rule add lookup main priority $AUTO_MAIN
   ip $family rule add lookup default priority $AUTO_DEFAULT
 done
+for net in $NON_PUBLIC_V4 198.51.100.0/24; do
+  ip rule add to $net lookup main suppress_prefixlength 0 priority $MAIN
+done
+ip -6 rule add not to 2000::/3 lookup main suppress_prefixlength 0 priority $MAIN
+for net in 2001:db8:1::/64 2001:db8:2::/64 2001:db8:59::/124 2001:db8:62::/124 2001:db8:100::/56; do
+  ip -6 rule add to $net lookup main suppress_prefixlength 0 priority $MAIN
+done
 ip -6 rule add fwmark $T_WG0 to 2000::/3 lookup $T_WG0 priority $TUNNEL_REPLY
+ip -6 rule add fwmark $T_WG2 to 2000::/3 lookup $T_WG2 priority $TUNNEL_REPLY
 ip rule add from 192.168.1.5 iif lo fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
+ip rule add from 198.51.100.5 iif lo fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
 ip rule add from 10.59.0.2 iif lo fwmark 0/0xffffffff lookup $T_WG0 priority $SOURCE
 ip rule add from 10.60.0.2 iif lo fwmark 0/0xffffffff lookup $T_WG1 priority $SOURCE
 ip -6 rule add from 2001:db8:1::5 iif lo fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
+ip -6 rule add from 2001:db8:2::5 iif lo fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
 ip -6 rule add from fd12:3456::5 iif lo fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
 ip -6 rule add from 2001:db8:59::2 iif lo fwmark 0/0xffffffff lookup $T_WG0 priority $SOURCE
+ip -6 rule add from 2001:db8:62::2 iif lo fwmark 0/0xffffffff lookup $T_WG2 priority $SOURCE
 ip rule add from "$OS_LISTEN_V4" iif lo fwmark 0/0xffffffff lookup main priority $SOURCE
 ip -6 rule add from "$OS_LISTEN_V6" iif lo fwmark 0/0xffffffff lookup main priority $SOURCE
 
@@ -113,6 +134,17 @@ expect() {
   fi
 }
 
+expect_direct() {
+  local want=$1 out
+  shift
+  expect specific "$want" "$@"
+  out=$(ip route get "$@" 2>&1)
+  if grep -q ' via ' <<<"$out"; then
+    echo "$state: specific: ip route get $*: want direct route, got $out"
+    fail=1
+  fi
+}
+
 from_container="from 10.0.3.5 iif lxcbr0"
 from_container_v6="from fd00:3::5 iif lxcbr0"
 
@@ -121,6 +153,18 @@ every_state() {
   expect divert LOCAL 192.168.1.77 mark $DIVERT_MARK $from_container
   expect specific eth0 192.168.1.77
   expect specific eth0 192.168.1.77 $from_container
+  expect_direct eth0 198.51.100.77
+  expect_direct eth0 198.51.100.77 from 198.51.100.5
+  expect_direct eth0 198.51.100.77 mark $T_ETH $from_container
+  expect_direct eth0 198.51.100.77 mark $LOCAL_OUTBOUND_MARK
+  expect_direct eth0 2001:db8:2::77 from 2001:db8:2::5
+  expect_direct eth0 2001:db8:2::77 mark $T_ETH $from_container_v6
+  expect_direct eth0 2001:db8:2::77 mark $LOCAL_OUTBOUND_MARK
+  expect_direct wg0 2001:db8:100::77 $from_container_v6
+  for ip in 192.0.0.8 198.18.0.8 240.0.0.8; do
+    expect specific eth0 $ip mark $LOCAL_OUTBOUND_MARK
+    expect specific eth0 $ip $from_container
+  done
   expect specific lxcbr0 10.0.3.5 from 10.59.0.2
   expect specific lxcbr0 fd00:3::5 from 2001:db8:59::2
   expect specific lxcbr0 10.0.3.5 mark $T_WG0 from 203.0.113.9 iif wg0
@@ -189,6 +233,55 @@ expect v6-leak-guard REJECT 2001:db8:99::9 $from_container_v6
 expect local-outbound REJECT 2001:db8:99::9 from "$OS_LISTEN_V6" mark $LOCAL_OUTBOUND_MARK
 expect local-outbound REJECT 2001:db8:99::9 from 2001:db8:1::5 mark $LOCAL_OUTBOUND_MARK
 unpin_system
+
+state="system pinned to wg2, which carries no v4"
+pin_system $T_WG2
+every_state
+expect system-selection wg2 2001:db8:99::9
+expect v4-leak-guard REJECT 203.0.113.9
+expect v4-leak-guard REJECT 203.0.113.9 $from_container
+expect local-outbound REJECT 203.0.113.9 from 192.168.1.5 mark $LOCAL_OUTBOUND_MARK
+unpin_system
+
+# The LAN pushes routes for public destinations into main, as DHCP option 121 or
+# a static route can.
+ip route add 0.0.0.0/1 via 192.168.1.1 dev eth0
+ip route add 128.0.0.0/1 via 192.168.1.1 dev eth0
+ip -6 route add 2000::/3 via 2001:db8:1::1 dev eth0
+
+state="LAN routes public space, auto"
+every_state
+expect auto eth0 203.0.113.9
+expect auto eth0 2001:db8:99::9
+
+state="LAN routes public space, system pinned to wg0"
+pin_system $T_WG0
+every_state
+expect route-injection wg0 203.0.113.9
+expect route-injection wg0 2001:db8:99::9
+expect route-injection wg0 203.0.113.9 $from_container
+expect route-injection wg0 2001:db8:99::9 $from_container_v6
+expect route-injection wg0 203.0.113.9 from 192.168.1.5 mark $LOCAL_OUTBOUND_MARK
+unpin_system
+
+state="LAN routes public space, system pinned, gateway gone"
+pin_system ""
+every_state
+expect route-injection REJECT 203.0.113.9
+expect route-injection REJECT 2001:db8:99::9
+expect route-injection REJECT 203.0.113.9 $from_container
+unpin_system
+
+state="LAN routes public space, service pinned to wg0"
+pin_service $T_WG0
+every_state
+expect route-injection wg0 203.0.113.9 $from_container
+expect route-injection wg0 2001:db8:99::9 $from_container_v6
+unpin_service
+
+ip route del 0.0.0.0/1
+ip route del 128.0.0.0/1
+ip -6 route del 2000::/3
 
 state="service pinned to wg0"
 pin_service $T_WG0

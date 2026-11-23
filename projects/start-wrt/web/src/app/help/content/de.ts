@@ -57,26 +57,34 @@ Reservieren Sie eine IP-Adresse, um eine feste IPv4-Adresse zuzuweisen, die sich
 Entfernt ein Offline-Gerät aus Ihrer Geräteliste. Alle benutzerdefinierten Namen oder reservierten IP-Einstellungen gehen dabei verloren. Verbindet sich das Gerät erneut, erscheint es als neues Gerät.`,
   '/ethernet': `## Ethernet
 
+Jeder Port weist den daran angeschlossenen Geräten ein Sicherheitsprofil zu oder überlässt diese Wahl einem Managed Switch.
+
 ### Port
 
-Der physische Port: ein Ethernet-Port (z. B. eth0, eth1) oder ein USB-Port mit einem USB-Ethernet-Adapter (z. B. usb_eth0). Ein USB-Port erscheint, sobald zum ersten Mal ein Netzwerkgerät daran angeschlossen wird, und behält sein Profil, auch wenn nichts angeschlossen ist. Jeder Anschluss eines USB-Hubs ist ein eigener USB-Port. Ein USB-Port ohne angeschlossenen Adapter kann entfernt werden.
+Der physische Port: ein Ethernet-Port (z. B. eth0, eth1) oder ein USB-Port mit einem USB-Ethernet-Adapter (z. B. usb_eth0). Ein USB-Port erscheint, sobald zum ersten Mal ein Netzwerkgerät daran angeschlossen wird, und behält sein Profil, auch wenn nichts angeschlossen ist. Jeder Anschluss eines USB-Hubs ist ein eigener USB-Port.
+
+**WAN** kennzeichnet den Port, der mit Ihrem Modem oder dem vorgelagerten Netzwerk verbunden ist. Er hat kein Sicherheitsprofil. Es kann jeweils nur ein Port WAN sein, und es muss ein Ethernet-Port sein.
+
+**Nicht verbunden** kennzeichnet einen USB-Port, an dem kein Adapter angeschlossen ist. Entfernen Sie ihn mit der Papierkorb-Schaltfläche; er erscheint wieder im Admin-Profil, sobald erneut ein Adapter daran angeschlossen wird.
 
 ### Sicherheitsprofil
 
-Das standardmäßige Sicherheitsprofil, das Geräten zugewiesen wird, die über den angegebenen Ethernet-Port verbunden sind.
+Das Sicherheitsprofil, dem die an den Port angeschlossenen Geräte beitreten. Eine Änderung trennt den Port kurz, und die meisten seiner Geräte verbinden sich innerhalb weniger Sekunden im neuen Profil wieder. **Profile verwalten** öffnet die Profilseite, um Profile hinzuzufügen oder zu bearbeiten.
 
-### WAN
+### Delegieren
 
-Der WAN-Port (Wide Area Network) verbindet sich mit dem Modem Ihres ISP oder dem vorgelagerten Netzwerk. Es kann immer nur ein Ethernet-Port als WAN festgelegt werden. Der WAN-Port muss ein Ethernet-Port sein.
+Überlässt die Wahl des Profils einem Managed Switch, der an den Port angeschlossen ist. Der Port überträgt jedes Sicherheitsprofil als getaggtes VLAN, und die Einstellungen des Switches entscheiden, zu welchem Profil jeder seiner Ports gehört. Wer sich am Switch anmelden kann, erreicht daher jedes Profil. Datenverkehr, der ohne VLAN-Tag am Port ankommt, erhält keinen Zugang. Für USB-Ports nicht verfügbar.
+
+Ein delegierter Port zeigt **Managed Switch** an, und seine Schaltfläche **VLAN-IDs** listet die VLAN-ID jedes Profils auf. Richten Sie den Switch mit diesen IDs ein; Admin ist immer VLAN 1.
 
 ### WAN-Port ändern
 
-Verwenden Sie die Schaltfläche „WAN-Port ändern“, um die WAN-Zuordnung einem anderen Ethernet-Port zuzuweisen. Dies unterbricht Ihre Internetverbindung und startet den Router neu. Stellen Sie sicher, dass Ihr Modem mit dem neuen WAN-Port verbunden ist, bevor Sie bestätigen.`,
+Verlegt WAN auf einen anderen Ethernet-Port. Dies unterbricht Ihre Internetverbindung und startet das Netzwerk kurz neu. Schließen Sie Ihr Modem an den neuen WAN-Port an, bevor Sie bestätigen.`,
   '/ethernet/dialog': `## WAN-Port ändern
 
 Wählen Sie einen neuen Ethernet-Port, der als WAN-Verbindung (Internet) dienen soll. Der aktuelle WAN-Port ist vorausgewählt.
 
-Das Ändern des WAN-Ports unterbricht sofort Ihre Internetverbindung und startet den Router neu. Stellen Sie sicher, dass Ihr Modem oder das vorgelagerte Netzwerkkabel mit dem neuen Port verbunden ist, bevor Sie bestätigen.`,
+Das Ändern des WAN-Ports unterbricht sofort Ihre Internetverbindung und startet das Netzwerk kurz neu. Stellen Sie sicher, dass Ihr Modem oder das vorgelagerte Netzwerkkabel mit dem neuen Port verbunden ist, bevor Sie bestätigen.`,
   '/inbound': `## Eingehende VPNs
 
 VPN-Server sind Software-Anwendungen, die sicheren und verschlüsselten Zugriff auf interne Netzwerkressourcen bereitstellen und es Clients ermöglichen, eine eingehende Verbindung zum Netzwerk sicher über das Internet von überall auf der Welt herzustellen.

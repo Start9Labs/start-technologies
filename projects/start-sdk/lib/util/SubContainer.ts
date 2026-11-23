@@ -20,7 +20,7 @@ export type ExecOptions = {
   /** How long to wait before SIGKILL, in ms (default 30000). `null` waits as long as the command takes — use it whenever the runtime is set by the size of the data or the speed of a disk. */
   timeout?: number | null
   /** Aborting SIGKILLs the process */
-  abort?: AbortController
+  abort?: AbortController | AbortSignal
 }
 
 const TIMES_TO_WAIT_FOR_PROC = 100
@@ -811,6 +811,7 @@ export class SubContainerEager<
       .catch(() => '{}')
       .then(JSON.parse)
     const { timeout = 30000, abort, ...spawnOptions } = options ?? {}
+    const abortSignal = abort instanceof AbortController ? abort.signal : abort
     const prepared = commandOptions(imageMeta, this.imageId, spawnOptions)
     const child = cp.spawn(
       'start-container',
@@ -837,7 +838,7 @@ export class SubContainerEager<
       }
       const cleanup = () => {
         clearTimeout(killTimeout)
-        abort?.signal.removeEventListener('abort', kill)
+        abortSignal?.removeEventListener('abort', kill)
       }
       const fail = (error: Error) => {
         cleanup()
@@ -876,8 +877,8 @@ export class SubContainerEager<
           kill()
         }, timeout)
       }
-      abort?.signal.addEventListener('abort', kill, { once: true })
-      if (abort?.signal.aborted) kill()
+      abortSignal?.addEventListener('abort', kill, { once: true })
+      if (abortSignal?.aborted) kill()
       // EOF-reading commands require closed stdin, including empty input.
       // Completion is observed before stdin closes, which can end the command.
       try {

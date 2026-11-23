@@ -4,10 +4,16 @@
 .SH NAME
 start\-cli\-s9pk\-publish \- Publish s9pk to S3 bucket and index on registry
 .SH SYNOPSIS
-\fBstart\-cli s9pk publish\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIS9PK\fR>
+\fBstart\-cli s9pk publish\fR [\fB\-\-private\fR] [\fB\-\-reader\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIS9PK\fR>
 .SH DESCRIPTION
 Publish s9pk to S3 bucket and index on registry
 .SH OPTIONS
+.TP
+\fB\-\-private\fR
+Host the s9pk encrypted with a key derived from your identity, visible only to admins, publishers, and the given readers
+.TP
+\fB\-\-reader\fR \fI<READERS>\fR
+Registered reader key allowed to see the private s9pk, in PEM or DER Base64 format
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

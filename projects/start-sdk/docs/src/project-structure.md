@@ -193,11 +193,12 @@ jobs:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
       S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
     permissions:
       contents: write
 ```
 
-The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL` and `REGISTRY_PROXY` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
+The reusable workflows read `REFERENCE_REGISTRY`, `RELEASE_REGISTRY`, `S3_S9PKS_BASE_URL`, `REGISTRY_PROXY` and `PACKAGE_READER_KEYS` from the calling repository's variables, including organization variables. Set them there; pass an input of the same name under `with:` only to override one for a single repo's workflow. Secrets are not read this way and must still be passed.
 
 **release.yml** -- publishes on manual tag push, for re-releases or testing. This workflow only triggers on manually pushed tags — tags created by tagAndRelease (via `GITHUB_TOKEN`) do not trigger it:
 
@@ -216,9 +217,12 @@ jobs:
       DEV_KEY: ${{ secrets.DEV_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
       S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
     permissions:
       contents: write
 ```
+
+A package built from a private repository is published as private: its s9pks are encrypted, and only registry admins, its publishers, and the reader keys listed in `PACKAGE_READER_KEYS` (one per line, DER Base64 or PEM, each registered with `start-cli registry admin reader add`) can see and install it. On GitHub this requires `S3_S9PKS_BASE_URL`; on Forgejo, without S3, the encrypted s9pks stream into the owner's generic package registry, which requires a `PACKAGES_TOKEN` secret able to write the owner's packages (a personal access token with package write scope for a user with write access to the organization). The private repository's own release keeps plaintext assets, which the registry never indexes. `PACKAGE_READER_KEYS` on a public repository is an error. Tag-and-release requires `DEV_KEY` to have read access on `REFERENCE_REGISTRY`.
 
 To publish to registries served over Tor, run a Tor SOCKS proxy the runners can reach and set `REGISTRY_PROXY` to its URL, such as `socks5h://tor-proxy.example:9050`. The `socks5h` scheme resolves names through the proxy, which `.onion` addresses require. Both workflows then route every `start-cli` registry request through it. The workflows do not start a proxy themselves.
 
@@ -278,9 +282,10 @@ second workflow, so tag-and-release calls the release workflow directly.
 Forgejo artifacts group the `.s9pk` files by build target rather than creating an
 artifact for each file. Release assets remain individual `.s9pk` downloads, and
 re-running a release updates its notes and replaces same-named assets in place.
-The shared release workflow retains its 2 GiB per-asset ceiling; configure S3 for
-larger files and ensure the Forgejo instance's upload limit permits the remaining
-assets.
+Release assets keep a 2 GiB per-file ceiling. Without S3, a larger public `.s9pk`
+goes to the owner's generic package registry, which requires the `PACKAGES_TOKEN`
+secret; the release notes link it under **Downloads** and the registry indexes it
+from there. Ensure the Forgejo instance's upload limit permits the remaining assets.
 
 ### AGENTS.md and CLAUDE.md
 

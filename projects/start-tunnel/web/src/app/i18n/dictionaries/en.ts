@@ -141,6 +141,12 @@ export const ENGLISH: Record<string, number> = {
   'WireGuard endpoint': 127,
   'Defaults to this page’s host. Use an IP address or DNS name reachable by the device; the WireGuard port is unchanged.': 128,
   'Generate config': 129,
+  'Sign in from the command line': 130,
+  'Enroll this browser': 131,
+  'Sign in without a password by running this command in a terminal on the server, then select Continue.': 132,
+  'This browser is not enrolled yet': 133,
+  'Cancel': 134,
+  'Continue': 135,
 }
 
 export default ENGLISH

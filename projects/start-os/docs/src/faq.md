@@ -160,6 +160,10 @@ To recover:
 2. Make sure your device is on the same network as the server. If you use a VPN, disconnect it to test.
 3. Reload the page. If a plain reload still shows the saved copy, do a hard refresh — the key combinations for each browser are listed [above](#i-am-unable-to-connect-to-my-servers-server-namelocal-url). If you were using an IP address, use `https://server-name.local` instead: it follows the server even when its IP changes.
 
+## Login says there have been too many attempts
+
+StartOS limits password attempts, and someone guessing your password can use them all up. Select **Sign in from the command line** under the error. [SSH](ssh.md) into your server, run the command it shows, then select **Continue**. The command enrolls this browser without a password, so the UI works normally even while the guessing continues.
+
 ## Can I add a second drive to give a service more storage?
 
 Partly. StartOS keeps every service's own data on a single data drive, the one chosen at the Select Drives step when [installing StartOS](installing-startos.md), and that data cannot move to another drive. A service that supports [shared volumes](shared-volumes.md) can keep shared files, such as a media library, on an external drive or a network share. A drive plugged in after setup can also be a [backup target](backups.md#backup-targets).
@@ -196,7 +200,7 @@ No. StartOS has one administrator, protected by the master password, and no othe
 
 To let someone use a service without administering the server, give them the service's [address](interfaces.md) and an account in that service, never the master password.
 
-To revoke known administrative credentials, [change the master password](change-password.md) and remove their SSH keys under **System > SSH**. List web-interface and `start-cli` sessions with `start-cli auth session list`, then revoke each unwanted entry with `start-cli auth session kill --pubkey <ID>` for a `pubkey` entry or `start-cli auth session kill --token <ID>` for a `token` entry, using its ID from the list.
+To revoke known administrative credentials, [change the master password](change-password.md) and remove their SSH keys under **System > SSH**. List web-interface and `start-cli` sessions with `start-cli auth key list` and remove unwanted ones with `start-cli auth key remove <ID>`. List bearer tokens with `start-cli auth token list` and revoke unwanted ones with `start-cli auth token remove <ID>`.
 
 An SSH connection that is already open stays open until it ends; restarting the server closes it. Revoking credentials leaves in place any change they made to the server and any data they copied. If you no longer trust someone who had administrative access, [get help](https://start9.com/help) restoring trust in the server; changing credentials alone cannot establish that.
 

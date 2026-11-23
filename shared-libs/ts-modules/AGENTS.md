@@ -79,6 +79,10 @@ English keys to numeric IDs; each other dictionary maps those IDs to translated
 strings. Add a key at the next available ID and supply a real translation in
 every dictionary. Run `npm run check:i18n`.
 
+An app that loads its own dictionaries through `I18N_LOADER` also provides its
+English-to-ID map as `I18N_IDS`, or shared components look up shared IDs in its
+dictionaries. Its dictionaries then carry every shared string it renders.
+
 For a new language, add its dictionary, extend `loadDictionary` and the Taiga
 language loader in `shared/src/i18n/i18n.providers.ts`, and update `languages`
 and `LANGUAGE_TO_TUI` in `shared/src/i18n/i18n.service.ts`. Add its language-name
