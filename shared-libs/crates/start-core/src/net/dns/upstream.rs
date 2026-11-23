@@ -340,6 +340,10 @@ mod tests {
                 ])
                 .arg(std::env::current_exe().unwrap())
                 .env("MAIN", crate::net::MAIN_RULE_PRIORITY.to_string())
+                .env(
+                    "NON_PUBLIC_V4",
+                    crate::net::gateway::NON_PUBLIC_V4.join(" "),
+                )
                 .env("REPLY", crate::net::REPLY_RULE_PRIORITY.to_string())
                 .env(
                     "DEFAULT_OUTBOUND",
