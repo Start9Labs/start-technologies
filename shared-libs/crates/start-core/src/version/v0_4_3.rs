@@ -182,7 +182,7 @@ fn group_enabled_plain_domains(addresses: &mut Value) {
     }
 }
 
-/// Renames every repeat of a shared-volume name to an unused suffixed variant.
+/// Gives every shared volume a valid folder name, suffixing repeats to keep names unique.
 fn suffix_duplicate_shared_volume_names(db: &mut Value) {
     let Some(volumes) = db
         .get_mut("public")
@@ -200,10 +200,11 @@ fn suffix_duplicate_shared_volume_names(db: &mut Value) {
         let Some(name) = volume["name"].as_str().map(str::to_owned) else {
             continue;
         };
-        if seen.insert(name.clone()) {
+        let valid = crate::shared_volumes::folder_name(&name);
+        if valid == name && seen.insert(name.clone()) {
             continue;
         }
-        let unused = crate::shared_volumes::unused_name(&name, |name| taken.contains(name));
+        let unused = crate::shared_volumes::unused_name(&valid, |name| taken.contains(name));
         taken.insert(unused.clone());
         seen.insert(unused.clone());
         volume["name"] = json!(unused);
@@ -359,6 +360,8 @@ mod tests {
             "C": volume("Photos (2)"),
             "D": volume("Music"),
             "E": volume("Photos"),
+            "F": volume("media/photos"),
+            "G": volume(".."),
         }}});
         suffix_duplicate_shared_volume_names(&mut db);
         let names: Vec<_> = db["public"]["sharedVolumes"]
@@ -369,7 +372,15 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["Photos", "Photos (3)", "Photos (2)", "Music", "Photos (4)"]
+            [
+                "Photos",
+                "Photos (3)",
+                "Photos (2)",
+                "Music",
+                "Photos (4)",
+                "media-photos",
+                "Volume"
+            ]
         );
         let migrated = db.clone();
         suffix_duplicate_shared_volume_names(&mut db);

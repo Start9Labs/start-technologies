@@ -6,7 +6,7 @@ A shared volume is a folder managed independently of services. It can use your s
 
 ## Create and manage volumes
 
-Open **System → Shared Volumes**, choose **Add**, pick a source and give the volume a name that no other volume uses. Services can find a volume by its name, so renaming it can change where they look for it:
+Open **System → Shared Volumes**, choose **Add**, pick a source and give the volume a name that no other volume uses and that works as a folder name: no `/`, and not `.` or `..`. Services can find a volume by its name, so renaming it can change where they look for it:
 
 - **Local folder** creates a managed folder on the server's data drive.
 - **External drive** first selects a connected drive, then one of its partitions or **Erase and format this drive**, suggests a name from the partition's label or the drive's make and model, and optionally a folder on it, such as `media/photos`. The server's own system and data drives are not offered. Missing folders are created; leaving the path blank uses the whole partition. The selected folder becomes the volume root, and services cannot use it to access parent or sibling folders. Its filesystem UUID identifies it independently of device names and USB ports. Keep it connected while services use it. The filesystem must support Linux ownership mapping; mounting does not rewrite its existing file ownership.

@@ -156,7 +156,7 @@ rpc_toolkit::reflect_ts!(SharedVolumeAvailability);
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct SharedVolume {
-    /// Unique among shared volumes; services mount a volume at a path matching it.
+    /// A unique single folder name; services mount a volume at a path matching it.
     pub name: String,
     pub source: SharedVolumeSource,
     pub grants: BTreeMap<PackageId, SharedVolumeGrant>,
@@ -213,7 +213,7 @@ pub(crate) fn recover_pending_deletions(
             if volumes.contains_key(&id) {
                 continue;
             }
-            let name = unused_name(&name, |name| {
+            let name = unused_name(&folder_name(&name), |name| {
                 volumes.values().any(|volume| volume.name == name)
             });
             volumes.insert(id, SharedVolume::new(name, SharedVolumeSource::Local));
@@ -321,6 +321,31 @@ pub(crate) fn validate_name(name: &str) -> Result<(), Error> {
     Ok(())
 }
 
+fn is_folder_name(name: &str) -> bool {
+    !matches!(name, "." | "..") && !name.contains(['/', '\0'])
+}
+
+fn validate_volume_name(name: &str) -> Result<(), Error> {
+    validate_name(name)?;
+    if !is_folder_name(name) {
+        return Err(Error::new(
+            eyre!(t!("shared-volumes.name-not-folder")),
+            ErrorKind::InvalidRequest,
+        ));
+    }
+    Ok(())
+}
+
+/// A valid volume name derived from a stored one that may predate validation.
+pub(crate) fn folder_name(name: &str) -> String {
+    let name = name.replace(['/', '\0'], "-");
+    if name.trim().is_empty() || !is_folder_name(&name) {
+        "Volume".into()
+    } else {
+        name
+    }
+}
+
 /// Fails when a volume other than the excepted one holds the name.
 fn ensure_name_available(
     volumes: &Model<BTreeMap<SharedVolumeId, SharedVolume>>,
@@ -349,7 +374,7 @@ pub(crate) fn unused_name(name: &str, taken: impl Fn(&str) -> bool) -> String {
         .expect("unbounded suffixes")
 }
 
-/// Inserts a volume, suffixing its name past every name already registered.
+/// Inserts a volume under a valid name suffixed past every name already registered.
 pub(crate) fn insert_with_unused_name(
     volumes: &mut Model<BTreeMap<SharedVolumeId, SharedVolume>>,
     id: &SharedVolumeId,
@@ -360,7 +385,7 @@ pub(crate) fn insert_with_unused_name(
         .into_iter()
         .map(|(_, volume)| volume.as_name().de())
         .collect::<Result<BTreeSet<String>, _>>()?;
-    volume.name = unused_name(&volume.name, |name| taken.contains(name));
+    volume.name = unused_name(&folder_name(&volume.name), |name| taken.contains(name));
     volumes.insert(id, &volume)?;
     Ok(())
 }
@@ -369,7 +394,7 @@ pub async fn create(
     ctx: RpcContext,
     CreateSharedVolumeParams { name, source }: CreateSharedVolumeParams,
 ) -> Result<SharedVolumeId, Error> {
-    validate_name(&name)?;
+    validate_volume_name(&name)?;
     ensure_name_available(
         ctx.db.peek().await.as_public().as_shared_volumes(),
         None,
@@ -429,7 +454,7 @@ pub async fn rename(
     ctx: RpcContext,
     RenameSharedVolumeParams { id, name }: RenameSharedVolumeParams,
 ) -> Result<(), Error> {
-    validate_name(&name)?;
+    validate_volume_name(&name)?;
     ctx.db
         .mutate(|db| {
             ensure_name_available(db.as_public().as_shared_volumes(), Some(&id), &name)?;
@@ -900,6 +925,21 @@ mod tests {
     }
 
     #[test]
+    fn names_must_work_as_single_folder_names() {
+        for name in ["Photos", "My .photos", "...", "Photos (2)", ".hidden"] {
+            assert!(validate_volume_name(name).is_ok(), "{name:?}");
+            assert_eq!(folder_name(name), name);
+        }
+        for name in ["media/photos", "/", ".", "..", "a\0b", "", "  "] {
+            let error = validate_volume_name(name).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::InvalidRequest, "{name:?}");
+            assert!(validate_volume_name(&folder_name(name)).is_ok(), "{name:?}");
+        }
+        assert_eq!(folder_name("media/photos"), "media-photos");
+        assert_eq!(folder_name(".."), "Volume");
+    }
+
+    #[test]
     fn names_are_unique_across_volumes() {
         use crate::db::model::DatabaseModel;
         let photos = SharedVolumeId::new();
@@ -932,6 +972,16 @@ mod tests {
         assert_eq!(volumes[&photos].name, "Photos");
         assert_eq!(volumes[&restored].name, "Photos (2)");
         assert_eq!(volumes[&again].name, "Photos (3)");
+
+        let legacy = SharedVolumeId::new();
+        insert_with_unused_name(
+            db.as_public_mut().as_shared_volumes_mut(),
+            &legacy,
+            SharedVolume::new("media/photos".into(), SharedVolumeSource::Local),
+        )
+        .unwrap();
+        let volumes = db.as_public().as_shared_volumes().de().unwrap();
+        assert_eq!(volumes[&legacy].name, "media-photos");
     }
 
     async fn deletion_database(

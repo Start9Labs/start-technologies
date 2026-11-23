@@ -4183,6 +4183,13 @@ shared-volumes.invalid-path:
   fr_FR: "Les chemins des volumes doivent rester dans leur répertoire autorisé"
   pl_PL: "Ścieżki woluminów muszą pozostawać w dozwolonym katalogu"
 
+shared-volumes.name-not-folder:
+  en_US: "A volume name must work as a folder name: no / and not . or .."
+  de_DE: "Ein Volume-Name muss als Ordnername taugen: kein / und nicht . oder .."
+  es_ES: "El nombre del volumen debe servir como nombre de carpeta: sin / y distinto de . o .."
+  fr_FR: "Le nom du volume doit pouvoir servir de nom de dossier : sans / et différent de . ou .."
+  pl_PL: "Nazwa woluminu musi nadawać się na nazwę folderu: bez / i inna niż . lub .."
+
 shared-volumes.name-required:
   en_US: "Enter a volume name"
   de_DE: "Einen Namen für das Volume eingeben"
