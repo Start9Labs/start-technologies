@@ -35,13 +35,26 @@ export const Guid: typeof literal_2 = /* @__PURE__ */ literal_2.meta({
  */
 export const BinaryRequestProof: z.ZodObject<{
   commitment: typeof BinaryRequestCommitment
-  signer: typeof literal_1
+  /**
+   * Omitted only with a WebAuthn signature, whose credential ID the receiver resolves.
+   */
+  signer: z.ZodOptional<z.ZodNullable<typeof literal_1>>
   signature: typeof literal_1
 }> = /* @__PURE__ */ object({
   commitment: BinaryRequestCommitment,
-  signer: literal_1.meta({
-    description: 'An algorithm-tagged DER value carried as a byte string.',
-  }),
+  /**
+   * Omitted only with a WebAuthn signature, whose credential ID the receiver resolves.
+   */
+  signer: literal_1
+    .meta({
+      description: 'An algorithm-tagged DER value carried as a byte string.',
+    })
+    .nullable()
+    .optional()
+    .meta({
+      description:
+        'Omitted only with a WebAuthn signature, whose credential ID the receiver resolves.',
+    }),
   signature: literal_1.meta({
     description: 'An algorithm-tagged DER value carried as a byte string.',
   }),

@@ -1,0 +1,16 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-auth-passkey-remove 1  "remove "
+.SH NAME
+start\-cli\-auth\-passkey\-remove \- Remove a passkey and close its connections
+.SH SYNOPSIS
+\fBstart\-cli auth passkey remove\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIPUBLIC_KEY\fR>
+.SH DESCRIPTION
+Remove a passkey and close its connections
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIPUBLIC_KEY\fR>
+The passkey’s public key in PEM or DER Base64

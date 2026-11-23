@@ -9,7 +9,7 @@ import {
   RPCOptions,
   registryUrl,
 } from '@start9labs/shared'
-import { createRpcClient } from '@start9labs/start-core'
+import { auth, createRpcClient } from '@start9labs/start-core'
 import { ApiService, RegistryClient } from './api.service'
 
 @Injectable()
@@ -61,7 +61,13 @@ export class LiveApiService extends ApiService {
     options: RPCOptions<Record<string, unknown>, string>,
     urlOverride: string,
   ): Promise<T> {
-    const res = await this.http.rpcRequest<T>(options, urlOverride)
+    const res = await this.http.rpcRequest<T>(
+      {
+        ...options,
+        headers: { ...options.headers, ...auth.REGISTRY_SIGNATURE_HEADERS },
+      },
+      urlOverride,
+    )
     const body = res.body
 
     if (isRpcError(body)) {

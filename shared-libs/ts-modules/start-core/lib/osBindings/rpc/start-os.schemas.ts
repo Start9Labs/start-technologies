@@ -940,6 +940,32 @@ export const PackageBackupReport: z.ZodObject<{
 export const PackageId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'PackageId',
 })
+
+/**
+ * A persisted WebAuthn credential independent of browser session expiry.
+ */
+export const Passkey: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Base64url credential ID, for the browser's `allowCredentials`.
+   */
+  credentialId: z.ZodString
+  addedAt: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Base64url credential ID, for the browser's `allowCredentials`.
+   */
+  credentialId: z.string().meta({
+    description:
+      "Base64url credential ID, for the browser's `allowCredentials`.",
+  }),
+  addedAt: z.string(),
+}).meta({
+  id: 'Passkey',
+  description:
+    'A persisted WebAuthn credential independent of browser session expiry.',
+})
 export const Percentage: typeof literal_4 = /* @__PURE__ */ literal_4.meta({
   id: 'Percentage',
 })
@@ -1131,8 +1157,8 @@ export const ServiceInterfaceType: z.ZodEnum<{
 })
 export const Session: z.ZodObject<{
   /**
-   * A friendly name for the key, if one was assigned at enrollment (e.g.
-   * tunnel device keys). UI-enrolled keys are unnamed.
+   * A friendly name assigned at enrollment: a tunnel device's name, or the
+   * name of the passkey that enrolled the key. Password logins are unnamed.
    */
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1146,12 +1172,12 @@ export const Session: z.ZodObject<{
   >
 }> = /* @__PURE__ */ object({
   /**
-   * A friendly name for the key, if one was assigned at enrollment (e.g.
-   * tunnel device keys). UI-enrolled keys are unnamed.
+   * A friendly name assigned at enrollment: a tunnel device's name, or the
+   * name of the passkey that enrolled the key. Password logins are unnamed.
    */
   name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
     description:
-      'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
+      "A friendly name assigned at enrollment: a tunnel device's name, or the\nname of the passkey that enrolled the key. Password logins are unnamed.",
   }),
   loggedIn: wire(z.string().optional(), z.string()),
   lastActive: wire(z.string().optional(), z.string()),
@@ -1776,6 +1802,36 @@ export const AddKeyParams: z.ZodObject<{
 }).meta({
   id: 'AddKeyParams',
 })
+export const AddPasskeyParams: z.ZodObject<{
+  name: z.ZodString
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.ZodString
+  publicKey: typeof AnyVerifyingKey
+  /**
+   * The server password, confirming a credential that will outlive every session.
+   */
+  password: z.ZodString
+}> = /* @__PURE__ */ object({
+  name: z.string(),
+  /**
+   * Base64url credential ID.
+   */
+  credentialId: z.string().meta({
+    description: 'Base64url credential ID.',
+  }),
+  publicKey: AnyVerifyingKey,
+  /**
+   * The server password, confirming a credential that will outlive every session.
+   */
+  password: z.string().meta({
+    description:
+      'The server password, confirming a credential that will outlive every session.',
+  }),
+}).meta({
+  id: 'AddPasskeyParams',
+})
 export const AddPassthroughParams: z.ZodObject<{
   hostname: z.ZodString
   'listen-port': z.ZodInt
@@ -1819,7 +1875,7 @@ export const AddTrustedKeyParams: z.ZodObject<{
    */
   name: z.ZodString
   /**
-   * Ed25519 public keys in PEM or armored GPG format.
+   * Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format.
    */
   publicKeys: z.ZodArray<z.ZodString>
   /**
@@ -1837,10 +1893,11 @@ export const AddTrustedKeyParams: z.ZodObject<{
     description: 'Blank names each GPG key after its identity.',
   }),
   /**
-   * Ed25519 public keys in PEM or armored GPG format.
+   * Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format.
    */
   publicKeys: z.array(z.string()).meta({
-    description: 'Ed25519 public keys in PEM or armored GPG format.',
+    description:
+      'Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format.',
   }),
   /**
    * Grants this permission to every imported key, including existing keys.
@@ -2142,6 +2199,21 @@ export const EditGatewayParams: z.ZodObject<{
   ),
 }).meta({
   id: 'EditGatewayParams',
+})
+export const EnrollPasskeySessionParams: z.ZodObject<{
+  /**
+   * The browser's unpersisted session key.
+   */
+  pubkey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({
+  /**
+   * The browser's unpersisted session key.
+   */
+  pubkey: AnyVerifyingKey.meta({
+    description: "The browser's unpersisted session key.",
+  }),
+}).meta({
+  id: 'EnrollPasskeySessionParams',
 })
 export const EppInfo: z.ZodObject<{
   current: z.ZodCodec<
@@ -3101,6 +3173,11 @@ export const RemoveKeyParams: z.ZodObject<{
   keys: z.ZodArray<typeof AnyVerifyingKey>
 }> = /* @__PURE__ */ object({ keys: z.array(AnyVerifyingKey) }).meta({
   id: 'RemoveKeyParams',
+})
+export const RemovePasskeyParams: z.ZodObject<{
+  publicKey: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ publicKey: AnyVerifyingKey }).meta({
+  id: 'RemovePasskeyParams',
 })
 export const RemoveTunnelParams: z.ZodObject<{ id: typeof GatewayId }> =
   /* @__PURE__ */ object({ id: GatewayId }).meta({
@@ -5185,6 +5262,46 @@ export const Api = {
           _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
+        },
+        passkey: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddPasskeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            enroll: {
+              _PARAMS: /* @__PURE__ */ EnrollPasskeySessionParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.record(z.string(), Passkey),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemovePasskeyParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         'reset-password': {
           _PARAMS: /* @__PURE__ */ ResetPasswordParams,

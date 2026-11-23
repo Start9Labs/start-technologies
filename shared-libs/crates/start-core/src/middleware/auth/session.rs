@@ -13,7 +13,7 @@ use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::sign::AnyVerifyingKey;
 use crate::sign::session::{ServerIdentity, Target};
-use crate::util::net::secure::{EncryptedSocket, wire_message_size};
+use crate::util::net::secure::{EncryptedSocket, SocketLease, wire_message_size};
 
 /// Immutable provenance of a completed encrypted exchange, without cached enrollment or roles.
 #[derive(Clone)]
@@ -22,6 +22,7 @@ pub struct SecureSession {
     address: InternedString,
     server_identity: ServerIdentity,
     replay_check: RequestReplayCheck,
+    lease_factory: Option<Arc<dyn Fn() -> Option<SocketLease> + Send + Sync>>,
 }
 
 impl SecureSession {
@@ -32,6 +33,19 @@ impl SecureSession {
     /// The ingress-validated server name bound into the exchange.
     pub fn address(&self) -> &InternedString {
         &self.address
+    }
+
+    /// The factory must retain the authentication owner weakly.
+    pub(crate) fn with_lease_factory<F: Fn() -> Option<SocketLease> + Send + Sync + 'static>(
+        mut self,
+        factory: F,
+    ) -> Self {
+        self.lease_factory = Some(Arc::new(factory));
+        self
+    }
+
+    fn connection_lease(&self) -> Option<SocketLease> {
+        self.lease_factory.as_ref().and_then(|factory| factory())
     }
 
     /// Admits a fresh encrypted continuation only for the initiating identity.
@@ -51,7 +65,7 @@ impl SecureSession {
             |commitment| self.replay_check.check(commitment),
         )
         .await?;
-        Ok(socket)
+        Ok(socket.with_lease(self.connection_lease()))
     }
 }
 
@@ -164,10 +178,14 @@ impl<C: SignatureAuthContext + Clone> WebSocketUpgrader<C> for RpcSessionUpgrade
                 address,
                 server_identity,
                 replay_check,
+                lease_factory: None,
             });
+            let lease = scoped
+                .secure_session()
+                .and_then(SecureSession::connection_lease);
             Ok(UpgradedWebSocket {
                 context: Arc::new(scoped),
-                socket: Box::new(socket),
+                socket: Box::new(socket.with_lease(lease)),
             })
         }
         .boxed()

@@ -413,6 +413,7 @@ async fn existing_send_deadline_covers_stalled_encrypted_transport() {
         pending: VecDeque::new(),
         closing: None,
         fused: false,
+        _lease: None,
     };
     let mut socket = crate::util::net::WebSocket::new(encrypted);
     socket.set_send_timeout(Duration::from_secs(15));
@@ -429,6 +430,7 @@ async fn close_result_reuses_the_existing_send_deadline() {
         pending: VecDeque::new(),
         closing: None,
         fused: false,
+        _lease: None,
     };
     let mut socket = crate::util::net::WebSocket::new(encrypted);
     socket.set_send_timeout(Duration::from_secs(15));

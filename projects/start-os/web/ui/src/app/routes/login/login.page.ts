@@ -8,12 +8,14 @@ import {
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router } from '@angular/router'
+import { WA_WINDOW } from '@ng-web-apis/common'
 import {
   AuthKeyService,
   CA_TRUST_CHECK,
   CaWizard,
   CLI_ENROLL,
   DialogService,
+  getErrorMessage,
   i18nKey,
   i18nPipe,
   RELATIVE_URL,
@@ -28,6 +30,7 @@ import {
 } from '@taiga-ui/core'
 import { TuiButtonLoading, TuiPassword } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiForm, TuiHeader } from '@taiga-ui/layout'
+import { auth } from '@start9labs/start-core'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { AuthService } from 'src/app/services/auth.service'
 import { ConfigService } from 'src/app/services/config.service'
@@ -36,7 +39,6 @@ import { ConfigService } from 'src/app/services/config.service'
   selector: 'login',
   template: `
     @if (config.isSecureContext()) {
-      <!-- Secure context -->
       <div tuiCardLarge>
         <img alt="StartOS Icon" src="assets/img/icon.png" />
         <header tuiHeader="h4">
@@ -62,10 +64,22 @@ import { ConfigService } from 'src/app/services/config.service'
           <button tuiButton size="m" [loading]="loading()">
             {{ 'Login' | i18n }}
           </button>
+          @if (passkeysSupported) {
+            <button
+              tuiButton
+              type="button"
+              size="m"
+              appearance="secondary"
+              iconStart="@tui.fingerprint"
+              [loading]="passkeyLoading()"
+              (click)="loginWithPasskey()"
+            >
+              {{ 'Login with passkey' | i18n }}
+            </button>
+          }
         </form>
       </div>
     } @else {
-      <!-- Insecure context -->
       <ca-wizard product="start-os" />
     }
   `,
@@ -134,10 +148,13 @@ export default class LoginPage {
   private readonly dialogs = inject(DialogService)
 
   protected readonly config = inject(ConfigService)
+  protected readonly passkeysSupported =
+    'PublicKeyCredential' in inject(WA_WINDOW)
   protected readonly authError = this.authService.loginError
 
   readonly password = signal('')
   readonly loading = signal(false)
+  readonly passkeyLoading = signal(false)
   readonly error = linkedSignal<string, i18nKey | null>({
     source: () => this.password(),
     computation: () => null,
@@ -146,6 +163,29 @@ export default class LoginPage {
     source: () => this.password(),
     computation: () => false,
   })
+
+  async loginWithPasskey() {
+    this.error.set(null)
+    this.authService.loginError.set(null)
+    this.passkeyLoading.set(true)
+
+    try {
+      const lease = await this.authKeys.admissionLease()
+      const key = await auth.generateAuthKey()
+      await this.api.enrollWithPasskey({ pubkey: key.pubkeyPem }, lease.signal)
+      const active = await this.authKeys.adopt(key, lease.signal)
+      active.throwIfAborted()
+      await this.signedIn()
+    } catch (error) {
+      this.error.set(
+        error instanceof DOMException && error.name === 'NotAllowedError'
+          ? 'Passkey sign-in was cancelled'
+          : (getErrorMessage(error) as i18nKey),
+      )
+    } finally {
+      this.passkeyLoading.set(false)
+    }
+  }
 
   async submit() {
     this.error.set(null)

@@ -200,7 +200,10 @@ impl HasUnenrolledKeys {
 
 impl SignatureAuthContext for RpcContext {
     fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
-        RpcContext::server_identity(self).map(Into::into)
+        Ok(
+            crate::sign::session::ServerIdentity::from(RpcContext::server_identity(self)?)
+                .with_passkeys(crate::auth::passkey::resolver(self.weak())),
+        )
     }
     fn replay_check(&self) -> RequestReplayCheck {
         RpcContext::replay_check(self)
@@ -692,7 +695,8 @@ fn verify_auth_message(
             key.verify_strict(message, signature)?;
             Ok(())
         }
-        (_, AnySignature::Ed25519ph(_)) => Err(Error::new(
+        (key, AnySignature::WebAuthn(assertion)) => assertion.verify(key, message),
+        (_, AnySignature::Ed25519ph(_)) | (AnyVerifyingKey::P256(_), _) => Err(Error::new(
             eyre!("{}", t!("sign.unknown-signature-algorithm")),
             ErrorKind::InvalidSignature,
         )),
@@ -866,6 +870,8 @@ mod tests {
     /// TypeScript-generated proof for seed 0102…1f20 and `BODY`.
     const JS_PRODUCED_HEADER: &str = "commitment=request&timestamp=1792644825&nonce=18095015305127205807&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEBBctoB4q6Ez-Iuc8w7CBw6gz5ysJYD6F2fpz7Cb7A9mX96rUFD-IPWzjs3mt-Y6oBqDfYVVC-cVXbkU9UTGIsC";
     const JS_PRODUCED_HEADER_V1: &str = "timestamp=1784746349&nonce=5184603501117103523&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEA0QgkL7GFycl72l-Bt076252XjpFG7aLngdxeIs-hNXpCkcJUtq9Xsfm_YV68U0JtK2qLMG2KPSfAVTcg8ntMH";
+    /// TypeScript-generated proof from a P-256 passkey with seed 0303…03 and `BODY`.
+    const JS_PRODUCED_PASSKEY_HEADER: &str = "commitment=request&timestamp=1795465051&nonce=5378435914465431124&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWRq3ceu8_W2cuQlNEGUordGmnUTCwfYn8InsWLnGGt-fTmq_DQRcDGk6PGitfJfKcr5k3vSib-zSY92YqSeA8A&signature=MIIBIDAWBhRpgrCEwKe7zaK6_6ns2O_6gIq_EQSCAQQwggEABAQBAgMEBCU1MHpuBDmUe4X4C33g7TpcYcrd84LUgooQ5loFRg6ICAUAAAABBIGGeyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiOHh6UmhkQlVHQ0I3SnhrZzJjWTRoMmxrdlljWEN6WDdZSE04MWpBbE1wQSIsIm9yaWdpbiI6Imh0dHBzOi8vc3RhcnQtOS5sb2NhbCIsImNyb3NzT3JpZ2luIjpmYWxzZX0ESDBGAiEA0IgsbP0UTSUDe05OFZE1M1Lifs_cop5r8x0eXkjKetkCIQC1nEb1IzdGNr5-8bZILHE1Bcozo0W770rcXVKmks3d_g";
     const BODY: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server.echo\",\"params\":{}}";
 
     #[test]
@@ -897,7 +903,11 @@ mod tests {
 
     #[test]
     fn verifies_js_produced_signature_headers() {
-        for raw in [JS_PRODUCED_HEADER, JS_PRODUCED_HEADER_V1] {
+        for raw in [
+            JS_PRODUCED_HEADER,
+            JS_PRODUCED_HEADER_V1,
+            JS_PRODUCED_PASSKEY_HEADER,
+        ] {
             let header = SignatureHeader::from_header(&HeaderValue::from_static(raw))
                 .expect("header parses");
             assert_eq!(header.commitment.size, BODY.len() as u64);
@@ -1296,5 +1306,37 @@ mod tests {
             .is_err(),
             "clients sign the v2 layout"
         );
+    }
+
+    #[tokio::test]
+    async fn passkey_signed_request_verifies_under_its_context() {
+        let key = crate::sign::webauthn::test_util::p256_key();
+        let ed25519 = Signer::Key(AnySigningKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[2; 32]),
+        ));
+        let mut header = SignatureHeader::sign(&ed25519, BODY, "start-9.local")
+            .await
+            .expect("signs");
+        header.signer = AnyVerifyingKey::P256(*key.verifying_key());
+        header.signature =
+            AnySignature::WebAuthn(crate::sign::webauthn::test_util::passkey_assertion(
+                &key,
+                &request_signing_message(&header.commitment, "start-9.local").unwrap(),
+            ));
+        let parsed = SignatureHeader::from_header(&header.to_header()).expect("header parses");
+        verify_request(
+            &parsed.signer,
+            &parsed.commitment,
+            "start-9.local",
+            &parsed.signature,
+        )
+        .expect("passkey signature verifies");
+        verify_request(
+            &parsed.signer,
+            &parsed.commitment,
+            "other-host.local",
+            &parsed.signature,
+        )
+        .expect_err("passkey signature does not verify under a different context");
     }
 }

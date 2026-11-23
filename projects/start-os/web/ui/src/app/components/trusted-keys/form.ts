@@ -40,7 +40,8 @@ const PEM_KEY = /-----BEGIN PUBLIC KEY-----/
           tuiTextarea
           formControlName="publicKeys"
           [placeholder]="
-            'Enter an Ed25519 public key in PEM or GPG format.' | i18n
+            'Enter an Ed25519 or P-256 public key in PEM format, or an Ed25519 key in GPG format.'
+              | i18n
           "
           [min]="5"
           [max]="12"
@@ -89,7 +90,7 @@ const PEM_KEY = /-----BEGIN PUBLIC KEY-----/
       return {
         required: i18n.transform('Required'),
         publicKeys: i18n.transform(
-          'Enter an Ed25519 public key in PEM or GPG format.',
+          'Enter an Ed25519 or P-256 public key in PEM format, or an Ed25519 key in GPG format.',
         ),
       }
     }),

@@ -95,6 +95,23 @@ test('browser parsing does not authenticate embedded or supplemental signatures'
   expect(result.diagnostics).toEqual([])
 })
 
+test('P-256 endorsements retain their canonical signer and opaque signature bytes', async () => {
+  const fixture = JSON.parse(
+    readFileSync(join(directory, '../p256-public-key.json'), 'utf8'),
+  )
+  const signer = Buffer.from(fixture.uncompressedDerHex, 'hex').toString(
+    'base64',
+  )
+  const signature = new Uint8Array([1])
+  for (const hex of [fixture.uncompressedDerHex, fixture.compressedDerHex]) {
+    const encoded = Buffer.from(hex, 'hex').toString('base64')
+    const result = await read(file([tlv(1, endorsement(encoded, signature))]))
+    expect(result.signers).toEqual([vectors.embedded, signer])
+    expect(result.signatures).toEqual({ [signer]: 'AQ==' })
+    expect(result.diagnostics).toEqual([])
+  }
+})
+
 test('duplicate identities appear once and keep their last signature', async () => {
   const result = await read(
     file([

@@ -192,6 +192,7 @@ impl StartupRpc {
                 .identity
                 .as_ref()
                 .is_some_and(|identity| identity.temporary),
+            passkeys: None,
         })
     }
 

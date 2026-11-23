@@ -3403,11 +3403,19 @@ sign.gpg-agent.no-signing-key:
   pl_PL: "Żaden klucz podpisujący Ed25519 z częścią tajną w bazie kluczy GnuPG nie pasuje do %{key}"
 
 sign.gpg.invalid-public-key:
-  en_US: "Use an Ed25519 public signing key in PEM or GPG format"
-  de_DE: "Verwenden Sie einen öffentlichen Ed25519-Signaturschlüssel im PEM- oder GPG-Format"
-  es_ES: "Use una clave pública de firma Ed25519 en formato PEM o GPG"
-  fr_FR: "Utilisez une clé publique de signature Ed25519 au format PEM ou GPG"
-  pl_PL: "Użyj publicznego klucza podpisującego Ed25519 w formacie PEM lub GPG"
+  en_US: "Use an Ed25519 or P-256 public signing key in PEM format, or an Ed25519 key in GPG format"
+  de_DE: "Verwenden Sie einen öffentlichen Ed25519- oder P-256-Signaturschlüssel im PEM-Format oder einen Ed25519-Schlüssel im GPG-Format"
+  es_ES: "Use una clave pública de firma Ed25519 o P-256 en formato PEM, o una clave Ed25519 en formato GPG"
+  fr_FR: "Utilisez une clé publique de signature Ed25519 ou P-256 au format PEM, ou une clé Ed25519 au format GPG"
+  pl_PL: "Użyj publicznego klucza podpisującego Ed25519 lub P-256 w formacie PEM albo klucza Ed25519 w formacie GPG"
+
+# sign/webauthn.rs
+sign.webauthn.invalid-assertion:
+  en_US: "Invalid passkey signature"
+  de_DE: "Ungültige Passkey-Signatur"
+  es_ES: "Firma de llave de acceso no válida"
+  fr_FR: "Signature de clé d’accès invalide"
+  pl_PL: "Nieprawidłowy podpis klucza dostępu"
 
 service.mod.service-actor-held-after-shutdown:
   en_US: "ServiceActor held somewhere after actor shutdown"
@@ -4274,6 +4282,20 @@ auth.password-incorrect:
   es_ES: "Contraseña incorrecta"
   fr_FR: "Mot de passe incorrect"
   pl_PL: "Nieprawidłowe hasło"
+
+auth.passkey.invalid-credential-id:
+  en_US: "Invalid passkey credential ID"
+  de_DE: "Ungültige Passkey-Anmeldedaten-ID"
+  es_ES: "ID de credencial de llave de acceso no válido"
+  fr_FR: "Identifiant d’identification de clé d’accès invalide"
+  pl_PL: "Nieprawidłowy identyfikator poświadczenia klucza dostępu"
+
+auth.passkey.not-a-passkey:
+  en_US: "Only a registered passkey can enroll a passkey session"
+  de_DE: "Nur ein registrierter Passkey kann eine Passkey-Sitzung anmelden"
+  es_ES: "Solo una llave de acceso registrada puede inscribir una sesión de llave de acceso"
+  fr_FR: "Seule une clé d’accès enregistrée peut inscrire une session de clé d’accès"
+  pl_PL: "Tylko zarejestrowany klucz dostępu może zarejestrować sesję klucza dostępu"
 
 auth.prompt-new-password:
   en_US: "New Password: "
@@ -5516,11 +5538,18 @@ help.arg.trusted-key-name:
   pl_PL: "Nazwa klucza; pusta nadaje każdemu kluczowi GPG nazwę jego tożsamości"
 
 help.arg.trusted-public-keys:
-  en_US: "Ed25519 public keys in PEM or armored GPG format; put options before -- and keys after it"
-  de_DE: "Öffentliche Ed25519-Schlüssel im PEM- oder ASCII-armierten GPG-Format; Optionen vor -- und Schlüssel danach angeben"
-  es_ES: "Claves públicas Ed25519 en formato PEM o GPG blindado; coloque las opciones antes de -- y las claves después"
-  fr_FR: "Clés publiques Ed25519 au format PEM ou GPG armuré ; placer les options avant -- et les clés après"
-  pl_PL: "Klucze publiczne Ed25519 w formacie PEM lub GPG z pancerzem ASCII; opcje podaj przed --, a klucze po nim"
+  en_US: "Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format; put options before -- and keys after it"
+  de_DE: "Öffentliche Ed25519- oder P-256-Schlüssel im PEM-Format oder Ed25519-Schlüssel im ASCII-armierten GPG-Format; Optionen vor -- und Schlüssel danach angeben"
+  es_ES: "Claves públicas Ed25519 o P-256 en formato PEM, o claves Ed25519 en formato GPG blindado; coloque las opciones antes de -- y las claves después"
+  fr_FR: "Clés publiques Ed25519 ou P-256 au format PEM, ou clés Ed25519 au format GPG armuré ; placer les options avant -- et les clés après"
+  pl_PL: "Klucze publiczne Ed25519 lub P-256 w formacie PEM albo klucze Ed25519 w formacie GPG z pancerzem ASCII; opcje podaj przed --, a klucze po nim"
+
+help.arg.passkey-public-key:
+  en_US: "The passkey’s public key in PEM or DER Base64"
+  de_DE: "Öffentlicher Schlüssel des Passkeys in PEM oder DER-Base64"
+  es_ES: "Clave pública de la llave de acceso en PEM o DER Base64"
+  fr_FR: "Clé publique de la clé d’accès en PEM ou DER Base64"
+  pl_PL: "Klucz publiczny klucza dostępu w PEM lub DER Base64"
 
 help.arg.tunnel-address:
   en_US: "Tunnel server address"
@@ -6617,6 +6646,13 @@ about.commands-authentication:
   fr_FR: "Commandes liées à l'authentification, comme connexion, déconnexion"
   pl_PL: "Polecenia związane z uwierzytelnianiem, np. logowanie, wylogowanie"
 
+about.commands-passkeys:
+  en_US: "Passkey commands"
+  de_DE: "Passkey-Befehle"
+  es_ES: "Comandos de llaves de acceso"
+  fr_FR: "Commandes des clés d’accès"
+  pl_PL: "Polecenia kluczy dostępu"
+
 about.commands-authorized-keys:
   en_US: "Commands for managing authorized keys"
   de_DE: "Befehle zur Verwaltung autorisierter Schlüssel"
@@ -7555,6 +7591,20 @@ about.list-onion-services-with-keys-in-store:
   es_ES: "Listar servicios onion con claves en el almacén"
   fr_FR: "Lister les services onion avec des clés en stockage"
   pl_PL: "Wyświetl usługi onion z kluczami w magazynie"
+
+about.list-passkeys:
+  en_US: "List registered passkeys"
+  de_DE: "Registrierte Passkeys auflisten"
+  es_ES: "Listar las llaves de acceso registradas"
+  fr_FR: "Lister les clés d’accès enregistrées"
+  pl_PL: "Wyświetl zarejestrowane klucze dostępu"
+
+about.remove-passkey:
+  en_US: "Remove a passkey and close its connections"
+  de_DE: "Einen Passkey entfernen und seine Verbindungen schließen"
+  es_ES: "Eliminar una llave de acceso y cerrar sus conexiones"
+  fr_FR: "Supprimer une clé d’accès et fermer ses connexions"
+  pl_PL: "Usuń klucz dostępu i zamknij jego połączenia"
 
 about.list-os-versions-index:
   en_US: "List OS versions index"
@@ -8664,11 +8714,11 @@ update.security.selected-registry:
   pl_PL: "wybranym rejestrze systemu"
 
 trusted-keys.invalid:
-  en_US: "Enter a name and at least one Ed25519 public key"
-  de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519-Schlüssel ein"
-  es_ES: "Introduzca un nombre y al menos una clave pública Ed25519"
-  fr_FR: "Saisissez un nom et au moins une clé publique Ed25519"
-  pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519"
+  en_US: "Enter a name and at least one Ed25519 or P-256 public key"
+  de_DE: "Geben Sie einen Namen und mindestens einen öffentlichen Ed25519- oder P-256-Schlüssel ein"
+  es_ES: "Introduzca un nombre y al menos una clave pública Ed25519 o P-256"
+  fr_FR: "Saisissez un nom et au moins une clé publique Ed25519 ou P-256"
+  pl_PL: "Podaj nazwę i co najmniej jeden klucz publiczny Ed25519 lub P-256"
 
 trusted-keys.invalid-registry-url:
   en_US: "Enter an HTTP or HTTPS registry URL without credentials, query, or fragment"

@@ -29,6 +29,21 @@ use crate::util::lshw::LshwDevice;
 use crate::version::VersionT;
 
 pub const DEVICE_INFO_HEADER: &str = "X-StartOS-Device-Info";
+const PASSKEY_SIGNATURES_HEADER: &str = "x-start-webauthn-signatures";
+const PASSKEY_SIGNATURES_VALUE: &str = "true";
+
+/// Advertises P-256 key and WebAuthn signature support for registry responses.
+pub fn advertise_signature_capabilities(headers: &mut http::HeaderMap) {
+    headers.insert(
+        PASSKEY_SIGNATURES_HEADER,
+        HeaderValue::from_static(PASSKEY_SIGNATURES_VALUE),
+    );
+}
+
+/// Header advertisement for P-256 keys and WebAuthn signatures in registry responses.
+pub fn signature_wire_profile() -> serde_json::Value {
+    serde_json::json!({ "header": PASSKEY_SIGNATURES_HEADER, "value": PASSKEY_SIGNATURES_VALUE })
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
@@ -236,6 +251,7 @@ pub struct Metadata {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WireCompatibility {
     legacy_signatures: bool,
+    legacy_passkeys: bool,
     legacy_pem: bool,
     inline_icons: bool,
     legacy_os_notes: bool,
@@ -247,9 +263,18 @@ impl WireCompatibility {
         Self::for_client(false, Some(version))
     }
 
+    /// Explicit passkey capability overrides legacy signature profiles.
+    pub(crate) fn with_passkey_signatures(mut self) -> Self {
+        self.legacy_passkeys = false;
+        self.legacy_signatures = false;
+        self
+    }
+
     fn for_client(startwrt: bool, version: Option<&Version>) -> Result<Self, Error> {
         let mut wire = Self {
             legacy_signatures: startwrt,
+            // Prereleases share release numbers; passkey support requires explicit opt-in.
+            legacy_passkeys: true,
             legacy_pem: true,
             ..Self::default()
         };
@@ -277,6 +302,9 @@ impl WireCompatibility {
             project_legacy_os_notes(method, res)?;
         }
         project_os_headlines(method, res, self.legacy_os_headlines);
+        if self.legacy_passkeys {
+            super::compat::without_passkeys(res);
+        }
         if self.legacy_signatures {
             crate::sign::compat::downgrade_signatures(res);
         }
@@ -293,6 +321,7 @@ pub struct DeviceInfoMiddleware {
     device_info: Option<DeviceInfo>,
     req: Option<RpcRequest>,
     wire: WireCompatibility,
+    passkey_signatures: bool,
     legacy_os_versions: bool,
 }
 impl DeviceInfoMiddleware {
@@ -302,6 +331,7 @@ impl DeviceInfoMiddleware {
             device_info: None,
             req: None,
             wire: WireCompatibility::default(),
+            passkey_signatures: false,
             legacy_os_versions: false,
         }
     }
@@ -333,11 +363,15 @@ impl DeviceInfoMiddleware {
                 self.wire = WireCompatibility::for_client(startwrt, Some(&version))?;
             }
         }
+        if self.passkey_signatures {
+            self.wire = self.wire.with_passkey_signatures();
+        }
         if request.method.as_str().starts_with("db.") {
             self.wire = WireCompatibility::default();
         }
-        self.legacy_os_versions =
-            !startwrt && self.wire.legacy_signatures && request.method.as_str() == "os.version.get";
+        self.legacy_os_versions = !startwrt
+            && (self.wire.legacy_signatures || self.wire.legacy_passkeys)
+            && request.method.as_str() == "os.version.get";
         self.req = Some(request.clone());
         Ok(())
     }
@@ -481,6 +515,10 @@ impl Middleware<RegistryContext> for DeviceInfoMiddleware {
         request: &mut Request,
     ) -> Result<(), Response> {
         self.device_info_header = request.headers_mut().remove(DEVICE_INFO_HEADER);
+        self.passkey_signatures = request
+            .headers_mut()
+            .remove(PASSKEY_SIGNATURES_HEADER)
+            .is_some_and(|value| value == PASSKEY_SIGNATURES_VALUE);
         Ok(())
     }
     async fn process_rpc_request(
@@ -607,6 +645,164 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn passkeys_require_opt_in_for_registry_responses() {
+        use crate::sign::commitment::blake3::Blake3Commitment;
+        use crate::sign::ed25519::Ed25519ph;
+        use crate::sign::{AnySignature, AnyVerifyingKey, SignatureMap, SignatureScheme, webauthn};
+
+        let ed_key = ed25519_dalek::SigningKey::from_bytes(&[6; 32]);
+        let ed = AnyVerifyingKey::Ed25519(ed_key.verifying_key());
+        let p256_key = webauthn::test_util::p256_key();
+        let p256 = AnyVerifyingKey::P256(*p256_key.verifying_key());
+        let commitment = Blake3Commitment {
+            hash: crate::util::serde::Base64([1; 32]),
+            size: 7,
+        };
+        let signature = AnySignature::Ed25519ph(
+            Ed25519ph
+                .sign_commitment(&ed_key, &commitment, "startos")
+                .unwrap(),
+        );
+        let message =
+            crate::sign::signing_message(crate::sign::COMMITMENT_SIG_TAG, &commitment, "startos")
+                .unwrap();
+        let passkey =
+            AnySignature::WebAuthn(webauthn::test_util::passkey_assertion(&p256_key, &message));
+        let ed_passkey = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let ed_passkey_public = AnyVerifyingKey::Ed25519(ed_passkey.verifying_key());
+        let data = webauthn::test_util::authenticator_data(0x05);
+        let json = webauthn::test_util::client_data("webauthn.get", &message);
+        use ed25519_dalek::Signer as _;
+        let ed_assertion = webauthn::WebAuthnAssertion::new(
+            webauthn::test_util::CREDENTIAL_ID.to_vec(),
+            data.clone(),
+            json.clone(),
+            ed_passkey
+                .sign(&webauthn::test_util::signed_bytes(&data, &json))
+                .to_bytes()
+                .to_vec(),
+        )
+        .unwrap();
+        let signatures = SignatureMap::from([
+            (ed.clone(), signature),
+            (p256.clone(), passkey),
+            (
+                ed_passkey_public.clone(),
+                AnySignature::WebAuthn(ed_assertion),
+            ),
+        ]);
+        let response = json!({
+            "signers": { "publisher": { "keys": [ed.clone(), p256.clone(), ed_passkey_public.clone()] } },
+            "trustSigners": { "publisher": { "keys": [ed.clone(), p256.clone(), ed_passkey_public.clone()] } },
+            "os": { "versions": {} },
+            "asset": { "signatures": signatures },
+        });
+        for (header, startwrt, advertised, passkeys) in [
+            (None, false, false, false),
+            (None, false, true, true),
+            (None, true, true, true),
+            (
+                Some("os.version=0.4.0.2&os.compat=*&os.platform=x86_64"),
+                false,
+                false,
+                false,
+            ),
+            (
+                Some("os.version=0.4.0.2&os.compat=*&os.platform=x86_64"),
+                false,
+                true,
+                true,
+            ),
+            (
+                Some("os.version=0.4.2.1&os.compat=*&os.platform=x86_64"),
+                false,
+                false,
+                false,
+            ),
+            (
+                Some("os.version=0.4.3&os.compat=*&os.platform=x86_64"),
+                false,
+                false,
+                false,
+            ),
+            (
+                Some("os.version=0.4.3&os.compat=*&os.platform=x86_64"),
+                false,
+                true,
+                true,
+            ),
+            (
+                Some("os.version=1.4.0&os.compat=*&os.platform=spacemit,k1-x_muse-pi-pro"),
+                true,
+                false,
+                false,
+            ),
+            (
+                Some("os.version=1.4.0&os.compat=*&os.platform=spacemit,k1-x_muse-pi-pro"),
+                true,
+                true,
+                true,
+            ),
+        ] {
+            let mut middleware = DeviceInfoMiddleware::new();
+            middleware.device_info_header = header.map(HeaderValue::from_static);
+            middleware.passkey_signatures = advertised;
+            middleware
+                .prepare_request(
+                    startwrt,
+                    Metadata {
+                        get_device_info: false,
+                    },
+                    &mut request("index", json!({})),
+                )
+                .unwrap();
+            let mut projected = response.clone();
+            middleware
+                .wire
+                .project(Path::new(""), "index", &Value::Null, &mut projected)
+                .await
+                .unwrap();
+            for name in ["signers", "trustSigners"] {
+                let keys: Vec<AnyVerifyingKey> =
+                    from_value(projected[name]["publisher"]["keys"].clone()).unwrap();
+                assert_eq!(keys.contains(&p256), passkeys, "{header:?}");
+                assert!(keys.contains(&ed));
+            }
+            let signatures: SignatureMap =
+                from_value(projected["asset"]["signatures"].clone()).unwrap();
+            assert_eq!(signatures.contains_key(&p256), passkeys, "{header:?}");
+            assert_eq!(
+                signatures.contains_key(&ed_passkey_public),
+                passkeys,
+                "{header:?}"
+            );
+            assert!(signatures.contains_key(&ed));
+            if advertised {
+                assert!(matches!(
+                    signatures.get(&ed),
+                    Some(AnySignature::Ed25519ph(_))
+                ));
+            }
+        }
+        let mut headers = http::HeaderMap::new();
+        advertise_signature_capabilities(&mut headers);
+        assert_eq!(headers[PASSKEY_SIGNATURES_HEADER], "true");
+        let mut middleware = DeviceInfoMiddleware::new();
+        middleware.passkey_signatures = true;
+        middleware
+            .prepare_request(
+                false,
+                Metadata {
+                    get_device_info: true,
+                },
+                &mut request("os.version.get", json!({ "sourceVersion": "0.4.3" })),
+            )
+            .unwrap();
+        assert!(!middleware.wire.legacy_passkeys);
+        assert!(!middleware.legacy_os_versions);
     }
 
     #[test]
@@ -872,7 +1068,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(middleware.wire.legacy_signatures, legacy, "{version}");
-            assert_eq!(middleware.legacy_os_versions, legacy, "{version}");
+            assert!(middleware.legacy_os_versions, "{version}");
         }
     }
 
@@ -909,7 +1105,7 @@ mod tests {
             (
                 "os.version=0.4.0.3&os.compat=*&os.platform=x86_64",
                 "os.version.get",
-                false,
+                true,
             ),
             (
                 "os.version=0.4.0.2&os.compat=*&os.platform=x86_64",

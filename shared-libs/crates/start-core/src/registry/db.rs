@@ -147,6 +147,9 @@ pub struct SubscribeIndexParams {
     pub pointer: Option<JsonPointer>,
     /// Client StartOS version. Omission preserves the canonical index format.
     pub os_version: Option<Version>,
+    /// Requests P-256 keys and WebAuthn signatures in a versioned view.
+    #[serde(default)]
+    pub passkey_signatures: bool,
     /// Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
     pub language: Option<InternedString>,
     #[serde(flatten)]
@@ -160,16 +163,20 @@ async fn visible_subscription(
     SubscribeIndexParams {
         pointer,
         os_version,
+        passkey_signatures,
         language,
         reader,
     }: SubscribeIndexParams,
 ) -> Result<(Arc<IndexMirror>, Dump, JsonSubscriber), Error> {
     let pointer = subscription_pointer(pointer)?;
-    let wire = os_version
+    let mut wire = os_version
         .as_ref()
         .map(WireCompatibility::for_startos)
         .transpose()?
         .unwrap_or_default();
+    if passkey_signatures {
+        wire = wire.with_passkey_signatures();
+    }
     let (key, view) = match language.as_deref() {
         None => (
             mirror_key(&ctx.db.peek().await, reader.signer)?,
@@ -358,6 +365,7 @@ mod tests {
             let params: SubscribeIndexParams = serde_json::from_value(params).unwrap();
             assert!(params.pointer.is_none());
             assert!(params.language.is_none());
+            assert!(!params.passkey_signatures);
         }
         let params: SubscribeIndexParams =
             serde_json::from_value(serde_json::json!({ "language": "pl_PL" })).unwrap();

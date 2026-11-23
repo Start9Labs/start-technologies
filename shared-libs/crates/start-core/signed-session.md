@@ -2,10 +2,10 @@
 
 Identity authentication uses StartOS request commitments, `RequestProof::sign_commitment`,
 `AnyVerifyingKey::verify_commitment` and `AnySignature`. Handshake proofs emit pure Ed25519
-through `Signer::sign_message`; verification also accepts Ed25519ph. Existing package and
+through `Signer::sign_message`; verification also accepts Ed25519ph and WebAuthn assertions. Existing package and
 storage signature policy stays with its own signing owner. Client and server schemes
 need not match. Adding a signing scheme extends those owners and the browser provider,
-not the transport. WebAuthn enrollment, assertions and user-presence policy are separate.
+not the transport. Passkey registration and in-memory session enrollment belong to `auth/passkey.rs`; assertion policy belongs to `sign/webauthn.rs`.
 
 ## Admission
 
@@ -51,7 +51,10 @@ committed-account handshakes retain their existing shape.
 The proof map contains:
 
 - `commitment`: `timestamp` (i64), `nonce` (u64), `size` (u64), and `blake3` (32 bytes).
-- `signer`: the existing algorithm-tagged DER verifying key as a byte string.
+- `signer`: the existing algorithm-tagged DER verifying key as a byte string. A client signing
+  with a passkey omits it: the WebAuthn assertion carries its credential ID, and the server
+  resolves the key from the passkeys it has registered (`ServerIdentity::passkeys`). Any other
+  proof without a signer, and a credential the server does not know, is rejected.
 - `signature`: the existing algorithm-tagged DER signature as a byte string.
 
 The request-commitment type is fixed by this protocol and its existing signature-domain

@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::Message;
@@ -26,6 +26,7 @@ async fn scope() -> (SecureSession, Signer, ScopeOwner) {
         address: "localhost".into(),
         server_identity: context.server_identity().unwrap().into(),
         replay_check: context.replay_check(),
+        lease_factory: None,
     };
     (
         scope,
@@ -114,6 +115,62 @@ async fn secured_authenticated_continuations_preserve_text_and_binary_bulk() {
             message
         );
     }
+}
+
+struct LeaseProbe(Arc<AtomicUsize>);
+
+impl Drop for LeaseProbe {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn continuation_leases_belong_to_sockets_not_retained_provenance() {
+    let (scope, signer, _owner) = scope().await;
+    let active = Arc::new(AtomicUsize::new(0));
+    let acquired = active.clone();
+    let scope = scope.with_lease_factory(move || {
+        acquired.fetch_add(1, Ordering::SeqCst);
+        Some(Arc::new(LeaseProbe(acquired.clone())) as SocketLease)
+    });
+    let retained = scope.clone();
+    assert_eq!(active.load(Ordering::SeqCst), 0);
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let (finished, dropped) = tokio::sync::oneshot::channel();
+    let observed = active.clone();
+    let (url, _server) = serve(RpcContinuation::ws(
+        WebSocketPolicy::Authenticated,
+        Some(scope),
+        move |mut socket| async move {
+            started.send(()).unwrap();
+            while let Some(Ok(message)) = socket.recv().await {
+                if matches!(message, Message::Close(_)) {
+                    break;
+                }
+            }
+            drop(socket);
+            finished.send(observed.load(Ordering::SeqCst)).unwrap();
+        },
+        Duration::from_secs(30),
+    ))
+    .await;
+    let socket = connect(&url, &signer).await;
+    tokio::time::timeout(Duration::from_secs(3), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(active.load(Ordering::SeqCst), 1);
+    drop(socket);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), dropped)
+            .await
+            .unwrap()
+            .unwrap(),
+        0,
+    );
+    drop(retained);
+    assert_eq!(active.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

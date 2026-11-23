@@ -387,7 +387,7 @@ pub struct AddTrustedKeyParams {
     /// Blank names each GPG key after its identity.
     #[arg(long, default_value = "", help = "help.arg.trusted-key-name")]
     pub name: String,
-    /// Ed25519 public keys in PEM or armored GPG format.
+    /// Ed25519 or P-256 public keys in PEM, or Ed25519 keys in armored GPG format.
     #[arg(required = true, help = "help.arg.trusted-public-keys")]
     pub public_keys: Vec<String>,
     /// Grants this permission to every imported key, including existing keys.

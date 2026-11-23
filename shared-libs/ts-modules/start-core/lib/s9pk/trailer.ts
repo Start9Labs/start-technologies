@@ -1,7 +1,7 @@
 import {
   bytesToBase64,
   ed25519PublicKeyDer64,
-  parseEd25519PublicKey,
+  verifyingKeyDer64,
 } from '../auth/signature'
 import { SideloadParams } from '../osBindings'
 import { MerkleArchive } from './merkleArchive'
@@ -117,8 +117,9 @@ export async function readTrailer(
       if (keyLength === 0n || keyLength >= BigInt(record.end - value - 8))
         throw new Error('Invalid public key length')
       const keyEnd = value + 8 + Number(keyLength)
-      const signer = bytesToBase64(raw.subarray(value + 8, keyEnd))
-      parseEd25519PublicKey(signer)
+      const signer = verifyingKeyDer64(
+        bytesToBase64(raw.subarray(value + 8, keyEnd)),
+      )
       signatures[signer] = bytesToBase64(raw.subarray(keyEnd, record.end))
     } catch {
       diagnose(

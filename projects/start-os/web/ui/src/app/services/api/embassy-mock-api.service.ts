@@ -153,6 +153,7 @@ export class MockApiService extends ApiService implements StartupApiService {
   private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
+  private passkeyStore?: Map<string, T.Passkey>
   private drives?: Map<string, number>
   private history?: BackupRun[]
   private readonly conversionJobs: T.ServerStatus['backupConversions'] = {}
@@ -272,6 +273,24 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'auth.reset-password': async params => {
       await pauseFor(2000)
+      return null
+    },
+    'auth.passkey.list': async () => {
+      await pauseFor(1000)
+      return Object.fromEntries(this.passkeys())
+    },
+    'auth.passkey.add': async ({ publicKey, name, credentialId }) => {
+      await pauseFor(1000)
+      this.passkeys().set(publicKey, {
+        name,
+        credentialId,
+        addedAt: new Date().toISOString(),
+      })
+      return null
+    },
+    'auth.passkey.remove': async ({ publicKey }) => {
+      await pauseFor(1000)
+      this.passkeys().delete(publicKey)
       return null
     },
     'diagnostic.error': async () => {
@@ -2209,7 +2228,16 @@ export class MockApiService extends ApiService implements StartupApiService {
     }
   }
 
-  // state
+  private passkeys() {
+    return (this.passkeyStore ??= new Map(Object.entries(Mock.Passkeys)))
+  }
+
+  async enrollWithPasskey(
+    _: T.EnrollPasskeySessionParams,
+    signal: AbortSignal,
+  ): Promise<void> {
+    await pauseFor(1000, signal)
+  }
 
   async checkEnrollment(): Promise<unknown> {
     await pauseFor(1000)

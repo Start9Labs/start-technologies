@@ -3167,8 +3167,8 @@ const {
   registrySigningKeys,
   keyIdentities,
 } = await import('@start9labs/marketplace')
-const { parsePublicKeys, publicKeyPem } =
-  await import('src/app/utils/public-keys')
+const publicKeys = await import('src/app/utils/public-keys')
+const { parsePublicKeys, publicKeyPem } = publicKeys
 const { MarketplaceControlsComponent: Controls } =
   await import('src/app/routes/portal/routes/marketplace/components/controls.component')
 const { MarketplaceService } =
@@ -3291,7 +3291,7 @@ test('known GPG signers show their label and every email address', () => {
   ])
 })
 
-test('PEM form parsing canonicalizes multiple keys and rejects empty, private, non-Ed25519, and mixed input', () => {
+test('PEM form parsing canonicalizes multiple keys and rejects empty, private, unsupported, and mixed input', () => {
   const first = OS_UPDATE_SIGNERS[0]
   const second = OS_UPDATE_SIGNERS[1]
   assert.deepEqual(
@@ -3317,6 +3317,26 @@ test('PEM form parsing canonicalizes multiple keys and rejects empty, private, n
     .publicKey.export({ type: 'spki', format: 'der' })
     .subarray(-32)
   assert.deepEqual(parsePublicKeys(publicKeyPem(raw)), [publicKeyPem(raw)])
+})
+
+test('P-256 PEM imports share the canonical identity used by registry trust controls', () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../../../../shared-libs/crates/start-core/testdata/p256-public-key.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  )
+  const der = Buffer.from(fixture.uncompressedDerHex, 'hex').toString('base64')
+  const { parsePemPublicKey } = publicKeys
+  const canonical = parsePemPublicKey(der)
+  for (const hex of [fixture.uncompressedDerHex, fixture.compressedDerHex]) {
+    const value = `-----BEGIN PUBLIC KEY-----\n${Buffer.from(hex, 'hex').toString('base64')}\n-----END PUBLIC KEY-----\n`
+    assert.equal(parsePemPublicKey(value), canonical)
+    assert.deepEqual(parsePublicKeys(value), [canonical])
+  }
 })
 
 test('GPG form input preserves armored exports for backend validation alongside PEM keys', () => {
