@@ -8314,117 +8314,42 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$defs": {
-        "SmtpValue": {
-          "allOf": [
-            {
-              "type": "object",
-              "properties": {
-                "host": { "type": "string" },
-                "server": { "type": "string" },
-                "port": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "from": { "type": "string" },
-                "login": { "type": "string" },
-                "username": { "type": "string" },
-                "password": { "type": ["string", "null"] },
-                "security": { "$ref": "#/$defs/SmtpSecurity" }
-              },
-              "required": ["port", "from"],
-              "additionalProperties": true
-            },
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": { "host": { "type": "string" } },
-                  "required": ["host"],
-                  "additionalProperties": true
-                },
-                {
-                  "type": "object",
-                  "properties": { "server": { "type": "string" } },
-                  "required": ["server"],
-                  "additionalProperties": true
-                }
-              ]
-            },
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": { "login": { "type": "string" } },
-                  "required": ["login"],
-                  "additionalProperties": true
-                },
-                {
-                  "type": "object",
-                  "properties": { "username": { "type": "string" } },
-                  "required": ["username"],
-                  "additionalProperties": true
-                }
-              ]
-            }
-          ]
-        },
-        "SmtpSecurity": { "type": "string", "enum": ["starttls", "tls"] }
-      },
-      "allOf": [
-        {
+        "SetSmtpParams": {
           "type": "object",
           "properties": {
             "host": { "type": "string" },
-            "server": { "type": "string" },
             "port": {
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
             "from": { "type": "string" },
-            "login": { "type": "string" },
             "username": { "type": "string" },
             "password": { "type": ["string", "null"] },
+            "keepPassword": { "type": "boolean" },
             "security": { "$ref": "#/$defs/SmtpSecurity" }
           },
-          "required": ["port", "from"],
+          "required": ["host", "port", "from", "username"],
           "additionalProperties": true
         },
-        {
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": { "host": { "type": "string" } },
-              "required": ["host"],
-              "additionalProperties": true
-            },
-            {
-              "type": "object",
-              "properties": { "server": { "type": "string" } },
-              "required": ["server"],
-              "additionalProperties": true
-            }
-          ]
+        "SmtpSecurity": { "type": "string", "enum": ["starttls", "tls"] }
+      },
+      "type": "object",
+      "properties": {
+        "host": { "type": "string" },
+        "port": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
         },
-        {
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": { "login": { "type": "string" } },
-              "required": ["login"],
-              "additionalProperties": true
-            },
-            {
-              "type": "object",
-              "properties": { "username": { "type": "string" } },
-              "required": ["username"],
-              "additionalProperties": true
-            }
-          ]
-        }
-      ],
-      "type": "object"
+        "from": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": ["string", "null"] },
+        "keepPassword": { "type": "boolean" },
+        "security": { "$ref": "#/$defs/SmtpSecurity" }
+      },
+      "required": ["host", "port", "from", "username"],
+      "additionalProperties": true
     }
   },
   {
@@ -8470,10 +8395,13 @@
             "from": { "type": "string" },
             "to": { "type": "string" },
             "username": { "type": "string" },
-            "password": { "type": "string" },
+            "password": {
+              "description": "Omitted, uses the saved password for the same host, port and username.",
+              "type": ["string", "null"]
+            },
             "security": { "$ref": "#/$defs/SmtpSecurity" }
           },
-          "required": ["host", "port", "from", "to", "username", "password"],
+          "required": ["host", "port", "from", "to", "username"],
           "additionalProperties": true
         },
         "SmtpSecurity": { "type": "string", "enum": ["starttls", "tls"] }
@@ -8489,10 +8417,13 @@
         "from": { "type": "string" },
         "to": { "type": "string" },
         "username": { "type": "string" },
-        "password": { "type": "string" },
+        "password": {
+          "description": "Omitted, uses the saved password for the same host, port and username.",
+          "type": ["string", "null"]
+        },
         "security": { "$ref": "#/$defs/SmtpSecurity" }
       },
-      "required": ["host", "port", "from", "to", "username", "password"],
+      "required": ["host", "port", "from", "to", "username"],
       "additionalProperties": true
     }
   },

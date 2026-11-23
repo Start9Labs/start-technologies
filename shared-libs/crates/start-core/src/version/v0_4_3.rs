@@ -38,13 +38,14 @@ impl VersionT for Version {
         V0_4_3.clone()
     }
     fn migration_revision(self) -> usize {
-        3
+        4
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         move_ssh_pubkeys(db, "private", "public")?;
+        hide_smtp_password(db)?;
         for_each_host(db, |host| {
             let Some(ranges) = host.get_mut("bindingRanges").and_then(Value::as_object_mut) else {
                 return;
@@ -64,6 +65,7 @@ impl VersionT for Version {
         Ok(())
     }
     fn down(self, db: &mut Value) -> Result<(), Error> {
+        restore_smtp_password(db)?;
         move_ssh_pubkeys(db, "public", "private")
     }
 }
@@ -83,6 +85,51 @@ fn move_ssh_pubkeys(db: &mut Value, from: &str, to: &str) -> Result<(), Error> {
     destination
         .entry("sshPubkeys".into())
         .or_insert_with(|| keys.unwrap_or_else(|| json!({})));
+    Ok(())
+}
+
+fn hide_smtp_password(db: &mut Value) -> Result<(), Error> {
+    let Some(public) = db
+        .get_mut("public")
+        .and_then(|public| public.get_mut("serverInfo"))
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    let Some(smtp) = public.get_mut("smtp").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+    if smtp.contains_key("passwordSet") {
+        return Ok(());
+    }
+    let saved = Value::Object(smtp.clone());
+    let password_set = smtp
+        .remove("password")
+        .is_some_and(|password| !password.is_null());
+    smtp.insert("passwordSet".into(), Value::Bool(password_set));
+    db.as_object_mut()
+        .or_not_found("database")?
+        .entry("private".into())
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .or_not_found("private database")?
+        .insert("smtp".into(), saved);
+    Ok(())
+}
+
+fn restore_smtp_password(db: &mut Value) -> Result<(), Error> {
+    let saved = db
+        .get_mut("private")
+        .and_then(Value::as_object_mut)
+        .and_then(|private| private.remove("smtp"))
+        .filter(|smtp| !smtp.is_null());
+    if let Some(public) = db
+        .get_mut("public")
+        .and_then(|public| public.get_mut("serverInfo"))
+        .and_then(Value::as_object_mut)
+    {
+        public.insert("smtp".into(), saved.unwrap_or(Value::Null));
+    }
     Ok(())
 }
 
@@ -209,12 +256,65 @@ mod tests {
         settings
     }
 
+    #[test]
+    fn the_smtp_password_moves_to_private_once() {
+        let mut db = json!({
+            "public": { "serverInfo": { "smtp": {
+                "host": "smtp.example.com", "port": 587, "from": "a@example.com",
+                "username": "a", "password": "secret", "security": "starttls",
+            } } },
+            "private": {},
+        });
+        hide_smtp_password(&mut db).unwrap();
+        hide_smtp_password(&mut db).unwrap();
+        assert_eq!(
+            db["public"]["serverInfo"]["smtp"],
+            json!({
+                "host": "smtp.example.com", "port": 587, "from": "a@example.com",
+                "username": "a", "security": "starttls", "passwordSet": true,
+            })
+        );
+        assert_eq!(db["private"]["smtp"]["password"], json!("secret"));
+        restore_smtp_password(&mut db).unwrap();
+        assert_eq!(
+            db["public"]["serverInfo"]["smtp"]["password"],
+            json!("secret")
+        );
+        assert!(db["private"].get("smtp").is_none());
+    }
+
+    #[test]
+    fn an_unset_smtp_password_is_reported_unset() {
+        let mut db = json!({
+            "public": { "serverInfo": { "smtp": {
+                "host": "h", "port": 25, "from": "f", "username": "u",
+                "password": null, "security": "tls",
+            } } },
+        });
+        hide_smtp_password(&mut db).unwrap();
+        assert_eq!(
+            db["public"]["serverInfo"]["smtp"]["passwordSet"],
+            json!(false)
+        );
+        assert_eq!(db["private"]["smtp"]["password"], Value::Null);
+    }
+
+    #[test]
+    fn no_smtp_leaves_the_database_alone() {
+        let mut db = json!({ "public": { "serverInfo": { "smtp": null } }, "private": {} });
+        hide_smtp_password(&mut db).unwrap();
+        assert_eq!(
+            db,
+            json!({ "public": { "serverInfo": { "smtp": null } }, "private": {} })
+        );
+    }
+
     #[tokio::test]
     async fn an_existing_0_4_3_server_queues_the_mtu_migration_once() {
         let version = super::super::Version::from_exver_version(Version.semver())
             .as_version_t()
             .unwrap();
-        for applied in [0, 1, 2] {
+        for applied in [0, 1, 2, 3] {
             let mut db = json!({ "public": { "serverInfo": {
                 "version": "0.4.3",
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
