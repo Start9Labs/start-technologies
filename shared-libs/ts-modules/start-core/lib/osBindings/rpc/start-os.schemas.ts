@@ -7198,7 +7198,7 @@ export const Api = {
             package: {
               _PARAMS: /* @__PURE__ */ SyncedPackageParams,
               _RETURN: /* @__PURE__ */ GetPackageResponse,
-              _ITEM: /* @__PURE__ */ z.never(),
+              _ITEM: /* @__PURE__ */ GetPackageResponse,
               _FINAL: /* @__PURE__ */ z.null(),
             },
             refresh: {
