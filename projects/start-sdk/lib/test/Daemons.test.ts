@@ -169,6 +169,81 @@ describe('Daemons recorder', () => {
   )
 })
 
+describe('dynamic health ordering', () => {
+  it('updates retained checks on insertion, reordering, and requested-index changes', async () => {
+    const latest = new Map<string, { index?: number | null; result: string }>()
+    const setHealth = jest.fn(
+      async (health: {
+        id: string
+        index?: number | null
+        result: string
+      }) => {
+        latest.set(health.id, health)
+        return null
+      },
+    )
+    const effects = { ...fakeEffects(), setHealth } as T.Effects
+    const probe = jest.fn(baseReady.fn)
+    let order = ['b']
+    let requested: Record<string, number> = {}
+    const options = (id: 'a' | 'b') => ({
+      ready: {
+        display: id,
+        index: requested[id],
+        trigger: onceTrigger,
+        fn: probe,
+      },
+      requires: [] as [],
+    })
+    const reconciler = Daemons.dynamic<Manifest>(effects, ({ effects }) => {
+      const chain = Daemons.of<Manifest>({ effects })
+      if (order.length === 1) return chain.addHealthCheck('b', options('b'))
+      return order[0] === 'a'
+        ? chain
+            .addHealthCheck('a', options('a'))
+            .addHealthCheck('b', options('b'))
+        : chain
+            .addHealthCheck('b', options('b'))
+            .addHealthCheck('a', options('a'))
+    })
+    const built = await reconciler.build()
+    const settle = () => new Promise<void>(resolve => setImmediate(resolve))
+    const indices = () =>
+      Object.fromEntries(
+        [...latest].map(([id, health]) => [id, health.index]),
+      )
+    try {
+      await settle()
+      expect(indices()).toEqual({ b: 0 })
+      expect(probe).toHaveBeenCalledTimes(1)
+
+      order = ['a', 'b']
+      reconciler.scheduleRerun()
+      await settle()
+      expect(indices()).toEqual({ a: 0, b: 1 })
+      expect(latest.get('b')?.result).toBe('success')
+      expect(probe).toHaveBeenCalledTimes(2)
+
+      order = ['b', 'a']
+      reconciler.scheduleRerun()
+      await settle()
+      expect(indices()).toEqual({ b: 0, a: 1 })
+      expect(probe).toHaveBeenCalledTimes(2)
+
+      requested = { a: 0 }
+      reconciler.scheduleRerun()
+      await settle()
+      expect(indices()).toEqual({ a: 0, b: 1 })
+      expect(
+        [...latest.values()].every(health => health.result === 'success'),
+      ).toBe(true)
+      expect(probe).toHaveBeenCalledTimes(2)
+    } finally {
+      await built.term()
+    }
+  })
+})
+
 describe('configHash', () => {
   it('is stable when nothing structural changes', () => {
     const e = fakeEffects()

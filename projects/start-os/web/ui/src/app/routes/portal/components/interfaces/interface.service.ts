@@ -10,7 +10,10 @@ import {
 } from 'src/app/services/pkg-status-rendering.service'
 import { toAuthorityName } from 'src/app/utils/acme'
 import { byTitle, getManifest } from 'src/app/utils/get-package-data'
-import { packageInterfaces } from 'src/app/utils/service-interfaces'
+import {
+  byInterfaceIndex,
+  packageInterfaces,
+} from 'src/app/utils/service-interfaces'
 
 // An IPv6 global-unicast address (GUA) — not loopback / ULA (fc00::/7) /
 // link-local (fe80::/10). Mirrors the backend's `ipv6_is_local` complement, so
@@ -102,9 +105,6 @@ function getAddressType(h: T.HostnameInfo): string {
 export class InterfaceService {
   private readonly config = inject(ConfigService)
 
-  // The package's service interfaces, mapped for display: single-port
-  // interfaces first (reached host -> binding -> interface), then port ranges
-  // (host -> bindingRange -> interface, carrying a `portRange` span).
   getServiceInterfaces(
     pkg: PackageDataEntry,
     gateways: GatewayPlus[],
@@ -189,13 +189,8 @@ export class InterfaceService {
             }
           }),
       )
-      .sort(
-        (a, b) =>
-          (a.index ?? Infinity) - (b.index ?? Infinity) ||
-          a.addressInfo.internalPort - b.addressInfo.internalPort,
-      )
 
-    return [...single, ...ranges]
+    return [...single, ...ranges].sort(byInterfaceIndex)
   }
 
   getGatewayGroups(

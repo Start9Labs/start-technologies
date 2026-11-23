@@ -11,6 +11,7 @@ mod m_02_ed25519ph_signature_label;
 mod m_03_commitment_type_tags;
 mod m_04_icon_store;
 mod m_05_s9pk_access;
+mod m_06_category_order;
 
 pub trait RegistryMigration {
     fn name(&self) -> &'static str {
@@ -27,6 +28,7 @@ pub const MIGRATIONS: &[&dyn RegistryMigration] = &[
     &m_03_commitment_type_tags::CommitmentTypeTags,
     &m_04_icon_store::IconStore,
     &m_05_s9pk_access::S9pkAccess,
+    &m_06_category_order::CategoryOrder,
 ];
 
 #[instrument(skip_all)]

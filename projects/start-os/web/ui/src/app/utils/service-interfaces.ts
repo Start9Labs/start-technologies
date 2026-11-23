@@ -1,7 +1,8 @@
 import { byIndex } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 
-const byInterfaceIndex = byIndex<{ id: string; index?: number | null }>(
+/** Single-port and range interfaces share one index order; ties use ID. */
+export const byInterfaceIndex = byIndex<{ id: string; index?: number | null }>(
   iface => iface.id,
 )
 
@@ -15,13 +16,14 @@ export function packageInterfaces(
     .sort(byInterfaceIndex)
 }
 
-/** A host's interface names, single-port then ranges, each in the package's order. */
+/** A host's interface names in the package's interface order. */
 export function hostInterfaceNames(host: T.Host): string[] {
   return [
-    ...packageInterfaces({ host }).map(iface => iface.name),
-    ...Object.values(host.bindingRanges)
-      .flatMap(range => (range.interface ? [range.interface] : []))
-      .sort(byInterfaceIndex)
-      .map(iface => iface.name),
+    ...packageInterfaces({ host }),
+    ...Object.values(host.bindingRanges).flatMap(range =>
+      range.interface ? [range.interface] : [],
+    ),
   ]
+    .sort(byInterfaceIndex)
+    .map(iface => iface.name)
 }
