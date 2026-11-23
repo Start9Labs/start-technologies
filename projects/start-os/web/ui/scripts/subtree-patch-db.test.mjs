@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { BehaviorSubject, Observable, Subject } from 'rxjs'
-import { scopeOperations, SubtreePatchDB } from 'patch-db-client'
+import {
+  applyOperation,
+  projectOperations,
+  projectRoot,
+  scopeOperations,
+  SubtreePatchDB,
+} from 'patch-db-client'
 
 test('subtree patch scoping preserves server removal and missing-value semantics', () => {
   for (const pointer of ['/a', '/a/b']) {
@@ -31,9 +37,15 @@ function fixture(t, { releaseDelay = 5000 } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const calls = []
   const source = {
-    subscribe(path, since) {
+    subscribe(path, since, projection) {
       const events = new Subject()
-      const call = { path: '/' + path.join('/'), since, events, closed: false }
+      const call = {
+        path: path.length ? '/' + path.join('/') : '',
+        since,
+        projection,
+        events,
+        closed: false,
+      }
       calls.push(call)
       return new Observable(subscriber => {
         const subscription = events.subscribe(subscriber)
@@ -50,14 +62,17 @@ function fixture(t, { releaseDelay = 5000 } = {}) {
   const start = (call, id, value, epoch = 'boot') =>
     call.events.next({ epoch, id, value })
   const revision = (call, id, patch) => call.events.next({ id, patch })
-  const watch = (...path) => {
+  const observe = observable => {
     const values = []
-    const subscription = db.watch$(...path).subscribe(v => values.push(v))
+    const subscription = observable.subscribe(v => values.push(v))
     t.after(() => subscription.unsubscribe())
     return { values, subscription }
   }
+  const watch = (...path) => observe(db.watch$(...path))
+  const project = (projection, ...path) =>
+    observe(db.watchProjection$(projection, ...path))
   t.after(() => db.stop())
-  return { db, cache, calls, open, start, revision, watch }
+  return { db, cache, calls, open, start, revision, watch, project }
 }
 
 test('a watched path opens one server subscription shared by its watchers and released after a delay', t => {
@@ -257,4 +272,159 @@ test('stop clears the document, cursors and subscriptions', t => {
   assert.equal(f.calls[0].closed, true)
   assert.deepEqual(f.cache.value, { id: 0, value: {} })
   assert.deepEqual(f.db.snapshotCursors(), {})
+})
+
+const PROJECTIONS = [
+  null,
+  { depth: 0 },
+  { depth: 1 },
+  { depth: 2 },
+  { include: ['/a'] },
+  { include: ['/*/b'] },
+  { include: ['/a/*/c', '/b'] },
+  { exclude: ['/a/b'] },
+  { exclude: ['/*/c'] },
+  { include: ['/a'], exclude: ['/a/*/b'] },
+  { depth: 2, include: ['/*/a'], exclude: ['/b'] },
+  { include: ['/arr/*/a'] },
+  { exclude: ['/arr/*/b'] },
+  { exclude: [''] },
+]
+
+const STATES = [
+  null,
+  {},
+  { a: { x: { b: 1, c: 2 } } },
+  { a: { x: { b: 2 }, y: { c: [1] } }, b: { a: 1 } },
+  { a: 5, b: { a: { c: 1 } } },
+  { arr: [{ a: 1, b: 2 }] },
+  { arr: [{ a: 0, b: 0 }, { a: 1, b: 2 }, { a: 3 }] },
+  { arr: [{ a: 3 }] },
+]
+
+function replaceAll(to) {
+  return [{ op: 'replace', path: '', value: to }]
+}
+
+test('projected operations track the projected document, as the server projects them', () => {
+  const patches = (from, to) => [
+    replaceAll(to),
+    ...(from?.arr && to?.arr
+      ? [
+          [
+            { op: 'add', path: '/arr/0', value: to.arr[0] ?? null },
+            { op: 'remove', path: '/arr/1' },
+          ],
+        ]
+      : []),
+  ]
+  for (const projection of PROJECTIONS) {
+    for (const from of STATES) {
+      for (const to of STATES) {
+        for (const patch of patches(from, to)) {
+          const truth = { id: 0, value: structuredClone(from) }
+          patch.forEach(op => applyOperation(truth, op))
+          const projected = { id: 0, value: projectRoot(projection, from) }
+          projectOperations(scopeOperations(patch, ''), projection).forEach(
+            op => applyOperation(projected, op),
+          )
+          assert.deepEqual(
+            projected.value,
+            projectRoot(projection, truth.value),
+            JSON.stringify({ projection, from, patch }),
+          )
+        }
+      }
+    }
+  }
+})
+
+test('a projected subscription opens with its projection and writes only what it includes', t => {
+  const f = fixture(t)
+  f.db.start()
+  const full = f.watch('packageData', 'x')
+  f.start(f.calls[0], 3, { state: 1, icon: 'big' })
+  const listing = f.project({ exclude: ['/*/icon'] }, 'packageData')
+  const call = f.calls[1]
+  assert.equal(call.path, '/packageData')
+  assert.deepEqual(call.projection, { exclude: ['/*/icon'] })
+  assert.equal(call.since, null)
+  f.start(call, 4, { x: { state: 2 }, y: { state: 1 } })
+  assert.deepEqual(listing.values.at(-1), {
+    x: { state: 2 },
+    y: { state: 1 },
+  })
+  assert.deepEqual(full.values.at(-1), { state: 2, icon: 'big' })
+  assert.equal(f.calls[0].closed, false)
+
+  f.revision(call, 5, [{ op: 'replace', path: '/x', value: { state: 3 } }])
+  f.revision(call, 6, [{ op: 'remove', path: '/y' }])
+  f.revision(f.calls[0], 5, [{ op: 'replace', path: '/state', value: 3 }])
+  t.mock.timers.tick(250)
+  assert.deepEqual(f.cache.value.value.packageData, {
+    x: { state: 3, icon: 'big' },
+  })
+  assert.deepEqual(listing.values.at(-1), { x: { state: 3 } })
+  assert.equal(f.cache.value.id, 5)
+})
+
+test('an unprojected ancestor serves a projected watch', t => {
+  const f = fixture(t)
+  f.db.start()
+  f.watch('packageData')
+  f.start(f.calls[0], 3, { x: { state: 1, icon: 'big' } })
+  const projected = f.project({ exclude: ['/*/icon'] }, 'packageData')
+  assert.equal(f.calls.length, 1)
+  assert.deepEqual(projected.values, [{ x: { state: 1 } }])
+})
+
+test('a projection serves only watches of the same projection', t => {
+  const f = fixture(t)
+  f.db.start()
+  f.project({ include: ['/*/state'] }, 'packageData')
+  f.start(f.calls[0], 3, { x: { state: 1 } })
+  const child = f.watch('packageData', 'x')
+  assert.deepEqual(
+    f.calls.map(c => [c.path, c.projection]),
+    [
+      ['/packageData', { include: ['/*/state'] }],
+      ['/packageData/x', null],
+    ],
+  )
+  assert.equal(f.calls[1].since, null)
+  assert.deepEqual(child.values, [])
+  f.start(f.calls[1], 4, { state: 2, icon: 'big' })
+  assert.deepEqual(child.values, [{ state: 2, icon: 'big' }])
+})
+
+test('a projected subscription resumes from its own cursor only without overlapping data', t => {
+  const f = fixture(t)
+  f.db.start()
+  const projection = { include: ['/*/state'] }
+  const listing = f.project(projection, 'packageData')
+  f.start(f.calls[0], 3, { x: { state: 1 } })
+  assert.deepEqual(f.db.snapshotCursors(), {
+    '["/packageData",{"include":["/*/state"]}]': { epoch: 'boot', id: 3 },
+  })
+  listing.subscription.unsubscribe()
+  t.mock.timers.tick(5000)
+  f.project(projection, 'packageData')
+  assert.deepEqual(f.calls[1].since, { epoch: 'boot', id: 3 })
+
+  const child = f.watch('packageData', 'x')
+  f.start(f.calls[2], 4, { state: 2, icon: 'big' })
+  child.subscription.unsubscribe()
+  f.calls[1].events.next({ epoch: 'boot', id: 4, revisions: [] })
+  t.mock.timers.tick(5000)
+  f.db.stop()
+  f.db.restore(
+    { id: 4, value: { packageData: { x: { state: 2, icon: 'big' } } } },
+    {
+      '["/packageData",{"include":["/*/state"]}]': { epoch: 'boot', id: 4 },
+      '/packageData/x': { epoch: 'boot', id: 4 },
+    },
+  )
+  f.db.start()
+  f.project(projection, 'packageData')
+  assert.equal(f.calls.at(-1).since, null)
 })

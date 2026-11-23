@@ -14,7 +14,7 @@ use json_ptr::JsonPointer;
 use serde::de::DeserializeOwned;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{Dump, Error, HasModel, ModelExt, Revision};
+use crate::{Dump, Error, HasModel, ModelExt, Projection, Revision};
 
 #[cfg(test)]
 mod tests;
@@ -72,7 +72,7 @@ const HISTORY_LEN: usize = 1024;
 
 #[derive(Debug)]
 pub struct Broadcast {
-    listeners: BTreeMap<JsonPointer, ScopedBroadcast>,
+    listeners: BTreeMap<(JsonPointer, Projection), ScopedBroadcast>,
     history: VecDeque<Arc<Revision>>,
     epoch: InternedString,
 }
@@ -98,9 +98,15 @@ impl Broadcast {
         &self.epoch
     }
 
-    /// Returns the revisions after `since` up to `current`, scoped to `ptr`,
+    /// Returns the revisions after `since` up to `current`, scoped to `ptr` and projected,
     /// or `None` once the retained history no longer reaches back to `since`.
-    pub fn replay(&self, ptr: &JsonPointer, since: u64, current: u64) -> Option<Vec<Revision>> {
+    pub fn replay(
+        &self,
+        ptr: &JsonPointer,
+        projection: &Projection,
+        since: u64,
+        current: u64,
+    ) -> Option<Vec<Revision>> {
         if since > current
             || since < current && self.history.front().map_or(true, |rev| rev.id > since + 1)
         {
@@ -110,7 +116,7 @@ impl Broadcast {
             self.history
                 .iter()
                 .filter(|rev| rev.id > since)
-                .map(|rev| rev.for_path(ptr))
+                .map(|rev| projection.project_revision(rev.for_path(ptr)))
                 .filter(|rev| !rev.patch.is_empty())
                 .collect(),
         )
@@ -121,7 +127,7 @@ impl Broadcast {
             self.history.pop_front();
         }
         self.history.push_back(value.clone());
-        self.listeners.retain(|ptr, listeners| {
+        self.listeners.retain(|(ptr, projection), listeners| {
             listeners.dump = None;
             listeners.prune_unbounded();
             listeners
@@ -130,7 +136,7 @@ impl Broadcast {
             if listeners.is_empty() {
                 return false;
             }
-            let scoped = value.for_path(ptr);
+            let scoped = projection.project_revision(value.for_path(ptr));
             if !scoped.patch.is_empty() {
                 listeners
                     .unbounded
@@ -149,12 +155,21 @@ impl Broadcast {
     }
 
     pub fn subscribe(&mut self, ptr: JsonPointer) -> Subscriber {
+        self.subscribe_projected(ptr, Projection::default())
+    }
+
+    /// Subscribers with equal pointers and projections share one listener.
+    pub fn subscribe_projected(&mut self, ptr: JsonPointer, projection: Projection) -> Subscriber {
         self.listeners.retain(|_, listeners| {
             listeners.prune_unbounded();
             !listeners.is_empty()
         });
         let (send, recv) = mpsc::unbounded_channel();
-        self.listeners.entry(ptr).or_default().unbounded.push(send);
+        self.listeners
+            .entry((ptr, projection.normalized()))
+            .or_default()
+            .unbounded
+            .push(send);
         recv
     }
 
@@ -164,7 +179,10 @@ impl Broadcast {
         dump: Dump,
         capacity: NonZeroUsize,
     ) -> Result<(Bytes, JsonSubscriber), Error> {
-        let listeners = self.listeners.entry(ptr.clone()).or_default();
+        let listeners = self
+            .listeners
+            .entry((ptr.clone(), Projection::default()))
+            .or_default();
         let json = match &listeners.dump {
             Some(json) => json.clone(),
             None => {
@@ -184,7 +202,7 @@ impl Broadcast {
     ) -> JsonSubscriber {
         let receiver = self
             .listeners
-            .entry(ptr)
+            .entry((ptr, Projection::default()))
             .or_default()
             .json
             .entry(capacity)

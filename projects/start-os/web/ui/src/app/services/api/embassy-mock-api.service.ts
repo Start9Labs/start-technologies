@@ -32,6 +32,9 @@ import {
   Operation,
   PatchOp,
   pathFromArray,
+  projectOperations,
+  Projection,
+  projectRoot,
   scopeOperations,
   RemoveOperation,
   ReplaceOperation,
@@ -3319,6 +3322,7 @@ export class MockApiService extends ApiService implements StartupApiService {
   override watchDb$(
     path: string[],
     _since: DatabaseCursor | null,
+    projection: Projection | null = null,
   ): Observable<DatabaseUpdate<unknown>> {
     const pointer = pathFromArray(path)
     return defer(
@@ -3345,11 +3349,17 @@ export class MockApiService extends ApiService implements StartupApiService {
         this.mockWsSource$.pipe(
           map(({ id, patch }) => ({
             id,
-            patch: scopeOperations(patch, pointer),
+            patch: projectOperations(
+              scopeOperations(patch, pointer),
+              projection,
+            ),
           })),
           startWith({
             id: document.id,
-            value: getValueByPointer(document.value as any, pointer) ?? null,
+            value: projectRoot(
+              projection,
+              getValueByPointer(document.value as any, pointer) ?? null,
+            ),
           }),
         ),
       ),

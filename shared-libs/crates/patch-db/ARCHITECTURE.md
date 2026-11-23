@@ -64,6 +64,7 @@ The main database engine. Key types:
 | `JsonSubscriber`     | Bounded JSON revision receiver. Closes permanently on overflow.                                                                                                                                    |
 | `Broadcast`          | Per-pointer fan-out with shared JSON serialization and cached dumps. Reclaims dropped typed senders on send and typed subscription. Retains the last 1024 revisions under a random per-open epoch. |
 | `Catchup`            | What a resuming subscriber lacks: a `Dump`, or the scoped revisions since its cursor plus the current revision id.                                                                                 |
+| `Projection`         | Optional `depth`, `include` and `exclude` narrowing a subscribed subtree. A pure function of each dump and revision, so subscribers sharing a pointer and projection share one listener.           |
 | `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced.                                                                   |
 
 #### Write path
@@ -81,7 +82,7 @@ Store::apply(DiffPatch)
   ├─ For file-backed stores: compress (rewrite snapshot) every 4096 revisions
   └─ Broadcast::send(Revision)
        ├─ Append to the bounded revision history
-       ├─ Scope each patch once per subscribed pointer
+       ├─ Scope and project each patch once per subscribed pointer and projection
        ├─ Deliver typed revisions to unbounded subscribers
        └─ Serialize once per pointer for shared bounded JSON broadcast rings
 ```
@@ -106,6 +107,8 @@ PatchDb::subscribe(ptr)    → Subscriber (mpsc receiver)
 PatchDb::watch(ptr)        → DbWatch (Dump + Subscriber, implements Stream)
 PatchDb::dump_and_sub(ptr) → (Dump, Subscriber)
 PatchDb::catch_up_and_sub(ptr, since) → (epoch, Catchup, Subscriber)
+PatchDb::catch_up_and_sub_projected(ptr, projection, since) → (epoch, Catchup, Subscriber)
+PatchDb::dump_projected(ptr, projection) → Dump
 PatchDb::catch_up_and_sub_json(ptr, since, capacity) → Result<(epoch, JsonCatchup, JsonSubscriber)>
 PatchDb::dump_and_sub_json(ptr, capacity) → Result<(Bytes, JsonSubscriber)>
 ```

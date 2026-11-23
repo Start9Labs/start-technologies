@@ -13,7 +13,12 @@ fn idle_subscriptions_reclaim_dropped_listeners_without_a_revision() {
     }
     let _live = broadcast.subscribe(ROOT.to_owned());
     assert_eq!(broadcast.listeners.len(), 1);
-    assert_eq!(broadcast.listeners[&ROOT.to_owned()].unbounded.len(), 1);
+    assert_eq!(
+        broadcast.listeners[&(ROOT.to_owned(), crate::Projection::default())]
+            .unbounded
+            .len(),
+        1
+    );
 
     let capacity = NonZeroUsize::new(1).unwrap();
     let dump = Dump {
@@ -30,7 +35,7 @@ fn idle_subscriptions_reclaim_dropped_listeners_without_a_revision() {
     let (_, _live_json) = broadcast
         .subscribe_json(ROOT.to_owned(), dump, capacity)
         .unwrap();
-    let listeners = &broadcast.listeners[&ROOT.to_owned()];
+    let listeners = &broadcast.listeners[&(ROOT.to_owned(), crate::Projection::default())];
     assert_eq!(listeners.unbounded.len(), 1);
     assert_eq!(listeners.json.len(), 1);
     assert_eq!(listeners.json[&capacity].receiver_count(), 1);

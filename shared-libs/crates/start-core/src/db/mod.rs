@@ -10,7 +10,7 @@ use clap::Parser;
 use imbl_value::{InternedString, Value};
 use itertools::Itertools;
 use patch_db::json_ptr::{JsonPointer, ROOT};
-use patch_db::{Catchup, DiffPatch, Dump, PatchDb, Revision, Subscriber};
+use patch_db::{Catchup, DiffPatch, Dump, PatchDb, Projection, Revision, Subscriber};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -85,6 +85,45 @@ pub enum RevisionsRes {
     Dump(Dump),
 }
 
+/// Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
+pub struct ProjectionParams {
+    /// Levels kept below the pointer; deeper objects and arrays become empty.
+    #[arg(long, help = "help.arg.db-depth")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<usize>,
+    /// Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+    /// Empty keeps everything. Array elements are addressed only by `*`.
+    #[arg(long, help = "help.arg.db-include")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<JsonPointer>,
+    /// Subtrees removed from what `include` keeps, in the same form.
+    #[arg(long, help = "help.arg.db-exclude")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<JsonPointer>,
+}
+
+rpc_toolkit::reflect_ts!(ProjectionParams);
+
+impl From<ProjectionParams> for Projection {
+    fn from(
+        ProjectionParams {
+            depth,
+            include,
+            exclude,
+        }: ProjectionParams,
+    ) -> Self {
+        Projection {
+            depth,
+            include,
+            exclude,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
@@ -97,6 +136,9 @@ pub struct CliDumpParams {
     )]
     #[serde(default)]
     include_private: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    projection: ProjectionParams,
     #[arg(help = "help.arg.db-path")]
     path: Option<PathBuf>,
 }
@@ -107,28 +149,35 @@ async fn cli_dump(
         context,
         parent_method,
         method,
-        params: CliDumpParams {
-            include_private,
-            path,
-        },
+        params:
+            CliDumpParams {
+                include_private,
+                projection,
+                path,
+            },
         ..
     }: HandlerArgs<CliContext, CliDumpParams>,
 ) -> Result<Dump, RpcError> {
     let dump = if let Some(path) = path {
-        PatchDb::open(path).await?.dump(&ROOT).await
+        PatchDb::open(path)
+            .await?
+            .dump_projected(&ROOT, &projection.into())
+            .await
     } else {
         let method = parent_method.into_iter().chain(method).join(".");
+        let pointer = if include_private {
+            ROOT.to_owned()
+        } else {
+            PUBLIC.clone()
+        };
         from_value::<Dump>(
             context
                 .call_remote::<RpcContext>(
                     &method,
-                    imbl_value::json!({
-                        "pointer": if include_private {
-                            AsRef::<str>::as_ref(&ROOT)
-                        } else {
-                            AsRef::<str>::as_ref(&*PUBLIC)
-                        }
-                    }),
+                    to_value(&DumpParams {
+                        pointer: Some(pointer),
+                        projection,
+                    })?,
                 )
                 .await?,
         )?
@@ -141,12 +190,23 @@ async fn cli_dump(
 #[serde(rename_all = "camelCase")]
 pub struct DumpParams {
     pub pointer: Option<JsonPointer>,
+    #[serde(flatten)]
+    pub projection: ProjectionParams,
 }
 
 rpc_toolkit::reflect_ts!(DumpParams);
 
-pub async fn dump(ctx: RpcContext, DumpParams { pointer }: DumpParams) -> Result<Dump, Error> {
-    Ok(ctx.db.dump(pointer.as_ref().unwrap_or(&*PUBLIC)).await)
+pub async fn dump(
+    ctx: RpcContext,
+    DumpParams {
+        pointer,
+        projection,
+    }: DumpParams,
+) -> Result<Dump, Error> {
+    Ok(ctx
+        .db
+        .dump_projected(pointer.as_ref().unwrap_or(&*PUBLIC), &projection.into())
+        .await)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
@@ -164,6 +224,8 @@ pub struct SubscribeParams {
     pub pointer: Option<JsonPointer>,
     /// The subscriber's last revision; resumes only within the epoch that reported it.
     pub since: Option<DbCursor>,
+    #[serde(flatten)]
+    pub projection: ProjectionParams,
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     pub signer: Option<InternedString>,
@@ -195,10 +257,15 @@ rpc_toolkit::reflect_ts!(SubscribeStart);
 pub(crate) async fn subscribe_start(
     db: &PatchDb,
     pointer: JsonPointer,
+    projection: Projection,
     since: Option<&DbCursor>,
 ) -> (SubscribeStart, Subscriber) {
     let (epoch, catchup, sub) = db
-        .catch_up_and_sub(pointer, since.map(|since| (&*since.epoch, since.id)))
+        .catch_up_and_sub_projected(
+            pointer,
+            projection,
+            since.map(|since| (&*since.epoch, since.id)),
+        )
         .await;
     let start = match catchup {
         Catchup::Dump(Dump { id, value }) => SubscribeStart {
@@ -284,6 +351,7 @@ pub async fn subscribe(
             SubscribeParams {
                 pointer,
                 since,
+                projection,
                 signer,
             },
         rpc_stream,
@@ -292,7 +360,8 @@ pub async fn subscribe(
 ) -> Result<SubscribeStartResult, Error> {
     let pointer = pointer.unwrap_or_else(|| PUBLIC.clone());
     if let Some(stream) = rpc_stream {
-        let (start, sub) = subscribe_start(&ctx.db, pointer, since.as_ref()).await;
+        let (start, sub) =
+            subscribe_start(&ctx.db, pointer, projection.into(), since.as_ref()).await;
         let sub = DbSubscriber {
             rev: start.id,
             sub,
@@ -308,7 +377,10 @@ pub async fn subscribe(
             );
         return Ok(SubscribeStartResult::Stream(start));
     }
-    let (dump, sub) = ctx.db.dump_and_sub(pointer).await;
+    let (dump, sub) = ctx
+        .db
+        .dump_and_sub_projected(pointer, projection.into())
+        .await;
     let mut sub = DbSubscriber {
         rev: dump.id,
         sub,

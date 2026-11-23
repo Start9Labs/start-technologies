@@ -17,6 +17,13 @@ import {
   pathFromArray,
 } from './json-patch-lib'
 import { PatchDB } from './patch-db'
+import {
+  mergeProjected,
+  parseSubscriptionKey,
+  Projection,
+  projectRoot,
+  subscriptionKey,
+} from './projection'
 import { Dump, PatchOp, Revision } from './types'
 
 /** A revision's place in one server process's history. */
@@ -30,8 +37,12 @@ export type SubtreeStart = { epoch?: string | null; id: number } & (
 export type SubtreeEvent = SubtreeStart | Revision
 
 export interface SubtreeSource {
-  /** Streams the subtree at `path`: a start, then revisions scoped to `path`. */
-  subscribe(path: string[], since: Cursor | null): Observable<SubtreeEvent>
+  /** Streams the projected subtree at `path`: a start, then revisions scoped to `path`. */
+  subscribe(
+    path: string[],
+    since: Cursor | null,
+    projection: Projection | null,
+  ): Observable<SubtreeEvent>
 }
 
 export type SubtreeOptions = {
@@ -43,6 +54,7 @@ export type SubtreeOptions = {
 
 type Active = {
   path: string[]
+  projection: Projection | null
   subscription: Subscription
   cursor: Cursor | null
 }
@@ -50,13 +62,16 @@ type Active = {
 /**
  * A {@link PatchDB} whose `watch$` subscriptions are server subscriptions.
  *
- * Each watched path is reference-counted; the outermost watched paths are
- * subscribed on the server, and a path is released a short delay after its last
- * watcher leaves. Every subscribed path keeps its own cursor so it fast-forwards
- * on reconnect, and data from a released path stays readable until it is
- * subscribed again. The document cursor follows the lowest live subscription,
- * including handovers. A failed subscription stops them all and is reported on
- * {@link failures$}; {@link start} resumes them.
+ * Each watched path and projection is reference-counted and released a short
+ * delay after its last watcher leaves. An unprojected path serves every watch at
+ * or below it, and a projected one serves only watches of the same projection;
+ * only subscriptions no other watch serves are opened on the server. A projected
+ * subscription writes the shared document only at paths its projection keeps.
+ * Every subscription keeps its own cursor so it fast-forwards on reconnect, and
+ * data from a released subscription stays readable until it is subscribed again.
+ * The document cursor follows the lowest live subscription, including handovers.
+ * A failed subscription stops them all and is reported on {@link failures$};
+ * {@link start} resumes them.
  */
 export class SubtreePatchDB<
   T extends { [key: string]: any },
@@ -67,7 +82,7 @@ export class SubtreePatchDB<
   private readonly cursors = new Map<string, Cursor>()
   private readonly loaded = new Set<string>()
   private readonly changes$ = new BehaviorSubject<void>(undefined)
-  private pending: { pointer: string; revision: Revision }[] = []
+  private pending: { key: string; revision: Revision }[] = []
   private flush?: ReturnType<typeof setTimeout>
   private running = false
   private readonly releaseDelay: number
@@ -86,20 +101,20 @@ export class SubtreePatchDB<
     this.batch = batch
   }
 
-  /** Loads a persisted snapshot whose subscribed paths resume from their cursors. */
+  /** Loads a persisted snapshot whose subscriptions resume from their cursors. */
   restore(dump: Dump<T>, cursors: Record<string, Cursor>) {
     this.cache$.next({ id: dump.id, value: { ...dump.value } })
-    Object.entries(cursors).forEach(([pointer, cursor]) => {
-      this.cursors.set(pointer, cursor)
-      this.loaded.add(pointer)
+    Object.entries(cursors).forEach(([key, cursor]) => {
+      this.cursors.set(key, cursor)
+      this.loaded.add(key)
     })
-    Object.keys(this.watchedNodes).forEach(path =>
-      this.updateWatchedNode(path, this.cache$.value.value),
+    Object.keys(this.watchedNodes).forEach(key =>
+      this.updateWatchedNode(key, this.cache$.value.value),
     )
     this.changes$.next()
   }
 
-  /** Cursors of every path whose data this document holds. */
+  /** Cursors of every subscription whose data this document holds, by subscription key. */
   snapshotCursors(): Record<string, Cursor> {
     return Object.fromEntries(this.cursors)
   }
@@ -118,8 +133,8 @@ export class SubtreePatchDB<
     this.watchedNodes = {}
     this.releases.forEach(timer => clearTimeout(timer))
     this.releases.clear()
-    this.watchers.forEach((count, pointer) => {
-      if (!count) this.watchers.delete(pointer)
+    this.watchers.forEach((count, key) => {
+      if (!count) this.watchers.delete(key)
     })
     this.cache$.next({ id: 0, value: {} as T })
     this.changes$.next()
@@ -127,29 +142,42 @@ export class SubtreePatchDB<
 
   /** True while every path is covered by a live server subscription. */
   live$(...paths: (readonly string[])[]): Observable<boolean> {
-    const pointers = paths.map(path => pathFromArray([...path]))
+    const keys = paths.map(path => pathFromArray([...path]))
     return this.changes$.pipe(
-      map(() => this.running && pointers.every(p => this.isLive(p))),
+      map(() => this.running && keys.every(key => this.isLive(key))),
       distinctUntilChanged(),
     )
   }
 
   override watch$(...args: (string | number)[]): Observable<any> {
-    const path = pathFromArray(args)
+    return this.watchKey$(pathFromArray(args))
+  }
+
+  /** The projection of the value at a path, from a subscription narrowed to that projection. */
+  watchProjection$(
+    projection: Projection,
+    ...args: (string | number)[]
+  ): Observable<any> {
+    return this.watchKey$(subscriptionKey(pathFromArray(args), projection))
+  }
+
+  protected override updateWatchedNode(key: string, data: T): void {
+    this.watchedNodes[key]?.subject.next(read(key, data))
+  }
+
+  private watchKey$(key: string): Observable<any> {
     return new Observable(subscriber => {
-      const release = this.acquire(path)
+      const release = this.acquire(key)
       const subscription = this.changes$
         .pipe(
-          filter(() => this.covered(path)),
+          filter(() => this.covered(key)),
           take(1),
           switchMap(() => {
-            this.watchedNodes[path] ??= {
-              subject: new BehaviorSubject(
-                getValueByPointer(this.cache$.value.value, path),
-              ),
-              pathArr: arrayFromPath(path),
+            this.watchedNodes[key] ??= {
+              subject: new BehaviorSubject(read(key, this.cache$.value.value)),
+              pathArr: arrayFromPath(parseSubscriptionKey(key).pointer),
             }
-            return this.watchedNodes[path].subject
+            return this.watchedNodes[key].subject
           }),
         )
         .subscribe(subscriber)
@@ -160,23 +188,23 @@ export class SubtreePatchDB<
     })
   }
 
-  private acquire(pointer: string): () => void {
-    clearTimeout(this.releases.get(pointer))
-    this.releases.delete(pointer)
-    this.watchers.set(pointer, (this.watchers.get(pointer) ?? 0) + 1)
+  private acquire(key: string): () => void {
+    clearTimeout(this.releases.get(key))
+    this.releases.delete(key)
+    this.watchers.set(key, (this.watchers.get(key) ?? 0) + 1)
     this.reconcile()
     let released = false
     return () => {
       if (released) return
       released = true
-      const count = (this.watchers.get(pointer) ?? 1) - 1
-      this.watchers.set(pointer, count)
+      const count = (this.watchers.get(key) ?? 1) - 1
+      this.watchers.set(key, count)
       if (count) return
       this.releases.set(
-        pointer,
+        key,
         setTimeout(() => {
-          this.releases.delete(pointer)
-          if (!this.watchers.get(pointer)) this.watchers.delete(pointer)
+          this.releases.delete(key)
+          if (!this.watchers.get(key)) this.watchers.delete(key)
           this.reconcile()
         }, this.releaseDelay),
       )
@@ -186,48 +214,54 @@ export class SubtreePatchDB<
   private roots(): string[] {
     const watched = [...this.watchers.keys()]
     return watched.filter(
-      pointer => !watched.some(other => isAncestor(other, pointer)),
+      key => !watched.some(other => other !== key && serves(other, key)),
     )
   }
 
   private reconcile() {
     if (!this.running) return
     const roots = this.roots()
-    roots
-      .filter(pointer => !this.active.has(pointer))
-      .forEach(pointer => this.open(pointer))
-    ; [...this.active.keys()]
-      .filter(pointer => !roots.includes(pointer))
-      .forEach(pointer => {
-        const ancestor = roots.find(root => isAncestor(root, pointer))
-        if (ancestor && !this.active.get(ancestor)?.cursor) return
-        this.close(pointer)
+    roots.filter(key => !this.active.has(key)).forEach(key => this.open(key))
+    ;[...this.active.keys()]
+      .filter(key => !roots.includes(key))
+      .forEach(key => {
+        const server = roots.find(root => serves(root, key))
+        if (server && !this.active.get(server)?.cursor) return
+        this.close(key)
       })
   }
 
-  private sinceFor(pointer: string): Cursor | null {
-    const below = (other: string) => isAncestor(pointer, other)
-    if ([...this.active.keys(), ...this.cursors.keys()].some(below)) return null
-    const own = this.cursors.get(pointer)
+  /**
+   * Replays from a cursor only when no other held subscription overlaps the data,
+   * so a replay never re-applies revisions over newer data.
+   */
+  private sinceFor(key: string): Cursor | null {
+    const overlapping = [...this.active.keys(), ...this.cursors.keys()].some(
+      other => other !== key && overlaps(other, key) && !serves(other, key),
+    )
+    if (overlapping) return null
+    const own = this.cursors.get(key)
     if (own) return own
     const ancestors = [...this.cursors.keys()]
-      .filter(other => isAncestor(other, pointer))
+      .filter(other => other !== key && serves(other, key))
       .sort((a, b) => b.length - a.length)
     return ancestors.length ? this.cursors.get(ancestors[0]!)! : null
   }
 
-  private open(pointer: string) {
+  private open(key: string) {
+    const { pointer, projection } = parseSubscriptionKey(key)
     const path = arrayFromPath(pointer)
-    const since = this.sinceFor(pointer)
+    const since = this.sinceFor(key)
     const entry: Active = {
       path,
+      projection,
       cursor: null,
       subscription: new Subscription(),
     }
-    this.active.set(pointer, entry)
+    this.active.set(key, entry)
     entry.subscription.add(
-      this.source.subscribe(path, since).subscribe({
-        next: event => this.receive(pointer, event),
+      this.source.subscribe(path, since, projection).subscribe({
+        next: event => this.receive(key, event),
         error: error => this.fail(error),
         complete: () =>
           this.fail(new Error(`Subscription to ${pointer || '/'} ended`)),
@@ -235,10 +269,10 @@ export class SubtreePatchDB<
     )
   }
 
-  private close(pointer: string) {
-    const entry = this.active.get(pointer)
+  private close(key: string) {
+    const entry = this.active.get(key)
     if (!entry) return
-    this.active.delete(pointer)
+    this.active.delete(key)
     entry.subscription.unsubscribe()
     this.emit(this.cache$.value)
   }
@@ -248,7 +282,7 @@ export class SubtreePatchDB<
     clearTimeout(this.flush)
     this.flush = undefined
     this.applyPending()
-    ; [...this.active.keys()].forEach(pointer => this.close(pointer))
+    ;[...this.active.keys()].forEach(key => this.close(key))
   }
 
   private fail(error: unknown) {
@@ -257,11 +291,11 @@ export class SubtreePatchDB<
     this.failures$.next(error)
   }
 
-  private receive(pointer: string, event: SubtreeEvent) {
-    const entry = this.active.get(pointer)
+  private receive(key: string, event: SubtreeEvent) {
+    const entry = this.active.get(key)
     if (!entry) return
     if ('patch' in event) {
-      this.pending.push({ pointer, revision: event })
+      this.pending.push({ key, revision: event })
       this.flush ??= setTimeout(() => {
         this.flush = undefined
         this.applyPending()
@@ -272,20 +306,29 @@ export class SubtreePatchDB<
     const cache = this.cache$.value
     if (event.revisions) {
       event.revisions.forEach(revision =>
-        this.applyRevision(cache, pointer, revision),
+        this.applyRevision(cache, entry, revision),
       )
     } else {
-      this.applyAt(cache, entry.path, event.value)
+      this.applyAt(
+        cache,
+        entry.path,
+        mergeProjected(
+          entry.projection,
+          [],
+          getValueByPointer(cache.value, pathFromArray(entry.path)),
+          event.value,
+        ),
+      )
     }
     entry.cursor = { epoch, id: event.id }
-    ; [...this.cursors.keys()]
-      .filter(other => isAncestor(pointer, other))
+    ;[...this.cursors.keys()]
+      .filter(other => other !== key && serves(key, other))
       .forEach(other => {
         this.cursors.delete(other)
         this.loaded.delete(other)
       })
-    this.cursors.set(pointer, entry.cursor)
-    this.loaded.add(pointer)
+    this.cursors.set(key, entry.cursor)
+    this.loaded.add(key)
     this.emit(cache)
     this.reconcile()
   }
@@ -296,28 +339,55 @@ export class SubtreePatchDB<
     this.pending
       .splice(0)
       .sort((a, b) => a.revision.id - b.revision.id)
-      .forEach(({ pointer, revision }) => {
-        const entry = this.active.get(pointer)
+      .forEach(({ key, revision }) => {
+        const entry = this.active.get(key)
         if (!entry?.cursor || revision.id <= entry.cursor.id) return
-        this.applyRevision(cache, pointer, revision)
+        this.applyRevision(cache, entry, revision)
         entry.cursor = { epoch: entry.cursor.epoch, id: revision.id }
-        this.cursors.set(pointer, entry.cursor)
+        this.cursors.set(key, entry.cursor)
       })
     this.emit(cache)
   }
 
-  private applyRevision(cache: Dump<T>, pointer: string, revision: Revision) {
-    if (!revision.patch.length) return
-    this.handleRevision(
-      {
-        id: revision.id,
-        patch: revision.patch.map(op =>
-          op.path === '' && op.op !== PatchOp.REMOVE
-            ? this.replacementAt(cache, arrayFromPath(pointer), op.value)
-            : ({ ...op, path: pointer + op.path } as Operation<unknown>),
-        ),
-      },
+  /** Applies each operation against the document as the previous one left it. */
+  private applyRevision(cache: Dump<T>, entry: Active, revision: Revision) {
+    const pointer = pathFromArray(entry.path)
+    revision.patch.forEach(op => {
+      this.handleRevision(
+        { id: revision.id, patch: [this.localize(cache, entry, pointer, op)] },
+        cache,
+      )
+    })
+  }
+
+  private localize(
+    cache: Dump<T>,
+    { projection }: Active,
+    pointer: string,
+    op: Operation<unknown>,
+  ): Operation<unknown> {
+    const path = pointer + op.path
+    if (op.op === PatchOp.REMOVE) return { ...op, path }
+    if (!projection) {
+      return op.path === ''
+        ? this.replacementAt(cache, arrayFromPath(path), op.value)
+        : { ...op, path }
+    }
+    const segments = arrayFromPath(path)
+    const parent = getValueByPointer(
+      cache.value,
+      pathFromArray(segments.slice(0, -1)),
+    )
+    if (op.op === PatchOp.ADD && Array.isArray(parent)) return { ...op, path }
+    return this.replacementAt(
       cache,
+      segments,
+      mergeProjected(
+        projection,
+        arrayFromPath(op.path),
+        getValueByPointer(cache.value, path),
+        op.value,
+      ),
     )
   }
 
@@ -364,18 +434,40 @@ export class SubtreePatchDB<
     this.changes$.next()
   }
 
-  private covered(pointer: string): boolean {
-    return [...this.loaded].some(
-      other => other === pointer || isAncestor(other, pointer),
-    )
+  private covered(key: string): boolean {
+    return [...this.loaded].some(other => serves(other, key))
   }
 
-  private isLive(pointer: string): boolean {
+  private isLive(key: string): boolean {
     return [...this.active.entries()].some(
-      ([other, { cursor }]) =>
-        !!cursor && (other === pointer || isAncestor(other, pointer)),
+      ([other, { cursor }]) => !!cursor && serves(other, key),
     )
   }
+}
+
+/** The watched value of a subscription key: its projection of the document at its pointer. */
+function read(key: string, data: unknown): unknown {
+  const { pointer, projection } = parseSubscriptionKey(key)
+  return projectRoot(projection, getValueByPointer(data as any, pointer))
+}
+
+/**
+ * Whether a subscription's data includes everything another subscription receives.
+ * An unprojected subscription serves its subtree; a projected one only itself.
+ */
+function serves(server: string, served: string): boolean {
+  if (server === served) return true
+  const a = parseSubscriptionKey(server)
+  if (a.projection) return false
+  const b = parseSubscriptionKey(served)
+  return a.pointer === b.pointer || isAncestor(a.pointer, b.pointer)
+}
+
+/** Whether two subscriptions' subtrees share any path. */
+function overlaps(a: string, b: string): boolean {
+  const p = parseSubscriptionKey(a).pointer
+  const q = parseSubscriptionKey(b).pointer
+  return p === q || isAncestor(p, q) || isAncestor(q, p)
 }
 
 /** True when `ancestor` is a proper ancestor of `pointer`. */

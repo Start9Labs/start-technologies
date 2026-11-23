@@ -128,7 +128,6 @@ export type DataUrlInput = z.input<typeof schemas.DataUrl>
 export type DbCursorInput = z.input<typeof schemas.DbCursor>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type Dump = z.output<typeof schemas.Dump>
-export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetOsAssetParamsInput = z.input<typeof schemas.GetOsAssetParams>
 export type GetOsVersionParamsInput = z.input<typeof schemas.GetOsVersionParams>
@@ -184,6 +183,11 @@ export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type PackageVersionCount = z.output<typeof schemas.PackageVersionCount>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
 export type ReaderParamsInput = z.input<typeof schemas.ReaderParams>
 
 /**
@@ -244,6 +248,7 @@ export type CurrentDependencyKind = z.output<
 >
 export type Description = z.output<typeof schemas.Description>
 export type DownloadsResponse = z.output<typeof schemas.DownloadsResponse>
+export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type EditReaderParamsInput = z.input<typeof schemas.EditReaderParams>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
 
