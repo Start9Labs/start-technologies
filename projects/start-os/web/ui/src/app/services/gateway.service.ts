@@ -16,11 +16,22 @@ export function isConnectedGateway(
   )
 }
 
+/** Gateways by display name, then ID. */
+export function sortedGateways(
+  gateways: Record<string, T.NetworkInterfaceInfo>,
+): [string, T.NetworkInterfaceInfo][] {
+  return Object.entries(gateways).sort(
+    ([aId, a], [bId, b]) =>
+      gatewayName(aId, a).localeCompare(gatewayName(bId, b)) ||
+      aId.localeCompare(bId),
+  )
+}
+
 export function outboundGatewayOptions(
   gateways: Record<string, T.NetworkInterfaceInfo>,
   selected: string | null,
 ): Record<string, string> {
-  const ids = Object.entries(gateways)
+  const ids = sortedGateways(gateways)
     .filter(([id, gateway]) => id === selected || isConnectedGateway(gateway))
     .map(([id]) => id)
   if (selected && !ids.includes(selected)) ids.push(selected)
@@ -64,7 +75,7 @@ export class GatewayService {
   readonly gateways = computed(() => {
     const network = this.network()
     if (!network) return
-    return Object.entries(network.gateways).flatMap(
+    return sortedGateways(network.gateways).flatMap(
       ([id, gateway]): GatewayPlus[] => {
         if (!isConnectedGateway(gateway)) return []
         const subnets = gateway.ipInfo.subnets.map(s => utils.IpNet.parse(s))

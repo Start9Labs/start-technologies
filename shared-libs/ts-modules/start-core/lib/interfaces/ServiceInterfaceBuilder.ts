@@ -27,6 +27,7 @@ export class ServiceInterfaceBuilder {
       schemeOverride: { ssl: Scheme; noSsl: Scheme } | null
       masked: boolean
       preferredLauncherAddress?: string | null
+      index?: number
     },
   ) {}
 }

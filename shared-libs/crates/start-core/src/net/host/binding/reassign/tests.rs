@@ -46,6 +46,7 @@ fn binding(ports: &mut AvailablePorts, port: u16, ssl: Option<u16>) -> BindInfo 
             },
             interface_type: ServiceInterfaceType::Api,
             preferred_launcher_address: None,
+            index: None,
         },
     );
     binding

@@ -198,6 +198,9 @@ pub struct ServiceInterface {
     pub interface_type: ServiceInterfaceType,
     /// The interface address Open UI should prefer.
     pub preferred_launcher_address: Option<String>,
+    /// Position in the package's interface list, set by the package. Unset sorts last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
 }
 
 rpc_toolkit::reflect_ts!(ServiceInterface);
@@ -243,6 +246,9 @@ pub struct RangeServiceInterface {
     pub name: String,
     pub description: String,
     pub scheme: Option<InternedString>,
+    /// Position in the package's interface list, set by the package. Unset sorts last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
 }
 
 rpc_toolkit::reflect_ts!(RangeServiceInterface);

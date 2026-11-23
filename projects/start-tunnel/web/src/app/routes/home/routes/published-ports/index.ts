@@ -32,6 +32,7 @@ import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 
 import { mapForwards, mapPinholes, MappedDevice, MappedForward } from './utils'
+import { byIp, entriesByIp } from 'src/app/utils/order'
 
 @Component({
   template: `
@@ -237,8 +238,8 @@ export default class PublishedPorts {
   private readonly devices: Signal<MappedDevice[]> = toSignal(
     this.patch.watch$('wg', 'subnets').pipe(
       map(subnets =>
-        Object.values(subnets).flatMap(subnet =>
-          Object.entries(subnet.clients)
+        entriesByIp(subnets).flatMap(([, subnet]) =>
+          entriesByIp(subnet.clients)
             .filter(([, c]) => c.kind === 'server')
             .map(([ip, { name }]) => ({
               ip,
@@ -270,10 +271,17 @@ export default class PublishedPorts {
   protected readonly transportLabel = utils.transportLabel
   protected readonly portForwards = toSignal(this.patch.watch$('portForwards'))
   protected readonly pinholes = toSignal(this.patch.watch$('pinholes6'))
-  protected readonly forwards = computed(() => [
-    ...mapForwards(this.portForwards() || {}, this.allDevices()),
-    ...mapPinholes(this.pinholes() || {}, this.allDevices()),
-  ])
+  protected readonly forwards = computed(() =>
+    [
+      ...mapForwards(this.portForwards() || {}, this.allDevices()),
+      ...mapPinholes(this.pinholes() || {}, this.allDevices()),
+    ].sort(
+      (a, b) =>
+        byIp(a.externalip, b.externalip) ||
+        Number(a.externalport) - Number(b.externalport) ||
+        (a.hostname ?? '').localeCompare(b.hostname ?? ''),
+    ),
+  )
   protected readonly manual = computed(() =>
     this.forwards().filter(f => !f.auto),
   )

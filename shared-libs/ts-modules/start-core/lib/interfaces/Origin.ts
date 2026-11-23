@@ -56,6 +56,7 @@ export class Origin {
         schemeOverride,
         masked,
         preferredLauncherAddress,
+        index,
       } = serviceInterface.options
 
       const addressInfo = this.build({
@@ -73,6 +74,7 @@ export class Origin {
         type,
         masked,
         preferredLauncherAddress,
+        ...(index != null && { index }),
       })
 
       addressesInfo.push(addressInfo)

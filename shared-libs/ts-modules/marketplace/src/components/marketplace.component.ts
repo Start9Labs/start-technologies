@@ -15,6 +15,7 @@ import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import {
   i18nKey,
   i18nPipe,
+  indexedEntries,
   knownRegistries,
   LocalizePipe,
   MarkdownPipe,
@@ -380,7 +381,7 @@ export class MarketplaceComponent {
         ...(packages.some(isNewArrival) && {
           [NEW_ARRIVALS]: { name: this.i18n.transform('New Arrivals') },
         }),
-        ...listed,
+        ...Object.fromEntries(indexedEntries(listed)),
       }
     },
   )

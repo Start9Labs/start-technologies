@@ -26,6 +26,7 @@ import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 
 import { SUBNETS_ADD } from './add'
+import { entriesByIp } from 'src/app/utils/order'
 
 @Component({
   template: `
@@ -170,7 +171,7 @@ export default class Subnets {
   protected readonly subnets = toSignal(
     this.patch.watch$('wg', 'subnets').pipe(
       map(s =>
-        Object.entries(s).map(([range, info]) => ({
+        entriesByIp(s).map(([range, info]) => ({
           range,
           name: info.name,
           hasClients: !!Object.keys(info.clients).length,
@@ -218,7 +219,7 @@ export default class Subnets {
     wanIp,
     ipv6,
   }: MappedSubnet): void {
-    const devices = Object.entries(clients).map(([ip, client]) => ({
+    const devices = entriesByIp(clients).map(([ip, client]) => ({
       ip,
       name: client.name,
     }))

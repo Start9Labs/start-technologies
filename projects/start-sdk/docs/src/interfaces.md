@@ -87,6 +87,8 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
 })
 ```
 
+StartOS lists a package's interfaces in the order they are exported. Pass `index` to `sdk.createInterface` to place one elsewhere; lower numbers come first.
+
 Expose interfaces on separate ports:
 
 ```typescript

@@ -1,7 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { T, utils } from '@start9labs/start-core'
 import { selectLaunchableAddress } from '@start9labs/start-core/util/selectLaunchableAddress'
-import { tuiDefaultSort } from '@taiga-ui/cdk'
 import { ConfigService } from 'src/app/services/config.service'
 import { GatewayPlus } from 'src/app/services/gateway.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
@@ -10,7 +9,8 @@ import {
   renderPkgStatus,
 } from 'src/app/services/pkg-status-rendering.service'
 import { toAuthorityName } from 'src/app/utils/acme'
-import { getManifest } from 'src/app/utils/get-package-data'
+import { byTitle, getManifest } from 'src/app/utils/get-package-data'
+import { packageInterfaces } from 'src/app/utils/service-interfaces'
 
 // An IPv6 global-unicast address (GUA) — not loopback / ULA (fc00::/7) /
 // link-local (fe80::/10). Mirrors the backend's `ipv6_is_local` complement, so
@@ -112,41 +112,33 @@ export class InterfaceService {
   ): MappedServiceInterface[] {
     const { hosts } = pkg
 
-    const all = Object.values(hosts).flatMap(host =>
-      Object.values(host.bindings).flatMap(binding =>
-        Object.values(binding.interfaces),
-      ),
-    )
+    const all = packageInterfaces(hosts)
 
-    const single = all
-      .sort(tuiDefaultSort)
-      .map<MappedServiceInterface>(iFace => {
-        const hostId = iFace.addressInfo.hostId || ''
-        const host = hosts[hostId]
-        const sharedHostNames = all
-          .filter(si => si.addressInfo.hostId === hostId && si.id !== iFace.id)
-          .map(si => si.name)
+    const single = all.map<MappedServiceInterface>(iFace => {
+      const hostId = iFace.addressInfo.hostId || ''
+      const host = hosts[hostId]
+      const sharedHostNames = all
+        .filter(si => si.addressInfo.hostId === hostId && si.id !== iFace.id)
+        .map(si => si.name)
 
-        return {
-          ...iFace,
-          gatewayGroups: host
-            ? this.getGatewayGroups(iFace, host, gateways)
-            : [],
-          pluginGroups: host
-            ? this.getPluginGroups(iFace, host, allPackageData)
-            : [],
-          // A public domain applies to the whole host, so the CA selector must
-          // appear whenever any binding on it is SSL — not only this interface's.
-          anyAddSsl: Object.values(host?.bindings ?? {}).some(
-            b => !!b.options.addSsl,
-          ),
-          // This interface's own binding: gates whether port/firewall tests are
-          // meaningful while the service is stopped (see MappedServiceInterface).
-          addSsl:
-            !!host?.bindings[iFace.addressInfo.internalPort]?.options.addSsl,
-          sharedHostNames,
-        }
-      })
+      return {
+        ...iFace,
+        gatewayGroups: host ? this.getGatewayGroups(iFace, host, gateways) : [],
+        pluginGroups: host
+          ? this.getPluginGroups(iFace, host, allPackageData)
+          : [],
+        // A public domain applies to the whole host, so the CA selector must
+        // appear whenever any binding on it is SSL — not only this interface's.
+        anyAddSsl: Object.values(host?.bindings ?? {}).some(
+          b => !!b.options.addSsl,
+        ),
+        // This interface's own binding: gates whether port/firewall tests are
+        // meaningful while the service is stopped (see MappedServiceInterface).
+        addSsl:
+          !!host?.bindings[iFace.addressInfo.internalPort]?.options.addSsl,
+        sharedHostNames,
+      }
+    })
 
     const ranges = Object.entries(hosts)
       .flatMap(([hostId, host]) =>
@@ -175,6 +167,7 @@ export class InterfaceService {
               masked: false,
               type: 'api',
               preferredLauncherAddress: null,
+              index: iface.index,
               addressInfo,
               gatewayGroups: this.getRangeGatewayGroups(
                 addressInfo,
@@ -196,7 +189,11 @@ export class InterfaceService {
             }
           }),
       )
-      .sort((a, b) => a.addressInfo.internalPort - b.addressInfo.internalPort)
+      .sort(
+        (a, b) =>
+          (a.index ?? Infinity) - (b.index ?? Infinity) ||
+          a.addressInfo.internalPort - b.addressInfo.internalPort,
+      )
 
     return [...single, ...ranges]
   }
@@ -358,7 +355,10 @@ export class InterfaceService {
 
     // Also include URL plugins that have no addresses yet
     if (allPackageData) {
-      for (const [pkgId, pkg] of Object.entries(allPackageData)) {
+      const byPackageTitle = Object.entries(allPackageData).sort(
+        ([, a], [, b]) => byTitle(a, b),
+      )
+      for (const [pkgId, pkg] of byPackageTitle) {
         if (pkg.plugin?.url && !groupMap.has(pkgId)) {
           groupMap.set(pkgId, [])
         }

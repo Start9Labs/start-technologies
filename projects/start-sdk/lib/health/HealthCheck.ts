@@ -10,6 +10,8 @@ import { isInGracePeriod, withGracePeriod } from './isInGracePeriod'
 export type HealthCheckParams = {
   id: HealthCheckId
   name: string
+  /** Position in the StartOS health-check list, lowest first. Unset sorts last. */
+  index?: number
   trigger?: Trigger
   gracePeriod?: number
   fn(): Promise<HealthCheckResult> | HealthCheckResult
@@ -77,6 +79,7 @@ export class HealthCheck extends Drop {
                 ...displayedHealth,
                 name: o.name,
                 id: o.id,
+                ...(o.index != null && { index: o.index }),
               })
               this.currentValue = {
                 lastResult: displayedHealth.result,
@@ -87,6 +90,7 @@ export class HealthCheck extends Drop {
               await effects.setHealth({
                 name: o.name,
                 id: o.id,
+                ...(o.index != null && { index: o.index }),
                 result: isInGracePeriod(started, o.gracePeriod)
                   ? 'starting'
                   : 'failure',

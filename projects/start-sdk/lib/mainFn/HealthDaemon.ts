@@ -224,6 +224,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
       ...displayedHealth,
       id: this.id,
       name: display,
+      ...(this.ready.index != null && { index: this.ready.index }),
     })
   }
 

@@ -469,6 +469,15 @@ where
     }
 }
 
+/// The `index` that places a new entry after every indexed entry.
+pub fn next_index(indices: impl IntoIterator<Item = Option<u32>>) -> u32 {
+    indices
+        .into_iter()
+        .flatten()
+        .max()
+        .map_or(0, |last| last + 1)
+}
+
 #[repr(transparent)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct JsonKey<T>(pub T);
@@ -562,4 +571,11 @@ impl<T> std::ops::DerefMut for WithTimeData<T> {
         self.updated_at = Utc::now();
         &mut self.value
     }
+}
+
+#[test]
+fn next_index_follows_the_highest_assigned_index() {
+    assert_eq!(next_index([]), 0);
+    assert_eq!(next_index([None, None]), 0);
+    assert_eq!(next_index([Some(3), None, Some(1)]), 4);
 }

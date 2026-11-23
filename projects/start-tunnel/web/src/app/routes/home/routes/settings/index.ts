@@ -37,6 +37,7 @@ import { AuthService } from 'src/app/services/auth.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 import { UpdateService } from 'src/app/services/update.service'
 import { CHANGE_PASSWORD } from './change-password'
+import { entriesByKey } from 'src/app/utils/order'
 
 @Component({
   template: `
@@ -233,7 +234,8 @@ export default class Settings {
   private readonly ips = toSignal(
     this.patch.watch$('gateways').pipe(
       map(g =>
-        Object.values(g)
+        entriesByKey(g)
+          .map(([, gateway]) => gateway)
           .flatMap(
             val => val.ipInfo?.subnets.map(s => utils.IpNet.parse(s)) || [],
           )

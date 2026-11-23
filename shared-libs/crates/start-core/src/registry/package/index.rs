@@ -302,6 +302,9 @@ impl ReaderParams {
 #[model = "Model<Self>"]
 pub struct Category {
     pub name: LocaleString,
+    /// The order categories were added in; re-adding one keeps its place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
 }
 
 rpc_toolkit::reflect_ts!(Category);

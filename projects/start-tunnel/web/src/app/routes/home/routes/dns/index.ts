@@ -29,6 +29,7 @@ import { ApiService } from 'src/app/services/api/api.service'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
 
 import { DNS_ADD } from './add'
+import { entriesByIp } from 'src/app/utils/order'
 
 @Component({
   template: `
@@ -177,8 +178,8 @@ export default class Dns {
   private readonly devices = toSignal(
     this.patch.watch$('wg', 'subnets').pipe(
       map(subnets =>
-        Object.values(subnets).flatMap(({ clients, ipv6 }) =>
-          Object.entries(clients).map(([ip, { name, kind }]) => ({
+        entriesByIp(subnets).flatMap(([, { clients, ipv6 }]) =>
+          entriesByIp(clients).map(([ip, { name, kind }]) => ({
             ip,
             name,
             kind,

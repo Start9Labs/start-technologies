@@ -1,3 +1,4 @@
+import { indexedEntries } from '@start9labs/shared'
 import { PatchDB } from 'patch-db-client'
 import {
   DataModel,
@@ -28,18 +29,21 @@ export function getManifest(pkg: PackageDataEntry): T.Manifest {
     : pkg.stateInfo.manifest!
 }
 
+export function byTitle(a: PackageDataEntry, b: PackageDataEntry): number {
+  return getManifest(a).title.localeCompare(getManifest(b).title)
+}
+
 export function getCurrentManifest(pkg: PackageDataEntry): T.Manifest {
   return pkg.stateInfo.manifest ?? getManifest(pkg)
 }
 
-/** Tasks on the package itself or a current dependency, keyed by replay ID. */
+/** Tasks on the package itself or a current dependency, keyed by replay ID, in creation order. */
 export function getLiveTasks(pkg: PackageDataEntry): [string, T.TaskEntry][] {
   const { id } = getManifest(pkg)
-  return Object.entries(pkg.tasks).filter(
-    (entry): entry is [string, T.TaskEntry] =>
-      !!entry[1] &&
-      (entry[1].task.packageId === id ||
-        entry[1].task.packageId in pkg.currentDependencies),
+  return indexedEntries(pkg.tasks).filter(
+    ([, entry]) =>
+      entry.task.packageId === id ||
+      entry.task.packageId in pkg.currentDependencies,
   )
 }
 

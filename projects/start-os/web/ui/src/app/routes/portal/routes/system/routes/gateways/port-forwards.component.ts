@@ -14,6 +14,7 @@ import { TableComponent } from 'src/app/routes/portal/components/table.component
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { formatPortRange } from 'src/app/utils/format-port-range'
+import { hostInterfaceNames } from 'src/app/utils/service-interfaces'
 
 export type PortForwardsModalData = {
   gatewayId: string
@@ -181,18 +182,9 @@ export class PortForwardsModalComponent {
             pkgId
 
           for (const [hostId, host] of Object.entries(pkg.hosts)) {
-            // Interface names exported from this host's bindings + ranges
-            const ifaceNames: string[] = []
-            for (const binding of Object.values(host.bindings)) {
-              for (const iface of Object.values(binding.interfaces)) {
-                ifaceNames.push(`${title} - ${iface.name}`)
-              }
-            }
-            for (const range of Object.values(host.bindingRanges)) {
-              if (range.interface) {
-                ifaceNames.push(`${title} - ${range.interface.name}`)
-              }
-            }
+            const ifaceNames = hostInterfaceNames(host).map(
+              name => `${title} - ${name}`,
+            )
 
             const label =
               ifaceNames.length > 0 ? ifaceNames : [`${title} - ${hostId}`]

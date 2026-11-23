@@ -34,6 +34,7 @@ import {
 import { VOLUME_SOURCES } from './source-picker'
 
 import { DELETE_LOCAL } from './delete-local'
+import { byEntryName } from 'src/app/utils/by-entry-name'
 @Component({
   template: `
     <ng-container *title>
@@ -76,7 +77,7 @@ import { DELETE_LOCAL } from './delete-local'
         </button>
       </header>
       <table [appTable]="['Name', 'Type', 'Path', 'Status', 'Free', null]">
-        @for (entry of volumes() | keyvalue: null; track entry.key) {
+        @for (entry of volumes() | keyvalue: byEntryName; track entry.key) {
           @let id = entry.key;
           @let volume = entry.value;
           <tr>
@@ -199,6 +200,8 @@ import { DELETE_LOCAL } from './delete-local'
   ],
 })
 export default class Volumes {
+  protected readonly byEntryName = byEntryName
+
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
   private readonly errors = inject(ErrorService)

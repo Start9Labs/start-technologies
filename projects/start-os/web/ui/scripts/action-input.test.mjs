@@ -62,6 +62,7 @@ const boundaries = new Map([
   [
     'src/app/utils/get-package-data',
     `
+    export const byTitle = () => 0;
     export const getAllPackages = async () => ({});
     export const getLiveTasks = () => [];
     export const getManifest = () => ({});

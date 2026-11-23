@@ -1,5 +1,6 @@
 import { utils } from '@start9labs/start-core'
 import { TunnelData } from 'src/app/services/patch-db/data-model'
+import { entriesByKey } from 'src/app/utils/order'
 
 type Gateways = TunnelData['gateways']
 
@@ -27,7 +28,8 @@ function isWanCandidate(address: string): boolean {
 
 // Public WAN IPv4 addresses the gateway can egress from — the explicit choices.
 export function wanOptions(gateways: Gateways): readonly string[] {
-  return Object.values(gateways)
+  return entriesByKey(gateways)
+    .map(([, gateway]) => gateway)
     .flatMap(
       g => g.ipInfo?.subnets.map(s => utils.IpNet.parse(s).address) ?? [],
     )
@@ -37,7 +39,7 @@ export function wanOptions(gateways: Gateways): readonly string[] {
 // Mirrors core's default_wan (core/src/tunnel/igd.rs): the first gateway's
 // detected WAN IP if it is a candidate, else its first candidate subnet address.
 export function defaultWanIp(gateways: Gateways): string | null {
-  for (const { ipInfo } of Object.values(gateways)) {
+  for (const [, { ipInfo }] of entriesByKey(gateways)) {
     if (!ipInfo) continue
     if (ipInfo.wanIp && isWanCandidate(ipInfo.wanIp)) return ipInfo.wanIp
     const subnet = ipInfo.subnets

@@ -83,10 +83,18 @@ pub async fn add_category(
 ) -> Result<(), Error> {
     ctx.db
         .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_categories_mut()
-                .insert(&id, &Category { name })
+            let categories = db.as_index_mut().as_package_mut().as_categories_mut();
+            let index = match categories.as_idx(&id) {
+                Some(category) => category.as_index().de()?,
+                None => Some(next_index(
+                    categories
+                        .as_entries()?
+                        .into_iter()
+                        .map(|(_, category)| category.as_index().de())
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
+            };
+            categories.insert(&id, &Category { name, index })
         })
         .await
         .result?;

@@ -348,6 +348,8 @@ Every daemon has a `ready` property that tells StartOS when the daemon has start
 
 Use `display: null` for internal daemons (databases, caches) whose readiness check should not be shown to the user.
 
+StartOS lists health checks in the order the daemon chain declares them. Set `index` on `ready` to move a check to that position, counting from 0; it goes ahead of any check that lands there by declaration order.
+
 ### Standalone Health Checks (`addHealthCheck`)
 
 For ongoing conditions beyond daemon readiness — sync progress, network reachability, secondary interface availability — use `.addHealthCheck()` in the daemon chain. These run continuously and are displayed to the user. Their IDs are what dependency packages reference in their `healthChecks` array.

@@ -25,6 +25,7 @@ import { FormService, trim } from 'src/app/services/form.service'
 import {
   gatewayName,
   isConnectedGateway,
+  sortedGateways,
 } from 'src/app/services/gateway.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
@@ -151,7 +152,7 @@ export default class EditGateway {
               ),
             ))
         ) {
-          for (const [id, g] of Object.entries(gateways)) {
+          for (const [id, g] of sortedGateways(gateways)) {
             if (
               gateway.dns.servers.some(server =>
                 g.ipInfo?.lanIp.some(

@@ -481,6 +481,28 @@ describe('HealthDaemon ready polling', () => {
     },
   )
 
+  it('reports its index with each health result', async () => {
+    const setHealth = jest.fn(async () => null)
+    const hd = new HealthDaemon<Manifest>(
+      null,
+      [],
+      'sync',
+      {
+        display: 'Sync',
+        index: 3,
+        trigger: onceTrigger,
+        fn: results('success'),
+      },
+      { ...fakeEffects(), setHealth },
+    )
+    await hd.updateStatus()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(setHealth).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'sync', index: 3 }),
+    )
+    await hd.term()
+  })
+
   it('marks dependency-blocked checks as starting and waiting', async () => {
     const dependency = new HealthDaemon<Manifest>(
       null,

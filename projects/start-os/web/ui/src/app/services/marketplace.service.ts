@@ -11,7 +11,6 @@ import {
   isRegistryLoading,
 } from '@start9labs/marketplace'
 import {
-  defaultRegistries,
   ErrorService,
   Exver,
   isNetworkError,
@@ -42,6 +41,7 @@ import { ConnectionService } from 'src/app/services/connection.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
+import { sortedRegistries } from 'src/app/utils/registries'
 
 @Injectable({
   providedIn: 'root',
@@ -57,7 +57,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   private readonly registryCache$ = this.patch.watch$('registryCache')
 
-  /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
+  /** Registries in {@link sortedRegistries} order. */
   readonly registries$: Observable<
     (StoreIdentity & { status: T.RegistryStatus })[]
   > = combineLatest([
@@ -65,22 +65,20 @@ export class MarketplaceService extends AbstractMarketplaceService {
     this.registryCache$,
   ]).pipe(
     map(([registries, cache]) =>
-      Object.entries(registries)
-        .sort(([a], [b]) => defaultRank(a) - defaultRank(b))
-        .flatMap(([url, name]) => {
-          try {
-            const entry = findRegistryCache(cache, url)
-            return [
-              {
-                ...toStoreIdentity(url, name),
-                status: registryStatus(entry),
-                error: entry?.error,
-              },
-            ]
-          } catch {
-            return []
-          }
-        }),
+      sortedRegistries(registries).flatMap(([url, name]) => {
+        try {
+          const entry = findRegistryCache(cache, url)
+          return [
+            {
+              ...toStoreIdentity(url, name),
+              status: registryStatus(entry),
+              error: entry?.error,
+            },
+          ]
+        } catch {
+          return []
+        }
+      }),
     ),
   )
 
@@ -302,12 +300,16 @@ export class MarketplaceService extends AbstractMarketplaceService {
           toPkg(this.exver, id, version, row, row.releases[version]!),
         ),
       ),
-      updates: listings.flatMap(([id, row]) => {
-        const release = row.updateTarget && row.releases[row.updateTarget]
-        return release && row.updateTarget
-          ? [toPkg(this.exver, id, row.updateTarget, row, release)]
-          : []
-      }),
+      updates: listings
+        .flatMap(([id, row]) => {
+          const release = row.updateTarget && row.releases[row.updateTarget]
+          return release && row.updateTarget
+            ? [toPkg(this.exver, id, row.updateTarget, row, release)]
+            : []
+        })
+        .sort(
+          (a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id),
+        ),
     }
   }
 
@@ -444,10 +446,4 @@ function findRegistryCache(cache: DataModel['registryCache'], url: string) {
     sameUrl(saved, url),
   )?.[1]
   return entry && !entry.listings ? { ...entry, listings: {} } : entry
-}
-
-function defaultRank(url: string): number {
-  const defaults = Object.values(defaultRegistries)
-  const rank = defaults.findIndex(known => sameUrl(known, url))
-  return rank < 0 ? defaults.length : rank
 }

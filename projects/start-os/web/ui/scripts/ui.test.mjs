@@ -53,7 +53,8 @@ boundary(
     `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
-    `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};`,
+    `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};` +
+    `export { indexedEntries } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/indexed-entries.ts', import.meta.url).href)};`,
 )
 boundary(
   '@taiga-ui/core',
@@ -1365,7 +1366,7 @@ test('release notes select the live UI language without refetching or changing r
   locale.language = 'german'
   assert.equal(pipe.transform(notes), 'Deutsche Hinweise')
   locale.language = 'french'
-  assert.equal(pipe.transform(notes), 'English notes')
+  assert.equal(pipe.transform(notes), 'Deutsche Hinweise')
   locale.language = 'english'
   assert.equal(pipe.transform(notes), 'English notes')
   assert.equal(f.requests.length, 0)

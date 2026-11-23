@@ -6,6 +6,7 @@ describe('setupServiceInterfaces', () => {
     bind: jest.fn(async () => null),
     bindRange: jest.fn(async () => null),
     exportServiceInterface: jest.fn(async () => null),
+    exportRangeServiceInterface: jest.fn(async () => null),
     clearBindings: jest.fn(async () => null),
     clearServiceInterfaces: jest.fn(async () => null),
   })
@@ -68,6 +69,30 @@ describe('setupServiceInterfaces', () => {
         { id: 'web', internalPort: 80 },
         { id: 'turn', internalPort: 49152 },
       ],
+    })
+  })
+
+  test('exports are indexed in declaration order unless the package sets one', async () => {
+    const effects = fakeEffects()
+    await setupServiceInterfaces(async ({ effects }) => {
+      await effects.exportServiceInterface({ id: 'ui' } as any)
+      await effects.exportRangeServiceInterface({ id: 'zmq' } as any)
+      await effects.exportServiceInterface({ id: 'admin', index: 9 } as any)
+      return [] as any
+    })(effects as unknown as Effects)
+
+    expect(
+      effects.exportServiceInterface.mock.calls.map(([p]: any[]) => [
+        p.id,
+        p.index,
+      ]),
+    ).toEqual([
+      ['ui', 0],
+      ['admin', 9],
+    ])
+    expect(effects.exportRangeServiceInterface).toHaveBeenCalledWith({
+      id: 'zmq',
+      index: 1,
     })
   })
 })

@@ -1,6 +1,6 @@
 import { Exver } from '@start9labs/shared'
 import { DataModel } from '../services/patch-db/data-model'
-import { getManifest } from './get-package-data'
+import { byTitle, getManifest } from './get-package-data'
 
 export function dryUpdate(
   {
@@ -23,5 +23,6 @@ export function dryUpdate(
           pkg.currentDependencies[id]?.versionRange || '',
         ),
     )
+    .sort(byTitle)
     .map(pkg => getManifest(pkg).title)
 }

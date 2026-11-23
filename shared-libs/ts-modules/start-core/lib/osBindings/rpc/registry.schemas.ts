@@ -875,10 +875,24 @@ export const ApplyWithPathParams: z.ZodIntersection<
   .meta({
     id: 'ApplyWithPathParams',
   })
-export const Category: z.ZodObject<{ name: typeof LocaleString }> =
-  /* @__PURE__ */ object({ name: LocaleString }).meta({
-    id: 'Category',
-  })
+export const Category: z.ZodObject<{
+  name: typeof LocaleString
+  /**
+   * The order categories were added in; re-adding one keeps its place.
+   */
+  index: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+}> = /* @__PURE__ */ object({
+  name: LocaleString,
+  /**
+   * The order categories were added in; re-adding one keeps its place.
+   */
+  index: z.int().nullable().optional().meta({
+    description:
+      'The order categories were added in; re-adding one keeps its place.',
+  }),
+}).meta({
+  id: 'Category',
+})
 export const CurrentDependencyKind: z.ZodUnion<
   readonly [
     z.ZodObject<{ kind: z.ZodLiteral<'exists'> }>,

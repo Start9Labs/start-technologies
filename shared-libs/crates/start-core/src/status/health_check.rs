@@ -10,6 +10,9 @@ use crate::util::FromStrParser;
 #[serde(rename_all = "camelCase")]
 pub struct NamedHealthCheckResult {
     pub name: String,
+    /// Position in the package's health-check list, set by the package. Unset sorts last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
     #[serde(flatten, deserialize_with = "legacy_waiting::deserialize")]
     #[visit(input_wire = "legacy_waiting::CompatibleHealthCheckResultKind")]
     #[visit(type_attributes(visit::input_wire))]
@@ -41,6 +44,7 @@ impl FromStr for NamedHealthCheckResult {
             };
             Ok(Self {
                 name: name.to_string(),
+                index: None,
                 kind,
             })
         };

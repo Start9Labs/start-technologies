@@ -30,6 +30,7 @@ import { BackupService } from './backup.service'
 import { CONVERSIONS, ConversionLabel } from './conversion'
 import { BackupLegacyWarningComponent } from './legacy-warning.component'
 import { BackupTargetManage } from './manage'
+import { byEntryName } from 'src/app/utils/by-entry-name'
 
 const TARGET_SOURCES: SourcePickerData = {
   intro:
@@ -125,7 +126,10 @@ const TARGET_SOURCES: SourcePickerData = {
           null,
         ]"
       >
-        @for (entry of service.targets() | keyvalue: null; track entry.key) {
+        @for (
+          entry of service.targets() | keyvalue: byEntryName;
+          track entry.key
+        ) {
           @let id = entry.key;
           @let target = entry.value;
           @let conversion =
@@ -294,6 +298,8 @@ const TARGET_SOURCES: SourcePickerData = {
   ],
 })
 export default class BackupTargets {
+  protected readonly byEntryName = byEntryName
+
   private readonly api = inject(ApiService)
   private readonly tasks = inject(TaskService)
   private readonly dialogs = inject(DialogService)

@@ -1162,6 +1162,13 @@ export const ExportRangeServiceInterfaceParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Position in the package's interface list. Unset sorts last.
+   */
+  index: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
 }> = /* @__PURE__ */ object({
   hostId: HostId,
   internalStartPort: z.int(),
@@ -1169,6 +1176,12 @@ export const ExportRangeServiceInterfaceParams: z.ZodObject<{
   name: z.string(),
   description: z.string(),
   scheme: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Position in the package's interface list. Unset sorts last.
+   */
+  index: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: "Position in the package's interface list. Unset sorts last.",
+  }),
 }).meta({
   id: 'ExportRangeServiceInterfaceParams',
 })
@@ -1938,11 +1951,22 @@ export const RangeServiceInterface: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Position in the package's interface list, set by the package. Unset sorts last.
+   */
+  index: z.ZodOptional<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   id: ServiceInterfaceId,
   name: z.string(),
   description: z.string(),
   scheme: wire(z.string().nullable().optional(), z.string().nullable()),
+  /**
+   * Position in the package's interface list, set by the package. Unset sorts last.
+   */
+  index: z.int().nullable().optional().meta({
+    description:
+      "Position in the package's interface list, set by the package. Unset sorts last.",
+  }),
 }).meta({
   id: 'RangeServiceInterface',
   description:
@@ -2248,6 +2272,13 @@ export const ExportServiceInterfaceParams: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Position in the package's interface list. Unset sorts last.
+   */
+  index: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
 }> = /* @__PURE__ */ object({
   id: ServiceInterfaceId,
   name: z.string(),
@@ -2263,6 +2294,12 @@ export const ExportServiceInterfaceParams: z.ZodObject<{
     z.string().nullable(),
   ).meta({
     description: 'The interface address Open UI should prefer.',
+  }),
+  /**
+   * Position in the package's interface list. Unset sorts last.
+   */
+  index: wire(z.int().nullable().optional(), z.int().nullable()).meta({
+    description: "Position in the package's interface list. Unset sorts last.",
   }),
 }).meta({
   id: 'ExportServiceInterfaceParams',
@@ -2335,16 +2372,52 @@ export const MountParams: z.ZodObject<{
 )
 export const NamedHealthCheckResult: z.ZodCodec<
   z.ZodIntersection<
-    z.ZodObject<{ name: z.ZodString }>,
+    z.ZodObject<{
+      name: z.ZodString
+      /**
+       * Position in the package's health-check list, set by the package. Unset sorts last.
+       */
+      index: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+    }>,
     typeof CompatibleHealthCheckResultKind
   >,
   z.ZodIntersection<
-    z.ZodObject<{ name: z.ZodString }>,
+    z.ZodObject<{
+      name: z.ZodString
+      /**
+       * Position in the package's health-check list, set by the package. Unset sorts last.
+       */
+      index: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+    }>,
     typeof NamedHealthCheckResultKind
   >
 > = /* @__PURE__ */ wire(
-  z.intersection(object({ name: z.string() }), CompatibleHealthCheckResultKind),
-  z.intersection(object({ name: z.string() }), NamedHealthCheckResultKind),
+  z.intersection(
+    object({
+      name: z.string(),
+      /**
+       * Position in the package's health-check list, set by the package. Unset sorts last.
+       */
+      index: z.int().nullable().optional().meta({
+        description:
+          "Position in the package's health-check list, set by the package. Unset sorts last.",
+      }),
+    }),
+    CompatibleHealthCheckResultKind,
+  ),
+  z.intersection(
+    object({
+      name: z.string(),
+      /**
+       * Position in the package's health-check list, set by the package. Unset sorts last.
+       */
+      index: z.int().nullable().optional().meta({
+        description:
+          "Position in the package's health-check list, set by the package. Unset sorts last.",
+      }),
+    }),
+    NamedHealthCheckResultKind,
+  ),
 ).meta({
   id: 'NamedHealthCheckResult',
 })
@@ -2534,6 +2607,10 @@ export const ServiceInterface: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
     z.ZodNullable<z.ZodString>
   >
+  /**
+   * Position in the package's interface list, set by the package. Unset sorts last.
+   */
+  index: z.ZodOptional<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   id: ServiceInterfaceId,
   name: z.string(),
@@ -2549,6 +2626,13 @@ export const ServiceInterface: z.ZodObject<{
     z.string().nullable(),
   ).meta({
     description: 'The interface address Open UI should prefer.',
+  }),
+  /**
+   * Position in the package's interface list, set by the package. Unset sorts last.
+   */
+  index: z.int().nullable().optional().meta({
+    description:
+      "Position in the package's interface list, set by the package. Unset sorts last.",
   }),
 }).meta({
   id: 'ServiceInterface',
@@ -2960,7 +3044,21 @@ export const StatusInfo: z.ZodObject<{
 export const TaskEntry: z.ZodObject<{
   task: typeof Task
   active: z.ZodBoolean
-}> = /* @__PURE__ */ object({ task: Task, active: z.boolean() }).meta({
+  /**
+   * Creation order among the package's tasks; a re-created task keeps its place.
+   */
+  index: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+}> = /* @__PURE__ */ object({
+  task: Task,
+  active: z.boolean(),
+  /**
+   * Creation order among the package's tasks; a re-created task keeps its place.
+   */
+  index: z.int().nullable().optional().meta({
+    description:
+      "Creation order among the package's tasks; a re-created task keeps its place.",
+  }),
+}).meta({
   id: 'TaskEntry',
 })
 export const CheckDependenciesResult: z.ZodObject<{

@@ -1,5 +1,5 @@
 import { Daemons, DaemonsReconciler, configHash } from '../mainFn/Daemons'
-import { cooldownTrigger } from '../trigger'
+import { cooldownTrigger, onceTrigger } from '../trigger'
 import { Daemon } from '../mainFn/Daemon'
 import { Mounts } from '../mainFn/Mounts'
 import { setupMain } from '../mainFn'
@@ -123,6 +123,50 @@ describe('Daemons recorder', () => {
       })
     expect(daemons.entries.map(x => x.kind)).toEqual(['oneshot', 'health'])
   })
+
+  it.each([
+    ['declaration order by default', {}, ['first', 'second', 'third']],
+    [
+      'a later position moves a check down',
+      { first: 9 },
+      ['second', 'third', 'first'],
+    ],
+    [
+      'a requested index wins a tie with a default',
+      { third: 0 },
+      ['third', 'first', 'second'],
+    ],
+    [
+      'requested ties keep declaration order',
+      { second: 0, third: 0 },
+      ['second', 'third', 'first'],
+    ],
+  ] as const)(
+    'orders health checks: %s',
+    async (_case, requested, expected) => {
+      const effects = { ...fakeEffects(), setHealth: async () => null } as any
+      const ready = (id: 'first' | 'second' | 'third') => ({
+        ...baseReady,
+        trigger: onceTrigger,
+        ...(id in requested && {
+          index: (requested as Record<string, number>)[id],
+        }),
+      })
+      const daemons = await Daemons.of<Manifest>({ effects })
+        .addHealthCheck('first', { ready: ready('first'), requires: [] })
+        .addHealthCheck('second', { ready: ready('second'), requires: [] })
+        .addHealthCheck('third', { ready: ready('third'), requires: [] })
+        .build()
+      const indices = Object.fromEntries(
+        daemons.healthDaemons.map(hd => [
+          hd.id,
+          hd.ready === 'EXIT_SUCCESS' ? null : hd.ready.index,
+        ]),
+      )
+      expect(expected.map(id => indices[id])).toEqual([0, 1, 2])
+      await daemons.term()
+    },
+  )
 })
 
 describe('configHash', () => {

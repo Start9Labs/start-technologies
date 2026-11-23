@@ -5,7 +5,8 @@ use const_format::formatcp;
 
 rust_i18n::i18n!("locales", fallback = ["en_US"]);
 
-/// The candidate serving a language: an exact match, else the first with its language code.
+/// The candidate serving a language: an exact match, else the alphabetically first with its
+/// language code.
 pub fn best_locale<'a>(
     lang: &str,
     candidates: impl IntoIterator<Item = &'a str>,
@@ -15,7 +16,10 @@ pub fn best_locale<'a>(
         return Some(exact);
     }
     let prefix = lang.split_inclusive('_').next().filter(|p| !p.is_empty())?;
-    candidates.into_iter().find(|l| l.starts_with(prefix))
+    candidates
+        .into_iter()
+        .filter(|l| l.starts_with(prefix))
+        .min()
 }
 
 pub const DATA_DIR: &str = "/media/startos/data";

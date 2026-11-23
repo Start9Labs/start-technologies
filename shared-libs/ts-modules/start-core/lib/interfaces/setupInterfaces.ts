@@ -44,14 +44,16 @@ export const setupServiceInterfaces: SetupServiceInterfaces = <
         exportServiceInterface: (
           params: T.ExportServiceInterfaceParamsInput,
         ) => {
+          const index = params.index ?? interfaces.length
           interfaces.push(params.id)
-          return effects.exportServiceInterface(params)
+          return effects.exportServiceInterface({ ...params, index })
         },
         exportRangeServiceInterface: (
           params: T.ExportRangeServiceInterfaceParamsInput,
         ) => {
+          const index = params.index ?? interfaces.length
           interfaces.push(params.id)
-          return effects.exportRangeServiceInterface(params)
+          return effects.exportRangeServiceInterface({ ...params, index })
         },
         retireHost: () => {
           throw new Error(

@@ -219,6 +219,7 @@ mod test {
             },
             interface_type: kind,
             preferred_launcher_address: None,
+            index: None,
         }
     }
 
