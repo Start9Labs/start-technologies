@@ -473,8 +473,8 @@ struct WanIpv4SetRequest {
     device: Option<String>,
 }
 // Response: null
-// Backend: updates UCI network.wan, restarts network. network.wan keeps its
-//   metric, which ranks WAN routes behind a profile's equal connected route.
+// Backend: updates UCI network.wan, restarts network; preserves the route metric.
+//   The default metric ranks equal-prefix WAN routes behind profile routes.
 ```
 
 ### `wan.ipv6-get`
@@ -2071,10 +2071,11 @@ about to save. Each added or moved `/24`:
 Subnets the write leaves unchanged always pass, so an already conflicting
 configuration stays editable.
 
-A `/24` may overlap a WAN IPv4 network; `profiles.wan-overlaps` reports it. The
-WAN interface's route metric keeps a profile's route ahead of an equal or wider
-WAN route, so the profile's devices keep the router and the router loses that
-part of the upstream network.
+A `/24` may overlap a WAN IPv4 network; `profiles.wan-overlaps` reports it. With
+standard profile routes and the default WAN metric, equal or wider WAN networks
+do not displace a profile's route. More-specific WAN routes retain precedence
+and can prevent devices in their range from reaching the router. An explicit
+WAN metric is preserved and can change equal-prefix precedence.
 
 On create and set, `lan_access: "ALL"` stores `access_to_new_profiles: true`,
 `"SAME_PROFILE"` stores `false`, and `other_profiles` preserves the supplied flag.

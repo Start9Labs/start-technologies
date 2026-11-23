@@ -604,5 +604,5 @@ export default {
   652: 'VLAN-ID',
   653: '{port} sendet jedes Sicherheitsprofil mit seiner VLAN-ID getaggt an den Switch. Richten Sie die VLANs des Switches mit diesen IDs ein.',
   654: '{profile} überschneidet sich mit dem vorgelagerten Netzwerk {network}',
-  655: 'Der Router erreicht diesen Teil des vorgelagerten Netzwerks nicht und kann die Internetverbindung verlieren. Ändern Sie sein Subnetz in eines außerhalb dieses Netzwerks.',
+  655: 'Der Router kann den Zugang zum vorgelagerten Netzwerk oder zum Internet verlieren. Ein spezifischeres WAN-Netzwerk kann auch Geräten den Zugriff auf dieses Dashboard verwehren. Ändern Sie sein Subnetz in eines außerhalb dieses Netzwerks.',
 } satisfies i18n

@@ -51,7 +51,7 @@ import { ProfilesService } from './service'
           {{ describe(overlap) }}
           <div tuiSubtitle>
             {{
-              "The router can't reach that part of the upstream network and may lose the Internet. Change its subnet to one outside that network."
+              'The router may lose upstream or Internet access. A more-specific WAN network can also block devices from this dashboard. Change its subnet to one outside that network.'
                 | i18n
             }}
           </div>

@@ -21,10 +21,8 @@ fn serde_name(v: &impl Serialize) -> String {
 }
 
 pub const WAN_INTERFACE: &str = "wan";
-/// Ranks the WAN's routes behind a profile's equal connected route.
-///
-/// A profile overlapping the WAN's network keeps its devices' path to the router;
-/// the router loses that part of the upstream network instead.
+/// Ranks equal-prefix WAN routes behind profile routes.
+/// More-specific WAN routes retain precedence. Explicit WAN metrics are preserved.
 pub const WAN_ROUTE_METRIC: u32 = 10;
 pub const WAN6_INTERFACE: &str = "wan6";
 /// netifd alias for the `wan` interface's layer-3 device.

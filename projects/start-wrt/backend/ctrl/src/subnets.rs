@@ -5,9 +5,7 @@
 //! subnets always pass.
 //!
 //! A profile may overlap the WAN's network; [`overlaps`] reports it.
-//! [`crate::wan::WAN_ROUTE_METRIC`] keeps the profile's route ahead of an equal
-//! or wider WAN route, so its devices keep the router and the router loses that
-//! part of the upstream network.
+//! [`crate::wan::WAN_ROUTE_METRIC`] documents overlapping-route precedence.
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
