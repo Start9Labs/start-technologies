@@ -18,6 +18,7 @@ export class PatchDbCache {
   private db?: Promise<IDBDatabase>
   private saved?: Cursor & { value: DataModel }
   epoch: string | null = null
+  /** Persisted freshness requires a committed snapshot cursor. */
   readonly synced = signal<number | null>(null)
 
   /** Unavailable persistence yields an empty baseline for live synchronization. */
@@ -32,12 +33,13 @@ export class PatchDbCache {
           synced: tx.objectStore(META).get(SYNCED),
         }),
       )
-      this.synced.set(typeof synced.result === 'number' ? synced.result : null)
       const { id, epoch } = (cursor.result ?? {}) as Partial<Cursor>
       if (!id) {
         this.saved = undefined
+        this.synced.set(null)
         return { id: 0, value: {} as DataModel }
       }
+      this.synced.set(typeof synced.result === 'number' ? synced.result : null)
       const value = fromEntries(
         keys.result.map((key, i) => [String(key), values.result[i]]),
       )
@@ -47,6 +49,7 @@ export class PatchDbCache {
     } catch (e) {
       console.error(e)
       this.saved = undefined
+      this.synced.set(null)
       return { id: 0, value: {} as DataModel }
     }
   }
@@ -62,9 +65,7 @@ export class PatchDbCache {
         const stored = meta.get(CURSOR)
         stored.onsuccess = () => {
           const baseline =
-            previous &&
-            stored.result?.id === previous.id &&
-            stored.result?.epoch === previous.epoch
+            previous && sameCursor(stored.result, previous)
               ? previous.value
               : undefined
           const store = tx.objectStore(VALUES)
@@ -83,19 +84,33 @@ export class PatchDbCache {
     } catch (e) {
       console.error(e)
       this.saved = undefined
-      await this.transaction('readwrite', tx =>
-        tx.objectStore(META).delete(CURSOR),
-      ).catch(console.error)
+      this.synced.set(null)
+      await this.transaction('readwrite', tx => {
+        const meta = tx.objectStore(META)
+        meta.delete(CURSOR)
+        meta.delete(SYNCED)
+      }).catch(console.error)
     }
   }
 
   async markSynced(): Promise<void> {
-    if (!this.saved) return
+    const saved = this.saved
+    if (!saved) return
     const time = Date.now()
-    this.synced.set(time)
-    await this.transaction('readwrite', tx =>
-      tx.objectStore(META).put(time, SYNCED),
-    ).catch(console.error)
+    try {
+      const stored = await this.transaction('readwrite', tx => {
+        const meta = tx.objectStore(META)
+        const cursor = meta.get(CURSOR)
+        cursor.onsuccess = () => {
+          if (sameCursor(cursor.result, saved)) meta.put(time, SYNCED)
+        }
+        return cursor
+      })
+      if (this.saved === saved && sameCursor(stored.result, saved))
+        this.synced.set(time)
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   async clear(): Promise<void> {
@@ -120,6 +135,10 @@ export class PatchDbCache {
       tx.onerror = tx.onabort = () => reject(tx.error)
     })
   }
+}
+
+function sameCursor(stored: Cursor | undefined, saved: Cursor): boolean {
+  return stored?.id === saved.id && stored?.epoch === saved.epoch
 }
 
 function toEntries(value: DataModel): Map<string, unknown> {
