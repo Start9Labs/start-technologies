@@ -135,3 +135,50 @@ pub async fn forget_disk<C: Context>(_: C) -> Result<(), Error> {
     crate::context::startup::forget_identity().await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use rpc_toolkit::HandlerFor;
+
+    use super::*;
+    use crate::context::{InitContext, SetupContext};
+    use crate::net::static_server::UiContext;
+
+    #[test]
+    fn destructive_disk_commands_are_context_scoped() {
+        let init = InitContext::api();
+        let setup = SetupContext::api();
+        let diagnostic = DiagnosticContext::api();
+        let runtime = RpcContext::api();
+        let cli = crate::main_api::<CliContext>();
+
+        for (method, diagnostic_available) in [
+            ("diagnostic.disk.forget", true),
+            ("diagnostic.disk.repair", true),
+            ("disk.repair", false),
+        ] {
+            assert!(init.method_from_dots(method).is_none(), "{method} in init");
+            assert!(
+                setup.method_from_dots(method).is_none(),
+                "{method} in setup"
+            );
+            assert_eq!(
+                diagnostic.method_from_dots(method).is_some(),
+                diagnostic_available,
+                "{method} in diagnostic",
+            );
+            let runtime_method = runtime
+                .method_from_dots(method)
+                .unwrap_or_else(|| panic!("{method} missing from runtime"));
+            assert_ne!(
+                runtime.metadata(runtime_method).get("authenticated"),
+                Some(&Value::Bool(false)),
+                "{method} must require runtime authentication",
+            );
+            assert!(
+                cli.method_from_dots(method).is_some(),
+                "{method} missing from CLI",
+            );
+        }
+    }
+}
