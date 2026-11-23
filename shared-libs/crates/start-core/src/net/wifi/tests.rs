@@ -157,6 +157,28 @@ async fn missing_runtime_profile_directory_needs_no_cleanup() {
         .unwrap();
 }
 
+fn run_child_test(child: &str, directory: &std::path::Path, env: &[(&str, &std::ffi::OsStr)]) {
+    let path = std::env::join_paths(
+        std::iter::once(directory.to_owned())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", child, "--nocapture"])
+        .env("PATH", path);
+    for &(key, value) in env {
+        command.env(key, value);
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 #[tokio::test]
 async fn normalize_profiles_child() {
     if let Some(directory) = std::env::var_os("STARTOS_NM_PROFILE_FIXTURE") {
@@ -248,28 +270,17 @@ esac
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = std::env::join_paths(
-        std::iter::once(directory.path().to_owned())
-            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
-    )
-    .unwrap();
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "net::wifi::tests::normalize_profiles_child",
-            "--nocapture",
-        ])
-        .env("PATH", path)
-        .env("STARTOS_NM_PROFILE_FIXTURE", directory.path())
-        .env("STARTOS_NM_FAILURE", failure)
-        .env("STARTOS_NM_PRODUCT", product.unwrap_or_default())
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
+    run_child_test(
+        "net::wifi::tests::normalize_profiles_child",
+        directory.path(),
+        &[
+            ("STARTOS_NM_PROFILE_FIXTURE", directory.path().as_os_str()),
+            ("STARTOS_NM_FAILURE", std::ffi::OsStr::new(failure)),
+            (
+                "STARTOS_NM_PRODUCT",
+                std::ffi::OsStr::new(product.unwrap_or_default()),
+            ),
+        ],
     );
     directory
 }
@@ -386,5 +397,119 @@ fn failed_profile_listing_does_not_modify_saved_settings() {
     assert_eq!(
         std::fs::read_to_string(directory.path().join("saved-wired")).unwrap(),
         "eee-enabled=off\nmtu=1400\n"
+    );
+}
+
+#[tokio::test]
+async fn set_country_child() {
+    if std::env::var_os("STARTOS_WIFI_COUNTRY_FIXTURE").is_some() {
+        let db = crate::prelude::TypedPatchDb::<crate::db::model::Database>::load_unchecked(
+            patch_db::PatchDb::in_memory(),
+        );
+        db.put(
+            &patch_db::json_ptr::ROOT,
+            &imbl_value::json!({
+                "public": {
+                    "serverInfo": {
+                        "network": {
+                            "wifi": {
+                                "enabled": true,
+                                "interface": "wlan0",
+                                "ssids": ["Home WiFi", "Guest WiFi"],
+                                "selected": "Home WiFi",
+                                "lastRegion": "US"
+                            }
+                        }
+                    }
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        let mut wpa_cli = super::WpaCli::new(crate::GatewayId::from(
+            imbl_value::InternedString::intern("wlan0"),
+        ));
+        wpa_cli
+            .set_country(db.clone(), isocountry::CountryCode::GBR)
+            .await
+            .unwrap();
+        let peek = db.peek().await;
+        let wifi = peek.as_public().as_server_info().as_network().as_wifi();
+        assert_eq!(
+            wifi.as_last_region().de().unwrap(),
+            Some(isocountry::CountryCode::GBR)
+        );
+        assert!(wifi.as_ssids().de().unwrap().is_empty());
+        assert_eq!(wifi.as_selected().de().unwrap(), None);
+    }
+}
+
+#[test]
+fn set_country_removes_only_wireless_profiles() {
+    const WIFI_HOME_UUID: &str = "33333333-3333-3333-3333-333333333333";
+    const WIFI_GUEST_UUID: &str = "44444444-4444-4444-4444-444444444444";
+
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("country"), "US\n").unwrap();
+
+    let iw_script = directory.path().join("iw");
+    std::fs::write(
+        &iw_script,
+        r#"#!/bin/sh
+set -eu
+cd "$STARTOS_WIFI_COUNTRY_FIXTURE"
+printf '%s\n' "$*" >> iw-commands
+case "$1 ${2:-}" in
+    'reg set')
+        printf '%s\n' "$3" > country
+        ;;
+    'reg get')
+        cc=$(cat country)
+        printf 'global\ncountry %s: DFS-FCC\n' "$cc"
+        ;;
+    *) exit 2 ;;
+esac
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&iw_script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let nmcli_script = directory.path().join("nmcli");
+    std::fs::write(
+        &nmcli_script,
+        format!(
+            r#"#!/bin/sh
+set -eu
+cd "$STARTOS_WIFI_COUNTRY_FIXTURE"
+printf '%s\n' "$*" >> nmcli-commands
+case "$*" in
+    '-t c show')
+        printf 'Wired connection 1:{WIRED_UUID}:802-3-ethernet:eth0\n'
+        printf 'wg0:{OTHER_UUID}:wireguard:wg0\n'
+        printf 'Home WiFi:{WIFI_HOME_UUID}:802-11-wireless:wlan0\n'
+        printf 'Guest WiFi:{WIFI_GUEST_UUID}:802-11-wireless:\n'
+        ;;
+    'c del '*) ;;
+    *) exit 2 ;;
+esac
+"#
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&nmcli_script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    run_child_test(
+        "net::wifi::tests::set_country_child",
+        directory.path(),
+        &[("STARTOS_WIFI_COUNTRY_FIXTURE", directory.path().as_os_str())],
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("iw-commands")).unwrap(),
+        "reg set GB\nreg get\n",
+    );
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("nmcli-commands")).unwrap(),
+        format!("-t c show\nc del {WIFI_HOME_UUID}\nc del {WIFI_GUEST_UUID}\n"),
     );
 }

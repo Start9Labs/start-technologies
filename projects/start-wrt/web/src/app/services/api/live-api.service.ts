@@ -85,6 +85,7 @@ import {
   BackupCreateRes,
   BackupRestoreRes,
   DiagnosticsCreateRes,
+  WanOverlap,
 } from './api.service'
 import type { RpcStreamOptions } from '@start9labs/start-core'
 import { RpcService } from '../rpc.service'
@@ -98,6 +99,10 @@ export class LiveApiService extends ApiService {
 
   async login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>> {
     return this.rpc.request({ method: 'auth.login', params })
+  }
+
+  checkEnrollment(): Promise<unknown> {
+    return this.rpc.probe({ method: 'auth.key.list', params: {} })
   }
 
   async setTimezone(params: { timezone: string }): Promise<null> {
@@ -138,6 +143,10 @@ export class LiveApiService extends ApiService {
 
   async configCheck(): Promise<ConfigCheck> {
     return this.rpc.request({ method: 'config.check', params: {} })
+  }
+
+  async profilesWanOverlaps(): Promise<WanOverlap[]> {
+    return this.rpc.request({ method: 'profiles.wan-overlaps', params: {} })
   }
 
   async systemNewerVersions(): Promise<VersionInfo[]> {

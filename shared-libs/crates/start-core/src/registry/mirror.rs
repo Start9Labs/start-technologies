@@ -187,7 +187,7 @@ fn visible_index(
 ) -> Result<Model<FullIndex>, Error> {
     let reader = Reader::resolve(&db, key)?;
     let mut index = db.into_index();
-    index.as_package_mut().retain_visible(reader.as_ref())?;
+    index.retain_visible(reader.as_ref())?;
     Ok(index)
 }
 
@@ -206,15 +206,21 @@ mod tests {
     }
 
     fn package(private: bool, reader: &Guid) -> Value {
+        let mut asset = json!({ "readers": [reader] });
+        if private {
+            asset["private"] = json!({
+                "key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+                "iv": "AgICAgICAgICAgICAgICAg",
+            });
+        }
         json!({
             "authorized": {},
             "categories": [],
-            "versions": { "1.0.0:0": { "releaseNotes": "notes" } },
-            "private": private,
-            "readers": [reader],
+            "versions": { "1.0.0:0": { "releaseNotes": "notes", "s9pks": [[{}, asset]] } },
         })
     }
 
+    /// The reader key is both a registered signer and a reader-directory entry.
     fn root(private: bool, reader: &Guid, admins: &[&Guid]) -> Value {
         json!({
             "migrations": [],
@@ -227,6 +233,9 @@ mod tests {
                 "signers": {
                     reader.as_ref(): { "name": "reader", "contact": [], "keys": [key()] },
                 },
+                "readers": {
+                    reader.as_ref(): { "label": "reader", "key": key() },
+                },
                 "package": {
                     "categories": {},
                     "packages": {
@@ -236,6 +245,10 @@ mod tests {
                 },
             },
         })
+    }
+
+    fn secret_s9pk(root: &mut Value) -> &mut Value {
+        &mut root["index"]["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]
     }
 
     fn packages(root: &Value) -> Vec<String> {
@@ -306,11 +319,11 @@ mod tests {
         let reader = Guid::new();
         let permitted = root(true, &reader, &[]);
         let mut denied = permitted.clone();
-        denied["index"]["package"]["packages"]["secret"]["readers"] = json!([]);
+        secret_s9pk(&mut denied)["readers"] = json!([]);
         let mut admin = denied.clone();
         admin["admins"] = json!([reader]);
         let mut revoked = permitted.clone();
-        revoked["index"]["signers"][reader.as_ref()]["keys"] = json!([]);
+        revoked["index"]["readers"] = json!({});
 
         let main = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::in_memory());
         main.put(&JsonPointer::<&str>::default(), &denied)
@@ -384,19 +397,14 @@ mod tests {
             ["public", "secret"]
         );
 
-        main.mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_private_mut()
-                .ser(&false)
-        })
-        .await
-        .result
-        .unwrap();
+        let mut published = root(true, &reader, &[]);
+        secret_s9pk(&mut published)
+            .as_object_mut()
+            .unwrap()
+            .remove("private");
+        main.put(&JsonPointer::<&str>::default(), &published)
+            .await
+            .unwrap();
         sub.recv().await.unwrap();
         assert_eq!(
             packages(&public.db.dump(&JsonPointer::<&str>::default()).await.value),

@@ -14,6 +14,7 @@ use crate::prelude::*;
 use crate::s9pk::merkle_archive::hash::VerifyingWriter;
 use crate::util::io::{TmpDir, open_file};
 
+pub mod encrypted;
 pub mod http;
 pub mod multi_cursor_file;
 

@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router'
 import { TuiIcon } from '@taiga-ui/core'
 import { TuiNavigation } from '@taiga-ui/layout'
 import { SystemService } from 'src/app/services/system.service'
+import { WanOverlapsService } from 'src/app/services/wan-overlaps.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 
 const MENU = {
@@ -80,6 +81,9 @@ const MENU = {
           @if (route.link === 'settings' && system.updateAvailable()) {
             <tui-icon class="g-positive" icon="@tui.rocket" />
           }
+          @if (route.link === 'profiles' && wanOverlaps.overlaps().length) {
+            <tui-icon class="g-warning" icon="@tui.triangle-alert" />
+          }
         </a>
       }
       @if (!$last) {
@@ -113,6 +117,7 @@ const MENU = {
 })
 export class Nav {
   protected readonly system = inject(SystemService)
+  protected readonly wanOverlaps = inject(WanOverlapsService)
   protected readonly routes = MENU
 
   protected asIs(): number {

@@ -30,7 +30,18 @@ async fn server(
     )
     .await;
     let mut packages = index().package;
-    packages.packages.get_mut("test").unwrap().access.private = true;
+    let (_, info) = crate::registry::package::index::tests::version_info_signed_by(1);
+    let (hardware, mut asset) = info.s9pks.into_iter().next().unwrap();
+    asset.private = Some(crate::registry::tests::secret_keystream());
+    for version in packages
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .values_mut()
+    {
+        version.s9pks = vec![(hardware.clone(), asset.clone())];
+    }
     ctx.db
         .put(&"/index/package".parse().unwrap(), &packages)
         .await

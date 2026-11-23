@@ -616,7 +616,7 @@ describe('HealthDaemon check loop', () => {
       await hd.updateStatus()
       await jest.advanceTimersByTimeAsync(60_000)
       expect(fn).toHaveBeenCalledTimes(1)
-      const signal: AbortSignal = (hd as any).session.abort.signal
+      const signal: AbortSignal = (hd as any).session.signal
 
       // Under fake timers the pending tick only ends through the abort.
       await hd.term()
@@ -649,5 +649,43 @@ describe('HealthDaemon check loop', () => {
     )
     logged.mockRestore()
     await hd.term()
+  })
+})
+
+describe('HealthDaemon.term with a hung health check', () => {
+  it('terminates the daemon without waiting, aborting the check', async () => {
+    let signal: AbortSignal | undefined
+    const daemon = {
+      start: jest.fn(async () => {}),
+      term: jest.fn(async () => {}),
+      onExit: () => {},
+      isOneshot: () => false,
+    }
+    const hd = new HealthDaemon<Manifest>(
+      daemon as any,
+      [],
+      'svc',
+      {
+        display: 'Svc',
+        trigger: cooldownTrigger(1),
+        fn: s => {
+          signal = s
+          return new Promise<never>(() => {})
+        },
+      },
+      fakeEffects(),
+    )
+    await hd.updateStatus()
+    while (!signal) await tick()
+    expect(signal.aborted).toBe(false)
+
+    const outcome = await Promise.race([
+      hd.term().then(() => 'stopped'),
+      new Promise(resolve => setTimeout(() => resolve('hung'), 500)),
+    ])
+
+    expect(outcome).toBe('stopped')
+    expect(daemon.term).toHaveBeenCalledTimes(1)
+    expect(signal.aborted).toBe(true)
   })
 })

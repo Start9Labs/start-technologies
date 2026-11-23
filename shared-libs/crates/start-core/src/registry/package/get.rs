@@ -8,6 +8,7 @@ use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tracing::warn;
 
 use crate::PackageId;
@@ -21,7 +22,7 @@ use crate::s9pk::manifest::{HardwareRequirements, LocaleString};
 use crate::s9pk::merkle_archive::source::ArchiveSource;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::util::VersionString;
-use crate::util::io::{TrackingIO, to_tmp_path};
+use crate::util::io::{TrackingIO, create_file, delete_file, rename, to_tmp_path};
 use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::util::tui::{choose, choose_custom_display};
 
@@ -646,6 +647,7 @@ pub struct CliDownloadParams {
 
 rpc_toolkit::reflect_ts!(CliDownloadParams);
 
+/// Private downloads omit supplemental endorsements.
 pub async fn cli_download(
     ctx: CliContext,
     CliDownloadParams {
@@ -792,14 +794,32 @@ pub async fn cli_download(
         verify_progress.set_total(size);
     }
     verify_progress.set_units(Some(ProgressUnits::Bytes));
-    let mut progress_sink = verify_progress.writer(tokio::io::sink());
+    let plaintext = if source.is_encrypted() {
+        Some(to_tmp_path(&dest_tmp)?)
+    } else {
+        None
+    };
+    let out: Box<dyn AsyncWrite + Unpin + Send> = match &plaintext {
+        Some(path) => Box::new(create_file(path).await?),
+        None => Box::new(tokio::io::sink()),
+    };
+    let mut progress_sink = verify_progress.writer(out);
     parsed
         .serialize(&mut TrackingIO::new(0, &mut progress_sink), true)
         .await?;
-    progress_sink.into_inner().1.complete();
+    let (mut out, mut verify_progress) = progress_sink.into_inner();
+    out.shutdown().await?;
+    verify_progress.complete();
 
-    source.wait_for_buffered().await?;
-    tokio::fs::rename(dest_tmp, dest).await?;
+    source.inner().wait_for_buffered().await?;
+    match plaintext {
+        Some(path) => {
+            drop((parsed, source));
+            delete_file(&dest_tmp).await?;
+            rename(path, dest).await?;
+        }
+        None => rename(dest_tmp, dest).await?,
+    }
 
     progress_tracker.complete();
     progress.await.unwrap();

@@ -254,34 +254,8 @@ async fn wait_for(db: &TypedPatchDb<Database>, predicate: impl Fn(&DatabaseModel
 async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation() {
     let (_registry_temp, registry, _admin, reader, _) = crate::registry::tests::fixture().await;
     let secret = "secret".parse().unwrap();
-    let readers = registry
-        .db
-        .peek()
-        .await
-        .as_index()
-        .as_package()
-        .as_packages()
-        .as_idx(&secret)
-        .unwrap()
-        .as_access()
-        .as_readers()
-        .de()
-        .unwrap();
-    registry
-        .db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&secret)
-                .unwrap()
-                .as_access_mut()
-                .as_readers_mut()
-                .ser(&BTreeSet::new())
-        })
-        .await
-        .result
-        .unwrap();
+    let readers = crate::registry::tests::secret_readers(&registry).await;
+    crate::registry::tests::revoke_secret_reader(&registry).await;
     let (url, _server) = crate::registry::tests::server(registry.clone()).await;
     let url = registry_url(url.as_str()).unwrap();
     let temp = tempfile::tempdir().unwrap();
@@ -326,17 +300,10 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .is_some_and(|cache| cache.status == RegistryStatus::Connected)
     })
     .await;
+    crate::registry::tests::set_secret_readers(&registry, &readers).await;
     registry
         .db
         .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&secret)
-                .unwrap()
-                .as_access_mut()
-                .as_readers_mut()
-                .ser(&readers)?;
             db.as_index_mut()
                 .as_name_mut()
                 .ser(&Some("Grant barrier".into()))
@@ -378,21 +345,52 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
                 .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_some())
     })
     .await;
-    registry
-        .db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&secret)
-                .unwrap()
-                .as_access_mut()
-                .as_readers_mut()
-                .ser(&BTreeSet::new())
-        })
-        .await
-        .result
+    let synced = db.peek().await;
+    let private_s9pk = synced
+        .as_private()
+        .as_registry_indexes()
+        .as_idx(&url)
+        .unwrap()
+        .as_package()
+        .as_packages()
+        .as_idx(&secret)
+        .unwrap()
+        .de()
+        .unwrap()
+        .versions
+        .into_values()
+        .next()
+        .unwrap()
+        .s9pks
+        .remove(0)
+        .1;
+    assert_eq!(
+        private_s9pk.private,
+        Some(crate::registry::tests::secret_keystream())
+    );
+    let catalog = synced
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url)
+        .unwrap()
+        .as_catalog()
+        .as_idx(&secret)
+        .unwrap()
+        .de()
         .unwrap();
+    assert!(!catalog.versions.is_empty());
+    for release in catalog.versions.values() {
+        for (_, asset) in &release.info.s9pks {
+            assert!(asset.private.is_none() && asset.readers.is_empty());
+        }
+    }
+    assert!(
+        !to_value(&synced.as_public().de().unwrap())
+            .unwrap()
+            .to_string()
+            .contains(&crate::registry::tests::secret_keystream().key.to_string())
+    );
+    crate::registry::tests::revoke_secret_reader(&registry).await;
     wait_for(&db, |db| {
         db.as_private()
             .as_registry_indexes()

@@ -249,7 +249,10 @@ describe('SubContainerEager.exec abort', () => {
     expect(getEventListeners(abort.signal, 'abort')).toHaveLength(0)
   })
 
-  test('kills a running command when aborted', async () => {
+  test.each([
+    ['controller', (abort: AbortController) => abort],
+    ['signal', (abort: AbortController) => abort.signal],
+  ])('kills a running command when its %s aborts', async (_, option) => {
     const child = fakeChild()
     child.on = EventEmitter.prototype.on
     child.kill = jest.fn(() => {
@@ -260,7 +263,7 @@ describe('SubContainerEager.exec abort', () => {
     const abort = new AbortController()
 
     const running = subContainer().exec(['sleep', '60'], {
-      abort,
+      abort: option(abort),
       timeout: null,
     })
     while (!child.listenerCount('close')) {

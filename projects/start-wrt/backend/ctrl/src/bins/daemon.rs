@@ -9,6 +9,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::http::{header, Response};
 use axum::routing::{any, get, post};
 use axum::{Extension, Json};
+use futures::future::Either;
 use startos::middleware::auth::local::LocalAuthContext;
 use startos::middleware::auth::session::RpcSessionUpgrader;
 use startos::net::tls::TlsListener;
@@ -189,8 +190,8 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::init::restore_wifi_if_needed().await {
             tracing::error!("WiFi auto-restore failed: {e}");
         }
-        if let Err(e) = crate::wifi::heal_channel_widths("/etc/config").await {
-            tracing::error!("WiFi channel width repair failed: {e}");
+        if let Err(e) = crate::wifi::heal_channels("/etc/config").await {
+            tracing::error!("WiFi channel repair failed: {e}");
         }
 
         // netifd raises the radios at boot whatever the blackout schedule says.
@@ -427,7 +428,13 @@ async fn inner_main() -> Result<(), Error> {
         let https_listener = startos::net::utils::bind_tokio_listener_reuse_port(https_addr)
             .with_kind(ErrorKind::Network)?;
         tracing::info!("HTTPS listening on {}", https_addr);
-        let tls = TlsListener::new(https_listener, tls);
+        let remote_access = crate::port_control::PORT_CONTROL
+            .get()
+            .and_then(|pc| pc.take_ui_handoff());
+        let tls = TlsListener::new(
+            vec![Either::Left(https_listener), Either::Right(remote_access)],
+            tls,
+        );
         listeners.insert(WebserverListener::Https, tls.into_dyn());
     } else {
         tracing::warn!("HTTPS disabled — TLS setup failed, serving HTTP only");
