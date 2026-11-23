@@ -1861,6 +1861,36 @@ test('source editor requires a CIFS hostname independently of its volume name', 
   }
 })
 
+test('source editor preserves literal volume names when editing or saving', async () => {
+  for (const source of [
+    { kind: 'local' },
+    { kind: 'cifs', hostname: 'nas', path: '/files', username: 'reader' },
+  ]) {
+    const entry = signal({
+      name: ' Photos ',
+      source,
+      availability: 'available',
+      available: 4096,
+      error: null,
+    })
+    const edit = sourceEdit(entry, { cifsNamedByHost: false })
+    const calls = []
+    const client = {
+      rename: async params => calls.push(['rename', params]),
+      updateCifs: async params => calls.push(['update', params]),
+    }
+    assert.equal(edit.changed(), false)
+    assert.equal(edit.invalid(), false)
+    await edit.save(volumeA, client)
+    assert.deepEqual(calls, [])
+    edit.name.set(' Photos  ')
+    await edit.save(volumeA, client)
+    assert.deepEqual(calls, [['rename', { id: volumeA, name: ' Photos  ' }]])
+    edit.name.set('   ')
+    assert.equal(edit.invalid(), true)
+  }
+})
+
 test('source editor follows an actual stored rename without treating it as an edit', () => {
   const entry = signal({
     name: 'Music',
@@ -3087,6 +3117,13 @@ test('production mocks support inspection, independent failed backups and new-lo
     name: 'Photos',
     source: { kind: 'local' },
   })
+  for (const name of ['media/photos', '/', '.', '..', 'a\0b', '', '  ']) {
+    await assert.rejects(
+      api.rpc.volumes.create({ name, source: { kind: 'local' } }),
+    )
+    await assert.rejects(api.rpc.volumes.rename({ id: local, name }))
+  }
+  assert.equal(cache.value.value.sharedVolumes[local].name, 'Photos')
   const remote = await api.rpc.volumes.create({
     name: 'Remote',
     source: {
@@ -3198,6 +3235,21 @@ test('production mocks support inspection, independent failed backups and new-lo
     available: 812400000000,
     error: null,
   })
+  await api.rpc.volumes.create({
+    name: 'media-photos',
+    source: { kind: 'local' },
+  })
+  Mock.BackupInfo.sharedVolumeBackups[remote].name = 'media/photos'
+  const repaired = await api.rpc.backup.volume.restore({
+    targetId,
+    serverId: '1234-5678-9876-5432',
+    password: 'password',
+    ids: [remote],
+  })
+  assert.equal(
+    cache.value.value.sharedVolumes[repaired.restored[remote]].name,
+    'media-photos (2)',
+  )
   await api.rpc.volumes.remove({ id: local })
   assert.equal(cache.value.value.sharedVolumes[local], undefined)
   await api.rpc.volumes.remove({ id: local })

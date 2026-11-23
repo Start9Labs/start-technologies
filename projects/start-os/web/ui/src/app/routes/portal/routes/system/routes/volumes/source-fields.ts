@@ -38,9 +38,7 @@ export function sourceEdit(
   const path = linkedSignal(() => cifs()?.path ?? '')
   const username = linkedSignal(() => cifs()?.username ?? '')
   const password = signal('')
-  const newName = computed(() =>
-    hostNamed() ? hostname().trim() : name().trim(),
-  )
+  const newName = computed(() => (hostNamed() ? hostname().trim() : name()))
   const renamed = computed(() => newName() !== storedName())
   const cifsChanged = computed(
     () =>
@@ -61,7 +59,9 @@ export function sourceEdit(
     password,
     changed: computed(() => renamed() || cifsChanged()),
     invalid: computed(
-      () => !newName() || (!!cifs() && (!hostname().trim() || !path().trim())),
+      () =>
+        !newName().trim() ||
+        (!!cifs() && (!hostname().trim() || !path().trim())),
     ),
     async save(id: string, client: SourceClient) {
       if (renamed()) await client.rename({ id, name: newName() })

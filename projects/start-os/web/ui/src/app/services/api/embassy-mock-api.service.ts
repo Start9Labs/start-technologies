@@ -3126,15 +3126,29 @@ export class MockApiService extends ApiService implements StartupApiService {
     )
   }
 
+  private mockVolumeNameIsFolder(name: string) {
+    return !['.', '..'].includes(name) && !/[\/\0]/.test(name)
+  }
+
   private mockEnsureVolumeNameAvailable(name: string, except?: string) {
+    if (!name.trim()) throw new Error('Enter a volume name')
+    if (!this.mockVolumeNameIsFolder(name))
+      throw new Error(
+        'A volume name must work as a folder name: no / and not . or ..',
+      )
     if (this.mockVolumeNameTaken(name, except))
       throw new Error(`Another volume is already named ${name}`)
   }
 
   private mockUnusedVolumeName(name: string) {
-    let candidate = name
+    const repaired = name.replace(/[\/\0]/g, '-')
+    const base =
+      repaired.trim() && this.mockVolumeNameIsFolder(repaired)
+        ? repaired
+        : 'Volume'
+    let candidate = base
     for (let n = 2; this.mockVolumeNameTaken(candidate); n++)
-      candidate = `${name} (${n})`
+      candidate = `${base} (${n})`
     return candidate
   }
 
