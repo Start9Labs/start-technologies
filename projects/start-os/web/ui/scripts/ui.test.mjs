@@ -5091,7 +5091,7 @@ test('patch cache rewrites only replaced top-level values', async t => {
   assert.deepEqual(await writer.read(), { id: 0, value: {} })
   writer.epoch = 'boot'
   await writer.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
-  assert.deepEqual(control.puts, ['ui', 'packageData'])
+  assert.deepEqual(control.puts, ['/ui', '/packageData'])
 
   const reader = await patchDbCache(t, win)
   const cached = await reader.read()
@@ -5105,12 +5105,105 @@ test('patch cache rewrites only replaced top-level values', async t => {
     id: 4,
     value: { ...cached.value, packageData: { x: 1 } },
   })
-  assert.deepEqual(control.puts, ['packageData'])
+  assert.deepEqual(control.puts, ['/packageData/x'])
   await reader.write({ id: 5, value: { ui: cached.value.ui } })
   assert.deepEqual(await (await patchDbCache(t, win)).read(), {
     id: 5,
     value: { ui: { a: 1 } },
   })
+})
+
+test('patch cache stores keyed maps one entry per child', async t => {
+  const { win, control } = fakeIndexedDb()
+  const writer = await patchDbCache(t, win)
+  const alpha = { info: { name: 'Alpha' } }
+  const beta = { info: { name: 'Beta' } }
+  await writer.write({
+    id: 3,
+    value: {
+      ui: { a: 1 },
+      registryCache: { 'https://a.test/': alpha, 'https://b~c.test/': beta },
+      packageData: { x: { v: 1 }, y: { v: 1 } },
+    },
+  })
+  assert.deepEqual(control.puts, [
+    '/ui',
+    '/registryCache',
+    '/registryCache/https:~1~1a.test~1',
+    '/registryCache/https:~1~1b~0c.test~1',
+    '/packageData',
+    '/packageData/x',
+    '/packageData/y',
+  ])
+  const reader = await patchDbCache(t, win)
+  const cached = await reader.read()
+  assert.deepEqual(cached.value.registryCache, {
+    'https://a.test/': alpha,
+    'https://b~c.test/': beta,
+  })
+  control.puts = []
+  const { y: _, ...rest } = cached.value.packageData
+  await reader.write({
+    id: 4,
+    value: {
+      ...cached.value,
+      registryCache: {
+        ...cached.value.registryCache,
+        'https://a.test/': { info: { name: 'Alpha 2' } },
+      },
+      packageData: rest,
+    },
+  })
+  assert.deepEqual(control.puts, ['/registryCache/https:~1~1a.test~1'])
+  assert.deepEqual((await (await patchDbCache(t, win)).read()).value, {
+    ui: { a: 1 },
+    registryCache: {
+      'https://a.test/': { info: { name: 'Alpha 2' } },
+      'https://b~c.test/': beta,
+    },
+    packageData: { x: { v: 1 } },
+  })
+})
+
+test('patch cache stores a keyed root that is not a map whole', async t => {
+  const { win, control } = fakeIndexedDb()
+  const cache = await patchDbCache(t, win)
+  await cache.write({ id: 3, value: { packageData: { x: 1 } } })
+  await cache.write({ id: 4, value: { packageData: null } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 4,
+    value: { packageData: null },
+  })
+  control.puts = []
+  await cache.write({ id: 5, value: { packageData: { y: 1 } } })
+  assert.deepEqual(control.puts, ['/packageData', '/packageData/y'])
+})
+
+test('patch cache drops a store written in the top-level layout', async t => {
+  const { win } = fakeIndexedDb()
+  const calls = []
+  const open = win.indexedDB.open
+  win.indexedDB.open = (name, version) => {
+    calls.push(['open', version])
+    let request
+    queueMicrotask(() => {
+      request.result = {
+        deleteObjectStore: store => calls.push(['delete', store]),
+        createObjectStore: store => calls.push(['create', store]),
+      }
+      request.onupgradeneeded({ oldVersion: 1 })
+    })
+    request = open(name, version)
+    return request
+  }
+  await (await patchDbCache(t, win)).read()
+  assert.deepEqual(calls, [
+    ['open', 2],
+    ['delete', 'values'],
+    ['delete', 'meta'],
+    ['create', 'values'],
+    ['create', 'meta'],
+  ])
 })
 
 test('patch cache keeps a complete snapshot when another tab advances the stored revision', async t => {
@@ -5180,7 +5273,7 @@ test('patch cache discards its snapshot after a failed write and clears on deman
   })
   control.puts = []
   await cache.write({ id: 5, value })
-  assert.deepEqual(control.puts, ['ui', 'packageData'])
+  assert.deepEqual(control.puts, ['/ui', '/packageData'])
   await cache.clear()
   assert.equal(cache.epoch, null)
   assert.deepEqual(await (await patchDbCache(t, win)).read(), {
