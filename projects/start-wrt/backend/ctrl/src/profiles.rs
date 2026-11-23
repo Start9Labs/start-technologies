@@ -8791,12 +8791,12 @@ config dhcp 'guest'
         let dir = tempfile::tempdir().unwrap();
         let ctx = TestContext(dir.path().to_path_buf());
         setup_configs_with_ipv6_vpn(dir.path());
-        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        let startwrt = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
         std::fs::write(
-            dir.path().join("network"),
-            network.replace(
-                "\tlist addresses '10.3.0.2/32'\n",
-                "\tlist addresses '10.3.0.2/32'\n\tlist dns '10.3.0.1'\n",
+            dir.path().join("startwrt"),
+            startwrt.replace(
+                "\toption label 'V4 VPN'\n",
+                "\toption label 'V4 VPN'\n\tlist dns '10.3.0.1'\n",
             ),
         )
         .unwrap();

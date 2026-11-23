@@ -2,7 +2,6 @@ use std::net::IpAddr;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use uciedit::openwrt::NetworkInterface;
 use uciedit::{parse_all, Arena, Configs};
 
 use crate::prelude::*;
@@ -106,19 +105,13 @@ pub fn profile_dns(cfgs: &Configs, outbound: &str, dns_override: &[DnsServer]) -
     }
 }
 
-/// The `list dns` entries of a VPN interface that are IP addresses.
+/// The DNS servers of an outbound VPN that are IP addresses.
 pub fn vpn_dns_servers(cfgs: &Configs, vpn_interface: &str) -> Vec<String> {
-    cfgs["network"]
-        .sections
-        .iter()
-        .find(|s| s.name().as_deref() == Some(vpn_interface))
-        .and_then(|s| s.get::<NetworkInterface>().ok())
-        .map(|iface| {
-            iface
-                .dns
-                .iter()
+    crate::vpn_client::client_by_interface(cfgs, vpn_interface)
+        .map(|meta| {
+            meta.dns
+                .into_iter()
                 .filter(|s| s.parse::<IpAddr>().is_ok())
-                .cloned()
                 .collect()
         })
         .unwrap_or_default()

@@ -45,6 +45,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::DisableFlowOffloading,
     Migration::TurnOffRemoteAccess,
     Migration::SplitAutomaticForwardTransports,
+    Migration::MoveVpnDnsOffInterfaces,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +86,9 @@ enum Migration {
     /// Earlier releases defaulted Remote Access to When behind NAT, stored as `default`.
     TurnOffRemoteAccess,
     SplitAutomaticForwardTransports,
+    /// Earlier releases kept an outbound VPN's DNS servers in its interface's
+    /// `dns` list, which netifd also gives the router's own resolver.
+    MoveVpnDnsOffInterfaces,
 }
 
 impl Migration {
@@ -111,6 +115,7 @@ impl Migration {
                     .await
                     .map(|_| ())
             }
+            Migration::MoveVpnDnsOffInterfaces => move_vpn_dns_off_interfaces(root).await,
         }
     }
 
@@ -150,6 +155,9 @@ impl Migration {
                 "turn off Remote Access if it was still set to When behind NAT"
             }
             Migration::SplitAutomaticForwardTransports => "track automatic TCP and UDP mappings independently",
+            Migration::MoveVpnDnsOffInterfaces => {
+                "use each outbound VPN's DNS servers only through its tunnel"
+            }
         }
     }
 }
@@ -541,6 +549,23 @@ async fn pppoe_wan_ipv6(root: &Path) -> Result<(), Error> {
         break;
     }
     if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+/// Each list is saved under `startwrt` before it leaves `network`.
+async fn move_vpn_dns_off_interfaces(root: &Path) -> Result<(), Error> {
+    {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(uci_root(root), &arena, &["network", "startwrt"]).await?;
+        if crate::vpn_client::copy_interface_dns(&mut cfgs)? {
+            dump_all(uci_root(root), cfgs).await?;
+        }
+    }
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["network", "startwrt"]).await?;
+    if crate::vpn_client::strip_interface_dns(&mut cfgs) {
         dump_all(uci_root(root), cfgs).await?;
     }
     Ok(())
@@ -945,6 +970,50 @@ config forwarding
         let firewall = read(&dir, "etc/config/firewall");
         assert!(!firewall.contains("wg_old"));
         assert!(firewall.contains("list network 'wan'"));
+    }
+
+    const LEGACY_VPN_NETWORK: &str = "\
+config interface 'wg_proton'
+\toption proto 'wireguard'
+\toption private_key 'key'
+\toption peerdns '0'
+\tlist addresses '10.2.0.2/32'
+\tlist dns '10.2.0.1'
+
+config interface 'wg_inbound'
+\toption proto 'wireguard'
+\toption private_key 'key'
+\tlist addresses '10.9.0.1/24'
+\tlist dns '9.9.9.9'
+";
+
+    const VPN_CLIENT: &str = "\
+config vpn_client 'wg_proton'
+\toption interface 'wg_proton'
+\toption label 'Proton'
+\toption target 'Internet'
+";
+
+    #[tokio::test]
+    async fn vpn_dns_moves_off_client_interfaces() {
+        let dir = router(None, true);
+        write(&dir, "etc/config/network", LEGACY_VPN_NETWORK);
+        write(&dir, "etc/config/startwrt", VPN_CLIENT);
+        move_vpn_dns_off_interfaces(dir.path()).await.unwrap();
+        let network = read(&dir, "etc/config/network");
+        let startwrt = read(&dir, "etc/config/startwrt");
+        assert!(!network.contains("'10.2.0.1'"), "{network}");
+        assert!(network.contains("list dns '9.9.9.9'"), "{network}");
+        assert!(startwrt.contains("list dns '10.2.0.1'"), "{startwrt}");
+
+        move_vpn_dns_off_interfaces(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "etc/config/network"), network);
+        assert_eq!(read(&dir, "etc/config/startwrt"), startwrt);
+
+        write(&dir, "etc/config/network", LEGACY_VPN_NETWORK);
+        move_vpn_dns_off_interfaces(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "etc/config/network"), network);
+        assert_eq!(read(&dir, "etc/config/startwrt"), startwrt);
     }
 
     #[tokio::test]
