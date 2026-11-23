@@ -1442,11 +1442,15 @@ struct OutboundVpn {
     /// LAN IPv6 settings, and a v4-only VPN outbound fails IPv6 closed via the
     /// kill-switch route instead (LAN devices keep local ULA IPv6).
     supports_ipv6: bool,
-    /// Interface MTU if explicitly set, else null (kernel default ~1420).
+    /// The MTU the user set (the vpn_client section's `mtu`), else null.
     mtu: Option<u16>,
-    /// True when the peer Endpoint is a hostname. Such a VPN can only target
-    /// "Internet"; the web UI offers no other target for it.
-    hostname_endpoint: bool,
+    /// The largest MTU whose packets fit through what this VPN connects via:
+    /// the MTU of the VPN it connects via, or of the WAN (its `mtu`, else 1492
+    /// for PPPoE and 1500 otherwise), less 60 bytes for an IPv4 server or 80
+    /// for an IPv6 one, at most 1500. A hostname server connecting over the
+    /// WAN counts as IPv6 while the WAN carries IPv6; a chained one not yet
+    /// looked up counts as IPv4 when its target has an IPv4 address.
+    default_mtu: u16,
     /// Resolvers reached through the tunnel (the interface's `list dns`).
     dns: Vec<IpAddr>,
     status: OutboundVpnStatus,
@@ -1491,19 +1495,18 @@ struct OutboundVpnCreateResponse {
 }
 // Backend: parses WireGuard config, creates UCI interface+peer, bounces the WG
 // interface, and reloads network.
-// An uncommented `MTU` in the .conf (1280–1500) becomes `option mtu`; a
-// commented `#MTU` is ignored. The dedicated vpn_<X> egress zone also gets
+// An uncommented `MTU` in the .conf (1280–1500) below `default_mtu` becomes
+// the VPN's own MTU; a commented `#MTU` is ignored. The dedicated vpn_<X> egress zone also gets
 // `option mtu_fix 1` (TCP MSS clamp) as a backstop against too-high MTU.
 // The address entries of the .conf's `DNS =` line (or `dns`, when given)
 // become `list dns`; search-domain entries are dropped.
 //
 // DNS for a profile routed through the VPN, first match wins: the profile's
 // custom servers, then the VPN's `list dns`, then the system custom servers —
+// then 1.1.1.1 (`dns_source = "fallback"`) —
 // all reached through the tunnel and failing closed with it (dnsmasq
 // `server <ip>@<iface>` for the VPN's own servers, a per-profile SmartDNS group
-// with `-interface <iface>` upstreams otherwise). With none of them, the
-// profile resolves through the ISP's servers outside the tunnel and reports
-// `dns_source = "system-outside-vpn"`.
+// with `-interface <iface>` upstreams otherwise).
 //
 // Validation (InvalidValue on failure): the config MUST be a WireGuard .conf —
 // it requires `[Interface]` + `[Peer]` headers, a valid PrivateKey/PublicKey
@@ -1521,13 +1524,19 @@ struct OutboundVpnCreateResponse {
 // already chains through.
 //
 // A chained VPN (target ≠ "Internet") additionally needs (InvalidValue):
-//   * an IP-literal Endpoint — only an address can be routed through the target.
-//     At boot, a chained VPN with a hostname Endpoint is retargeted to
-//     "Internet" and the change logged to activity (`vpn-client.unchained`);
 //   * a target tunnel with an address of the endpoint's family whose peer
 //     AllowedIPs cover the endpoint;
 //   * an endpoint address no other VPN shares (checked for every VPN, since a
 //     chain route captures all router traffic to that address).
+// A chained VPN's hostname Endpoint moves to the vpn_client section's
+// `server`, and the router looks it up in plain DNS through the target's
+// tunnel alone (Network on failure), asking the servers a profile routed
+// through the target would use and taking an IPv4 address the target carries
+// over an IPv6 one. The address becomes the peer's `endpoint_host`.
+// Retargeting to "Internet" moves the hostname back. While a chained tunnel
+// sends without a handshake for 180 seconds, the daemon looks the name up
+// again, at most every 120 seconds, and on a new address rewrites the
+// endpoint, chain routes and MTUs and restarts the tunnel.
 // A bracketed IPv6 Endpoint is stored without its brackets.
 //
 // Routing: each chained VPN gets `vcr_<iface>` (endpoint /32 or /128 → target
@@ -1535,9 +1544,13 @@ struct OutboundVpnCreateResponse {
 // at metric 2048, so the endpoint is unreachable rather than reached over the
 // WAN while the target is down. A routed chained VPN's interface also gets
 // `nohostroute '1'`: netifd's endpoint host route would otherwise copy the
-// fallback as a unicast route over it. With no MTU in the .conf, a chained
-// VPN gets the chain MTU: the target's MTU (default 1420) less 60 (IPv4
-// endpoint) or 80 (IPv6), floored at 1280.
+// fallback as a unicast route over it.
+//
+// MTU: every VPN's interface `mtu` is its own MTU, else `default_mtu`. It is
+// rewritten for every VPN on create, update, a WAN IPv4 or IPv6 change, and at
+// boot, and each enabled tunnel whose MTU changed is restarted. Create and
+// update refuse (InvalidValue) a change that leaves a VPN without its own MTU a
+// `default_mtu` below 1280; a VPN already below it does not block.
 ```
 
 ### `vpn-client.update`
@@ -1548,10 +1561,8 @@ struct OutboundVpnUpdateRequest {
     id: String,
     label: String,
     target: String,
-    /// Desired interface MTU (1280–1500). null/absent restores the default:
-    /// the chain MTU for a chained VPN, else the kernel's. UCI is the single
-    /// source of truth — there is no stored .conf; the web edit form always
-    /// submits the field's current value.
+    /// The VPN's own MTU (1280–1500). null/absent uses `default_mtu`. The web
+    /// edit form always submits the field's current value.
     #[serde(default)]
     mtu: Option<u16>,
     /// Replaces the interface's `list dns`. null/absent keeps it.
@@ -1560,7 +1571,7 @@ struct OutboundVpnUpdateRequest {
 }
 // Response: null
 // Backend: updates label+target metadata and the interface `mtu` and `dns`
-// options. Bounces the WG interface only when the MTU actually changed; a DNS
+// options. Bounces the WG interface when its MTU changed or it was retargeted; a DNS
 // change rewrites the DNS forwarding of the profiles routed through it.
 //
 // Validation: same `target` rules as vpn-client.create, except the disabled
@@ -1991,8 +2002,8 @@ struct Profile<ProfileId> {
     /// Always present in responses — an empty array when unset, never null
     #[serde(default)]
     dns_override: Vec<DnsServer>,
-    /// "system", "custom", "vpn", or "system-outside-vpn" (a VPN-routed profile
-    /// resolving through the ISP outside the tunnel)
+    /// "system", "custom", "vpn", or "fallback" (a VPN-routed profile
+    /// resolving through the tunnel with 1.1.1.1)
     dns_source: String,
 }
 // Response: Profile<ProfileId>

@@ -214,7 +214,7 @@ Wie dieses VPN seinen eigenen VPN-Server erreicht: direkt über das Internet ode
 
 ### DNS-Server
 
-Optional. Ersetzt die DNS-Server aus der Konfigurationsdatei. Profile, die über dieses VPN geroutet werden, lösen Namen mit diesen Servern durch den Tunnel auf, sofern sie keine eigenen festlegen. Gibt es weder hier noch in der Konfiguration noch im benutzerdefinierten System-DNS Server, lösen diese Profile Namen über Ihren Internetanbieter außerhalb des Tunnels auf.`,
+Optional. Ersetzt die DNS-Server aus der Konfigurationsdatei. Profile, die über dieses VPN geroutet werden, lösen Namen mit diesen Servern durch den Tunnel auf, sofern sie keine eigenen festlegen. Gibt es weder hier noch in der Konfiguration noch im benutzerdefinierten System-DNS Server, lösen diese Profile Namen durch den Tunnel mit 1.1.1.1 (Cloudflare) auf.`,
   '/profiles': `## Profile
 
 Sicherheitsprofile definieren Netzwerksegmente mit isolierten Berechtigungen. Jedes Profil steuert den Internetzugriff und die Kommunikation mit anderen Profilen in Ihrem lokalen Netzwerk.
@@ -225,7 +225,7 @@ Ein aussagekräftiger Name für das Sicherheitsprofil, etwa „Gast“ oder „I
 
 ### DNS
 
-Welche DNS-Server Geräte in diesem Profil verwenden – die des Systems („System“), die eigenen benutzerdefinierten Server des Profils („Benutzerdefiniert“) oder, beim Routing durch ein VPN, die des VPN („VPN“). „System (außerhalb des VPN)“ bedeutet, dass ein über ein VPN geroutetes Profil keine DNS-Server im Tunnel hat und Namen über Ihren Internetanbieter außerhalb des Tunnels auflöst.
+Welche DNS-Server Geräte in diesem Profil verwenden – die des Systems („System“), die eigenen benutzerdefinierten Server des Profils („Benutzerdefiniert“) oder, beim Routing durch ein VPN, die des VPN („VPN“). „Ausweich-DNS (1.1.1.1)“ bedeutet, dass ein über ein VPN geroutetes Profil weder eigene DNS-Server noch solche des VPN oder des Systems hat und Namen daher durch den Tunnel mit 1.1.1.1 (Cloudflare) auflöst.
 
 ### Ausgehend
 

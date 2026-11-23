@@ -95,10 +95,7 @@ import {
 } from './api.service'
 import { DhcpHostSection, UciFile, UciSection } from './types'
 import { dhcpLanSlaacDhcpv6 } from 'src/app/routes/lan/routes/ipv6/uci/mocks'
-import {
-  configDnsServers,
-  hasHostnameEndpoint,
-} from 'src/app/routes/outbound/utils'
+import { configDnsServers } from 'src/app/routes/outbound/utils'
 import { windowsCover } from 'src/app/utils/schedule'
 import { VPN_PEERS_WOULD_BREAK_CODE } from 'src/app/services/vpn-peers'
 import {
@@ -927,7 +924,7 @@ export class MockApiService extends ApiService {
     if (outbound === 'wan') return 'system'
     return this.mockVpnClients.find(c => c.id === outbound)?.dns.length
       ? 'vpn'
-      : 'system-outside-vpn'
+      : 'fallback'
   }
 
   private guardVpnPeers(
@@ -2010,7 +2007,7 @@ export class MockApiService extends ApiService {
 
   // --- Outbound VPN (WireGuard Client) smart endpoint mocks ---
 
-  private mockVpnClients: OutboundVpn[] = [
+  private mockVpnClients: Omit<OutboundVpn, 'default_mtu'>[] = [
     {
       id: 'wg_proton',
       label: 'Proton',
@@ -2019,7 +2016,6 @@ export class MockApiService extends ApiService {
       used_by: [],
       supports_ipv6: true,
       mtu: null,
-      hostname_endpoint: false,
       dns: ['10.2.0.1'],
       status: 'connected',
       last_handshake_secs: 42,
@@ -2032,7 +2028,6 @@ export class MockApiService extends ApiService {
       used_by: [],
       supports_ipv6: false,
       mtu: 1280,
-      hostname_endpoint: false,
       dns: ['10.64.0.1'],
       status: 'connected',
       last_handshake_secs: 17,
@@ -2049,7 +2044,6 @@ export class MockApiService extends ApiService {
       used_by: [],
       supports_ipv6: false,
       mtu: null,
-      hostname_endpoint: false,
       dns: [],
       status: 'not-responding',
       last_handshake_secs: null,
@@ -2061,6 +2055,7 @@ export class MockApiService extends ApiService {
     return structuredClone(
       this.mockVpnClients.map(c => ({
         ...c,
+        default_mtu: this.mockDefaultMtu(c.target),
         ...(c.enabled
           ? {}
           : { status: 'disabled' as const, last_handshake_secs: null }),
@@ -2071,11 +2066,22 @@ export class MockApiService extends ApiService {
     )
   }
 
+  /** Mock servers all have IPv4 addresses, behind a 1500-byte WAN. */
+  private mockDefaultMtu(target: string): number {
+    const via = this.mockVpnClients.find(c => c.label === target)
+    const outer = via ? (via.mtu ?? this.mockDefaultMtu(via.target)) : 1500
+    return Math.max(outer - 60, 1280)
+  }
+
   async vpnClientCreate(
     params: OutboundVpnCreateRequest,
   ): Promise<OutboundVpnCreateResponse> {
     await pauseFor(250)
     const id = `wg_${params.label.toLowerCase().replace(/[^a-z0-9]/g, '_')}`
+    // A commented `#MTU=` is ignored.
+    const configMtu = Number(
+      /(^|\n)\s*MTU\s*=\s*(\d+)/i.exec(params.config)?.[2],
+    )
     this.mockVpnClients = [
       ...this.mockVpnClients,
       {
@@ -2085,10 +2091,7 @@ export class MockApiService extends ApiService {
         enabled: true,
         used_by: [],
         supports_ipv6: /(^|\n)\s*Address\s*=[^\n]*:/.test(params.config),
-        // Honor an uncommented MTU line; a commented `#MTU=` is ignored.
-        mtu:
-          Number(/(^|\n)\s*MTU\s*=\s*(\d+)/i.exec(params.config)?.[2]) || null,
-        hostname_endpoint: hasHostnameEndpoint(params.config),
+        mtu: configMtu < this.mockDefaultMtu(params.target) ? configMtu : null,
         dns: params.dns ?? configDnsServers(params.config),
         status: 'idle',
         last_handshake_secs: null,

@@ -45,6 +45,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::DisableFlowOffloading,
     Migration::TurnOffRemoteAccess,
     Migration::SplitAutomaticForwardTransports,
+    Migration::StoreVpnClientMtus,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +86,8 @@ enum Migration {
     /// Earlier releases defaulted Remote Access to When behind NAT, stored as `default`.
     TurnOffRemoteAccess,
     SplitAutomaticForwardTransports,
+    /// Earlier releases stored only the MTU each outbound VPN's interface used.
+    StoreVpnClientMtus,
 }
 
 impl Migration {
@@ -111,6 +114,7 @@ impl Migration {
                     .await
                     .map(|_| ())
             }
+            Migration::StoreVpnClientMtus => store_vpn_client_mtus(root).await,
         }
     }
 
@@ -150,6 +154,9 @@ impl Migration {
                 "turn off Remote Access if it was still set to When behind NAT"
             }
             Migration::SplitAutomaticForwardTransports => "track automatic TCP and UDP mappings independently",
+            Migration::StoreVpnClientMtus => {
+                "size each outbound VPN's MTU to fit what it connects via"
+            }
         }
     }
 }
@@ -550,6 +557,15 @@ async fn name_profile_firewall_sections(root: &Path) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root(root), &arena, &["firewall", "network", "startwrt"]).await?;
     if crate::profiles::name_profile_firewall_sections(&mut cfgs)? {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn store_vpn_client_mtus(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["network", "startwrt"]).await?;
+    if crate::vpn_client::adopt_interface_mtus(&mut cfgs)? {
         dump_all(uci_root(root), cfgs).await?;
     }
     Ok(())

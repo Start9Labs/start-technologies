@@ -305,6 +305,20 @@ async fn inner_main() -> Result<(), Error> {
         {
             tracing::error!("Failed to start USB port watcher: {e}");
         }
+
+        // Holds a uciedit `Arena` across awaits (!Send), as the IPv6 tracker does.
+        if let Err(e) = std::thread::Builder::new()
+            .name("vpn-server-lookup".into())
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("vpn-server-lookup runtime")
+                    .block_on(crate::vpn_client::run_server_lookups());
+            })
+        {
+            tracing::error!("Failed to start outbound VPN server lookups: {e}");
+        }
     }
 
     let tls = init_tls(ctx.clone()).await;

@@ -214,7 +214,7 @@ Cómo llega esta VPN a su propio servidor VPN: directamente por internet o a tra
 
 ### Servidores DNS
 
-Opcional. Reemplaza los servidores DNS del archivo de configuración. Los perfiles enrutados por esta VPN resuelven a través del túnel con estos servidores, salvo que definan los suyos. Si no hay ninguno aquí, en la configuración ni en el DNS personalizado del sistema, esos perfiles resuelven a través de su proveedor de Internet, fuera del túnel.`,
+Opcional. Reemplaza los servidores DNS del archivo de configuración. Los perfiles enrutados por esta VPN resuelven a través del túnel con estos servidores, salvo que definan los suyos. Si no hay ninguno aquí, en la configuración ni en el DNS personalizado del sistema, esos perfiles resuelven a través del túnel con 1.1.1.1 (Cloudflare).`,
   '/profiles': `## Perfiles
 
 Los perfiles de seguridad definen segmentos de red con permisos aislados. Cada perfil controla el acceso a internet y la comunicación con otros perfiles de tu red local.
@@ -225,7 +225,7 @@ Un nombre descriptivo para el perfil de seguridad, como «Invitados» o «Dispos
 
 ### DNS
 
-Qué servidores DNS usan los dispositivos de este perfil: los del sistema («Sistema»), los servidores personalizados del propio perfil («Personalizado») o, cuando se enruta a través de una VPN, los de la VPN («VPN»). «Sistema (fuera de la VPN)» significa que un perfil enrutado por una VPN no tiene servidores DNS que usar a través del túnel y resuelve a través de su proveedor de Internet, fuera de él.
+Qué servidores DNS usan los dispositivos de este perfil: los del sistema («Sistema»), los servidores personalizados del propio perfil («Personalizado») o, cuando se enruta a través de una VPN, los de la VPN («VPN»). «Respaldo (1.1.1.1)» significa que un perfil enrutado por una VPN no tiene servidores DNS propios, de la VPN ni del sistema, por lo que resuelve a través del túnel con 1.1.1.1 (Cloudflare).
 
 ### Saliente
 
