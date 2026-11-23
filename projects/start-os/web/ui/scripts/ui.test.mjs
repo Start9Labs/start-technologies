@@ -1834,6 +1834,33 @@ test('source editor keeps a CIFS volume name independent of its hostname', async
   assert.deepEqual(calls[0], ['rename', { id: volumeA, name: 'Photos' }])
 })
 
+test('source editor requires a CIFS hostname independently of its volume name', () => {
+  const entry = signal({
+    name: 'Family files',
+    source: {
+      kind: 'cifs',
+      hostname: 'nas',
+      path: '/files',
+      username: 'reader',
+    },
+    availability: 'available',
+    available: 4096,
+    error: null,
+  })
+  for (const cifsNamedByHost of [false, true]) {
+    const edit = sourceEdit(entry, { cifsNamedByHost })
+    assert.equal(edit.invalid(), false)
+    for (const hostname of ['', '   ']) {
+      edit.hostname.set(hostname)
+      assert.equal(edit.invalid(), true)
+    }
+    edit.hostname.set('new-nas')
+    assert.equal(edit.invalid(), false)
+    edit.path.set('')
+    assert.equal(edit.invalid(), true)
+  }
+})
+
 test('source editor follows an actual stored rename without treating it as an edit', () => {
   const entry = signal({
     name: 'Music',

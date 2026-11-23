@@ -60,7 +60,9 @@ export function sourceEdit(
     username,
     password,
     changed: computed(() => renamed() || cifsChanged()),
-    invalid: computed(() => !newName() || (!!cifs() && !path().trim())),
+    invalid: computed(
+      () => !newName() || (!!cifs() && (!hostname().trim() || !path().trim())),
+    ),
     async save(id: string, client: SourceClient) {
       if (renamed()) await client.rename({ id, name: newName() })
       if (cifsChanged())
