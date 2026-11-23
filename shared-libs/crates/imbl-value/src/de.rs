@@ -1,11 +1,11 @@
 use core::fmt;
 use core::str::FromStr;
 use std::marker::PhantomData;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use imbl::shared_ptr::DefaultSharedPtr;
 use imbl::Vector;
+use serde::de::value::StrDeserializer;
 use serde::de::{
     self, Deserialize, DeserializeSeed, EnumAccess, Expected, IntoDeserializer, MapAccess,
     SeqAccess, Unexpected, VariantAccess, Visitor,
@@ -126,30 +126,63 @@ impl<K: ObjectKind> FromStr for GenericValue<K> {
     }
 }
 
-macro_rules! deserialize_number {
-    ($method:ident) => {
-        fn $method<V>(self, visitor: V) -> Result<V::Value, Error>
-        where
-            V: Visitor<'de>,
-        {
-            match self {
-                GenericValue::Number(n) => n.$method(visitor),
-                _ => self.deserialize_any(visitor),
-            }
-        }
-    };
+/// How a by-reference walk hands string data to the visitor.
+trait StrMode<'a, 'de> {
+    fn visit_str<V: Visitor<'de>>(s: &'a str, visitor: V) -> Result<V::Value, Error>;
 }
 
-fn visit_array<'de, K, V>(array: Vector<GenericValue<K>>, visitor: V) -> Result<V::Value, Error>
+/// Lends strings for `'de`; output may borrow from the value.
+enum Borrowed {}
+
+impl<'de> StrMode<'de, 'de> for Borrowed {
+    fn visit_str<V: Visitor<'de>>(s: &'de str, visitor: V) -> Result<V::Value, Error> {
+        visitor.visit_borrowed_str(s)
+    }
+}
+
+/// Copies strings; output never borrows from the value.
+enum Copied {}
+
+impl<'a, 'de> StrMode<'a, 'de> for Copied {
+    fn visit_str<V: Visitor<'de>>(s: &'a str, visitor: V) -> Result<V::Value, Error> {
+        visitor.visit_str(s)
+    }
+}
+
+/// The deserializer behind both `GenericValue` and `&GenericValue`.
+///
+/// Walks the value by reference, so a value whose storage is shared is
+/// never copied to be taken apart.
+struct RefDeserializer<'a, K: ObjectKind, M> {
+    value: &'a GenericValue<K>,
+    mode: PhantomData<M>,
+}
+
+impl<'a, K: ObjectKind, M> RefDeserializer<'a, K, M> {
+    fn new(value: &'a GenericValue<K>) -> Self {
+        Self {
+            value,
+            mode: PhantomData,
+        }
+    }
+}
+
+fn visit_array<'a, 'de, K, M, V>(
+    array: &'a Vector<GenericValue<K>>,
+    visitor: V,
+) -> Result<V::Value, Error>
 where
     K: ObjectKind,
+    M: StrMode<'a, 'de>,
     V: Visitor<'de>,
 {
     let len = array.len();
-    let mut deserializer = SeqDeserializer::new(array);
+    let mut deserializer = SeqRefDeserializer::<K, M> {
+        iter: array.iter(),
+        mode: PhantomData,
+    };
     let seq = visitor.visit_seq(&mut deserializer)?;
-    let remaining = deserializer.iter.len();
-    if remaining == 0 {
+    if deserializer.iter.len() == 0 {
         Ok(seq)
     } else {
         Err(serde::de::Error::invalid_length(
@@ -159,16 +192,20 @@ where
     }
 }
 
-fn visit_object<'de, K, V>(object: K::Map, visitor: V) -> Result<V::Value, Error>
+fn visit_object<'a, 'de, K, M, V>(object: &'a K::Map, visitor: V) -> Result<V::Value, Error>
 where
     K: ObjectKind,
+    M: StrMode<'a, 'de>,
     V: Visitor<'de>,
 {
     let len = object.len();
-    let mut deserializer = MapDeserializer::<K>::new(object);
+    let mut deserializer = MapRefDeserializer::<K, M> {
+        iter: object.entries(),
+        value: None,
+        mode: PhantomData,
+    };
     let map = visitor.visit_map(&mut deserializer)?;
-    let remaining = deserializer.iter.len();
-    if remaining == 0 {
+    if deserializer.iter.len() == 0 {
         Ok(map)
     } else {
         Err(serde::de::Error::invalid_length(
@@ -178,24 +215,38 @@ where
     }
 }
 
-impl<'de, K: ObjectKind> serde::Deserializer<'de> for GenericValue<K> {
+macro_rules! deserialize_number {
+    ($method:ident) => {
+        fn $method<V>(self, visitor: V) -> Result<V::Value, Error>
+        where
+            V: Visitor<'de>,
+        {
+            match self.value {
+                GenericValue::Number(n) => n.deserialize_any(visitor),
+                _ => self.deserialize_any(visitor),
+            }
+        }
+    };
+}
+
+impl<'a, 'de, K, M> serde::Deserializer<'de> for RefDeserializer<'a, K, M>
+where
+    K: ObjectKind,
+    M: StrMode<'a, 'de>,
+{
     type Error = Error;
 
-    #[inline]
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Error>
     where
         V: Visitor<'de>,
     {
-        match self {
+        match self.value {
             GenericValue::Null => visitor.visit_unit(),
-            GenericValue::Bool(v) => visitor.visit_bool(v),
+            GenericValue::Bool(v) => visitor.visit_bool(*v),
             GenericValue::Number(n) => n.deserialize_any(visitor),
-            GenericValue::String(v) => match Arc::try_unwrap(v) {
-                Err(v) => visitor.visit_str(v.as_str()),
-                Ok(v) => visitor.visit_string(v),
-            },
-            GenericValue::Array(v) => visit_array(v, visitor),
-            GenericValue::Object(v) => visit_object::<K, _>(v, visitor),
+            GenericValue::String(v) => M::visit_str(v, visitor),
+            GenericValue::Array(v) => visit_array::<K, M, V>(v, visitor),
+            GenericValue::Object(v) => visit_object::<K, M, V>(v, visitor),
         }
     }
 
@@ -212,506 +263,11 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for GenericValue<K> {
     deserialize_number!(deserialize_f32);
     deserialize_number!(deserialize_f64);
 
-    #[inline]
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Error>
     where
         V: Visitor<'de>,
     {
-        match self {
-            GenericValue::Null => visitor.visit_none(),
-            _ => visitor.visit_some(self),
-        }
-    }
-
-    #[inline]
-    fn deserialize_enum<V>(
-        self,
-        _name: &str,
-        _variants: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        let (variant, value) = match self {
-            GenericValue::Object(value) => {
-                let mut iter = value.into_entries();
-                let (variant, value) = match iter.next() {
-                    Some(v) => v,
-                    None => {
-                        return Err(serde::de::Error::invalid_value(
-                            Unexpected::Map,
-                            &"map with a single key",
-                        ));
-                    }
-                };
-                // enums are encoded in json as maps with a single key:value pair
-                if iter.next().is_some() {
-                    return Err(serde::de::Error::invalid_value(
-                        Unexpected::Map,
-                        &"map with a single key",
-                    ));
-                }
-                (variant, Some(value))
-            }
-            GenericValue::String(variant) => (
-                InternedString::intern({
-                    struct ArcStr(Arc<String>);
-                    impl fmt::Display for ArcStr {
-                        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                            fmt::Display::fmt(&self.0, f)
-                        }
-                    }
-                    impl From<ArcStr> for String {
-                        fn from(value: ArcStr) -> Self {
-                            Arc::try_unwrap(value.0).unwrap_or_else(|v| v.deref().to_owned())
-                        }
-                    }
-                    ArcStr(variant)
-                }),
-                None,
-            ),
-            other => {
-                return Err(serde::de::Error::invalid_type(
-                    other.unexpected(),
-                    &"string or map",
-                ));
-            }
-        };
-
-        visitor.visit_enum(EnumDeserializer { variant, value })
-    }
-
-    #[inline]
-    fn deserialize_newtype_struct<V>(
-        self,
-        name: &'static str,
-        visitor: V,
-    ) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        let _ = name;
-        visitor.visit_newtype_struct(self)
-    }
-
-    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            GenericValue::Bool(v) => visitor.visit_bool(v),
-            _ => Err(self.invalid_type(&visitor)),
-        }
-    }
-
-    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_string(visitor)
-    }
-
-    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_string(visitor)
-    }
-
-    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            GenericValue::String(v) => match Arc::try_unwrap(v) {
-                Err(v) => visitor.visit_str(v.as_str()),
-                Ok(v) => visitor.visit_string(v),
-            },
-            _ => Err(self.invalid_type(&visitor)),
-        }
-    }
-
-    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_byte_buf(visitor)
-    }
-
-    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            GenericValue::String(v) => match Arc::try_unwrap(v) {
-                Err(v) => visitor.visit_str(v.as_str()),
-                Ok(v) => visitor.visit_string(v),
-            },
-            GenericValue::Array(v) => visit_array(v, visitor),
-            _ => Err(self.invalid_type(&visitor)),
-        }
-    }
-
-    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            GenericValue::Null => visitor.visit_unit(),
-            _ => Err(self.invalid_type(&visitor)),
-        }
-    }
-
-    fn deserialize_unit_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_unit(visitor)
-    }
-
-    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            GenericValue::Array(v) => visit_array(v, visitor),
-            _ => Err(self.invalid_type(&visitor)),
-        }
-    }
-
-    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_seq(visitor)
-    }
-
-    fn deserialize_tuple_struct<V>(
-        self,
-        _name: &'static str,
-        _len: usize,
-        visitor: V,
-    ) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_seq(visitor)
-    }
-
-    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            GenericValue::Object(v) => visit_object::<K, _>(v, visitor),
-            _ => Err(self.invalid_type(&visitor)),
-        }
-    }
-
-    fn deserialize_struct<V>(
-        self,
-        _name: &'static str,
-        _fields: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            GenericValue::Array(v) => visit_array(v, visitor),
-            GenericValue::Object(v) => visit_object::<K, _>(v, visitor),
-            _ => Err(self.invalid_type(&visitor)),
-        }
-    }
-
-    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_string(visitor)
-    }
-
-    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        drop(self);
-        visitor.visit_unit()
-    }
-}
-
-struct EnumDeserializer<K: ObjectKind> {
-    variant: InternedString,
-    value: Option<GenericValue<K>>,
-}
-
-impl<'de, K: ObjectKind> EnumAccess<'de> for EnumDeserializer<K> {
-    type Error = Error;
-    type Variant = VariantDeserializer<K>;
-
-    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, VariantDeserializer<K>), Error>
-    where
-        V: DeserializeSeed<'de>,
-    {
-        let variant = self.variant.into_deserializer();
-        let visitor = VariantDeserializer { value: self.value };
-        seed.deserialize(variant).map(|v| (v, visitor))
-    }
-}
-
-impl<'de, K: ObjectKind> IntoDeserializer<'de, Error> for GenericValue<K> {
-    type Deserializer = Self;
-
-    fn into_deserializer(self) -> Self::Deserializer {
-        self
-    }
-}
-
-struct VariantDeserializer<K: ObjectKind> {
-    value: Option<GenericValue<K>>,
-}
-
-impl<'de, K: ObjectKind> VariantAccess<'de> for VariantDeserializer<K> {
-    type Error = Error;
-
-    fn unit_variant(self) -> Result<(), Error> {
         match self.value {
-            Some(value) => Deserialize::deserialize(value),
-            None => Ok(()),
-        }
-    }
-
-    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Error>
-    where
-        T: DeserializeSeed<'de>,
-    {
-        match self.value {
-            Some(value) => seed.deserialize(value),
-            None => Err(serde::de::Error::invalid_type(
-                Unexpected::UnitVariant,
-                &"newtype variant",
-            )),
-        }
-    }
-
-    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self.value {
-            Some(GenericValue::Array(v)) => {
-                if v.is_empty() {
-                    visitor.visit_unit()
-                } else {
-                    visit_array(v, visitor)
-                }
-            }
-            Some(other) => Err(serde::de::Error::invalid_type(
-                other.unexpected(),
-                &"tuple variant",
-            )),
-            None => Err(serde::de::Error::invalid_type(
-                Unexpected::UnitVariant,
-                &"tuple variant",
-            )),
-        }
-    }
-
-    fn struct_variant<V>(
-        self,
-        _fields: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self.value {
-            Some(GenericValue::Object(v)) => visit_object::<K, _>(v, visitor),
-            Some(other) => Err(serde::de::Error::invalid_type(
-                other.unexpected(),
-                &"struct variant",
-            )),
-            None => Err(serde::de::Error::invalid_type(
-                Unexpected::UnitVariant,
-                &"struct variant",
-            )),
-        }
-    }
-}
-
-struct SeqDeserializer<K: ObjectKind> {
-    iter: imbl::vector::ConsumingIter<GenericValue<K>, DefaultSharedPtr>,
-}
-
-impl<K: ObjectKind> SeqDeserializer<K> {
-    fn new(vec: Vector<GenericValue<K>>) -> Self {
-        SeqDeserializer {
-            iter: vec.into_iter(),
-        }
-    }
-}
-
-impl<'de, K: ObjectKind> SeqAccess<'de> for SeqDeserializer<K> {
-    type Error = Error;
-
-    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Error>
-    where
-        T: DeserializeSeed<'de>,
-    {
-        match self.iter.next() {
-            Some(value) => seed.deserialize(value).map(Some),
-            None => Ok(None),
-        }
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        match self.iter.size_hint() {
-            (lower, Some(upper)) if lower == upper => Some(upper),
-            _ => None,
-        }
-    }
-}
-
-struct MapDeserializer<K: ObjectKind> {
-    iter: <K::Map as ObjectMap<GenericValue<K>>>::IntoEntries,
-    value: Option<GenericValue<K>>,
-}
-
-impl<K: ObjectKind> MapDeserializer<K> {
-    fn new(map: K::Map) -> Self {
-        MapDeserializer {
-            iter: map.into_entries(),
-            value: None,
-        }
-    }
-}
-
-impl<'de, K: ObjectKind> MapAccess<'de> for MapDeserializer<K> {
-    type Error = Error;
-
-    fn next_key_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Error>
-    where
-        T: DeserializeSeed<'de>,
-    {
-        match self.iter.next() {
-            Some((key, value)) => {
-                self.value = Some(value);
-                let key_de = MapKeyDeserializer { key };
-                seed.deserialize(key_de).map(Some)
-            }
-            None => Ok(None),
-        }
-    }
-
-    fn next_value_seed<T>(&mut self, seed: T) -> Result<T::Value, Error>
-    where
-        T: DeserializeSeed<'de>,
-    {
-        match self.value.take() {
-            Some(value) => seed.deserialize(value),
-            None => Err(serde::de::Error::custom("value is missing")),
-        }
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        match self.iter.size_hint() {
-            (lower, Some(upper)) if lower == upper => Some(upper),
-            _ => None,
-        }
-    }
-}
-
-macro_rules! deserialize_value_ref_number {
-    ($method:ident) => {
-        fn $method<V>(self, visitor: V) -> Result<V::Value, Error>
-        where
-            V: Visitor<'de>,
-        {
-            match self {
-                GenericValue::Number(n) => n.deserialize_any(visitor),
-                _ => Err(self.invalid_type(&visitor)),
-            }
-        }
-    };
-}
-
-fn visit_array_ref<'de, K, V>(
-    array: &'de Vector<GenericValue<K>>,
-    visitor: V,
-) -> Result<V::Value, Error>
-where
-    K: ObjectKind,
-    V: Visitor<'de>,
-{
-    let len = array.len();
-    let mut deserializer = SeqRefDeserializer::new(array);
-    let seq = visitor.visit_seq(&mut deserializer)?;
-    let remaining = deserializer.iter.len();
-    if remaining == 0 {
-        Ok(seq)
-    } else {
-        Err(serde::de::Error::invalid_length(
-            len,
-            &"fewer elements in array",
-        ))
-    }
-}
-
-fn visit_object_ref<'de, K, V>(object: &'de K::Map, visitor: V) -> Result<V::Value, Error>
-where
-    K: ObjectKind,
-    V: Visitor<'de>,
-{
-    let len = object.len();
-    let mut deserializer = MapRefDeserializer::<K>::new(object);
-    let map = visitor.visit_map(&mut deserializer)?;
-    let remaining = deserializer.iter.len();
-    if remaining == 0 {
-        Ok(map)
-    } else {
-        Err(serde::de::Error::invalid_length(
-            len,
-            &"fewer elements in map",
-        ))
-    }
-}
-
-impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
-    type Error = Error;
-
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self {
-            GenericValue::Null => visitor.visit_unit(),
-            GenericValue::Bool(v) => visitor.visit_bool(*v),
-            GenericValue::Number(n) => n.deserialize_any(visitor),
-            GenericValue::String(v) => visitor.visit_borrowed_str(v),
-            GenericValue::Array(v) => visit_array_ref(v, visitor),
-            GenericValue::Object(v) => visit_object_ref::<K, _>(v, visitor),
-        }
-    }
-
-    deserialize_value_ref_number!(deserialize_i8);
-    deserialize_value_ref_number!(deserialize_i16);
-    deserialize_value_ref_number!(deserialize_i32);
-    deserialize_value_ref_number!(deserialize_i64);
-    deserialize_number!(deserialize_i128);
-    deserialize_value_ref_number!(deserialize_u8);
-    deserialize_value_ref_number!(deserialize_u16);
-    deserialize_value_ref_number!(deserialize_u32);
-    deserialize_value_ref_number!(deserialize_u64);
-    deserialize_number!(deserialize_u128);
-    deserialize_value_ref_number!(deserialize_f32);
-    deserialize_value_ref_number!(deserialize_f64);
-
-    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Error>
-    where
-        V: Visitor<'de>,
-    {
-        match *self {
             GenericValue::Null => visitor.visit_none(),
             _ => visitor.visit_some(self),
         }
@@ -726,7 +282,7 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     where
         V: Visitor<'de>,
     {
-        let (variant, value) = match self {
+        let (variant, value) = match self.value {
             GenericValue::Object(value) => {
                 let mut iter = value.entries();
                 let (variant, value) = match iter.next() {
@@ -747,7 +303,7 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
                 }
                 (&**variant, Some(value))
             }
-            GenericValue::String(variant) => (&***variant, None),
+            GenericValue::String(variant) => (variant.as_str(), None),
             other => {
                 return Err(serde::de::Error::invalid_type(
                     other.unexpected(),
@@ -756,19 +312,22 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
             }
         };
 
-        visitor.visit_enum(EnumRefDeserializer { variant, value })
+        visitor.visit_enum(EnumRefDeserializer::<K, M> {
+            variant,
+            value,
+            mode: PhantomData,
+        })
     }
 
     #[inline]
     fn deserialize_newtype_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error>
     where
         V: Visitor<'de>,
     {
-        let _ = name;
         visitor.visit_newtype_struct(self)
     }
 
@@ -776,9 +335,9 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     where
         V: Visitor<'de>,
     {
-        match *self {
-            GenericValue::Bool(v) => visitor.visit_bool(v),
-            _ => Err(self.invalid_type(&visitor)),
+        match self.value {
+            GenericValue::Bool(v) => visitor.visit_bool(*v),
+            other => Err(other.invalid_type(&visitor)),
         }
     }
 
@@ -793,9 +352,9 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     where
         V: Visitor<'de>,
     {
-        match self {
-            GenericValue::String(v) => visitor.visit_borrowed_str(v),
-            _ => Err(self.invalid_type(&visitor)),
+        match self.value {
+            GenericValue::String(v) => M::visit_str(v, visitor),
+            other => Err(other.invalid_type(&visitor)),
         }
     }
 
@@ -810,10 +369,10 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     where
         V: Visitor<'de>,
     {
-        match self {
-            GenericValue::String(v) => visitor.visit_borrowed_str(v),
-            GenericValue::Array(v) => visit_array_ref(v, visitor),
-            _ => Err(self.invalid_type(&visitor)),
+        match self.value {
+            GenericValue::String(v) => M::visit_str(v, visitor),
+            GenericValue::Array(v) => visit_array::<K, M, V>(v, visitor),
+            other => Err(other.invalid_type(&visitor)),
         }
     }
 
@@ -828,9 +387,9 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     where
         V: Visitor<'de>,
     {
-        match *self {
+        match self.value {
             GenericValue::Null => visitor.visit_unit(),
-            _ => Err(self.invalid_type(&visitor)),
+            other => Err(other.invalid_type(&visitor)),
         }
     }
 
@@ -845,9 +404,9 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     where
         V: Visitor<'de>,
     {
-        match self {
-            GenericValue::Array(v) => visit_array_ref(v, visitor),
-            _ => Err(self.invalid_type(&visitor)),
+        match self.value {
+            GenericValue::Array(v) => visit_array::<K, M, V>(v, visitor),
+            other => Err(other.invalid_type(&visitor)),
         }
     }
 
@@ -874,9 +433,9 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     where
         V: Visitor<'de>,
     {
-        match self {
-            GenericValue::Object(v) => visit_object_ref::<K, _>(v, visitor),
-            _ => Err(self.invalid_type(&visitor)),
+        match self.value {
+            GenericValue::Object(v) => visit_object::<K, M, V>(v, visitor),
+            other => Err(other.invalid_type(&visitor)),
         }
     }
 
@@ -889,10 +448,10 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     where
         V: Visitor<'de>,
     {
-        match self {
-            GenericValue::Array(v) => visit_array_ref(v, visitor),
-            GenericValue::Object(v) => visit_object_ref::<K, _>(v, visitor),
-            _ => Err(self.invalid_type(&visitor)),
+        match self.value {
+            GenericValue::Array(v) => visit_array::<K, M, V>(v, visitor),
+            GenericValue::Object(v) => visit_object::<K, M, V>(v, visitor),
+            other => Err(other.invalid_type(&visitor)),
         }
     }
 
@@ -911,35 +470,99 @@ impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
     }
 }
 
-struct EnumRefDeserializer<'de, K: ObjectKind> {
-    variant: &'de str,
-    value: Option<&'de GenericValue<K>>,
+macro_rules! forward_to_ref {
+    ($mode:ty, $this:ident => $value:expr) => {
+        forward_to_ref! {
+            @methods $mode, $this => $value;
+            deserialize_any() deserialize_bool() deserialize_i8() deserialize_i16()
+            deserialize_i32() deserialize_i64() deserialize_i128() deserialize_u8()
+            deserialize_u16() deserialize_u32() deserialize_u64() deserialize_u128()
+            deserialize_f32() deserialize_f64() deserialize_char() deserialize_str()
+            deserialize_string() deserialize_bytes() deserialize_byte_buf()
+            deserialize_option() deserialize_unit() deserialize_unit_struct(name: &'static str)
+            deserialize_newtype_struct(name: &'static str) deserialize_seq()
+            deserialize_tuple(len: usize) deserialize_tuple_struct(name: &'static str, len: usize)
+            deserialize_map()
+            deserialize_struct(name: &'static str, fields: &'static [&'static str])
+            deserialize_enum(name: &'static str, variants: &'static [&'static str])
+            deserialize_identifier() deserialize_ignored_any()
+        }
+    };
+    (@methods $mode:ty, $this:ident => $value:expr; $($method:ident($($arg:ident: $ty:ty),*))*) => {
+        $(
+            fn $method<V>(self, $($arg: $ty,)* visitor: V) -> Result<V::Value, Error>
+            where
+                V: Visitor<'de>,
+            {
+                let $this = self;
+                RefDeserializer::<K, $mode>::new($value).$method($($arg,)* visitor)
+            }
+        )*
+    };
 }
 
-impl<'de, K: ObjectKind> EnumAccess<'de> for EnumRefDeserializer<'de, K> {
+impl<'de, K: ObjectKind> serde::Deserializer<'de> for GenericValue<K> {
     type Error = Error;
-    type Variant = VariantRefDeserializer<'de, K>;
+
+    forward_to_ref!(Copied, this => &this);
+}
+
+impl<'de, K: ObjectKind> serde::Deserializer<'de> for &'de GenericValue<K> {
+    type Error = Error;
+
+    forward_to_ref!(Borrowed, this => this);
+}
+
+impl<'de, K: ObjectKind> IntoDeserializer<'de, Error> for GenericValue<K> {
+    type Deserializer = Self;
+
+    fn into_deserializer(self) -> Self::Deserializer {
+        self
+    }
+}
+
+struct EnumRefDeserializer<'a, K: ObjectKind, M> {
+    variant: &'a str,
+    value: Option<&'a GenericValue<K>>,
+    mode: PhantomData<M>,
+}
+
+impl<'a, 'de, K, M> EnumAccess<'de> for EnumRefDeserializer<'a, K, M>
+where
+    K: ObjectKind,
+    M: StrMode<'a, 'de>,
+{
+    type Error = Error;
+    type Variant = VariantRefDeserializer<'a, K, M>;
 
     fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Error>
     where
         V: DeserializeSeed<'de>,
     {
-        let variant = self.variant.into_deserializer();
-        let visitor = VariantRefDeserializer { value: self.value };
+        let variant = StrDeserializer::<Error>::new(self.variant);
+        let visitor = VariantRefDeserializer {
+            value: self.value,
+            mode: PhantomData,
+        };
         seed.deserialize(variant).map(|v| (v, visitor))
     }
 }
 
-struct VariantRefDeserializer<'de, K: ObjectKind> {
-    value: Option<&'de GenericValue<K>>,
+struct VariantRefDeserializer<'a, K: ObjectKind, M> {
+    value: Option<&'a GenericValue<K>>,
+    mode: PhantomData<M>,
 }
 
-impl<'de, K: ObjectKind> VariantAccess<'de> for VariantRefDeserializer<'de, K> {
+impl<'a, 'de, K, M> VariantAccess<'de> for VariantRefDeserializer<'a, K, M>
+where
+    K: ObjectKind,
+    M: StrMode<'a, 'de>,
+{
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Error> {
         match self.value {
-            Some(value) => Deserialize::deserialize(value),
+            Some(value) => Deserialize::deserialize(RefDeserializer::<K, M>::new(value)),
             None => Ok(()),
         }
     }
@@ -949,7 +572,7 @@ impl<'de, K: ObjectKind> VariantAccess<'de> for VariantRefDeserializer<'de, K> {
         T: DeserializeSeed<'de>,
     {
         match self.value {
-            Some(value) => seed.deserialize(value),
+            Some(value) => seed.deserialize(RefDeserializer::<K, M>::new(value)),
             None => Err(serde::de::Error::invalid_type(
                 Unexpected::UnitVariant,
                 &"newtype variant",
@@ -966,7 +589,7 @@ impl<'de, K: ObjectKind> VariantAccess<'de> for VariantRefDeserializer<'de, K> {
                 if v.is_empty() {
                     visitor.visit_unit()
                 } else {
-                    visit_array_ref(v, visitor)
+                    visit_array::<K, M, V>(v, visitor)
                 }
             }
             Some(other) => Err(serde::de::Error::invalid_type(
@@ -989,7 +612,7 @@ impl<'de, K: ObjectKind> VariantAccess<'de> for VariantRefDeserializer<'de, K> {
         V: Visitor<'de>,
     {
         match self.value {
-            Some(GenericValue::Object(v)) => visit_object_ref::<K, _>(v, visitor),
+            Some(GenericValue::Object(v)) => visit_object::<K, M, V>(v, visitor),
             Some(other) => Err(serde::de::Error::invalid_type(
                 other.unexpected(),
                 &"struct variant",
@@ -1002,17 +625,16 @@ impl<'de, K: ObjectKind> VariantAccess<'de> for VariantRefDeserializer<'de, K> {
     }
 }
 
-struct SeqRefDeserializer<'de, K: ObjectKind> {
-    iter: imbl::vector::Iter<'de, GenericValue<K>, DefaultSharedPtr>,
+struct SeqRefDeserializer<'a, K: ObjectKind, M> {
+    iter: imbl::vector::Iter<'a, GenericValue<K>, DefaultSharedPtr>,
+    mode: PhantomData<M>,
 }
 
-impl<'de, K: ObjectKind> SeqRefDeserializer<'de, K> {
-    fn new(slice: &'de Vector<GenericValue<K>>) -> Self {
-        SeqRefDeserializer { iter: slice.iter() }
-    }
-}
-
-impl<'de, K: ObjectKind> SeqAccess<'de> for SeqRefDeserializer<'de, K> {
+impl<'a, 'de, K, M> SeqAccess<'de> for SeqRefDeserializer<'a, K, M>
+where
+    K: ObjectKind,
+    M: StrMode<'a, 'de>,
+{
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Error>
@@ -1020,34 +642,29 @@ impl<'de, K: ObjectKind> SeqAccess<'de> for SeqRefDeserializer<'de, K> {
         T: DeserializeSeed<'de>,
     {
         match self.iter.next() {
-            Some(value) => seed.deserialize(value).map(Some),
+            Some(value) => seed
+                .deserialize(RefDeserializer::<K, M>::new(value))
+                .map(Some),
             None => Ok(None),
         }
     }
 
     fn size_hint(&self) -> Option<usize> {
-        match self.iter.size_hint() {
-            (lower, Some(upper)) if lower == upper => Some(upper),
-            _ => None,
-        }
+        Some(self.iter.len())
     }
 }
 
-struct MapRefDeserializer<'de, K: ObjectKind> {
-    iter: <K::Map as ObjectMap<GenericValue<K>>>::Entries<'de>,
-    value: Option<&'de GenericValue<K>>,
+struct MapRefDeserializer<'a, K: ObjectKind, M> {
+    iter: <K::Map as ObjectMap<GenericValue<K>>>::Entries<'a>,
+    value: Option<&'a GenericValue<K>>,
+    mode: PhantomData<M>,
 }
 
-impl<'de, K: ObjectKind> MapRefDeserializer<'de, K> {
-    fn new(map: &'de K::Map) -> Self {
-        MapRefDeserializer {
-            iter: map.entries(),
-            value: None,
-        }
-    }
-}
-
-impl<'de, K: ObjectKind> MapAccess<'de> for MapRefDeserializer<'de, K> {
+impl<'a, 'de, K, M> MapAccess<'de> for MapRefDeserializer<'a, K, M>
+where
+    K: ObjectKind,
+    M: StrMode<'a, 'de>,
+{
     type Error = Error;
 
     fn next_key_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Error>
@@ -1069,16 +686,13 @@ impl<'de, K: ObjectKind> MapAccess<'de> for MapRefDeserializer<'de, K> {
         T: DeserializeSeed<'de>,
     {
         match self.value.take() {
-            Some(value) => seed.deserialize(value),
+            Some(value) => seed.deserialize(RefDeserializer::<K, M>::new(value)),
             None => Err(serde::de::Error::custom("value is missing")),
         }
     }
 
     fn size_hint(&self) -> Option<usize> {
-        match self.iter.size_hint() {
-            (lower, Some(upper)) if lower == upper => Some(upper),
-            _ => None,
-        }
+        Some(self.iter.len())
     }
 }
 
@@ -1333,5 +947,111 @@ impl<'de> de::VariantAccess<'de> for UnitOnly {
             Unexpected::UnitVariant,
             &"struct variant",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use serde::de::{Deserializer, Visitor};
+    use serde::Deserialize;
+
+    use crate::{from_value, json, OrdValue, Value};
+
+    /// Accepts a number or its decimal string, asking for `u64` first.
+    #[derive(Debug, PartialEq)]
+    struct Port(u64);
+
+    impl<'de> Deserialize<'de> for Port {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct PortVisitor;
+            impl<'de> Visitor<'de> for PortVisitor {
+                type Value = Port;
+                fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    f.write_str("a port")
+                }
+                fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Port, E> {
+                    Ok(Port(v))
+                }
+                fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Port, E> {
+                    v.parse().map(Port).map_err(E::custom)
+                }
+            }
+            deserializer.deserialize_u64(PortVisitor)
+        }
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    enum Kind {
+        Unit,
+        Newtype(Port),
+        Tuple(u8, String),
+        Struct { name: String },
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct Doc {
+        ports: Vec<Port>,
+        kinds: Vec<Kind>,
+        labels: BTreeMap<u32, Option<String>>,
+        bytes: Vec<u8>,
+    }
+
+    fn doc() -> Value {
+        json!({
+            "ports": [80, "443"],
+            "kinds": ["Unit", { "Newtype": "8080" }, { "Tuple": [1, "a"] }, { "Struct": { "name": "b" } }],
+            "labels": { "2": null, "10": "ten" },
+            "bytes": [1, 2, 3],
+        })
+    }
+
+    fn expected() -> Doc {
+        Doc {
+            ports: vec![Port(80), Port(443)],
+            kinds: vec![
+                Kind::Unit,
+                Kind::Newtype(Port(8080)),
+                Kind::Tuple(1, "a".into()),
+                Kind::Struct { name: "b".into() },
+            ],
+            labels: BTreeMap::from([(2, None), (10, Some("ten".into()))]),
+            bytes: vec![1, 2, 3],
+        }
+    }
+
+    #[test]
+    fn owned_and_borrowed_deserialize_alike() {
+        let value = doc();
+        assert_eq!(Doc::deserialize(&value).unwrap(), expected());
+        assert_eq!(from_value::<Doc>(value.clone()).unwrap(), expected());
+        assert_eq!(value, doc());
+
+        let ord = OrdValue::from(doc());
+        assert_eq!(Doc::deserialize(&ord).unwrap(), expected());
+        assert_eq!(from_value::<Doc>(ord).unwrap(), expected());
+    }
+
+    #[test]
+    fn borrowed_lends_strings() {
+        #[derive(Deserialize)]
+        struct Borrowing<'a> {
+            name: &'a str,
+        }
+        let value = json!({ "name": "start9" });
+        let borrowing = Borrowing::deserialize(&value).unwrap();
+        assert!(std::ptr::eq(
+            borrowing.name,
+            value["name"].as_str().unwrap()
+        ));
+    }
+
+    #[test]
+    fn rejects_mismatched_shapes() {
+        assert!(from_value::<Doc>(json!({ "ports": 1 })).is_err());
+        assert!(from_value::<Kind>(json!({ "Unit": null, "Struct": {} })).is_err());
+        assert!(from_value::<(u8,)>(json!([1, 2])).is_err());
+        assert!(Port::deserialize(&json!(true)).is_err());
     }
 }
