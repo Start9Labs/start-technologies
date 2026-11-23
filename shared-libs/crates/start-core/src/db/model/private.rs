@@ -32,6 +32,8 @@ pub struct Private {
     #[serde(default)]
     pub registry_indexes: BTreeMap<url::Url, crate::registry::FullIndex>,
     #[serde(default)]
+    pub registry_cursors: BTreeMap<url::Url, crate::registry::sync::RegistryCursor>,
+    #[serde(default)]
     pub push: crate::notifications::push::PushState,
     pub cifs: CifsTargets,
     #[serde(default)]
@@ -48,6 +50,8 @@ pub struct Private {
     >,
     #[serde(default)]
     pub package_stores: BTreeMap<PackageId, Value>,
+    #[serde(default)]
+    pub smtp: Option<crate::system::SmtpValue>,
 }
 
 pub fn generate_server_identity_key() -> Der64<ed25519_dalek::SigningKey> {

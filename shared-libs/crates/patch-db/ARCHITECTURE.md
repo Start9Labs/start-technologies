@@ -106,6 +106,7 @@ PatchDb::subscribe(ptr)    → Subscriber (mpsc receiver)
 PatchDb::watch(ptr)        → DbWatch (Dump + Subscriber, implements Stream)
 PatchDb::dump_and_sub(ptr) → (Dump, Subscriber)
 PatchDb::catch_up_and_sub(ptr, since) → (epoch, Catchup, Subscriber)
+PatchDb::catch_up_and_sub_json(ptr, since, capacity) → Result<(epoch, JsonCatchup, JsonSubscriber)>
 PatchDb::dump_and_sub_json(ptr, capacity) → Result<(Bytes, JsonSubscriber)>
 ```
 

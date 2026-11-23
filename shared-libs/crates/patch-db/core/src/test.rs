@@ -1,11 +1,12 @@
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use imbl_value::{json, Value};
 use json_ptr::{JsonPointer, ROOT};
-use patch_db::{Catchup, DiffPatch, Error, PatchDb, Revision};
+use patch_db::{Catchup, DiffPatch, Error, JsonCatchup, PatchDb, Revision};
 use proptest::prelude::*;
 use tokio::fs;
 use tokio::runtime::Builder;
@@ -112,6 +113,59 @@ async fn catch_up_replays_scoped_revisions_within_its_epoch() {
         let (_, catchup, _) = db.catch_up_and_sub(public.clone(), Some(since)).await;
         assert!(matches!(catchup, Catchup::Dump(dump) if dump.id == 4));
     }
+}
+
+#[tokio::test]
+async fn json_catch_up_replays_within_its_epoch_and_streams_later_revisions() {
+    let db = PatchDb::in_memory();
+    db.put(&ROOT, &json!({ "index": { "package": {} }, "other": 0 }))
+        .await
+        .unwrap();
+    let index: JsonPointer = "/index".parse().unwrap();
+    let capacity = NonZeroUsize::new(8).unwrap();
+    let (epoch, catchup, _) = db
+        .catch_up_and_sub_json(index.clone(), None, capacity)
+        .await
+        .unwrap();
+    let JsonCatchup::Dump(json) = catchup else {
+        panic!("expected a dump")
+    };
+    let dump: patch_db::Dump = serde_json::from_slice(&json).unwrap();
+    db.put(&"/other".parse::<JsonPointer>().unwrap(), &1)
+        .await
+        .unwrap();
+    db.put(&"/index/package/a".parse::<JsonPointer>().unwrap(), &1)
+        .await
+        .unwrap();
+
+    let (_, catchup, mut sub) = db
+        .catch_up_and_sub_json(index.clone(), Some((&epoch, dump.id)), capacity)
+        .await
+        .unwrap();
+    let JsonCatchup::Replay { id, revisions } = catchup else {
+        panic!("expected a replay")
+    };
+    assert_eq!(id, dump.id + 2);
+    assert_eq!(revisions.len(), 1);
+    assert_eq!(
+        revisions[0]
+            .patch
+            .paths()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["/package/a"]
+    );
+    db.put(&"/index/package/b".parse::<JsonPointer>().unwrap(), &1)
+        .await
+        .unwrap();
+    let next: Revision = serde_json::from_slice(&sub.recv().await.unwrap().unwrap()).unwrap();
+    assert_eq!(next.id, id + 1);
+
+    let (_, catchup, _) = db
+        .catch_up_and_sub_json(index, Some(("other", dump.id)), capacity)
+        .await
+        .unwrap();
+    assert!(matches!(catchup, JsonCatchup::Dump(_)));
 }
 
 #[tokio::test]

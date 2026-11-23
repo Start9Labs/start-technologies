@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common'
-import { Component, inject } from '@angular/core'
+import { Component, inject, signal } from '@angular/core'
 import {
   FormControl,
   ReactiveFormsModule,
@@ -15,7 +15,13 @@ import {
 } from '@start9labs/shared'
 import { inputSpec, ISB, utils } from '@start9labs/start-core'
 import { tuiMarkControlAsTouchedAndValidate } from '@taiga-ui/cdk'
-import { TuiButton, TuiError, TuiInput, TuiTitle } from '@taiga-ui/core'
+import {
+  TuiButton,
+  TuiError,
+  TuiInput,
+  TuiLink,
+  TuiTitle,
+} from '@taiga-ui/core'
 import { TuiHeader } from '@taiga-ui/layout'
 import { PatchDB } from 'patch-db-client'
 import { switchMap } from 'rxjs'
@@ -80,6 +86,14 @@ function detectProviderKey(host: string | undefined): string {
           </h3>
         </header>
         <form-group [spec]="data.spec" />
+        @if (data.passwordSet && !removePassword()) {
+          <p>
+            {{ 'A password is saved. Leave Password empty to keep it.' | i18n }}
+            <button tuiLink type="button" (click)="forgetPassword(data.form)">
+              {{ 'Remove saved password' | i18n }}
+            </button>
+          </p>
+        }
         <footer>
           @if (!data.form.pristine) {
             <button
@@ -159,6 +173,7 @@ function detectProviderKey(host: string | undefined): string {
     TuiButton,
     TuiError,
     TuiInput,
+    TuiLink,
     TuiHeader,
     TuiTitle,
     RouterLink,
@@ -177,6 +192,7 @@ export default class SystemEmailComponent {
 
   private readonly emailRegex = new RegExp(utils.Patterns.email.regex)
   readonly testEmailControl = new FormControl('')
+  readonly removePassword = signal(false)
 
   get testEmail(): string {
     return this.testEmailControl.value?.trim() || ''
@@ -222,7 +238,7 @@ export default class SystemEmailComponent {
                     },
                     from: value.from,
                     username: value.username,
-                    password: value.password,
+                    password: null,
                   },
                 },
               },
@@ -230,18 +246,26 @@ export default class SystemEmailComponent {
           }
         : undefined
       const form = this.formService.createForm(spec, formData)
+      this.removePassword.set(false)
 
-      return { form, spec, formData }
+      return { form, spec, formData, passwordSet: !!value?.passwordSet }
     }),
   )
 
   private getSmtpValue(formValue: Record<string, any>) {
-    const { security, ...rest } = formValue['smtp'].value.provider.value
+    const { security, password, ...rest } =
+      formValue['smtp'].value.provider.value
     return {
       ...rest,
+      password: (password as string | null) || null,
       security: security.selection,
       port: Number(security.value.port),
     }
+  }
+
+  forgetPassword(form: UntypedFormGroup) {
+    this.removePassword.set(true)
+    form.markAsDirty()
   }
 
   async save(form: UntypedFormGroup): Promise<void> {
@@ -252,12 +276,18 @@ export default class SystemEmailComponent {
 
     const formValue = form.value as Record<string, any>
 
-    this.tasks.run(async () => {
+    await this.tasks.run(async () => {
       if (formValue['smtp'].selection === 'disabled') {
         await this.api.rpc.server.clearSmtp({})
       } else {
-        await this.api.rpc.server.setSmtp(this.getSmtpValue(formValue))
+        await this.api.rpc.server.setSmtp({
+          ...this.getSmtpValue(formValue),
+          keepPassword: !this.removePassword(),
+        })
+        form.get('smtp.value.provider.value.password')?.reset(null)
       }
+      form.markAsPristine()
+      this.removePassword.set(false)
     }, 'Saving')
   }
 
@@ -265,6 +295,7 @@ export default class SystemEmailComponent {
     form: ReturnType<FormService['createForm']>
     formData: Record<string, any> | undefined
   }) {
+    this.removePassword.set(false)
     data.form.reset(data.formData)
   }
 
@@ -277,7 +308,8 @@ export default class SystemEmailComponent {
     this.tasks.run(async () => {
       await this.api.rpc.server.testSmtp({
         ...smtpValue,
-        password: smtpValue.password || '',
+        password:
+          smtpValue.password ?? (this.removePassword() ? '' : undefined),
         to: address,
       })
       this.dialog

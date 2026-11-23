@@ -1103,6 +1103,8 @@ export const ENGLISH: Record<string, number> = {
   'This browser is not enrolled yet': 1308,
   'Sign in from the command line': 1309,
   'Enroll this browser': 1310,
+  'A password is saved. Leave Password empty to keep it.': 1311,
+  'Remove saved password': 1312,
   'Last synced': 1313,
   'just now': 1314,
 }
