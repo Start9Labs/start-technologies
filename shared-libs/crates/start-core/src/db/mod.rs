@@ -75,7 +75,12 @@ pub fn db<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.update-db-record"),
         )
-        .subcommand("apply", from_fn_async(apply).no_cli())
+        .subcommand(
+            "apply",
+            from_fn_async(apply)
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_cli(),
+        )
 }
 
 #[derive(Deserialize, Serialize)]
@@ -486,6 +491,7 @@ pub fn put<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "ui",
         from_fn_async(ui)
+            .with_metadata(crate::mcp::MCP, Value::Bool(false))
             .with_display_serializable()
             .with_about("about.add-path-value-db")
             .with_call_remote::<CliContext>(),
