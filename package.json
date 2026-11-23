@@ -79,7 +79,6 @@
     "core-js": "^3.42.0",
     "cron": "^2.2.0",
     "cronstrue": "^2.21.0",
-    "deep-equality-data-structures": "1.5.1",
     "dompurify": "3.4.17",
     "fast-json-patch": "^3.1.1",
     "jose": "^4.9.0",

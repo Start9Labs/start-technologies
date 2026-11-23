@@ -1035,7 +1035,7 @@ pub async fn update(
         .await?;
 
         let old_target = update_client_metadata(&mut cfgs, &req.id, &req.label, &req.target)?;
-        // Only on an actual retarget, mirroring guard_subnet_collision: a
+        // Only on an actual retarget, mirroring the subnet check: a
         // no-op edit (label, MTU) must not be blocked by a broken chain that
         // already exists in the stored config — otherwise a router that
         // already chains onto a disabled VPN becomes uneditable.

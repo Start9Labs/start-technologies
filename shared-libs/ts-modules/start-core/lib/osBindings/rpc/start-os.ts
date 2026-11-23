@@ -346,6 +346,7 @@ export type SharedVolumeBackupInfo = z.output<
   typeof schemas.SharedVolumeBackupInfo
 >
 export type SharedVolumeDrive = z.output<typeof schemas.SharedVolumeDrive>
+export type SharedVolumeGrant = z.output<typeof schemas.SharedVolumeGrant>
 export type SharedVolumeGrantInput = z.input<typeof schemas.SharedVolumeGrant>
 
 /**
@@ -700,6 +701,7 @@ export type ResetPasswordParamsInput = z.input<
   typeof schemas.ResetPasswordParams
 >
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
+export type SharedVolume = z.output<typeof schemas.SharedVolume>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**

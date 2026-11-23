@@ -85,6 +85,14 @@ export class OSService {
     distinctUntilChanged(),
   )
 
+  /** Null once a restart or shutdown is under way. */
+  readonly restartReason$ = this.statusInfo$.pipe(
+    map(({ restart, restarting, shuttingDown }) =>
+      restarting || shuttingDown ? null : restart,
+    ),
+    distinctUntilChanged(),
+  )
+
   readonly backingUp$ = this.statusInfo$.pipe(
     map(status => !!status.backupProgress),
     distinctUntilChanged(),

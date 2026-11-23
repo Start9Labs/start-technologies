@@ -293,7 +293,7 @@ jobs:
       - name: Set up developer key
         run: |
           mkdir -p ~/.startos
-          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/developer.key.pem
+          printf '%s' "${{ secrets.DEV_KEY }}" > ~/.startos/id.key.pem
 
       - name: Upload to S3
         working-directory: artifacts
