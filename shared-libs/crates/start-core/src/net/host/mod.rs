@@ -158,7 +158,10 @@ fn domain_ssl_port(
     assigned_port: u16,
     available_ports: &AvailablePorts,
 ) -> u16 {
-    if domain.trim_end_matches('.').eq_ignore_ascii_case(OS_HOSTNAME) {
+    if domain
+        .trim_end_matches('.')
+        .eq_ignore_ascii_case(OS_HOSTNAME)
+    {
         return assigned_port;
     }
     options
@@ -1552,7 +1555,11 @@ mod tests {
                 .filter(|address| address.hostname.as_ref() == domain)
                 .collect();
             assert_eq!(bridge_domains.len(), 2);
-            assert!(bridge_domains.iter().all(|address| address.port == Some(assigned)));
+            assert!(
+                bridge_domains
+                    .iter()
+                    .all(|address| address.port == Some(assigned))
+            );
             assert!(binding.addresses.available.iter().any(|address| {
                 address.hostname.as_ref() == "provider.example" && address.port == Some(443)
             }));
