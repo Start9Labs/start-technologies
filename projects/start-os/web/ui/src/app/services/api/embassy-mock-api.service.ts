@@ -1,12 +1,7 @@
 import type { Api, ApiClient, Params, Result } from './api.types'
 import { inject, Injectable } from '@angular/core'
 import { WA_CRYPTO, WA_SESSION_STORAGE } from '@ng-web-apis/common'
-import {
-  FALLBACK_ICON,
-  GetPackageRes,
-  GetPackagesRes,
-  registrySigningKeys,
-} from '@start9labs/marketplace'
+import { FALLBACK_ICON, registrySigningKeys } from '@start9labs/marketplace'
 import {
   FullKeyboard,
   i18nPipe,
@@ -377,6 +372,15 @@ export class MockApiService extends ApiService implements StartupApiService {
       this.importRegistryKeys(normalized, info)
       await this.publishTrust()
       return null
+    },
+    'server.registries.package': async ({ id, targetVersion }) => {
+      await pauseFor(500)
+      const pkg = Mock.RegistryPackages[id]
+      if (!pkg) return { categories: [], best: {}, otherVersions: {} }
+      const exact = targetVersion
+        ? Mock.OtherPackageVersions[id]?.[targetVersion]
+        : undefined
+      return exact ? { ...pkg, best: exact.best } : pkg
     },
     'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)

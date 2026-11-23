@@ -161,7 +161,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Legacy Registry"));
-    assert!(cache.catalog.contains_key("test"));
+    assert!(cache.listings.contains_key("test"));
     assert_eq!(
         snapshot
             .as_public()

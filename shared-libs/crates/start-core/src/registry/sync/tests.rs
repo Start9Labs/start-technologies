@@ -115,6 +115,33 @@ async fn refreshing_a_registry_cancels_its_group_without_cancelling_other_regist
 }
 
 #[tokio::test]
+async fn reconciliation_restarts_every_registry_after_a_coalesced_language_change() {
+    let mut tasks = RegistryTasks::new();
+    let mut cancelled = Vec::new();
+    for url in [url(), "https://other.test/".parse().unwrap()] {
+        let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
+        cancelled.push(receiver);
+        tasks.insert(
+            BTreeSet::from([Subscription::Index(url)]),
+            tokio::spawn(async move {
+                let _sender = sender;
+                std::future::pending::<()>().await;
+            })
+            .into(),
+        );
+    }
+    let mut previous = Some(Some("en_US".into()));
+    reconcile_connection_language(&mut tasks, &mut previous, &Some("en_US".into())).await;
+    assert_eq!(tasks.len(), 2);
+    reconcile_connection_language(&mut tasks, &mut previous, &Some("de_DE".into())).await;
+    assert!(tasks.is_empty());
+    assert_eq!(previous, Some(Some("de_DE".into())));
+    for receiver in cancelled {
+        assert!(receiver.await.is_err());
+    }
+}
+
+#[tokio::test]
 async fn registry_settings_watch_ignores_unrelated_writes_and_reads_coherent_settings() {
     let temp = tempfile::tempdir().unwrap();
     let db = TypedPatchDb::<Database>::load_unchecked(
@@ -360,8 +387,8 @@ fn package_and_signer_changes_publish_atomically_without_granting_trust() {
     assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Test Registry"));
     assert!(
-        cache.catalog["test"]
-            .versions
+        cache.listings["test"]
+            .releases
             .contains_key(&"2.0.0:0".parse::<crate::util::VersionString>().unwrap())
     );
     let key = db
@@ -516,7 +543,7 @@ fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connecting);
     assert_eq!(cache.info.name.as_deref(), Some("Test Registry"));
-    assert!(!cache.catalog.is_empty());
+    assert!(!cache.listings.is_empty());
 }
 
 #[test]
@@ -537,7 +564,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
             .de()
             .unwrap();
         assert_eq!(cache.status, status);
-        assert!(cache.catalog.is_empty());
+        assert!(cache.listings.is_empty());
     }
     publish_snapshot(
         &mut db,
@@ -554,7 +581,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
         .de()
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connected);
-    assert!(cache.catalog.is_empty());
+    assert!(cache.listings.is_empty());
     publish_snapshot(
         &mut db,
         &subscription,
@@ -569,7 +596,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
         .unwrap()
         .de()
         .unwrap()
-        .catalog;
+        .listings;
     assert!(!packages.is_empty());
     for status in [RegistryStatus::Error, RegistryStatus::Connecting] {
         set_status(&mut db, &subscription, status, None).unwrap();
@@ -582,7 +609,7 @@ fn registry_status_distinguishes_loading_empty_success_error_and_retry() {
             .unwrap();
         assert_eq!(cache.status, status);
         assert_eq!(
-            to_value(&cache.catalog).unwrap(),
+            to_value(&cache.listings).unwrap(),
             to_value(&packages).unwrap()
         );
     }
@@ -876,6 +903,139 @@ fn index_revisions_patch_the_saved_index_and_resume_only_from_the_same_view() {
     );
 }
 
+#[test]
+fn listed_release_metadata_follows_live_replayed_and_snapshot_updates() {
+    use connection::{SubscriptionEvent, SubscriptionStart};
+
+    let mut db = database();
+    let view = RegistryView::new(&device());
+    let start = |id, value, revisions| {
+        SubscriptionEvent::Start(SubscriptionStart {
+            epoch: Some("details".into()),
+            id,
+            value,
+            revisions,
+        })
+    };
+    let ingest = |db: &mut DatabaseModel, event| ingest_event(db, &url(), &view, &event, &device());
+    let row = |db: &DatabaseModel| {
+        db.as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .as_listings()
+            .as_idx(&"test".parse().unwrap())
+            .unwrap()
+            .as_value()
+            .clone()
+    };
+    ingest(&mut db, start(1, to_value(&index()).unwrap(), None)).unwrap();
+    let before = row(&db);
+    let detail = |id, text| {
+        revision(
+            id,
+            json!([{
+                "op": "replace",
+                "path": "/package/packages/test/versions/2.0.0:0/description/long",
+                "value": text,
+            }]),
+        )
+    };
+    let long = |row: &Value| row["releases"]["2.0.0:0"]["description"]["long"].clone();
+    assert_eq!(long(&before), json!("Test"));
+    ingest(&mut db, SubscriptionEvent::Revision(detail(2, "Updated"))).unwrap();
+    assert_eq!(long(&row(&db)), json!("Updated"));
+    ingest(
+        &mut db,
+        start(3, Value::Null, Some(vec![detail(3, "Replayed")])),
+    )
+    .unwrap();
+    assert_eq!(long(&row(&db)), json!("Replayed"));
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&index()).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    assert_eq!(row(&db), before);
+}
+
+#[test]
+fn older_signatures_invalidate_details_after_live_replay_and_snapshot_updates() {
+    use connection::{SubscriptionEvent, SubscriptionStart};
+
+    use crate::registry::package::index::tests::version_info_signed_by;
+
+    let mut db = database();
+    let view = RegistryView::new(&device());
+    let (_, mut older) = version_info_signed_by(1);
+    let mut source = to_value(&index()).unwrap();
+    source["package"]["packages"]["test"]["versions"]["1.0.0:0"] = to_value(&older).unwrap();
+    let initial_signatures = to_value(&older.s9pks[0].1.signatures).unwrap();
+    let (_, cosigned) = version_info_signed_by(2);
+    older.s9pks[0]
+        .1
+        .signatures
+        .extend(cosigned.s9pks[0].1.signatures.clone());
+    let signed = to_value(&older.s9pks[0].1.signatures).unwrap();
+    let start = |id, value, revisions| {
+        SubscriptionEvent::Start(SubscriptionStart {
+            epoch: Some("details".into()),
+            id,
+            value,
+            revisions,
+        })
+    };
+    let ingest = |db: &mut DatabaseModel, event| ingest_event(db, &url(), &view, &event, &device());
+    let row = |db: &DatabaseModel| {
+        db.as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .as_listings()
+            .as_idx(&"test".parse().unwrap())
+            .unwrap()
+            .as_value()
+            .clone()
+    };
+    let signatures = |id, value| {
+        revision(
+            id,
+            json!([{
+                "op": "replace",
+                "path": "/package/packages/test/versions/1.0.0:0/s9pks/0/1/signatures",
+                "value": value,
+            }]),
+        )
+    };
+    ingest(&mut db, start(1, source.clone(), None)).unwrap();
+    let before = row(&db);
+    ingest(
+        &mut db,
+        SubscriptionEvent::Revision(signatures(2, signed.clone())),
+    )
+    .unwrap();
+    let live = row(&db);
+    assert_eq!(before["releases"], live["releases"]);
+    assert_eq!(before["versions"], live["versions"]);
+    assert_ne!(before["detailsHash"], live["detailsHash"]);
+    ingest(
+        &mut db,
+        start(
+            3,
+            Value::Null,
+            Some(vec![signatures(3, initial_signatures)]),
+        ),
+    )
+    .unwrap();
+    assert_eq!(before["detailsHash"], row(&db)["detailsHash"]);
+    source["package"]["packages"]["test"]["versions"]["1.0.0:0"]["s9pks"][0][1]["signatures"] =
+        signed;
+    publish_snapshot(&mut db, &Subscription::Index(url()), &source, &device()).unwrap();
+    assert_eq!(live["detailsHash"], row(&db)["detailsHash"]);
+}
+
 #[tokio::test]
 async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
     let temp = tempfile::tempdir().unwrap();
@@ -1002,7 +1162,7 @@ fn update_target(db: &DatabaseModel) -> Option<String> {
         .unwrap()
         .de()
         .unwrap()
-        .catalog
+        .listings
         .get(&"test".parse::<crate::PackageId>().unwrap())
         .and_then(|package| package.update_target.as_ref())
         .map(ToString::to_string)
@@ -1046,8 +1206,8 @@ fn update_targets_follow_the_installed_version_through_migration_and_os_ranges()
         .de()
         .unwrap();
     assert!(
-        cache.catalog["test"]
-            .versions
+        cache.listings["test"]
+            .releases
             .contains_key(&"3.0.0:0".parse::<crate::util::VersionString>().unwrap())
     );
     let mut strict: GetPackageParams =

@@ -80,21 +80,42 @@ const MOCK_UPDATE_TARGETS: Record<string, string> = {
   'btc-rpc-proxy': '0.4.0:0',
 }
 
-function mockCatalog(): T.RegistryCache['catalog'] {
+function mockListings(): T.RegistryCache['listings'] {
   return Object.fromEntries(
-    Object.entries(Mock.RegistryPackages).map(([id, pkg]) => [
-      id,
-      {
-        categories: pkg.categories,
-        versions: Object.fromEntries([
+    Object.entries(Mock.RegistryPackages).map(([id, pkg]) => {
+      const updateTarget = MOCK_UPDATE_TARGETS[id]
+      const versions: Record<string, T.PackageVersionInfo> = Object.fromEntries(
+        [
           ...Object.values(Mock.OtherPackageVersions[id] ?? {}).flatMap(res =>
             Object.entries(res.best),
           ),
           ...Object.entries(pkg.best),
-        ]),
-        updateTarget: MOCK_UPDATE_TARGETS[id] ?? null,
-      },
-    ]),
+        ],
+      )
+      const listed = Object.keys(pkg.best)
+      if (
+        updateTarget &&
+        versions[updateTarget] &&
+        !listed.includes(updateTarget)
+      )
+        listed.push(updateTarget)
+      return [
+        id,
+        {
+          detailsHash: 'mock',
+          categories: pkg.categories,
+          firstPublishedAt: pkg.firstPublishedAt,
+          releases: Object.fromEntries(listed.map(v => [v, versions[v]!])),
+          versions: Object.fromEntries(
+            [
+              ...Object.keys(versions),
+              ...Object.keys(pkg.otherVersions ?? {}),
+            ].map(v => [v, {}]),
+          ),
+          updateTarget,
+        },
+      ]
+    }),
   )
 }
 
@@ -106,14 +127,14 @@ export function mockRegistryCache(
   return sameUrl(url, defaultRegistries.community)
     ? {
         info,
-        catalog: {},
+        listings: {},
         publishesOsUpdates: false,
         status: 'error',
         error: `error sending request for url (${registryUrl(url)}): connection timed out`,
       }
     : {
         info,
-        catalog: mockCatalog(),
+        listings: mockListings(),
         publishesOsUpdates: true,
         status: 'connected',
       }

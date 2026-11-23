@@ -12,6 +12,11 @@ const literal_4 = /* @__PURE__ */ z.object({
   value: z.string(),
   unit: z.string(),
 })
+const literal_5 = /* @__PURE__ */ z.union([
+  z.string(),
+  z.record(z.string(), z.string()),
+])
+const literal_6 = /* @__PURE__ */ z.enum(['processor', 'display'])
 export const AcmeProvider: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'AcmeProvider',
 })
@@ -334,6 +339,38 @@ export const DbCursor: z.ZodObject<{ epoch: z.ZodString; id: z.ZodInt }> =
   /* @__PURE__ */ object({ epoch: z.string(), id: z.int() }).meta({
     id: 'DbCursor',
   })
+export const DeviceFilter: z.ZodObject<{
+  description: z.ZodString
+  class: typeof literal_6
+  product: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  vendor: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  capabilities: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
+    z.ZodNullable<z.ZodArray<z.ZodString>>
+  >
+  driver: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  description: z.string(),
+  class: literal_6,
+  product: wire(z.string().nullable().optional(), z.string().nullable()),
+  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  capabilities: wire(
+    z.array(z.string()).nullable().optional(),
+    z.array(z.string()).nullable(),
+  ),
+  driver: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
+  id: 'DeviceFilter',
+})
 export const DnsSource: z.ZodEnum<{
   gateway: 'gateway'
   static: 'static'
@@ -465,6 +502,9 @@ export const GenerateCertificateResponse: z.ZodObject<{
 export const GigaBytes: typeof literal_4 = /* @__PURE__ */ literal_4.meta({
   id: 'GigaBytes',
 })
+export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
+  id: 'GitHash',
+})
 export const Governor: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Governor',
 })
@@ -560,6 +600,9 @@ export const HasUnenrolledKeys: z.ZodNull = /* @__PURE__ */ z.null().meta({
   description:
     'Proof that a set of auth keys was unenrolled — removed from the persisted\nand ephemeral signer stores with any continuations they opened killed.\nObtained via [`SignatureAuthorizationContext::unenroll`], or [`Self::unenroll`]\nfrom inside a db transaction.',
 })
+export const HealthCheckId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
+  id: 'HealthCheckId',
+})
 export const HistoryParams: z.ZodObject<{ offset: z.ZodInt; limit: z.ZodInt }> =
   /* @__PURE__ */ object({ offset: z.int(), limit: z.int() }).meta({
     id: 'HistoryParams',
@@ -582,6 +625,20 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
+
+/**
+ * An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.
+ *
+ * Ciphertext has the plaintext's length, and any byte range decrypts on its own.
+ */
+export const KeyStreamInfo: z.ZodObject<{
+  key: typeof literal_0
+  iv: typeof literal_0
+}> = /* @__PURE__ */ object({ key: literal_0, iv: literal_0 }).meta({
+  id: 'KeyStreamInfo',
+  description:
+    "An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.\n\nCiphertext has the plaintext's length, and any byte range decrypts on its own.",
+})
 export const KeyboardOptions: z.ZodObject<{
   layout: z.ZodString
   keymap: z.ZodCodec<
@@ -640,6 +697,9 @@ export const ListNutUpsParams: z.ZodObject<{
 }).meta({
   id: 'ListNutUpsParams',
   description: 'Address of the NUT server to list UPS devices from.',
+})
+export const LocaleString: typeof literal_5 = /* @__PURE__ */ literal_5.meta({
+  id: 'LocaleString',
 })
 export const LogEntry: z.ZodObject<{
   timestamp: z.ZodString
@@ -716,6 +776,27 @@ export const MaybeUtf8String: typeof literal_3 = /* @__PURE__ */ literal_3.meta(
 export const MebiBytes: typeof literal_4 = /* @__PURE__ */ literal_4.meta({
   id: 'MebiBytes',
 })
+export const MerkleArchiveCommitment: z.ZodIntersection<
+  z.ZodObject<{
+    type: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'merkle-archive'>>,
+      z.ZodLiteral<'merkle-archive'>
+    >
+  }>,
+  z.ZodObject<{ rootSighash: typeof literal_0; rootMaxsize: z.ZodInt }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      type: wire(
+        z.literal('merkle-archive').optional(),
+        z.literal('merkle-archive'),
+      ),
+    }),
+    object({ rootSighash: literal_0, rootMaxsize: z.int() }),
+  )
+  .meta({
+    id: 'MerkleArchiveCommitment',
+  })
 export const MetricsFollowParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'MetricsFollowParams',
 })
@@ -943,6 +1024,15 @@ export const PackageId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 export const Percentage: typeof literal_4 = /* @__PURE__ */ literal_4.meta({
   id: 'Percentage',
 })
+export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
+  .enum(['url-v0'])
+  .meta({
+    id: 'PluginId',
+  })
+export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
+  /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
+    id: 'PreDownloadAlertWhen',
+  })
 export const ProgressUnits: z.ZodEnum<{ bytes: 'bytes'; steps: 'steps' }> =
   /* @__PURE__ */ z.enum(['bytes', 'steps']).meta({
     id: 'ProgressUnits',
@@ -1010,6 +1100,35 @@ export const ReassignPortParams: z.ZodObject<{
 }).meta({
   id: 'ReassignPortParams',
 })
+
+/**
+ * A registry asset with a caller-selected commitment representation.
+ */
+export const RegistryAsset = <Commitment extends z.ZodType>(
+  Commitment: Commitment,
+) => {
+  const self = object({
+    publishedAt: z.string(),
+    urls: z.array(z.string()),
+    commitment: Commitment,
+    signatures: z.record(z.string(), AnySignature),
+    /**
+     * Keystream the hosted bytes are encrypted with. Null for hosted plaintext visible to everyone.
+     */
+    private: KeyStreamInfo.nullable().optional().meta({
+      description:
+        'Keystream the hosted bytes are encrypted with. Null for hosted plaintext visible to everyone.',
+    }),
+    /**
+     * Reader keys in `FullIndex.readers` allowed to see this private asset.
+     */
+    readers: z.array(Guid).optional().meta({
+      description:
+        'Reader keys in `FullIndex.readers` allowed to see this private asset.',
+    }),
+  })
+  return self
+}
 export const RemoveDomainParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'RemoveDomainParams',
@@ -2093,10 +2212,45 @@ export const CreateSharedVolumeSource: z.ZodUnion<
   .meta({
     id: 'CreateSharedVolumeSource',
   })
+export const CurrentDependencyKind: z.ZodUnion<
+  readonly [
+    z.ZodObject<{ kind: z.ZodLiteral<'exists'> }>,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'running'> }>,
+      z.ZodObject<{
+        healthChecks: z.ZodCodec<
+          z.ZodOptional<z.ZodArray<typeof HealthCheckId>>,
+          z.ZodArray<typeof HealthCheckId>
+        >
+      }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    object({ kind: z.literal('exists') }),
+    z.intersection(
+      object({ kind: z.literal('running') }),
+      object({
+        healthChecks: wire(
+          z.array(HealthCheckId).optional(),
+          z.array(HealthCheckId),
+        ),
+      }),
+    ),
+  ])
+  .meta({
+    id: 'CurrentDependencyKind',
+  })
 export const DeleteLegacyParams: z.ZodObject<{
   targetId: typeof BackupTargetId
 }> = /* @__PURE__ */ object({ targetId: BackupTargetId }).meta({
   id: 'DeleteLegacyParams',
+})
+export const Description: z.ZodObject<{
+  short: typeof LocaleString
+  long: typeof LocaleString
+}> = /* @__PURE__ */ object({ short: LocaleString, long: LocaleString }).meta({
+  id: 'Description',
 })
 
 /**
@@ -2349,6 +2503,29 @@ export const GovernorParams: z.ZodObject<{
   set: wire(Governor.nullable().optional(), Governor.nullable()),
 }).meta({
   id: 'GovernorParams',
+})
+export const HardwareRequirements: z.ZodObject<{
+  device: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof DeviceFilter>>,
+    z.ZodArray<typeof DeviceFilter>
+  >
+  ram: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
+    z.ZodNullable<z.ZodInt>
+  >
+  arch: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
+    z.ZodNullable<z.ZodArray<z.ZodString>>
+  >
+}> = /* @__PURE__ */ object({
+  device: wire(z.array(DeviceFilter).optional(), z.array(DeviceFilter)),
+  ram: wire(z.int().nullable().optional(), z.int().nullable()),
+  arch: wire(
+    z.array(z.string()).nullable().optional(),
+    z.array(z.string()).nullable(),
+  ),
+}).meta({
+  id: 'HardwareRequirements',
 })
 export const HostnameMetadata: z.ZodUnion<
   readonly [
@@ -2826,10 +3003,55 @@ export const PackageBackupInfo: z.ZodObject<{
 }).meta({
   id: 'PackageBackupInfo',
 })
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export const PackageIcon: z.ZodUnion<readonly [typeof DataUrl, z.ZodString]> =
+  /* @__PURE__ */ z
+    .union([
+      DataUrl,
+      z.string().meta({
+        description:
+          "A path under the registry's `/icons/`, led by the scheme that names the file.",
+      }),
+    ])
+    .meta({
+      id: 'PackageIcon',
+      description:
+        'Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.',
+    })
 export const PackageIdParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'PackageIdParams',
   })
+export const PackageInfoShort: z.ZodObject<{
+  releaseNotes: typeof LocaleString
+  /**
+   * `PackageMetadata::default_locale`.
+   */
+  defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  /**
+   * A newer same-flavor revision covers this release's hardware.
+   */
+  superseded: z.ZodOptional<z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  releaseNotes: LocaleString,
+  /**
+   * `PackageMetadata::default_locale`.
+   */
+  defaultLocale: z.string().nullable().optional().meta({
+    description: '`PackageMetadata::default_locale`.',
+  }),
+  /**
+   * A newer same-flavor revision covers this release's hardware.
+   */
+  superseded: z.boolean().optional().meta({
+    description: "A newer same-flavor revision covers this release's hardware.",
+  }),
+}).meta({
+  id: 'PackageInfoShort',
+})
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
   listenPort: z.ZodInt
@@ -2984,6 +3206,15 @@ export const PatchOperation: z.ZodUnion<
     id: 'PatchOperation',
     description: 'JSON Patch single patch operation',
   })
+export const PreDownloadAlert: z.ZodObject<{
+  message: typeof LocaleString
+  when: typeof PreDownloadAlertWhen
+}> = /* @__PURE__ */ object({
+  message: LocaleString,
+  when: PreDownloadAlertWhen,
+}).meta({
+  id: 'PreDownloadAlert',
+})
 
 /**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -3507,6 +3738,31 @@ export const SubscribeRes: z.ZodObject<{
 }> = /* @__PURE__ */ object({ dump: Dump, guid: Guid }).meta({
   id: 'SubscribeRes',
 })
+export const SyncedPackageParams: z.ZodObject<{
+  registry: z.ZodString
+  id: typeof PackageId
+  /**
+   * Absent selects the newest release of each flavor.
+   */
+  targetVersion: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  id: PackageId,
+  /**
+   * Absent selects the newest release of each flavor.
+   */
+  targetVersion: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
+    description: 'Absent selects the newest release of each flavor.',
+  }),
+}).meta({
+  id: 'SyncedPackageParams',
+})
 export const TargetParams: z.ZodObject<{ id: typeof BackupTargetId }> =
   /* @__PURE__ */ object({ id: BackupTargetId }).meta({
     id: 'TargetParams',
@@ -3933,6 +4189,46 @@ export const CreateSharedVolumeParams: z.ZodObject<{
 }).meta({
   id: 'CreateSharedVolumeParams',
 })
+export const DependencyMetadata: z.ZodIntersection<
+  z.ZodObject<{
+    title: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
+      z.ZodNullable<typeof LocaleString>
+    >
+    icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
+    description: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
+      z.ZodNullable<typeof LocaleString>
+    >
+    optional: z.ZodBoolean
+    versionRange: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>,
+  z.ZodUnion<
+    readonly [z.ZodNullable<typeof CurrentDependencyKind>, typeof empty]
+  >
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      title: wire(LocaleString.nullable().optional(), LocaleString.nullable()),
+      icon: PackageIcon.nullable().optional(),
+      description: wire(
+        LocaleString.nullable().optional(),
+        LocaleString.nullable(),
+      ),
+      optional: z.boolean(),
+      versionRange: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ),
+    }),
+    z.union([CurrentDependencyKind.nullable(), empty]),
+  )
+  .meta({
+    id: 'DependencyMetadata',
+  })
 export const HardwareInfo: z.ZodObject<{
   arch: z.ZodString
   ram: z.ZodInt
@@ -4186,6 +4482,101 @@ export const NutConfig: z.ZodObject<{
 }).meta({
   id: 'NutConfig',
   description: 'Stored NUT configuration and its independent enabled state.',
+})
+export const PackageMetadata: z.ZodObject<{
+  title: z.ZodString
+  /**
+   * Locale this package's `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  description: typeof Description
+  releaseNotes: typeof LocaleString
+  preDownloadAlert: z.ZodOptional<z.ZodNullable<typeof PreDownloadAlert>>
+  gitHash: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
+    z.ZodNullable<typeof GitHash>
+  >
+  license: z.ZodString
+  packageRepo: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  upstreamRepo: z.ZodString
+  marketingUrl: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  donationUrl: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  osVersion: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+  sdkVersion: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  hardwareAcceleration: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * Grants access to `/dev/fuse`.
+   */
+  userspaceFilesystems: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * Grants access to `/dev/net/tun`.
+   */
+  virtualNetworking: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  /**
+   * Grants /dev/kvm when present. The opening process must run as container root.
+   */
+  hardwareVirtualization: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  plugins: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof PluginId>>,
+    z.ZodArray<typeof PluginId>
+  >
+  satisfies: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof Version>>,
+    z.ZodArray<typeof Version>
+  >
+}> = /* @__PURE__ */ object({
+  title: z.string(),
+  /**
+   * Locale this package's `LocaleString`s fall back to when a requested one is missing.
+   */
+  defaultLocale: z.string().nullable().optional().meta({
+    description:
+      "Locale this package's `LocaleString`s fall back to when a requested one is missing.",
+  }),
+  description: Description,
+  releaseNotes: LocaleString,
+  preDownloadAlert: PreDownloadAlert.nullable().optional(),
+  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  license: z.string(),
+  packageRepo: wire(z.string().optional(), z.string()),
+  upstreamRepo: z.string(),
+  marketingUrl: wire(z.string().nullable().optional(), z.string().nullable()),
+  donationUrl: wire(z.string().nullable().optional(), z.string().nullable()),
+  osVersion: wire(z.string().optional(), z.string()),
+  sdkVersion: wire(z.string().nullable().optional(), z.string().nullable()),
+  hardwareAcceleration: wire(z.boolean().optional(), z.boolean()),
+  /**
+   * Grants access to `/dev/fuse`.
+   */
+  userspaceFilesystems: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Grants access to `/dev/fuse`.',
+  }),
+  /**
+   * Grants access to `/dev/net/tun`.
+   */
+  virtualNetworking: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Grants access to `/dev/net/tun`.',
+  }),
+  /**
+   * Grants /dev/kvm when present. The opening process must run as container root.
+   */
+  hardwareVirtualization: wire(z.boolean().optional(), z.boolean()).meta({
+    description:
+      'Grants /dev/kvm when present. The opening process must run as container root.',
+  }),
+  plugins: wire(z.array(PluginId).optional(), z.array(PluginId)),
+  satisfies: wire(z.array(Version).optional(), z.array(Version)),
+}).meta({
+  id: 'PackageMetadata',
 })
 
 /**
@@ -4881,6 +5272,43 @@ export const NetworkGatewayInfo: z.ZodObject<{
     id: 'NetworkGatewayInfo',
   },
 )
+export const PackageVersionInfo: z.ZodIntersection<
+  z.ZodObject<{
+    icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
+    dependencyMetadata: z.ZodRecord<z.ZodString, typeof DependencyMetadata>
+    sourceVersion: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+    s9pks: z.ZodArray<
+      z.ZodTuple<
+        [
+          typeof HardwareRequirements,
+          ReturnType<typeof RegistryAsset<typeof MerkleArchiveCommitment>>,
+        ],
+        null
+      >
+    >
+  }>,
+  typeof PackageMetadata
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      icon: PackageIcon.nullable().optional(),
+      dependencyMetadata: z.record(z.string(), DependencyMetadata),
+      sourceVersion: wire(
+        z.string().nullable().optional(),
+        z.string().nullable(),
+      ),
+      s9pks: z.array(
+        z.tuple([HardwareRequirements, RegistryAsset(MerkleArchiveCommitment)]),
+      ),
+    }),
+    PackageMetadata,
+  )
+  .meta({
+    id: 'PackageVersionInfo',
+  })
 
 /**
  * Parameters for replacing the stored NUT configuration.
@@ -4931,6 +5359,30 @@ export const DnsStatus: z.ZodObject<{
 }).meta({
   id: 'DnsStatus',
   description: 'Active DNS authority and its bootstrap gateway.',
+})
+export const GetPackageResponse: z.ZodObject<{
+  categories: z.ZodArray<z.ZodString>
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  best: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
+  otherVersions: z.ZodOptional<
+    z.ZodNullable<z.ZodRecord<z.ZodString, typeof PackageInfoShort>>
+  >
+}> = /* @__PURE__ */ object({
+  categories: z.array(z.string()),
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.string().nullable().optional().meta({
+    description:
+      'When this registry first published any version it still carries.',
+  }),
+  best: z.record(z.string(), PackageVersionInfo),
+  otherVersions: z.record(z.string(), PackageInfoShort).nullable().optional(),
+}).meta({
+  id: 'GetPackageResponse',
 })
 export const LegacyProxySslOptions: z.ZodIntersection<
   z.ZodObject<{
@@ -6740,6 +7192,12 @@ export const Api = {
                 z.string(),
                 z.string().nullable(),
               ),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            package: {
+              _PARAMS: /* @__PURE__ */ SyncedPackageParams,
+              _RETURN: /* @__PURE__ */ GetPackageResponse,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },

@@ -380,14 +380,14 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         .as_registry_cache()
         .as_idx(&url)
         .unwrap()
-        .as_catalog()
+        .as_listings()
         .as_idx(&secret)
         .unwrap()
         .de()
         .unwrap();
-    assert!(!catalog.versions.is_empty());
-    for release in catalog.versions.values() {
-        for (_, asset) in &release.info.s9pks {
+    assert!(!catalog.releases.is_empty());
+    for release in catalog.releases.values() {
+        for (_, asset) in &release.s9pks {
             assert!(asset.private.is_none() && asset.readers.is_empty());
         }
     }

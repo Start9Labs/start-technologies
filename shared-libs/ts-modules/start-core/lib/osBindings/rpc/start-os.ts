@@ -118,6 +118,7 @@ export type AddOperation = z.output<typeof schemas.AddOperation>
  * Keys an import added, and keys it found already present.
  */
 export type AddTrustedKeyRes = z.output<typeof schemas.AddTrustedKeyRes>
+export type AnySignature = z.output<typeof schemas.AnySignature>
 export type AnySignatureInput = z.input<typeof schemas.AnySignature>
 export type AnyVerifyingKey = z.output<typeof schemas.AnyVerifyingKey>
 export type AnyVerifyingKeyInput = z.input<typeof schemas.AnyVerifyingKey>
@@ -160,6 +161,7 @@ export type CreateTokenParamsInput = z.input<typeof schemas.CreateTokenParams>
 export type CreatedToken = z.output<typeof schemas.CreatedToken>
 export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DbCursorInput = z.input<typeof schemas.DbCursor>
+export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type DnsSource = z.output<typeof schemas.DnsSource>
 export type Dump = z.output<typeof schemas.Dump>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
@@ -195,6 +197,7 @@ export type GenerateCertificateResponse = z.output<
   typeof schemas.GenerateCertificateResponse
 >
 export type GigaBytes = z.output<typeof schemas.GigaBytes>
+export type GitHash = z.output<typeof schemas.GitHash>
 export type Governor = z.output<typeof schemas.Governor>
 export type GovernorInput = z.input<typeof schemas.Governor>
 
@@ -212,11 +215,19 @@ export type GuidInput = z.input<typeof schemas.Guid>
  * from inside a db transaction.
  */
 export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
+export type HealthCheckId = z.output<typeof schemas.HealthCheckId>
 export type HistoryParamsInput = z.input<typeof schemas.HistoryParams>
 export type HostId = z.output<typeof schemas.HostId>
 export type HostIdInput = z.input<typeof schemas.HostId>
 export type ImageIdInput = z.input<typeof schemas.ImageId>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
+
+/**
+ * An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.
+ *
+ * Ciphertext has the plaintext's length, and any byte range decrypts on its own.
+ */
+export type KeyStreamInfo = z.output<typeof schemas.KeyStreamInfo>
 export type KeyboardOptionsInput = z.input<typeof schemas.KeyboardOptions>
 export type ListKeysParamsInput = z.input<typeof schemas.ListKeysParams>
 export type ListNotificationParamsInput = z.input<
@@ -227,6 +238,7 @@ export type ListNotificationParamsInput = z.input<
  * Address of the NUT server to list UPS devices from.
  */
 export type ListNutUpsParamsInput = z.input<typeof schemas.ListNutUpsParams>
+export type LocaleString = z.output<typeof schemas.LocaleString>
 export type LogEntry = z.output<typeof schemas.LogEntry>
 
 /**
@@ -238,6 +250,9 @@ export type LshwDisplay = z.output<typeof schemas.LshwDisplay>
 export type LshwProcessor = z.output<typeof schemas.LshwProcessor>
 export type MaybeUtf8String = z.output<typeof schemas.MaybeUtf8String>
 export type MebiBytes = z.output<typeof schemas.MebiBytes>
+export type MerkleArchiveCommitment = z.output<
+  typeof schemas.MerkleArchiveCommitment
+>
 export type MetricsFollowParamsInput = z.input<
   typeof schemas.MetricsFollowParams
 >
@@ -287,6 +302,8 @@ export type PackageBackupReport = z.output<typeof schemas.PackageBackupReport>
 export type PackageId = z.output<typeof schemas.PackageId>
 export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type Percentage = z.output<typeof schemas.Percentage>
+export type PluginId = z.output<typeof schemas.PluginId>
+export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
 export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
 export type PushKeys = z.output<typeof schemas.PushKeys>
 export type PushKeysInput = z.input<typeof schemas.PushKeys>
@@ -299,6 +316,13 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
  */
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
 export type ReassignPortParamsInput = z.input<typeof schemas.ReassignPortParams>
+
+/**
+ * A registry asset with a caller-selected commitment representation.
+ */
+export type RegistryAsset<Commitment> = z.output<
+  ReturnType<typeof schemas.RegistryAsset<z.ZodType<Commitment, Commitment>>>
+>
 export type RemoveDomainParamsInput = z.input<typeof schemas.RemoveDomainParams>
 
 /**
@@ -460,7 +484,11 @@ export type CreateParamsInput = z.input<typeof schemas.CreateParams>
 export type CreateSharedVolumeSourceInput = z.input<
   typeof schemas.CreateSharedVolumeSource
 >
+export type CurrentDependencyKind = z.output<
+  typeof schemas.CurrentDependencyKind
+>
 export type DeleteLegacyParamsInput = z.input<typeof schemas.DeleteLegacyParams>
+export type Description = z.output<typeof schemas.Description>
 
 /**
  * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
@@ -493,6 +521,7 @@ export type GetActionInputParamsInput = z.input<
 >
 export type GovernorInfo = z.output<typeof schemas.GovernorInfo>
 export type GovernorParamsInput = z.input<typeof schemas.GovernorParams>
+export type HardwareRequirements = z.output<typeof schemas.HardwareRequirements>
 export type HostnameMetadata = z.output<typeof schemas.HostnameMetadata>
 export type HostnameMetadataInput = z.input<typeof schemas.HostnameMetadata>
 export type InfoParamsInput = z.input<typeof schemas.InfoParams>
@@ -519,7 +548,13 @@ export type Notification = z.output<typeof schemas.Notification>
 export type NutSettingsInput = z.input<typeof schemas.NutSettings>
 export type OsInfo = z.output<typeof schemas.OsInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
+
+/**
+ * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
+ */
+export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIdParamsInput = z.input<typeof schemas.PackageIdParams>
+export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 
@@ -527,6 +562,7 @@ export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
  * JSON Patch single patch operation
  */
 export type PatchOperation = z.output<typeof schemas.PatchOperation>
+export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
 
 /**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -603,6 +639,9 @@ export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
+export type SyncedPackageParamsInput = z.input<
+  typeof schemas.SyncedPackageParams
+>
 export type TargetParamsInput = z.input<typeof schemas.TargetParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
 export type TransportWire = z.output<typeof schemas.TransportWire>
@@ -641,6 +680,7 @@ export type ConvertParamsInput = z.input<typeof schemas.ConvertParams>
 export type CreateSharedVolumeParamsInput = z.input<
   typeof schemas.CreateSharedVolumeParams
 >
+export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
 export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
@@ -659,6 +699,7 @@ export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
  * Stored NUT configuration and its independent enabled state.
  */
 export type NutConfigInput = z.input<typeof schemas.NutConfig>
+export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 
 /**
  * Representation of JSON Patch (list of patch operations)
@@ -708,6 +749,7 @@ export type MetricsFollowResponse = z.output<
   typeof schemas.MetricsFollowResponse
 >
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
+export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 
 /**
  * Parameters for replacing the stored NUT configuration.
@@ -719,6 +761,7 @@ export type BackupHistory = z.output<typeof schemas.BackupHistory>
  * Active DNS authority and its bootstrap gateway.
  */
 export type DnsStatus = z.output<typeof schemas.DnsStatus>
+export type GetPackageResponse = z.output<typeof schemas.GetPackageResponse>
 export type LegacyProxySslOptions = z.output<
   typeof schemas.LegacyProxySslOptions
 >

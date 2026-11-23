@@ -5,19 +5,23 @@ import {
   MarketplacePkg,
   StoreDataWithUrl,
   StoreIdentity,
+  packageResponse,
   packageSignerPolicy,
   registryStatus,
   isRegistryLoading,
 } from '@start9labs/marketplace'
 import {
   defaultRegistries,
+  ErrorService,
   Exver,
+  isNetworkError,
   registryUrl,
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
+  catchError,
   combineLatest,
   distinctUntilChanged,
   filter,
@@ -32,6 +36,7 @@ import {
   switchMap,
 } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
+import { ConnectionService } from 'src/app/services/connection.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
@@ -45,6 +50,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
+  private readonly connection = inject(ConnectionService)
+  private readonly errors = inject(ErrorService)
 
   private readonly registryCache$ = this.patch.watch$('registryCache')
 
@@ -78,6 +85,14 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private watchRegistry$(url: string) {
     return this.registryCache$.pipe(
       map(cache => findRegistryCache(cache, url)),
+      distinctUntilChanged(),
+    )
+  }
+
+  private watchListing$(registry: string, id: string) {
+    return this.watchRegistry$(registry).pipe(
+      filter(registryReady),
+      map(entry => entry.listings[id]),
       distinctUntilChanged(),
     )
   }
@@ -131,6 +146,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
     ]),
   )
 
+  /** Listed releases follow the live cache; any other version is fetched. */
   getPackage$(
     id: string,
     version: string | null,
@@ -139,19 +155,75 @@ export class MarketplaceService extends AbstractMarketplaceService {
   ): Observable<MarketplacePkg | null> {
     return (registryUrl ? of(registryUrl) : this.currentRegistryUrl$).pipe(
       distinctUntilChanged(),
-      switchMap(url => this.watchRegistry$(url)),
-      filter(registryReady),
-      map(entry => {
-        const pkg = entry.catalog[id]
-        if (!pkg) return null
-        const listed = listedVersions(this.exver, pkg)
-        const selected =
-          version ?? listed.find(v => this.exver.getFlavor(v) === flavor)
-        return selected
-          ? toMarketplacePkg(this.exver, id, selected, pkg, listed)
-          : null
+      switchMap(url =>
+        this.watchListing$(url, id).pipe(
+          switchMap(row => {
+            const selected =
+              version ?? (row && newestReleases(this.exver, row)[flavor ?? ''])
+            if (!row || !selected) return of(null)
+            const release = row.releases[selected]
+            return release
+              ? of(toPkg(this.exver, id, selected, row, release))
+              : this.fetchOnConnection$(id, selected, url)
+          }),
+        ),
+      ),
+    )
+  }
+
+  /** A release with every other version's release notes, following live package changes. */
+  getDetails$(
+    id: string,
+    version: string,
+    registry: string,
+  ): Observable<MarketplacePkg | null> {
+    return this.watchListing$(registry, id).pipe(
+      switchMap(row =>
+        row ? this.fetchOnConnection$(id, version, registry) : of(null),
+      ),
+    )
+  }
+
+  private fetchOnConnection$(
+    id: string,
+    version: string,
+    registry: string,
+  ): Observable<MarketplacePkg | null> {
+    return this.connection.pipe(
+      filter(Boolean),
+      switchMap(() =>
+        from(this.fetchPackage(registry, id, version)).pipe(
+          catchError(error => {
+            if (!isNetworkError(error)) this.errors.handleError(error)
+            return of(null)
+          }),
+        ),
+      ),
+    )
+  }
+
+  private async fetchPackage(
+    registry: string,
+    id: string,
+    version: string,
+  ): Promise<MarketplacePkg | null> {
+    const pkg = packageResponse(
+      await this.api.rpc.server.registries.package({
+        registry,
+        id,
+        targetVersion: `=${version}`,
       }),
     )
+    const best = pkg.best[version]
+    return best
+      ? {
+          ...pkg,
+          ...best,
+          id,
+          version,
+          flavor: this.exver.getFlavor(version),
+        }
+      : null
   }
 
   override fetchIcon$(registry: string, icon: string): Observable<string> {
@@ -196,21 +268,23 @@ export class MarketplaceService extends AbstractMarketplaceService {
     url: string,
     entry: T.Public['registryCache'][string],
   ): StoreDataWithUrl {
-    const packages = Object.entries(entry.catalog).flatMap(([id, pkg]) => {
-      const listed = listedVersions(this.exver, pkg)
-      return listed.flatMap(
-        version => toMarketplacePkg(this.exver, id, version, pkg, listed) ?? [],
-      )
-    })
+    const listings = Object.entries(entry.listings)
     return {
       url,
       info: this.registryInfo(entry.info),
       status: registryStatus(entry),
       error: entry.error,
-      packages,
-      updates: packages.filter(
-        pkg => entry.catalog[pkg.id]?.updateTarget === pkg.version,
+      packages: listings.flatMap(([id, row]) =>
+        Object.values(newestReleases(this.exver, row)).map(version =>
+          toPkg(this.exver, id, version, row, row.releases[version]!),
+        ),
       ),
+      updates: listings.flatMap(([id, row]) => {
+        const release = row.updateTarget && row.releases[row.updateTarget]
+        return release && row.updateTarget
+          ? [toPkg(this.exver, id, row.updateTarget, row, release)]
+          : []
+      }),
     }
   }
 
@@ -272,59 +346,53 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 }
 
-/** The release listed for each flavor: its update target, else its newest. */
-function listedVersions(exver: Exver, pkg: T.PackageReleases): string[] {
-  const listed = new Map<string | null, string>()
-  for (const version of Object.keys(pkg.versions)) {
-    const flavor = exver.getFlavor(version)
-    const newest = listed.get(flavor)
-    if (!newest || exver.compareExver(version, newest) === 1) {
-      listed.set(flavor, version)
-    }
-  }
-  if (pkg.updateTarget) {
-    listed.set(exver.getFlavor(pkg.updateTarget), pkg.updateTarget)
-  }
-  return [...listed.values()]
+/** The newest listed release of each flavor, keyed by flavor (`''` for none). */
+function newestReleases(
+  exver: Exver,
+  row: T.PackageListing,
+): Record<string, string> {
+  const newest: Record<string, string> = {}
+  Object.keys(row.releases).forEach(version => {
+    const flavor = exver.getFlavor(version) ?? ''
+    const current = newest[flavor]
+    if (!current || exver.compareExver(version, current) === 1)
+      newest[flavor] = version
+  })
+  return newest
 }
 
-function toMarketplacePkg(
+function toPkg(
   exver: Exver,
   id: string,
   version: string,
-  pkg: T.PackageReleases,
-  listed: string[],
-): MarketplacePkg | null {
-  const release = pkg.versions[version]
-  if (!release) return null
-  const { superseded, ...info } = release
+  { categories, firstPublishedAt, releases, versions }: T.PackageListing,
+  release: T.PackageVersionInfo,
+): MarketplacePkg {
   return {
+    ...release,
     id,
-    flavor: exver.getFlavor(version),
     version,
-    categories: pkg.categories,
-    firstPublishedAt: pkg.firstPublishedAt,
-    best: Object.fromEntries(
-      listed.flatMap(v => {
-        const best = pkg.versions[v]
-        if (!best) return []
-        const { superseded, ...bestInfo } = best
-        return [[v, bestInfo]]
-      }),
-    ),
+    flavor: exver.getFlavor(version),
+    categories,
+    firstPublishedAt,
+    best: { [version]: release },
     otherVersions: Object.fromEntries(
-      Object.entries(pkg.versions)
-        .filter(([v]) => v !== version)
-        .map(([v, r]) => [
-          v,
-          {
-            releaseNotes: r.releaseNotes,
-            defaultLocale: r.defaultLocale,
-            superseded: r.superseded,
-          },
-        ]),
+      Object.entries(versions)
+        .filter(([other]) => other !== version)
+        .map(([other, info]) => {
+          const listed = releases[other]
+          return [
+            other,
+            listed
+              ? {
+                  ...info,
+                  releaseNotes: listed.releaseNotes,
+                  defaultLocale: listed.defaultLocale,
+                }
+              : info,
+          ]
+        }),
     ),
-    ...info,
   }
 }
 
@@ -342,17 +410,17 @@ function registryReady(
     !!entry &&
     !isRegistryLoading(
       registryStatus(entry),
-      Object.keys(entry.catalog ?? {}).length,
+      Object.keys(entry.listings).length,
     )
   )
 }
 
-/** Browser snapshots can predate `RegistryCache.catalog`. */
+/** Browser snapshots can predate `RegistryCache.listings`. */
 function findRegistryCache(cache: DataModel['registryCache'], url: string) {
   const entry = Object.entries(cache).find(([saved]) =>
     sameUrl(saved, url),
   )?.[1]
-  return entry && !entry.catalog ? { ...entry, catalog: {} } : entry
+  return entry && !entry.listings ? { ...entry, listings: {} } : entry
 }
 
 function defaultRank(url: string): number {
