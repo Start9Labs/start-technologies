@@ -195,6 +195,39 @@ function harness(moduleOverrides = new Map(), globals = {}) {
   return { dependencies, tokens, load }
 }
 
+test('prompt submission preserves masked secrets and normalizes ordinary input', () => {
+  const { load } = harness(
+    new Map([
+      ['@angular/forms', {}],
+      ['@taiga-ui/core', {}],
+      ['@taiga-ui/kit', {}],
+      ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
+      ['../i18n/i18n.pipe', {}],
+    ]),
+  )
+  const { PromptModal } = load(
+    'shared-libs/ts-modules/shared/src/components/prompt.component.ts',
+  )
+  for (const [options, input, expected] of [
+    [{ useMask: true }, ' secret password ', [' secret password ']],
+    [{ useMask: true }, '\tsecret\t', ['\tsecret\t']],
+    [{ useMask: true }, '            ', ['            ']],
+    [{ useMask: true }, '', []],
+    [{}, ' ordinary input ', ['ordinary input']],
+    [{}, '   ', []],
+    [{ required: false }, '   ', ['']],
+  ]) {
+    const emitted = []
+    const prompt = Object.create(PromptModal.prototype)
+    prompt.context = {
+      data: options,
+      $implicit: { next: value => emitted.push(value) },
+    }
+    prompt.submit(input)
+    assert.deepEqual(emitted, expected)
+  }
+})
+
 function mockPatchFixture(data) {
   return {
     mockPatchData: data,

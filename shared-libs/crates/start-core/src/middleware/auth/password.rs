@@ -51,8 +51,9 @@ async fn authorize(
         return Ok(());
     };
     let password = password.ok_or_else(password_required)?;
-    let address = session_address.ok_or_else(super::local::unauthorized)?;
-    super::login_rate_limit::check(address, origin)?;
+    session_address.ok_or_else(super::local::unauthorized)?;
+    // Startup Host aliases share the password-attempt budget.
+    super::login_rate_limit::check(InternedString::intern("diagnostic"), origin)?;
     check_shadow_password(&hash, password)
 }
 
@@ -122,7 +123,10 @@ mod tests {
     #[tokio::test]
     async fn set_start9_password_is_required_and_checked() {
         let root = root_with_start9(&sha512(PASSWORD)).await;
-        let origin = RequestOrigin::default();
+        let origin = RequestOrigin {
+            gateway: Some("password-checked".parse().unwrap()),
+            ..RequestOrigin::default()
+        };
         let session = || Some(InternedString::intern("password-checked.local"));
 
         let missing = authorize(&root, None, session(), &origin)
@@ -146,18 +150,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn password_attempts_share_the_login_rate_limit() {
+    async fn startup_host_aliases_share_the_password_attempt_budget() {
         let root = root_with_start9(&sha512(PASSWORD)).await;
-        let origin = RequestOrigin::default();
-        let session = || Some(InternedString::intern("password-rate-limited.local"));
-        for _ in 0..3 {
-            authorize(&root, Some("wrong"), session(), &origin)
-                .await
-                .unwrap_err();
-        }
-        let limited = authorize(&root, Some(PASSWORD), session(), &origin)
+        let origin = RequestOrigin {
+            gateway: Some("password-rate-limited".parse().unwrap()),
+            peer_ip: Some("192.168.1.2".parse().unwrap()),
+            ..RequestOrigin::default()
+        };
+        for host in ["first.local", "second.local", "third.local"] {
+            let wrong = authorize(
+                &root,
+                Some("wrong"),
+                Some(InternedString::intern(host)),
+                &origin,
+            )
             .await
             .unwrap_err();
+            assert_eq!(wrong.kind, ErrorKind::IncorrectPassword);
+        }
+        let other_client = RequestOrigin {
+            peer_ip: Some("192.168.1.3".parse().unwrap()),
+            ..origin
+        };
+        let limited = authorize(
+            &root,
+            Some(PASSWORD),
+            Some(InternedString::intern("fourth.local")),
+            &other_client,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(limited.kind, ErrorKind::RateLimited);
     }
 }
