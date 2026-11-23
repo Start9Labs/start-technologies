@@ -1730,7 +1730,7 @@ test('source editor preserves unsaved fields when an inspection replaces its ent
     available: null,
     error: null,
   })
-  const edit = sourceEdit(entry)
+  const edit = sourceEdit(entry, { cifsNamedByHost: false })
   edit.name.set('My music')
   edit.hostname.set('new-nas')
   edit.path.set('/albums')
@@ -1751,7 +1751,7 @@ test('source editor preserves unsaved fields when an inspection replaces its ent
   assert.equal(edit.invalid(), false)
 })
 
-test('source editor opens legacy CIFS aliases clean and saves a real hostname edit once', async () => {
+test('source editor opens host-named CIFS aliases clean and saves a real hostname edit once', async () => {
   const entry = signal({
     name: 'Original alias',
     source: {
@@ -1764,7 +1764,7 @@ test('source editor opens legacy CIFS aliases clean and saves a real hostname ed
     available: 4096,
     error: null,
   })
-  const edit = sourceEdit(entry)
+  const edit = sourceEdit(entry, { cifsNamedByHost: true })
   const calls = []
   const client = {
     rename: async params => calls.push(['rename', params]),
@@ -1793,6 +1793,47 @@ test('source editor opens legacy CIFS aliases clean and saves a real hostname ed
   ])
 })
 
+test('source editor keeps a CIFS volume name independent of its hostname', async () => {
+  const entry = signal({
+    name: 'Family files',
+    source: {
+      kind: 'cifs',
+      hostname: 'nas',
+      path: '/files',
+      username: 'reader',
+    },
+    availability: 'available',
+    available: 4096,
+    error: null,
+  })
+  const edit = sourceEdit(entry, { cifsNamedByHost: false })
+  const calls = []
+  const client = {
+    rename: async params => calls.push(['rename', params]),
+    updateCifs: async params => calls.push(['update', params]),
+  }
+  assert.equal(edit.hostNamed(), false)
+  assert.equal(edit.name(), 'Family files')
+  edit.hostname.set('new-nas')
+  await edit.save(volumeA, client)
+  assert.deepEqual(calls, [
+    [
+      'update',
+      {
+        id: volumeA,
+        hostname: 'new-nas',
+        path: '/files',
+        username: 'reader',
+        password: undefined,
+      },
+    ],
+  ])
+  calls.length = 0
+  edit.name.set('Photos')
+  await edit.save(volumeA, client)
+  assert.deepEqual(calls[0], ['rename', { id: volumeA, name: 'Photos' }])
+})
+
 test('source editor follows an actual stored rename without treating it as an edit', () => {
   const entry = signal({
     name: 'Music',
@@ -1801,7 +1842,7 @@ test('source editor follows an actual stored rename without treating it as an ed
     available: null,
     error: null,
   })
-  const edit = sourceEdit(entry)
+  const edit = sourceEdit(entry, { cifsNamedByHost: false })
   edit.name.set('Unsaved')
   entry.update(value => ({ ...value, name: 'Renamed elsewhere' }))
   assert.equal(edit.name(), 'Renamed elsewhere')
@@ -2178,7 +2219,9 @@ function volumeFixture(t, packageData = {}, disks = VolumeMock.Disks) {
 
 test('choosing an external drive opens its form dialog without a separate loading task', async t => {
   const f = volumeFixture(t)
-  await f.make(AddSourceService).form('disk', async () => null)
+  await f
+    .make(AddSourceService)
+    .form('disk', { cifsNamedByHost: false }, async () => null)
   assert.equal(f.forms.length, 1)
   assert.deepEqual(f.taskCalls, [])
 })
@@ -2296,19 +2339,23 @@ test('local and CIFS forms open their own dialogs', async t => {
   const f = volumeFixture(t)
   const model = f.make(AddSourceService)
   const create = params => f.api.rpc.volumes.create(params)
-  f.formValues.push({ name: 'Shared' })
-  await model.form('local', create)
-  await model.form('cifs', create)
+  f.formValues.push(
+    { name: 'Shared' },
+    {
+      name: 'Family files',
+      hostname: 'nas',
+      path: 'files',
+      username: null,
+      password: null,
+    },
+  )
+  await model.form('local', { cifsNamedByHost: false }, create)
+  await model.form('cifs', { cifsNamedByHost: false }, create)
   await Promise.resolve()
   assert.equal(f.forms.length, 2)
   assert.deepEqual(
-    f.requests.filter(r => r.kind === 'create-volume'),
-    [
-      {
-        kind: 'create-volume',
-        params: { name: 'Shared', source: { kind: 'local' } },
-      },
-    ],
+    f.requests.filter(r => r.kind === 'create-volume').map(r => r.params.name),
+    ['Shared', 'Family files'],
   )
 })
 
@@ -3117,7 +3164,7 @@ test('production mocks support inspection, independent failed backups and new-lo
     cache.value.value.sharedVolumes[restored.restored[local]]
   assert.ok(checkedAt)
   assert.deepEqual(copy, {
-    name: 'Renamed photos',
+    name: 'Renamed photos (2)',
     source: { kind: 'local' },
     grants: {},
     availability: 'available',

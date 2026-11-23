@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-#[cfg(test)]
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -158,6 +156,7 @@ rpc_toolkit::reflect_ts!(SharedVolumeAvailability);
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct SharedVolume {
+    /// Unique among shared volumes; services mount a volume at a path matching it.
     pub name: String,
     pub source: SharedVolumeSource,
     pub grants: BTreeMap<PackageId, SharedVolumeGrant>,
@@ -211,9 +210,13 @@ pub(crate) fn recover_pending_deletions(
     if let Some(saved) = private.get("retainedSharedVolumes") {
         let pending: BTreeMap<SharedVolumeId, String> = from_value(saved.clone())?;
         for (id, name) in pending {
-            volumes
-                .entry(id)
-                .or_insert_with(|| SharedVolume::new(name, SharedVolumeSource::Local));
+            if volumes.contains_key(&id) {
+                continue;
+            }
+            let name = unused_name(&name, |name| {
+                volumes.values().any(|volume| volume.name == name)
+            });
+            volumes.insert(id, SharedVolume::new(name, SharedVolumeSource::Local));
         }
     }
     Ok(())
@@ -318,11 +321,60 @@ pub(crate) fn validate_name(name: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Fails when a volume other than the excepted one holds the name.
+fn ensure_name_available(
+    volumes: &Model<BTreeMap<SharedVolumeId, SharedVolume>>,
+    except: Option<&SharedVolumeId>,
+    name: &str,
+) -> Result<(), Error> {
+    for (id, volume) in volumes.as_entries()? {
+        if except != Some(&id) && volume.as_name().de()? == name {
+            return Err(Error::new(
+                eyre!(t!("shared-volumes.name-taken", name = name)),
+                ErrorKind::Duplicate,
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The name, or its first ` (N)` variant from 2 up that is not taken.
+pub(crate) fn unused_name(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(name) {
+        return name.to_owned();
+    }
+    (2..)
+        .map(|n| format!("{name} ({n})"))
+        .find(|candidate| !taken(candidate))
+        .expect("unbounded suffixes")
+}
+
+/// Inserts a volume, suffixing its name past every name already registered.
+pub(crate) fn insert_with_unused_name(
+    volumes: &mut Model<BTreeMap<SharedVolumeId, SharedVolume>>,
+    id: &SharedVolumeId,
+    mut volume: SharedVolume,
+) -> Result<(), Error> {
+    let taken = volumes
+        .as_entries()?
+        .into_iter()
+        .map(|(_, volume)| volume.as_name().de())
+        .collect::<Result<BTreeSet<String>, _>>()?;
+    volume.name = unused_name(&volume.name, |name| taken.contains(name));
+    volumes.insert(id, &volume)?;
+    Ok(())
+}
+
 pub async fn create(
     ctx: RpcContext,
     CreateSharedVolumeParams { name, source }: CreateSharedVolumeParams,
 ) -> Result<SharedVolumeId, Error> {
     validate_name(&name)?;
+    ensure_name_available(
+        ctx.db.peek().await.as_public().as_shared_volumes(),
+        None,
+        &name,
+    )?;
     let id = SharedVolumeId::new();
     let (source, credentials) = match source {
         CreateSharedVolumeSource::Local => {
@@ -348,6 +400,7 @@ pub async fn create(
                     .as_shared_volume_credentials_mut()
                     .insert(&id, credentials)?;
             }
+            ensure_name_available(db.as_public().as_shared_volumes(), None, &name)?;
             db.as_public_mut()
                 .as_shared_volumes_mut()
                 .insert(&id, &SharedVolume::new(name, source))?;
@@ -379,6 +432,7 @@ pub async fn rename(
     validate_name(&name)?;
     ctx.db
         .mutate(|db| {
+            ensure_name_available(db.as_public().as_shared_volumes(), Some(&id), &name)?;
             db.as_public_mut()
                 .as_shared_volumes_mut()
                 .as_idx_mut(&id)
@@ -833,6 +887,51 @@ mod tests {
             volume.inspection.availability,
             SharedVolumeAvailability::Unknown
         );
+        let retained = SharedVolumeId::new();
+        recover_pending_deletions(
+            &mut volumes,
+            &imbl_value::json!({
+                "retainedSharedVolumes": { retained.to_string(): "Photos" }
+            }),
+        )
+        .unwrap();
+        assert_eq!(volumes[&id].name, "Photos");
+        assert_eq!(volumes[&retained].name, "Photos (2)");
+    }
+
+    #[test]
+    fn names_are_unique_across_volumes() {
+        use crate::db::model::DatabaseModel;
+        let photos = SharedVolumeId::new();
+        let music = SharedVolumeId::new();
+        let mut db = DatabaseModel::from(imbl_value::json!({
+            "public": { "sharedVolumes": {
+                photos.to_string(): to_value(&SharedVolume::new("Photos".into(), SharedVolumeSource::Local)).unwrap(),
+                music.to_string(): to_value(&SharedVolume::new("Music".into(), SharedVolumeSource::Local)).unwrap(),
+            } }
+        }));
+        let volumes = db.as_public().as_shared_volumes();
+        let taken = ensure_name_available(volumes, None, "Photos").unwrap_err();
+        assert_eq!(taken.kind, ErrorKind::Duplicate);
+        assert!(ensure_name_available(volumes, Some(&music), "Photos").is_err());
+        assert!(ensure_name_available(volumes, Some(&photos), "Photos").is_ok());
+        assert!(ensure_name_available(volumes, None, "photos").is_ok());
+        assert!(ensure_name_available(volumes, None, "Photos ").is_ok());
+
+        let restored = SharedVolumeId::new();
+        let again = SharedVolumeId::new();
+        for id in [&restored, &again] {
+            insert_with_unused_name(
+                db.as_public_mut().as_shared_volumes_mut(),
+                id,
+                SharedVolume::new("Photos".into(), SharedVolumeSource::Local),
+            )
+            .unwrap();
+        }
+        let volumes = db.as_public().as_shared_volumes().de().unwrap();
+        assert_eq!(volumes[&photos].name, "Photos");
+        assert_eq!(volumes[&restored].name, "Photos (2)");
+        assert_eq!(volumes[&again].name, "Photos (3)");
     }
 
     async fn deletion_database(

@@ -950,6 +950,7 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'volumes.create': async ({ name, source }) => {
       await pauseFor(1000)
+      this.mockEnsureVolumeNameAvailable(name)
       const id = this.guid()
       const volume: T.SharedVolume = {
         name,
@@ -993,6 +994,7 @@ export class MockApiService extends ApiService implements StartupApiService {
         `/sharedVolumes/${id}`,
       )
       if (!volume) throw new Error('Volume not found')
+      this.mockEnsureVolumeNameAvailable(name, id)
       await this.mockRevision([
         { op: PatchOp.REPLACE, path: `/sharedVolumes/${id}/name`, value: name },
       ])
@@ -1561,7 +1563,7 @@ export class MockApiService extends ApiService implements StartupApiService {
           continue
         }
         const restored = await this.rpc.volumes.create({
-          name: info.name,
+          name: this.mockUnusedVolumeName(info.name),
           source: { kind: 'local' },
         })
         await this.mockRevision([
@@ -3114,6 +3116,26 @@ export class MockApiService extends ApiService implements StartupApiService {
     const target = this.backupTarget(id)
     if (target?.source.kind !== 'cifs') throw new Error('CIFS target not found')
     return target
+  }
+
+  private mockVolumeNameTaken(name: string, except?: string) {
+    const volumes: Record<string, T.SharedVolume> =
+      this.mockData('/sharedVolumes') ?? {}
+    return Object.entries(volumes).some(
+      ([id, volume]) => id !== except && volume.name === name,
+    )
+  }
+
+  private mockEnsureVolumeNameAvailable(name: string, except?: string) {
+    if (this.mockVolumeNameTaken(name, except))
+      throw new Error(`Another volume is already named ${name}`)
+  }
+
+  private mockUnusedVolumeName(name: string) {
+    let candidate = name
+    for (let n = 2; this.mockVolumeNameTaken(candidate); n++)
+      candidate = `${name} (${n})`
+    return candidate
   }
 
   private mockSource(

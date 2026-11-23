@@ -54,6 +54,7 @@ fn granted_volumes(
 
 type MountInput = (
     SharedVolumeId,
+    String,
     bool,
     SharedVolumeAvailability,
     SourceDefinition,
@@ -68,6 +69,7 @@ fn mount_inputs(package: &PackageId, db: &DatabaseModel) -> Result<Vec<MountInpu
             Some(SourceDefinition::read(db, &id).map(|definition| {
                 (
                     id,
+                    volume.name,
                     grant.readonly,
                     volume.inspection.availability,
                     definition,
@@ -79,9 +81,9 @@ fn mount_inputs(package: &PackageId, db: &DatabaseModel) -> Result<Vec<MountInpu
 
 fn mount_inputs_changed(previous: &[MountInput], mut current: Vec<MountInput>) -> bool {
     for input in &mut current {
-        if input.2 == SharedVolumeAvailability::Unknown {
+        if input.3 == SharedVolumeAvailability::Unknown {
             if let Some(known) = previous.iter().find(|known| known.0 == input.0) {
-                input.2 = known.2.clone();
+                input.3 = known.3.clone();
             }
         }
     }
@@ -384,8 +386,9 @@ mod tests {
             edit(&mut edited);
             mount_inputs_changed(&inputs, mount_inputs(&package, &database(&edited)).unwrap())
         };
+        assert!(changed(&|c| c.get_mut(&mine).unwrap().name = "Songs".into()));
         assert!(!changed(
-            &|c| c.get_mut(&mine).unwrap().name = "Songs".into()
+            &|c| c.get_mut(&other).unwrap().name = "Secret".into()
         ));
         assert!(!changed(&|c| {
             c.get_mut(&other).unwrap().inspection.availability =

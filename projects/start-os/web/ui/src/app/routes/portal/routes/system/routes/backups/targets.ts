@@ -19,7 +19,7 @@ import { SourcePickerData } from 'src/app/routes/portal/routes/system/routes/vol
 import {
   VOLUME_STATUSES,
   VOLUME_TYPES,
-  volumeName,
+  targetName,
   volumePath,
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
@@ -32,6 +32,7 @@ import { BackupLegacyWarningComponent } from './legacy-warning.component'
 import { BackupTargetManage } from './manage'
 
 const TARGET_SOURCES: SourcePickerData = {
+  cifsNamedByHost: true,
   intro:
     'A backup target is where StartOS stores encrypted backups of this server, its services and its shared volumes.',
   docs: '/start-os/backups.html#backup-targets',
@@ -305,7 +306,7 @@ export default class BackupTargets {
   protected readonly service = inject(BackupService)
   protected readonly types = VOLUME_TYPES
   protected readonly statuses = VOLUME_STATUSES
-  protected readonly name = volumeName
+  protected readonly name = targetName
   protected readonly path = volumePath
 
   constructor() {
