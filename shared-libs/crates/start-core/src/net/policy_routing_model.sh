@@ -26,10 +26,17 @@ T_ETH=$(table eth0) T_WG0=$(table wg0) T_WG1=$(table wg1) T_WG2=$(table wg2)
 WG_FWMARK=51820 DIVERT_MARK=0x540001 DIVERT_TABLE=5344
 
 ip addr add 192.168.1.5/24 dev eth0
+ip addr add 198.51.100.5/24 dev eth0
 ip -6 addr add 2001:db8:1::5/64 dev eth0 nodad
+ip -6 addr add 2001:db8:2::5/128 dev eth0 nodad
+ip -6 route add 2001:db8:2::/64 dev eth0 proto ra
+ip route add 192.0.0.0/24 via 192.168.1.1 dev eth0
+ip route add 198.18.0.0/15 via 192.168.1.1 dev eth0
+ip route add 240.0.0.0/4 via 192.168.1.1 dev eth0
 ip -6 addr add fd12:3456::5/64 dev eth0 nodad
 ip addr add 10.59.0.2/24 dev wg0
 ip -6 addr add 2001:db8:59::2/124 dev wg0 nodad
+ip -6 addr add 2001:db8:100::2/56 dev wg0 nodad
 ip addr add 10.60.0.2/24 dev wg1
 ip -6 addr add 2001:db8:62::2/124 dev wg2 nodad
 ip addr add 10.0.3.1/24 dev lxcbr0
@@ -56,19 +63,21 @@ for family in -4 -6; do
   ip $family rule add lookup main priority $AUTO_MAIN
   ip $family rule add lookup default priority $AUTO_DEFAULT
 done
-for net in $NON_PUBLIC_V4; do
+for net in $NON_PUBLIC_V4 198.51.100.0/24; do
   ip rule add to $net lookup main suppress_prefixlength 0 priority $MAIN
 done
 ip -6 rule add not to 2000::/3 lookup main suppress_prefixlength 0 priority $MAIN
-for net in 2001:db8:1::/64 2001:db8:59::/124 2001:db8:62::/124; do
+for net in 2001:db8:1::/64 2001:db8:2::/64 2001:db8:59::/124 2001:db8:62::/124 2001:db8:100::/56; do
   ip -6 rule add to $net lookup main suppress_prefixlength 0 priority $MAIN
 done
 ip -6 rule add fwmark $T_WG0 to 2000::/3 lookup $T_WG0 priority $TUNNEL_REPLY
 ip -6 rule add fwmark $T_WG2 to 2000::/3 lookup $T_WG2 priority $TUNNEL_REPLY
 ip rule add from 192.168.1.5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
+ip rule add from 198.51.100.5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
 ip rule add from 10.59.0.2 fwmark 0/0xffffffff lookup $T_WG0 priority $SOURCE
 ip rule add from 10.60.0.2 fwmark 0/0xffffffff lookup $T_WG1 priority $SOURCE
 ip -6 rule add from 2001:db8:1::5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
+ip -6 rule add from 2001:db8:2::5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
 ip -6 rule add from fd12:3456::5 fwmark 0/0xffffffff lookup $T_ETH priority $SOURCE
 ip -6 rule add from 2001:db8:59::2 fwmark 0/0xffffffff lookup $T_WG0 priority $SOURCE
 ip -6 rule add from 2001:db8:62::2 fwmark 0/0xffffffff lookup $T_WG2 priority $SOURCE
@@ -119,6 +128,17 @@ expect() {
   fi
 }
 
+expect_direct() {
+  local want=$1 out
+  shift
+  expect specific "$want" "$@"
+  out=$(ip route get "$@" 2>&1)
+  if grep -q ' via ' <<<"$out"; then
+    echo "$state: specific: ip route get $*: want direct route, got $out"
+    fail=1
+  fi
+}
+
 from_container="from 10.0.3.5 iif lxcbr0"
 from_container_v6="from fd00:3::5 iif lxcbr0"
 
@@ -127,6 +147,18 @@ every_state() {
   expect divert LOCAL 192.168.1.77 mark $DIVERT_MARK $from_container
   expect specific eth0 192.168.1.77
   expect specific eth0 192.168.1.77 $from_container
+  expect_direct eth0 198.51.100.77
+  expect_direct eth0 198.51.100.77 from 198.51.100.5
+  expect_direct eth0 198.51.100.77 mark $T_ETH $from_container
+  expect_direct eth0 198.51.100.77 mark $LOCAL_OUTBOUND_MARK
+  expect_direct eth0 2001:db8:2::77 from 2001:db8:2::5
+  expect_direct eth0 2001:db8:2::77 mark $T_ETH $from_container_v6
+  expect_direct eth0 2001:db8:2::77 mark $LOCAL_OUTBOUND_MARK
+  expect_direct wg0 2001:db8:100::77 $from_container_v6
+  for ip in 192.0.0.8 198.18.0.8 240.0.0.8; do
+    expect specific eth0 $ip mark $LOCAL_OUTBOUND_MARK
+    expect specific eth0 $ip $from_container
+  done
   expect specific lxcbr0 10.0.3.5 from 10.59.0.2
   expect specific lxcbr0 fd00:3::5 from 2001:db8:59::2
   expect specific lxcbr0 10.0.3.5 mark $T_WG0 from 203.0.113.9 iif wg0
