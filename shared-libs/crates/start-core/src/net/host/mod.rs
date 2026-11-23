@@ -15,6 +15,7 @@ use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::db::model::public::{GatewayType, NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::hostname::ServerHostname;
+use crate::net::dns::OS_HOSTNAME;
 use crate::net::forward::AvailablePorts;
 use crate::net::host::address::{HostAddress, PublicDomainConfig, address_api};
 use crate::net::host::binding::{
@@ -148,6 +149,22 @@ fn mdns_gateways(
         })
         .map(|(id, _)| id.clone())
         .collect()
+}
+
+// The bridge hostname cannot share another binding's preferred TLS port.
+fn domain_ssl_port(
+    domain: &str,
+    options: &BindOptions,
+    assigned_port: u16,
+    available_ports: &AvailablePorts,
+) -> u16 {
+    if domain.trim_end_matches('.').eq_ignore_ascii_case(OS_HOSTNAME) {
+        return assigned_port;
+    }
+    options
+        .preferred_ssl_port()
+        .filter(|port| available_ports.is_ssl(*port))
+        .unwrap_or(assigned_port)
 }
 
 impl Model<Host> {
@@ -314,16 +331,8 @@ impl Model<Host> {
                         metadata: metadata.clone(),
                     });
                 }
-                if let Some(mut port) = net.assigned_ssl_port {
-                    // The domain rides the preferred port whenever one of our
-                    // TLS listeners answers there — SNI routes it, terminating
-                    // (add_ssl) or passthrough (self-TLS) alike.
-                    if let Some(preferred) = opt
-                        .preferred_ssl_port()
-                        .filter(|p| available_ports.is_ssl(*p))
-                    {
-                        port = preferred;
-                    }
+                if let Some(assigned_port) = net.assigned_ssl_port {
+                    let port = domain_ssl_port(&domain, &opt, assigned_port, available_ports);
                     available.insert(HostnameInfo {
                         ssl: true,
                         public: true,
@@ -346,13 +355,8 @@ impl Model<Host> {
                         metadata: HostnameMetadata::PrivateDomain { gateways },
                     });
                 }
-                if let Some(mut port) = net.assigned_ssl_port {
-                    if let Some(preferred) = opt
-                        .preferred_ssl_port()
-                        .filter(|p| available_ports.is_ssl(*p))
-                    {
-                        port = preferred;
-                    }
+                if let Some(assigned_port) = net.assigned_ssl_port {
+                    let port = domain_ssl_port(&domain, &opt, assigned_port, available_ports);
                     available.insert(HostnameInfo {
                         ssl: true,
                         public: false,
@@ -1499,6 +1503,59 @@ mod tests {
                 addresses.effective,
                 addresses.enabled().into_iter().cloned().collect()
             );
+        }
+    }
+
+    #[test]
+    fn explicit_bridge_domains_keep_the_bindings_assigned_tls_port() {
+        use crate::net::host::binding::Security;
+
+        for domain in [OS_HOSTNAME, "StartOS.Internal."] {
+            let mut ports = AvailablePorts::new();
+            ports.set_ssl(443, true);
+            let mut host = host();
+            host.add_binding(
+                &mut ports,
+                10009,
+                BindOptions {
+                    transport: Default::default(),
+                    preferred_external_port: 443,
+                    secure: Some(Security { ssl: true }),
+                    add_ssl: None,
+                    proxy: None,
+                },
+                false,
+            )
+            .unwrap();
+            let config = PublicDomainConfig {
+                gateway: gw("eth0"),
+                acme: None,
+            };
+            host.as_public_domains_mut()
+                .insert(&InternedString::from(domain), &config)
+                .unwrap();
+            host.as_private_domains_mut()
+                .insert(&InternedString::from(domain), &BTreeSet::from([gw("eth0")]))
+                .unwrap();
+            host.as_public_domains_mut()
+                .insert(&InternedString::from("provider.example"), &config)
+                .unwrap();
+            converge(&mut host, &OrdMap::new(), &ports);
+            let host = host.de().unwrap();
+            let binding = &host.bindings[&10009];
+            let assigned = binding.net.assigned_ssl_port.unwrap();
+            assert_ne!(assigned, 443);
+            let bridge_domains: Vec<_> = binding
+                .addresses
+                .available
+                .iter()
+                .filter(|address| address.hostname.as_ref() == domain)
+                .collect();
+            assert_eq!(bridge_domains.len(), 2);
+            assert!(bridge_domains.iter().all(|address| address.port == Some(assigned)));
+            assert!(binding.addresses.available.iter().any(|address| {
+                address.hostname.as_ref() == "provider.example" && address.port == Some(443)
+            }));
         }
     }
 

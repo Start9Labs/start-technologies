@@ -22,6 +22,7 @@ use url::Url;
 use crate::auth::{AuthKeys, LoginContext};
 use crate::context::{CliContext, RpcContext};
 use crate::middleware::auth::DbContext;
+use crate::net::dns::OS_HOSTNAME;
 use crate::net::host::binding::BindInfo;
 use crate::net::http::request_authority;
 use crate::net::request_origin::RequestOrigin;
@@ -289,6 +290,9 @@ fn startos_signing_identities(
     let mut identities = BTreeSet::new();
     if let Some(binding) = binding.filter(|binding| binding.enabled) {
         for address in binding.enabled_addresses() {
+            if origin.is_internal() && address.is_internal() {
+                identities.insert(InternedString::from_static(OS_HOSTNAME));
+            }
             if !origin.is_internal() {
                 // Public identities remain valid privately for hairpin access.
                 if address.is_internal()
@@ -1200,6 +1204,7 @@ mod tests {
             origin.local_ip = Some(destination.parse().unwrap());
             origin.peer_ip = Some(peer.parse().unwrap());
             let identities = startos_signing_identities(Some(&binding), &origin);
+            assert!(identities.contains(OS_HOSTNAME));
             assert!(identities.contains("service.onion"));
             assert!(identities.contains("public.example"));
             assert!(identities.contains("private.example"));
@@ -1229,7 +1234,13 @@ mod tests {
         let key = Signer::Key(AnySigningKey::Ed25519(
             ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
         ));
+        let mut bridge = ingress("lxcbr0", false);
+        bridge.local_ip = Some(crate::HOST_IP.into());
+        bridge.peer_ip = Some("10.0.3.2".parse().unwrap());
         for (hostname, origin, accepted) in [
+            (OS_HOSTNAME, bridge, true),
+            (OS_HOSTNAME, ingress("eth0", true), false),
+            (OS_HOSTNAME, ingress("eth0", false), false),
             ("public.example", ingress("eth0", true), true),
             ("public.example", ingress("eth1", true), false),
             ("private.example", ingress("eth0", true), false),

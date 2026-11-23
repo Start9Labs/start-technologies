@@ -7,6 +7,8 @@ use itertools::Itertools;
 use openssl::pkey::{PKey, Private};
 
 use crate::HOST_IP;
+use crate::net::dns::OS_HOSTNAME;
+use crate::net::host::Host;
 use crate::service::effects::callbacks::CallbackHandler;
 use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
@@ -24,12 +26,32 @@ pub enum Algorithm {
 rpc_toolkit::reflect_ts!(Algorithm);
 rpc_toolkit::ts_export!(Algorithm, namespaces = [""]);
 
+// Services may certify the bridge hostname and retrieve its key.
+fn allowed_hostnames<'a>(
+    hosts: impl IntoIterator<Item = Result<&'a Model<Host>, Error>>,
+) -> Result<BTreeSet<InternedString>, Error> {
+    let mut names = BTreeSet::from([InternedString::from_static(OS_HOSTNAME)]);
+    for host in hosts {
+        let host = host?;
+        names.extend(host.as_public_domains().keys()?);
+        names.extend(host.as_private_domains().keys()?);
+        names.extend(
+            host.as_bindings()
+                .de()?
+                .values()
+                .flat_map(|binding| binding.addresses.available.iter())
+                .map(|address| address.to_san_hostname()),
+        );
+    }
+    Ok(names)
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSslCertificateParams {
     hostnames: BTreeSet<InternedString>,
 
-    algorithm: Option<Algorithm>, //"ecdsa" | "ed25519"
+    algorithm: Option<Algorithm>,
 
     callback: Option<CallbackId>,
 }
@@ -55,27 +77,13 @@ pub async fn get_ssl_certificate(
             let errfn = |h: &str| Error::new(eyre!("unknown hostname: {h}"), ErrorKind::NotFound);
             let entries = db.as_public().as_package_data().as_entries()?;
             let packages = entries.iter().map(|(k, _)| k).collect::<BTreeSet<_>>();
-            let allowed_hostnames = entries
-                .iter()
-                .map(|(_, m)| m.as_hosts().as_entries())
-                .flatten_ok()
-                .map_ok(|(_, m)| {
-                    Ok(m.as_public_domains()
-                        .keys()?
-                        .into_iter()
-                        .chain(m.as_private_domains().keys()?)
-                        .chain(
-                            m.as_bindings()
-                                .de()?
-                                .values()
-                                .flat_map(|b| b.addresses.available.iter().cloned())
-                                .map(|h| h.to_san_hostname()),
-                        )
-                        .collect::<Vec<InternedString>>())
-                })
-                .map(|a| a.and_then(|a| a))
-                .flatten_ok()
-                .try_collect::<_, BTreeSet<_>, _>()?;
+            let allowed_hostnames = allowed_hostnames(
+                entries
+                    .iter()
+                    .map(|(_, m)| m.as_hosts().as_entries())
+                    .flatten_ok()
+                    .map_ok(|(_, m)| m),
+            )?;
             for hostname in &hostnames {
                 if let Some(internal) = hostname
                     .strip_suffix(".embassy")
@@ -152,7 +160,7 @@ pub async fn get_ssl_certificate(
 pub struct GetSslKeyParams {
     hostnames: BTreeSet<InternedString>,
 
-    algorithm: Option<Algorithm>, //"ecdsa" | "ed25519"
+    algorithm: Option<Algorithm>,
 }
 
 rpc_toolkit::reflect_ts!(GetSslKeyParams);
@@ -179,30 +187,15 @@ pub async fn get_ssl_key(
         .db
         .mutate(|db| {
             let errfn = |h: &str| Error::new(eyre!("unknown hostname: {h}"), ErrorKind::NotFound);
-            let mut allowed_hostnames = db
-                .as_public()
-                .as_package_data()
-                .as_idx(package_id)
-                .into_iter()
-                .map(|m| m.as_hosts().as_entries())
-                .flatten_ok()
-                .map_ok(|(_, m)| {
-                    Ok(m.as_public_domains()
-                        .keys()?
-                        .into_iter()
-                        .chain(m.as_private_domains().keys()?)
-                        .chain(
-                            m.as_bindings()
-                                .de()?
-                                .values()
-                                .flat_map(|b| b.addresses.available.iter().cloned())
-                                .map(|h| h.to_san_hostname()),
-                        )
-                        .collect::<Vec<InternedString>>())
-                })
-                .map(|a| a.and_then(|a| a))
-                .flatten_ok()
-                .try_collect::<_, BTreeSet<_>, _>()?;
+            let mut allowed_hostnames = allowed_hostnames(
+                db.as_public()
+                    .as_package_data()
+                    .as_idx(package_id)
+                    .into_iter()
+                    .map(|m| m.as_hosts().as_entries())
+                    .flatten_ok()
+                    .map_ok(|(_, m)| m),
+            )?;
             allowed_hostnames.extend(container_ip.as_ref().map(InternedString::from_display));
             for hostname in &hostnames {
                 if let Some(internal) = hostname
@@ -233,4 +226,32 @@ pub async fn get_ssl_key(
     };
 
     Ok(Pem(key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn certificate_and_key_names_include_the_shared_bridge_hostname() {
+        let names = allowed_hostnames(std::iter::empty()).unwrap();
+        assert_eq!(
+            names,
+            BTreeSet::from([InternedString::from_static(OS_HOSTNAME)]),
+        );
+
+        let mut host = Host::default();
+        host.private_domains
+            .insert("provider.internal".into(), BTreeSet::new());
+        let host = Model::<Host>::new(&host).unwrap();
+        let names = allowed_hostnames([Ok(&host)]).unwrap();
+        assert_eq!(
+            names,
+            BTreeSet::from([
+                InternedString::from_static(OS_HOSTNAME),
+                InternedString::from("provider.internal"),
+            ]),
+        );
+        assert!(!names.contains("unrelated.internal"));
+    }
 }

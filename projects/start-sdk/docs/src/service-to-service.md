@@ -14,7 +14,7 @@ const osIp = await sdk.getOsIp(effects) // "10.0.3.1" — a plain Promise, not r
 
 `getOsIp` is a one-shot read of a compile-time constant. It never changes and never needs watching.
 
-Every port a service **binds** (via `sdk.MultiHost.of(...).bindPort(...)` in [interfaces.ts](interfaces.md)) is reachable from other containers at `startos.internal:<assigned external port>`. This holds even for a binding with **no exported interface** — binding a port is enough to make it reachable on the bridge (see [Exposing a bridge-only port](#exposing-a-bridge-only-port) below).
+Every port a service **binds** (via `sdk.MultiHost.of(...).bindPort(...)` in [interfaces.ts](interfaces.md)) is reachable from other containers at `startos.internal:<assigned external port>`. This holds even for a binding with **no exported interface** — binding a port is enough to make it reachable on the bridge (see [Exposing a bridge-only port](#exposing-a-bridge-only-port) below). When explicitly configured as a domain, `startos.internal` still uses that binding's assigned TLS port rather than sharing another binding's preferred port.
 
 > [!IMPORTANT]
 > The bridge exposes a service at its **assigned external port**, which you must not assume. `preferredExternalPort` is a request, not a guarantee: the first service to claim a given external port gets it and later claimants fall back to a random port, and when `preferredExternalPort` is omitted it defaults to the protocol default (`http` → 80). So the external port is only knowable at runtime, by reading the dependency's live binding. What _is_ stable is the dependency's **internal** port and **host id** — import those as constants from the dependency's package.

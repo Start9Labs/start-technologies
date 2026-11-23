@@ -92,7 +92,7 @@ export function getHost<Mapped>(
 }
 
 /**
- * Reactive reader for the bridge address (`10.0.3.1:<port>`) a dependency's
+ * Reactive reader for the bridge address (`startos.internal:<port>`) a dependency's
  * binding is reachable at from another container.
  *
  * Resolves the binding's own derived address rather than `net.assignedPort` /
