@@ -677,6 +677,7 @@ mod tests {
         let json = webauthn::test_util::client_data("webauthn.get", &message);
         use ed25519_dalek::Signer as _;
         let ed_assertion = webauthn::WebAuthnAssertion::new(
+            webauthn::test_util::CREDENTIAL_ID.to_vec(),
             data.clone(),
             json.clone(),
             ed_passkey

@@ -200,7 +200,10 @@ impl HasUnenrolledKeys {
 
 impl SignatureAuthContext for RpcContext {
     fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
-        RpcContext::server_identity(self).map(Into::into)
+        Ok(
+            crate::sign::session::ServerIdentity::from(RpcContext::server_identity(self)?)
+                .with_passkeys(crate::auth::passkey::resolver(self.weak())),
+        )
     }
     fn replay_check(&self) -> RequestReplayCheck {
         RpcContext::replay_check(self)
@@ -868,7 +871,7 @@ mod tests {
     const JS_PRODUCED_HEADER: &str = "commitment=request&timestamp=1792644825&nonce=18095015305127205807&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEBBctoB4q6Ez-Iuc8w7CBw6gz5ysJYD6F2fpz7Cb7A9mX96rUFD-IPWzjs3mt-Y6oBqDfYVVC-cVXbkU9UTGIsC";
     const JS_PRODUCED_HEADER_V1: &str = "timestamp=1784746349&nonce=5184603501117103523&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ&signature=MEkwBQYDK2VwBEA0QgkL7GFycl72l-Bt076252XjpFG7aLngdxeIs-hNXpCkcJUtq9Xsfm_YV68U0JtK2qLMG2KPSfAVTcg8ntMH";
     /// TypeScript-generated proof from a P-256 passkey with seed 0303…03 and `BODY`.
-    const JS_PRODUCED_PASSKEY_HEADER: &str = "commitment=request&timestamp=1795225552&nonce=4546796594533821&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWRq3ceu8_W2cuQlNEGUordGmnUTCwfYn8InsWLnGGt-fTmq_DQRcDGk6PGitfJfKcr5k3vSib-zSY92YqSeA8A&signature=MIIBFjAWBhRpgrCEwKe7zaK6_6ns2O_6gIq_EQSB-zCB-AQlNTB6bgQ5lHuF-At94O06XGHK3fOC1IKKEOZaBUYOiAgFAAAAAQSBhnsidHlwZSI6IndlYmF1dGhuLmdldCIsImNoYWxsZW5nZSI6Imc3YkNWVUNwRTNOaUdiVDVIRlM1R3Q1c2IzV0daWTlXZ1VUYlVqNXY3V2siLCJvcmlnaW4iOiJodHRwczovL3N0YXJ0LTkubG9jYWwiLCJjcm9zc09yaWdpbiI6ZmFsc2V9BEYwRAIgGh2T1V_qB180ZkJldhDocIgRskbPNEtZSIAVPFQgFi4CIGX_3QpS2Q4pjC_q3T2_iccnQhe2zH-ata8xppjr8GO_";
+    const JS_PRODUCED_PASSKEY_HEADER: &str = "commitment=request&timestamp=1795465051&nonce=5378435914465431124&size=59&blake3=95o3MZRDgMasjyEKb6h2qMb1JFOs45lZdiY2qeXDRQY&signer=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWRq3ceu8_W2cuQlNEGUordGmnUTCwfYn8InsWLnGGt-fTmq_DQRcDGk6PGitfJfKcr5k3vSib-zSY92YqSeA8A&signature=MIIBIDAWBhRpgrCEwKe7zaK6_6ns2O_6gIq_EQSCAQQwggEABAQBAgMEBCU1MHpuBDmUe4X4C33g7TpcYcrd84LUgooQ5loFRg6ICAUAAAABBIGGeyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiOHh6UmhkQlVHQ0I3SnhrZzJjWTRoMmxrdlljWEN6WDdZSE04MWpBbE1wQSIsIm9yaWdpbiI6Imh0dHBzOi8vc3RhcnQtOS5sb2NhbCIsImNyb3NzT3JpZ2luIjpmYWxzZX0ESDBGAiEA0IgsbP0UTSUDe05OFZE1M1Lifs_cop5r8x0eXkjKetkCIQC1nEb1IzdGNr5-8bZILHE1Bcozo0W770rcXVKmks3d_g";
     const BODY: &[u8] = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server.echo\",\"params\":{}}";
 
     #[test]

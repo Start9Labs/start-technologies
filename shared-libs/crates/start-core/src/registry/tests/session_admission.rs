@@ -22,7 +22,7 @@ fn proof(wire: &[u8]) -> (&[u8], RequestProof) {
     let _: serde_cbor::Value = serde_cbor::de::from_reader(&mut reader).unwrap();
     let end = reader.position() as usize;
     let proof: BinaryRequestProof = serde_cbor::de::from_reader(&mut reader).unwrap();
-    (&wire[..end], proof.into())
+    (&wire[..end], proof.into_proof(None).unwrap())
 }
 
 #[tokio::test]

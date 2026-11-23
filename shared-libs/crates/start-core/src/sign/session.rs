@@ -1,7 +1,9 @@
 #![doc = include_str!("../../signed-session.md")]
 
 use std::future::Future;
+use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use hkdf::Hkdf;
 use openssl::symm::{Cipher, decrypt_aead, encrypt_aead};
 use serde::{Deserialize, Serialize};
@@ -103,6 +105,7 @@ async fn encode(signer: &Signer, context: &str, hello: Hello) -> Result<Vec<u8>,
 async fn decode(
     wire: &[u8],
     contexts: &[InternedString],
+    passkeys: Option<&PasskeyResolver>,
 ) -> Result<(Hello, RequestProof, InternedString), Error> {
     if wire.len() > MAX_HANDSHAKE_BYTES {
         return Err(invalid());
@@ -114,7 +117,11 @@ async fn decode(
     if reader.position() as usize != wire.len() {
         return Err(invalid());
     }
-    let proof = RequestProof::from(proof);
+    let resolved = match (proof.unnamed_credential(), passkeys) {
+        (Some(credential), Some(passkeys)) => passkeys(credential).await,
+        _ => None,
+    };
+    let proof = proof.into_proof(resolved).ok_or_else(invalid)?;
     let context = proof.verify_commitment(&wire[..body_end], contexts).await?;
     if message.protocol != PROTOCOL || message.version != VERSION {
         return Err(invalid());
@@ -131,11 +138,17 @@ fn transcript(client: &[u8], server: &[u8]) -> [u8; 32] {
     digest.finalize().into()
 }
 
+/// Looks up the key registered for a WebAuthn credential ID.
+pub type PasskeyResolver =
+    Arc<dyn Fn(Vec<u8>) -> BoxFuture<'static, Option<AnyVerifyingKey>> + Send + Sync>;
+
 /// The server's proof identity and its admission scope.
 #[derive(Clone)]
 pub struct ServerIdentity {
     pub signer: Signer,
     pub temporary: bool,
+    /// Admits clients that sign with a passkey without naming its key. `None` rejects them.
+    pub passkeys: Option<PasskeyResolver>,
 }
 
 impl ServerIdentity {
@@ -143,7 +156,13 @@ impl ServerIdentity {
         Self {
             signer,
             temporary: true,
+            passkeys: None,
         }
+    }
+
+    pub fn with_passkeys(mut self, passkeys: PasskeyResolver) -> Self {
+        self.passkeys = Some(passkeys);
+        self
     }
 }
 
@@ -152,6 +171,7 @@ impl From<Signer> for ServerIdentity {
         Self {
             signer,
             temporary: false,
+            passkeys: None,
         }
     }
 }
@@ -205,7 +225,7 @@ impl PreparedClient {
             },
             proof,
             _,
-        ) = decode(response, std::slice::from_ref(&self.context)).await?
+        ) = decode(response, std::slice::from_ref(&self.context), None).await?
         else {
             return Err(invalid());
         };
@@ -252,7 +272,7 @@ where
         },
         proof,
         context,
-    ) = decode(request, contexts).await?
+    ) = decode(request, contexts, identity.passkeys.as_ref()).await?
     else {
         return Err(invalid());
     };

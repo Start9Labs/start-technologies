@@ -44,10 +44,10 @@ export interface RequestSigner {
 }
 
 interface SigningIdentity {
-  /** Returns the signer's SPKI DER and a DER-encoded `AnySignature`. */
+  /** Returns a DER-encoded `AnySignature`, and the signer's SPKI DER unless the receiver resolves it. */
   sign(
     message: Uint8Array<ArrayBuffer>,
-  ): Promise<{ signer: Uint8Array; signature: Uint8Array }>
+  ): Promise<{ signer?: Uint8Array; signature: Uint8Array }>
 }
 
 function webCryptoIdentity(key: AuthKey): SigningIdentity {
@@ -65,7 +65,10 @@ function webCryptoIdentity(key: AuthKey): SigningIdentity {
   }
 }
 
-/** Offers every passkey and attributes the signature to the one the user chose. */
+/**
+ * Offers the given passkeys and names the chosen one's key. With none, offers the site's
+ * discoverable passkeys and leaves the receiver to resolve the key from the credential ID.
+ */
 function passkeyIdentity(passkeys: readonly Passkey[]): SigningIdentity {
   const credentials = passkeys.map(passkey => ({
     id: new Uint8Array(base64ToBytes(normalizeDer64(passkey.credentialId))),
@@ -77,7 +80,7 @@ function passkeyIdentity(passkeys: readonly Passkey[]): SigningIdentity {
         publicKey: {
           challenge: new Uint8Array(sha256(message)),
           allowCredentials: credentials.map(({ id }) => ({
-            type: 'public-key',
+            type: 'public-key' as const,
             id,
           })),
           userVerification: 'required',
@@ -90,11 +93,12 @@ function passkeyIdentity(passkeys: readonly Passkey[]): SigningIdentity {
           id.length === rawId.length &&
           id.every((byte, i) => byte === rawId[i]),
       )
-      if (!chosen) throw new Error('Unknown passkey')
+      if (credentials.length && !chosen) throw new Error('Unknown passkey')
       const response = credential.response as AuthenticatorAssertionResponse
       return {
-        signer: chosen.signer,
+        signer: chosen?.signer,
         signature: webAuthnSignature(
+          rawId,
           new Uint8Array(response.authenticatorData),
           new Uint8Array(response.clientDataJSON),
           new Uint8Array(response.signature),
@@ -115,6 +119,7 @@ function derTlv(tag: number, content: Uint8Array): Uint8Array {
 }
 
 function webAuthnSignature(
+  credentialId: Uint8Array,
   authenticatorData: Uint8Array,
   clientDataJson: Uint8Array,
   signature: Uint8Array,
@@ -122,6 +127,7 @@ function webAuthnSignature(
   const assertion = derTlv(
     0x30,
     concatBytes(
+      derTlv(0x04, credentialId),
       derTlv(0x04, authenticatorData),
       derTlv(0x04, clientDataJson),
       derTlv(0x04, signature),
@@ -183,7 +189,7 @@ export async function createPasskey(
         { type: 'public-key', alg: COSE_EDDSA },
       ],
       authenticatorSelection: {
-        residentKey: 'preferred',
+        residentKey: 'required',
         userVerification: 'required',
       },
       attestation: 'none',
@@ -200,9 +206,9 @@ export async function createPasskey(
   }
 }
 
-/** Uses any of the passkeys for generic request commitments, prompting once per request. */
+/** Signs request commitments with a passkey, prompting once per request. */
 export function passkeyRequestSigner(
-  passkeys: readonly Passkey[],
+  passkeys: readonly Passkey[] = [],
 ): RequestSigner {
   return commitmentSigner(passkeyIdentity(passkeys))
 }
@@ -216,13 +222,18 @@ export async function signRequest(
   return authHeader(webCryptoIdentity(key), context, body)
 }
 
-/** Produces an HTTP authentication header, prompting for one of the passkeys. */
+/** Produces an HTTP authentication header, prompting for one of the given passkeys. */
 export async function signRequestWithPasskey(
   passkeys: readonly Passkey[],
   context: string,
   body: Uint8Array,
 ): Promise<string> {
   return authHeader(passkeyIdentity(passkeys), context, body)
+}
+
+function requireSigner(signer: Uint8Array | null | undefined): Uint8Array {
+  if (!signer) throw new Error('Request proof names no signer')
+  return signer
 }
 
 async function authHeader(
@@ -242,7 +253,7 @@ async function authHeader(
     nonce: proof.commitment.nonce.toString(),
     size: proof.commitment.size.toString(),
     blake3: base64UrlEncode(proof.commitment.blake3),
-    signer: base64UrlEncode(proof.signer),
+    signer: base64UrlEncode(requireSigner(proof.signer)),
     signature: base64UrlEncode(proof.signature),
   }).toString()
 }
@@ -291,7 +302,7 @@ async function signTaggedRequest(
   const { signer, signature } = await identity.sign(message)
   return {
     commitment: { timestamp, nonce, size, blake3: new Uint8Array(hash) },
-    signer: new Uint8Array(signer),
+    ...(signer ? { signer: new Uint8Array(signer) } : {}),
     signature: new Uint8Array(signature),
   }
 }
@@ -327,7 +338,7 @@ export async function verifyRequestProof(
     !blake3(body).every((value, i) => value === hash[i])
   )
     throw new Error('Request proof body mismatch')
-  const signer = bytesToBase64(proof.signer)
+  const signer = bytesToBase64(requireSigner(proof.signer))
   const key = parseEd25519PublicKey(signer)
   const pure = SIGNATURE_PROFILE.ed25519.signaturePrefix
   const prehash = SIGNATURE_PROFILE.ed25519ph.signaturePrefix

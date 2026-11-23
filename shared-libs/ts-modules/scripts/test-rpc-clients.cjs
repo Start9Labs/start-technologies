@@ -1054,34 +1054,33 @@ test('passkey enrollment does not dispatch after its originating lease is cancel
       'projects/start-os/web/ui/src/app/services/api/embassy-live-api.service.ts',
     ).LiveApiService.prototype,
   )
-  const credentials = Promise.withResolvers()
-  let discoveries = 0
-  client.rpc = {
-    auth: {
-      passkey: {
-        credentials: () => {
-          discoveries++
-          return credentials.promise
-        },
-      },
-    },
-  }
+  const leases = []
+  client.identity = {}
   client.sockets = {
-    message: () => assert.fail('Cancelled enrollment dispatched'),
+    message: (_request, _options, lease) => {
+      leases.push(lease)
+      return new Promise((_resolve, reject) =>
+        lease.signal.addEventListener('abort', () =>
+          reject(lease.signal.reason),
+        ),
+      )
+    },
   }
   const cancelled = new AbortController()
   cancelled.abort()
   await assert.rejects(client.enrollWithPasskey({}, cancelled.signal), {
     name: 'AbortError',
   })
-  assert.equal(discoveries, 0)
+  assert.equal(leases.length, 0)
   const active = new AbortController()
-  const pending = client.enrollWithPasskey({}, active.signal)
-  const rejected = assert.rejects(pending, { name: 'AbortError' })
+  const rejected = assert.rejects(client.enrollWithPasskey({}, active.signal), {
+    name: 'AbortError',
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(leases.length, 1)
   active.abort()
-  credentials.resolve([])
   await rejected
-  assert.equal(discoveries, 1)
+  assert.equal(leases[0].signal.aborted, true)
 })
 
 test('setup mock ordinary and typed status share their progress and terminal owner', async () => {

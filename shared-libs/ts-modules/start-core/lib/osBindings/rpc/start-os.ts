@@ -529,11 +529,6 @@ export type NutSettingsInput = z.input<typeof schemas.NutSettings>
 export type OsInfo = z.output<typeof schemas.OsInfo>
 export type PackageBackupInfo = z.output<typeof schemas.PackageBackupInfo>
 export type PackageIdParamsInput = z.input<typeof schemas.PackageIdParams>
-
-/**
- * What an unauthenticated browser needs to request and attribute a passkey signature.
- */
-export type PasskeyCredential = z.output<typeof schemas.PasskeyCredential>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
 

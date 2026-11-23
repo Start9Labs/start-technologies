@@ -25,6 +25,8 @@ const MIN_AUTHENTICATOR_DATA_LEN: usize = 37;
 /// relying party and origin are not bound to the key.
 #[derive(Clone, Debug, PartialEq, Eq, der::Sequence)]
 pub struct WebAuthnAssertion {
+    /// Identifies the credential to a verifier that stores keys by credential; it is not signed.
+    pub credential_id: der::asn1::OctetString,
     pub authenticator_data: der::asn1::OctetString,
     pub client_data_json: der::asn1::OctetString,
     pub signature: der::asn1::OctetString,
@@ -46,6 +48,7 @@ fn invalid_assertion() -> Error {
 
 impl WebAuthnAssertion {
     pub fn new(
+        credential_id: Vec<u8>,
         authenticator_data: Vec<u8>,
         client_data_json: Vec<u8>,
         signature: Vec<u8>,
@@ -53,6 +56,7 @@ impl WebAuthnAssertion {
         let octets =
             |bytes| der::asn1::OctetString::new(bytes).with_kind(ErrorKind::Deserialization);
         Ok(Self {
+            credential_id: octets(credential_id)?,
             authenticator_data: octets(authenticator_data)?,
             client_data_json: octets(client_data_json)?,
             signature: octets(signature)?,
@@ -103,6 +107,7 @@ pub(crate) mod test_util {
     use super::*;
 
     pub const RP_ID_HASH: [u8; 32] = [7; 32];
+    pub const CREDENTIAL_ID: [u8; 16] = [9; 16];
 
     pub fn authenticator_data(flags: u8) -> Vec<u8> {
         let mut data = RP_ID_HASH.to_vec();
@@ -135,6 +140,7 @@ pub(crate) mod test_util {
         let signature: p256::ecdsa::Signature =
             key.sign(&signed_bytes(&authenticator_data, &client_data_json));
         WebAuthnAssertion::new(
+            CREDENTIAL_ID.to_vec(),
             authenticator_data,
             client_data_json,
             signature.to_der().as_bytes().to_vec(),
@@ -189,6 +195,7 @@ mod tests {
         let high = p256::ecdsa::Signature::from_scalars(r, -*s).unwrap();
         assert_ne!(high, signature);
         WebAuthnAssertion::new(
+            CREDENTIAL_ID.to_vec(),
             authenticator_data,
             client_data_json,
             high.to_der().as_bytes().to_vec(),
@@ -206,6 +213,7 @@ mod tests {
         let client_data_json = client_data("webauthn.get", b"message");
         let signature = key.sign(&signed_bytes(&authenticator_data, &client_data_json));
         let assertion = WebAuthnAssertion::new(
+            CREDENTIAL_ID.to_vec(),
             authenticator_data,
             client_data_json,
             signature.to_bytes().to_vec(),

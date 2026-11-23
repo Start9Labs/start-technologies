@@ -1108,5 +1108,4 @@ export default {
   1314: 'Brak kluczy dostępu',
   1315: 'Zaloguj się kluczem dostępu',
   1316: 'Logowanie kluczem dostępu zostało anulowane',
-  1317: 'Nie zarejestrowano żadnych kluczy dostępu',
 } satisfies i18n

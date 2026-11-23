@@ -241,15 +241,6 @@
     }
   },
   {
-    "name": "auth.passkey.credentials",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {},
-      "additionalProperties": true
-    }
-  },
-  {
     "name": "auth.passkey.enroll",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

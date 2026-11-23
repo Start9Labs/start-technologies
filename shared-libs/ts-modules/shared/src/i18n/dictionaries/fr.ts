@@ -1108,5 +1108,4 @@ export default {
   1314: 'Aucune clé d’accès',
   1315: 'Se connecter avec une clé d’accès',
   1316: 'La connexion par clé d’accès a été annulée',
-  1317: 'Aucune clé d’accès n’est enregistrée',
 } satisfies i18n

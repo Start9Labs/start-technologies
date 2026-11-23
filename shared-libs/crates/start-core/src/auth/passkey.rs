@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -9,19 +10,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::Empty;
 use crate::auth::{AuthKeys, Session};
+use crate::context::rpc::WeakRpcContext;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
 use crate::prelude::*;
 use crate::rpc_continuations::OpenAuthedContinuations;
 use crate::sign::AnyVerifyingKey;
+use crate::sign::session::PasskeyResolver;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::util::sync::SyncMutex;
 
 pub mod sessions;
 
-/// WebAuthn's limit on credential ID length.
-const MAX_CREDENTIAL_ID_BYTES: usize = 1023;
+/// Keeps a passkey-signed handshake within its record limit.
+const MAX_CREDENTIAL_ID_BYTES: usize = 255;
 
 /// A persisted WebAuthn credential independent of browser session expiry.
 #[derive(Clone, Debug, Deserialize, Serialize, HasModel, VisitFields)]
@@ -36,18 +39,6 @@ pub struct Passkey {
 
 rpc_toolkit::reflect_ts!(Passkey);
 rpc_toolkit::ts_export!(Passkey, namespaces = [""]);
-
-/// What an unauthenticated browser needs to request and attribute a passkey signature.
-#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct PasskeyCredential {
-    /// Base64url credential ID.
-    pub credential_id: String,
-    pub public_key: AnyVerifyingKey,
-}
-
-rpc_toolkit::reflect_ts!(PasskeyCredential);
-rpc_toolkit::ts_export!(PasskeyCredential, namespaces = [""]);
 
 pub fn passkey<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
@@ -79,13 +70,6 @@ pub fn passkey<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.remove-passkey")
                 .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
-            "credentials",
-            from_fn_async(credentials)
-                .with_metadata("authenticated", Value::Bool(false))
-                .with_metadata(crate::mcp::MCP, Value::Bool(false))
-                .no_cli(),
         )
 }
 
@@ -285,21 +269,26 @@ fn revoke(
     Ok(())
 }
 
-pub async fn credentials(ctx: RpcContext) -> Result<Vec<PasskeyCredential>, Error> {
-    ctx.db
-        .peek()
-        .await
-        .as_private()
+/// Resolves the credential ID an encrypted connection's passkey signature carries.
+pub(crate) fn resolver(ctx: WeakRpcContext) -> PasskeyResolver {
+    Arc::new(move |credential_id| {
+        let ctx = ctx.upgrade();
+        Box::pin(async move { key_for_credential(&ctx?.db.peek().await, &credential_id) })
+    })
+}
+
+fn key_for_credential(db: &Model<Database>, credential_id: &[u8]) -> Option<AnyVerifyingKey> {
+    db.as_private()
         .as_passkeys()
-        .de()?
+        .de()
+        .ok()?
         .into_iter()
-        .map(|(key, passkey)| {
-            Ok(PasskeyCredential {
-                credential_id: passkey.credential_id,
-                public_key: key.parse()?,
-            })
+        .find(|(_, passkey)| {
+            URL_SAFE_NO_PAD
+                .decode(&passkey.credential_id)
+                .is_ok_and(|id| id == credential_id)
         })
-        .collect()
+        .and_then(|(key, _)| key.parse().ok())
 }
 
 #[cfg(test)]
@@ -488,6 +477,20 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn credential_ids_resolve_to_their_registered_passkey() {
+        let db = database().await;
+        let hash = current_hash(&db).await;
+        let (public_key, passkey) = passkey();
+        db.mutate(|db| register(db, &hash, &public_key, &passkey))
+            .await
+            .result
+            .unwrap();
+        let peek = db.peek().await;
+        assert_eq!(key_for_credential(&peek, &[1, 2, 3]), Some(public_key));
+        assert_eq!(key_for_credential(&peek, &[1, 2]), None);
     }
 
     #[test]

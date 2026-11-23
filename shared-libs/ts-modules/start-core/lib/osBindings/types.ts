@@ -1044,16 +1044,6 @@ export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
-
-/**
- * What an unauthenticated browser needs to request and attribute a passkey signature.
- */
-export type PasskeyCredential = z.output<typeof schemas.PasskeyCredential>
-
-/**
- * What an unauthenticated browser needs to request and attribute a passkey signature.
- */
-export type PasskeyCredentialInput = z.input<typeof schemas.PasskeyCredential>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PassthroughInfoInput = z.input<typeof schemas.PassthroughInfo>
 export type PasswordType = z.output<typeof schemas.PasswordType>

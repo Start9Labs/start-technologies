@@ -1108,5 +1108,4 @@ export default {
   1314: 'No hay llaves de acceso',
   1315: 'Iniciar sesión con llave de acceso',
   1316: 'Se canceló el inicio de sesión con llave de acceso',
-  1317: 'No hay llaves de acceso registradas',
 } satisfies i18n

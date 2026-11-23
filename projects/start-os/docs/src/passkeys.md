@@ -4,7 +4,7 @@ A passkey signs you in to StartOS without the master password. Its private key s
 
 ## Adding a Passkey
 
-Go to **System > Passkeys**, click **Add**, give the passkey a name and enter your master password. Your browser then asks you to create the passkey with your device's lock, a security key or your password manager.
+Go to **System > Passkeys**, click **Add**, give the passkey a name and enter your master password. Your browser then asks you to create the passkey with your device's lock, a security key or your password manager. The passkey must be stored on that device or password manager (a discoverable credential); security keys that cannot store one are not supported.
 
 A passkey works only at the address it was created at. A passkey added while you were on your server's `.local` address does not work on its `.onion` address or a custom domain; add one at each address you sign in from. Browsers do not allow passkeys at a raw IP address.
 

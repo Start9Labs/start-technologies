@@ -2902,29 +2902,6 @@ export const PackageIdParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'PackageIdParams',
   })
-
-/**
- * What an unauthenticated browser needs to request and attribute a passkey signature.
- */
-export const PasskeyCredential: z.ZodObject<{
-  /**
-   * Base64url credential ID.
-   */
-  credentialId: z.ZodString
-  publicKey: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({
-  /**
-   * Base64url credential ID.
-   */
-  credentialId: z.string().meta({
-    description: 'Base64url credential ID.',
-  }),
-  publicKey: AnyVerifyingKey,
-}).meta({
-  id: 'PasskeyCredential',
-  description:
-    'What an unauthenticated browser needs to request and attribute a passkey signature.',
-})
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
   listenPort: z.ZodInt
@@ -5292,12 +5269,6 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ AddPasskeyParams,
               _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            credentials: {
-              _PARAMS: /* @__PURE__ */ empty,
-              _RETURN: /* @__PURE__ */ z.array(PasskeyCredential),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },

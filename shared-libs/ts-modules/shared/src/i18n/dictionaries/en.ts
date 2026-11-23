@@ -1109,5 +1109,4 @@ export const ENGLISH: Record<string, number> = {
   'No passkeys': 1314,
   'Login with passkey': 1315,
   'Passkey sign-in was cancelled': 1316,
-  'No passkeys are registered': 1317,
 }

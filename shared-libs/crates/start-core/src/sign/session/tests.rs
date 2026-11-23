@@ -50,7 +50,7 @@ fn split_proof(wire: &[u8]) -> (&[u8], RequestProof) {
     let end = reader.position() as usize;
     let proof: BinaryRequestProof = serde_cbor::de::from_reader(&mut reader).unwrap();
     assert_eq!(reader.position() as usize, wire.len());
-    (&wire[..end], proof.into())
+    (&wire[..end], proof.into_proof(None).unwrap())
 }
 
 fn with_proof(body: &[u8], proof: &RequestProof) -> Vec<u8> {
@@ -126,7 +126,11 @@ async fn temporary_identity_scope_is_authenticated_for_rpc_and_continuations() {
                 let mut changed = Vec::new();
                 serde_cbor::ser::into_writer(&raw, &mut changed).unwrap();
                 let tampered = with_proof(&changed, &proof);
-                assert!(decode(&tampered, &["server.test".into()]).await.is_err());
+                assert!(
+                    decode(&tampered, &["server.test".into()], None)
+                        .await
+                        .is_err()
+                );
             }
         }
     }
@@ -366,10 +370,10 @@ async fn initiation_is_fresh_for_each_connection() {
     let first = client(&signer(5)).await;
     let second = client(&signer(5)).await;
     assert_ne!(first.message(), second.message());
-    let (_, a, _) = decode(first.message(), &["server.test".into()])
+    let (_, a, _) = decode(first.message(), &["server.test".into()], None)
         .await
         .unwrap();
-    let (_, b, _) = decode(second.message(), &["server.test".into()])
+    let (_, b, _) = decode(second.message(), &["server.test".into()], None)
         .await
         .unwrap();
     assert_ne!(a.commitment.nonce, b.commitment.nonce);
@@ -739,4 +743,108 @@ async fn malformed_and_oversized_envelopes_do_not_reach_replay_policy() {
         reject_before_nonce(&wire, "server.test", None).await;
     }
     assert_eq!(wire_profile()["version"], VERSION);
+}
+
+fn passkey_hello(wire: &[u8], signer: Option<AnyVerifyingKey>) -> Vec<u8> {
+    use crate::sign::commitment::request::binary::BinaryRequestCommitment;
+    use crate::util::serde::binary::DerBytes;
+
+    let (body, proof) = split_proof(wire);
+    let assertion = crate::sign::webauthn::test_util::passkey_assertion(
+        &crate::sign::webauthn::test_util::p256_key(),
+        &crate::sign::signing_message(
+            crate::sign::COMMITMENT_SIG_TAG,
+            &proof.commitment,
+            "server.test",
+        )
+        .unwrap(),
+    );
+    let mut wire = body.to_vec();
+    serde_cbor::ser::into_writer(
+        &BinaryRequestProof {
+            commitment: BinaryRequestCommitment::from(&proof.commitment),
+            signer: signer.map(DerBytes),
+            signature: DerBytes(crate::sign::AnySignature::WebAuthn(assertion)),
+        },
+        &mut wire,
+    )
+    .unwrap();
+    wire
+}
+
+fn passkey_resolver(known: Vec<u8>, key: AnyVerifyingKey) -> PasskeyResolver {
+    Arc::new(move |credential_id| {
+        let found = (credential_id == known).then(|| key.clone());
+        Box::pin(async move { found })
+    })
+}
+
+async fn admit(identity: ServerIdentity, wire: &[u8]) -> Result<AnyVerifyingKey, Error> {
+    accept(
+        &identity,
+        &["server.test".into()],
+        wire,
+        &Target::Rpc,
+        None,
+        |_| async { Ok(()) },
+    )
+    .await
+    .map(|(peer, ..)| peer)
+}
+
+#[tokio::test]
+async fn passkey_hellos_name_their_credential_and_the_server_resolves_its_key() {
+    let passkey =
+        AnyVerifyingKey::P256(*crate::sign::webauthn::test_util::p256_key().verifying_key());
+    let credential = crate::sign::webauthn::test_util::CREDENTIAL_ID.to_vec();
+    let wire = passkey_hello(client(&signer(1)).await.message(), None);
+    let server = || ServerIdentity::from(signer(2));
+
+    let peer = admit(
+        server().with_passkeys(passkey_resolver(credential.clone(), passkey.clone())),
+        &wire,
+    )
+    .await
+    .unwrap();
+    assert_eq!(peer, passkey);
+
+    for rejected in [
+        server(),
+        server().with_passkeys(passkey_resolver(vec![1, 2, 3], passkey.clone())),
+        server().with_passkeys(passkey_resolver(
+            credential.clone(),
+            AnyVerifyingKey::Ed25519(
+                ed25519_dalek::SigningKey::from_bytes(&[5; 32]).verifying_key(),
+            ),
+        )),
+    ] {
+        assert!(admit(rejected, &wire).await.is_err());
+    }
+
+    let named = passkey_hello(client(&signer(1)).await.message(), Some(passkey.clone()));
+    assert_eq!(admit(server(), &named).await.unwrap(), passkey);
+}
+
+#[tokio::test]
+async fn only_passkey_signatures_may_omit_the_signer() {
+    use crate::sign::commitment::request::binary::BinaryRequestCommitment;
+    use crate::util::serde::binary::DerBytes;
+
+    let wire = client(&signer(1)).await.message().to_vec();
+    let (body, proof) = split_proof(&wire);
+    let mut unnamed = body.to_vec();
+    serde_cbor::ser::into_writer(
+        &BinaryRequestProof {
+            commitment: BinaryRequestCommitment::from(&proof.commitment),
+            signer: None,
+            signature: DerBytes(proof.signature.clone()),
+        },
+        &mut unnamed,
+    )
+    .unwrap();
+    let identity = ServerIdentity::from(signer(2)).with_passkeys(passkey_resolver(
+        crate::sign::webauthn::test_util::CREDENTIAL_ID.to_vec(),
+        proof.signer.clone(),
+    ));
+    assert!(admit(identity, &unnamed).await.is_err());
 }

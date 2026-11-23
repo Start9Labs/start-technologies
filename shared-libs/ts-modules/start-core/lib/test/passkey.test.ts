@@ -2,12 +2,15 @@ import { webcrypto } from 'node:crypto'
 import { p256 } from '@noble/curves/p256'
 import { sha256 } from '@noble/hashes/sha256'
 import { concatBytes } from '@noble/hashes/utils'
+import { decodeFirst } from '../auth/cbor'
 import {
   base64ToBytes,
   createPasskey,
   normalizeDer64,
+  passkeyRequestSigner,
   signRequestWithPasskey,
 } from '../auth/signature'
+import type { BinaryRequestProof } from '../osBindings/session'
 
 const secret = new Uint8Array(32).fill(3)
 const spkiPrefix = Buffer.from(
@@ -111,7 +114,9 @@ test('a passkey signs a request header the authenticator assertion verifies', as
   const algorithm = readTlv(outer.content, 0x30)
   const octets = readTlv(algorithm.rest, 0x04)
   const assertion = readTlv(octets.content, 0x30)
-  const authenticatorData = readTlv(assertion.content, 0x04)
+  const credential = readTlv(assertion.content, 0x04)
+  expect([...credential.content]).toEqual([...credentialId])
+  const authenticatorData = readTlv(credential.rest, 0x04)
   const clientDataJSON = readTlv(authenticatorData.rest, 0x04)
   const signature = readTlv(clientDataJSON.rest, 0x04)
   expect(signature.rest.length).toBe(0)
@@ -127,4 +132,35 @@ test('a passkey signs a request header the authenticator assertion verifies', as
   expect(
     JSON.parse(new TextDecoder().decode(clientDataJSON.content)).type,
   ).toBe('webauthn.get')
+})
+
+test('a discoverable passkey proof carries its credential ID and leaves the key to the server', async () => {
+  let requested: CredentialRequestOptions | undefined
+  const get = navigator.credentials.get
+  Object.assign(navigator.credentials, {
+    get: async (options: CredentialRequestOptions) => {
+      requested = options
+      return get(options)
+    },
+  })
+  try {
+    const proof = (
+      await decodeFirst(
+        await passkeyRequestSigner().sign(
+          'start-9.local',
+          new TextEncoder().encode('hello'),
+        ),
+      )
+    ).value as BinaryRequestProof
+    expect(requested?.publicKey?.allowCredentials).toEqual([])
+    expect(proof.signer ?? undefined).toBeUndefined()
+    const outer = readTlv(proof.signature, 0x30)
+    const algorithm = readTlv(outer.content, 0x30)
+    const assertion = readTlv(readTlv(algorithm.rest, 0x04).content, 0x30)
+    expect([...readTlv(assertion.content, 0x04).content]).toEqual([
+      ...credentialId,
+    ])
+  } finally {
+    Object.assign(navigator.credentials, { get })
+  }
 })

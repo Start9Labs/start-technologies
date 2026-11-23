@@ -1108,5 +1108,4 @@ export default {
   1314: 'Keine Passkeys',
   1315: 'Mit Passkey anmelden',
   1316: 'Die Passkey-Anmeldung wurde abgebrochen',
-  1317: 'Es sind keine Passkeys registriert',
 } satisfies i18n

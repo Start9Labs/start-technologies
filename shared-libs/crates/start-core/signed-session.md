@@ -51,7 +51,10 @@ committed-account handshakes retain their existing shape.
 The proof map contains:
 
 - `commitment`: `timestamp` (i64), `nonce` (u64), `size` (u64), and `blake3` (32 bytes).
-- `signer`: the existing algorithm-tagged DER verifying key as a byte string.
+- `signer`: the existing algorithm-tagged DER verifying key as a byte string. A client signing
+  with a passkey omits it: the WebAuthn assertion carries its credential ID, and the server
+  resolves the key from the passkeys it has registered (`ServerIdentity::passkeys`). Any other
+  proof without a signer, and a credential the server does not know, is rejected.
 - `signature`: the existing algorithm-tagged DER signature as a byte string.
 
 The request-commitment type is fixed by this protocol and its existing signature-domain

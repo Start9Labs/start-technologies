@@ -160,15 +160,7 @@ export class LiveApiService extends ApiService {
     signal: AbortSignal,
   ): Promise<void> {
     signal.throwIfAborted()
-    const credentials = await this.rpc.auth.passkey.credentials({})
-    signal.throwIfAborted()
-    if (!credentials.length) throw new Error('No passkeys are registered')
-    const signer = auth.passkeyRequestSigner(
-      credentials.map(({ credentialId, publicKey }) => ({
-        credentialId,
-        pubkeyPem: auth.derToPem('PUBLIC KEY', auth.base64ToBytes(publicKey)),
-      })),
-    )
+    const signer = auth.passkeyRequestSigner()
     const lifetime = new AbortController()
     let signingError: unknown
     try {

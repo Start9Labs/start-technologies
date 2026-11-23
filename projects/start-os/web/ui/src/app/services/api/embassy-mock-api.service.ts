@@ -293,11 +293,6 @@ export class MockApiService extends ApiService implements StartupApiService {
       this.passkeys().delete(publicKey)
       return null
     },
-    'auth.passkey.credentials': async () =>
-      [...this.passkeys()].map(([publicKey, { credentialId }]) => ({
-        publicKey,
-        credentialId,
-      })),
     'diagnostic.error': async () => {
       await pauseFor(1000)
       return {
