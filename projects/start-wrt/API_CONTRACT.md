@@ -1572,9 +1572,9 @@ struct OutboundVpnUpdateRequest {
     dns: Option<Vec<IpAddr>>,
 }
 // Response: null
-// Backend: updates label+target metadata and the interface `mtu` and `dns`
-// options. Bounces the WG interface only when the MTU actually changed; a DNS
-// change rewrites the DNS forwarding of the profiles routed through it.
+// Backend: updates the label, target and `list dns` metadata and the interface
+// `mtu` option. Bounces the WG interface only when the MTU actually changed; a
+// DNS change rewrites the DNS forwarding of the profiles routed through it.
 //
 // Validation: same `target` rules as vpn-client.create, except the disabled
 // and chained-endpoint checks run ONLY when `target` differs from the stored
