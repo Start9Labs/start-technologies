@@ -1181,14 +1181,18 @@ export class DaemonsReconciler<M extends T.SDKManifest>
 
     const indices = healthIndices(entries)
     for (const entry of entries) {
-      if (this.running.has(entry.id)) continue
       try {
-        await this.startEntry(
-          entry,
-          indices.get(entry.id),
-          desiredHashes.get(entry.id)!,
-          sharedVolumesRevision,
-        )
+        const current = this.running.get(entry.id)
+        if (current) {
+          await current.healthDaemon.setIndex(indices.get(entry.id))
+        } else {
+          await this.startEntry(
+            entry,
+            indices.get(entry.id),
+            desiredHashes.get(entry.id)!,
+            sharedVolumesRevision,
+          )
+        }
       } catch (e) {
         logErrorOnce(asError(e))
       }

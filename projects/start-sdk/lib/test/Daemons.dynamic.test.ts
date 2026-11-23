@@ -18,6 +18,7 @@ jest.mock('../mainFn/HealthDaemon', () => ({
       term: async () => {
         mockLifecycle.push(`stop:${id}`)
       },
+      setIndex: async () => {},
     })),
 }))
 

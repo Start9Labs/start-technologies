@@ -364,8 +364,9 @@ export class MarketplaceComponent {
     return url ? registryWarning(url) : null
   })
 
+  /** Numeric category IDs retain index order behind the pinned categories. */
   protected readonly categories = computed(
-    (): Record<string, T.Category> | undefined => {
+    (): Map<string, T.Category> | undefined => {
       if (this.loading()) return undefined
       const info = this.current()?.info?.categories
       if (!info) return undefined
@@ -376,24 +377,26 @@ export class MarketplaceComponent {
         Object.entries(info).filter(([key]) => key === 'all' || used.has(key)),
       )
 
-      return {
-        ...(all && { all }),
-        ...(packages.some(isNewArrival) && {
-          [NEW_ARRIVALS]: { name: this.i18n.transform('New Arrivals') },
-        }),
-        ...Object.fromEntries(indexedEntries(listed)),
-      }
+      return new Map<string, T.Category>([
+        ...(all ? [['all', all] as const] : []),
+        ...(packages.some(isNewArrival)
+          ? [
+              [NEW_ARRIVALS, { name: this.i18n.transform('New Arrivals') }] as const,
+            ]
+          : []),
+        ...indexedEntries(listed),
+      ])
     },
   )
 
   protected readonly effectiveCategory = computed(() => {
     const cats = this.categories()
     const cat = this.category()
-    return cats && cat !== 'all' && !cats[cat] ? 'all' : cat
+    return cats && cat !== 'all' && !cats.has(cat) ? 'all' : cat
   })
 
   protected readonly name = computed(
-    (c = this.effectiveCategory()) => this.categories()?.[c]?.name || c,
+    (c = this.effectiveCategory()) => this.categories()?.get(c)?.name || c,
   )
 
   protected readonly packages = computed(() =>
@@ -405,11 +408,11 @@ export class MarketplaceComponent {
     ),
   )
 
-  protected readonly fallback: Record<string, T.Category> = {
-    a: { name: '' },
-    b: { name: '' },
-    c: { name: '' },
-  }
+  protected readonly fallback = new Map<string, T.Category>([
+    ['a', { name: '' }],
+    ['b', { name: '' }],
+    ['c', { name: '' }],
+  ])
 
   protected get sortLabel(): string {
     return this.getLabel(this.sort())

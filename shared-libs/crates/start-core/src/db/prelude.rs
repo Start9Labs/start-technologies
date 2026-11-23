@@ -478,6 +478,24 @@ pub fn next_index(indices: impl IntoIterator<Item = Option<u32>>) -> u32 {
         .map_or(0, |last| last + 1)
 }
 
+/// Seeds missing positions in stored order before subsequent additions receive an index.
+pub(crate) fn populate_indices<'a>(
+    entries: impl IntoIterator<Item = &'a mut Value>,
+) -> Result<(), Error> {
+    let entries = entries
+        .into_iter()
+        .map(|entry| Ok((from_value::<Option<u32>>(entry["index"].clone())?, entry)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let mut next = next_index(entries.iter().map(|(index, _)| *index));
+    for (index, entry) in entries {
+        if index.is_none() {
+            entry["index"] = to_value(&next)?;
+            next += 1;
+        }
+    }
+    Ok(())
+}
+
 #[repr(transparent)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct JsonKey<T>(pub T);
@@ -578,4 +596,19 @@ fn next_index_follows_the_highest_assigned_index() {
     assert_eq!(next_index([]), 0);
     assert_eq!(next_index([None, None]), 0);
     assert_eq!(next_index([Some(3), None, Some(1)]), 4);
+}
+
+#[test]
+fn populating_indices_keeps_assigned_positions() {
+    use imbl_value::json;
+
+    let mut entries = [json!({ "index": 3 }), json!({}), json!({ "index": 1 })];
+    populate_indices(entries.iter_mut()).unwrap();
+    assert_eq!(
+        entries,
+        [json!({ "index": 3 }), json!({ "index": 4 }), json!({ "index": 1 })]
+    );
+    let populated = entries.clone();
+    populate_indices(entries.iter_mut()).unwrap();
+    assert_eq!(entries, populated);
 }
