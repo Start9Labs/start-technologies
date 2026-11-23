@@ -1,0 +1,65 @@
+Subject: mt76: mt7916: hold FCC domains to the AW7916-NPD grant
+
+Under the regulatory domains of the US and its territories, disable
+5250-5730 MHz on an MT7916 and keep every 6 GHz channel no-IR, clearing
+the flags that would let an AP beacon there anyway. The FCC grants of
+the AsiaRF AW7916-NPD (FCC ID TKZAW7916-NPD), the module Start9 routers
+carry, authorize 5 GHz only on 5180-5240, 5745-5825 and 5845-5885 MHz,
+and 6 GHz only as a Low Power Indoor Client. Every other domain, and
+every other chip, is unchanged.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: mt76 39c960c3ada558b4c2e7915772483d3731573d09 (openwrt v25.12.6)
+
+--- a/mt7915/init.c
++++ b/mt7915/init.c
+@@ -333,6 +333,39 @@
+ 		__mt7915_init_txpower(phy, &phy->mt76->sband_6g.sband);
+ }
+ 
++/* FCC grant TKZAW7916-NPD: no 5250-5730 MHz, and 6 GHz as a client only. */
++static void
++mt7916_regd_apply_fcc_grant(struct wiphy *wiphy,
++			    struct regulatory_request *request)
++{
++	static const char * const fcc[] = { "US", "AS", "GU", "MP", "PR", "VI" };
++	struct ieee80211_supported_band *sband;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(fcc); i++)
++		if (!memcmp(request->alpha2, fcc[i], 2))
++			break;
++	if (i == ARRAY_SIZE(fcc))
++		return;
++
++	sband = wiphy->bands[NL80211_BAND_5GHZ];
++	for (i = 0; sband && i < sband->n_channels; i++) {
++		struct ieee80211_channel *ch = &sband->channels[i];
++
++		if (ch->center_freq + 10 > 5250 && ch->center_freq - 10 < 5730)
++			ch->flags |= IEEE80211_CHAN_DISABLED;
++	}
++
++	sband = wiphy->bands[NL80211_BAND_6GHZ];
++	for (i = 0; sband && i < sband->n_channels; i++) {
++		struct ieee80211_channel *ch = &sband->channels[i];
++
++		ch->flags |= IEEE80211_CHAN_NO_IR;
++		ch->flags &= ~(IEEE80211_CHAN_ALLOW_6GHZ_VLP_AP |
++			       IEEE80211_CHAN_ALLOW_20MHZ_ACTIVITY);
++	}
++}
++
+ static void
+ mt7915_regd_notifier(struct wiphy *wiphy,
+ 		     struct regulatory_request *request)
+@@ -345,6 +378,9 @@
+ 	memcpy(dev->mt76.alpha2, request->alpha2, sizeof(dev->mt76.alpha2));
+ 	dev->mt76.region = request->dfs_region;
+ 
++	if (is_mt7916(&dev->mt76))
++		mt7916_regd_apply_fcc_grant(wiphy, request);
++
+ 	if (dev->mt76.region == NL80211_DFS_UNSET)
+ 		mt7915_mcu_rdd_background_enable(phy, NULL);
+ 

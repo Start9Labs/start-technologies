@@ -512,8 +512,9 @@ fn usable_widths(band: Option<&BandChannels>, channel: WifiChannel) -> Option<&[
     }
 }
 
-/// Rejects a changed or newly enabled radio whose channel cannot carry its width.
-fn check_channel_widths(
+/// Rejects a changed or newly enabled radio whose channel is unusable or cannot
+/// carry its width.
+fn check_channels(
     cfgs: &Configs,
     radios: &BTreeMap<String, WifiRadio>,
     bands: &BTreeMap<String, BandChannels>,
@@ -523,26 +524,28 @@ fn check_channel_widths(
             continue;
         };
         let current = device_width(&device);
-        let Some(width) = radio.width.or(current) else {
-            continue;
-        };
+        let width = radio.width.or(current);
         let channel = parse_channel(&radio.channel);
         if !device.disabled
             && channel == device.channel
-            && Some(width) == current
+            && width == current
             && radio.band == device.band
         {
             continue;
         }
-        let allowed = usable_widths(bands.get(&radio.band), channel)
-            .is_some_and(|widths| widths.contains(&width));
-        if !allowed {
+        let widths = usable_widths(bands.get(&radio.band), channel).unwrap_or_default();
+        if width.map_or(widths.is_empty(), |w| !widths.contains(&w)) {
             let what = match channel {
                 WifiChannel::Auto => "automatic channel selection".to_string(),
                 WifiChannel::Int(ch) => format!("channel {ch}"),
             };
             return Err(Error::new(
-                eyre!("{what} cannot use a channel width of {width} MHz under the current country"),
+                match width {
+                    Some(width) => eyre!(
+                        "{what} cannot use a channel width of {width} MHz under the current country"
+                    ),
+                    None => eyre!("{what} is unavailable under the current country"),
+                },
                 ErrorKind::InvalidValue,
             ));
         }
@@ -550,9 +553,10 @@ fn check_channel_widths(
     Ok(())
 }
 
-/// Narrows an enabled radio's width to the widest its channel carries under
-/// the current country. A no-op, with no reload, when every width is usable.
-pub async fn heal_channel_widths(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
+/// Moves an enabled radio off a channel the current country forbids, and
+/// narrows its width to the widest its channel carries. A no-op, with no
+/// reload, when every channel and width is usable.
+pub async fn heal_channels(uci_root: impl AsRef<std::path::Path>) -> Result<(), Error> {
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root.as_ref(), &arena, &["wireless"]).await?;
     let mut country = None;
@@ -569,8 +573,8 @@ pub async fn heal_channel_widths(uci_root: impl AsRef<std::path::Path>) -> Resul
         return Ok(());
     }
     let bands = band_channels(&iw_channels().await?);
-    let narrowed = narrow_unusable_widths(&mut cfgs, &bands)?;
-    if narrowed.is_empty() {
+    let healed = heal_unusable_channels(&mut cfgs, &bands)?;
+    if healed.is_empty() {
         return Ok(());
     }
 
@@ -579,52 +583,54 @@ pub async fn heal_channel_widths(uci_root: impl AsRef<std::path::Path>) -> Resul
 
     crate::activity::log(
         "wifi",
-        "width-narrowed",
+        "channel-healed",
         true,
         &format!(
-            "Narrowed a Wi-Fi channel width the channel cannot carry under the current country: {}",
-            narrowed.join(", ")
+            "Changed a Wi-Fi channel setting the current country does not permit: {}",
+            healed.join(", ")
         ),
         None,
     );
     reload_wifi(uci_root, WifiReload::Reload).await
 }
 
-/// The config half of [`heal_channel_widths`]. Returns what it narrowed, as
-/// `<radio> channel <n> from <old> MHz to <new> MHz`.
-fn narrow_unusable_widths(
+/// The config half of [`heal_channels`]. Returns what it changed, as
+/// `<radio> channel <n> to auto` or `<radio> channel <n> from <old> MHz to <new> MHz`.
+fn heal_unusable_channels(
     cfgs: &mut Configs,
     bands: &BTreeMap<String, BandChannels>,
 ) -> Result<Vec<String>, Error> {
-    let mut narrowed = Vec::new();
+    let mut healed = Vec::new();
     for s in &mut cfgs["wireless"].sections {
         let Some(mut device) = s.get_typed::<WifiDevice>()? else {
             continue;
         };
-        if device.disabled {
+        let Some(band) = bands.get(&device.band).filter(|_| !device.disabled) else {
             continue;
+        };
+        let radio = s.name().as_deref().unwrap_or("radio").to_string();
+        let before = healed.len();
+        if let WifiChannel::Int(ch) = device.channel {
+            if !band.channels.iter().any(|c| c.channel == ch) {
+                device.channel = WifiChannel::Auto;
+                healed.push(format!("{radio} channel {ch} to auto"));
+            }
         }
-        let Some(width) = device_width(&device) else {
-            continue;
-        };
-        let Some(widths) = usable_widths(bands.get(&device.band), device.channel) else {
-            continue;
-        };
-        if widths.contains(&width) {
-            continue;
+        let widths = usable_widths(Some(band), device.channel).unwrap_or_default();
+        if let (Some(width), Some(&widest)) = (device_width(&device), widths.iter().max()) {
+            if !widths.contains(&width) {
+                device.htmode = htmode_for_width(&device, Some(widest))?;
+                healed.push(format!(
+                    "{radio} channel {} from {width} MHz to {widest} MHz",
+                    device.channel
+                ));
+            }
         }
-        let Some(&widest) = widths.iter().max() else {
-            continue;
-        };
-        device.htmode = htmode_for_width(&device, Some(widest))?;
-        narrowed.push(format!(
-            "{} channel {} from {width} MHz to {widest} MHz",
-            s.name().as_deref().unwrap_or("radio"),
-            device.channel
-        ));
-        s.set(&device)?;
+        if healed.len() > before {
+            s.set(&device)?;
+        }
     }
-    Ok(narrowed)
+    Ok(healed)
 }
 
 fn generate_password<C: CtrlContext>(_ctx: C) -> Result<String, Error> {
@@ -1214,7 +1220,7 @@ pub async fn set<C: CtrlContext>(
         let width_check = if country_changed {
             check_country_change_widths(&cfgs, &wifi.radios)
         } else if let Some(bands) = &bands {
-            check_channel_widths(&cfgs, &wifi.radios, bands)
+            check_channels(&cfgs, &wifi.radios, bands)
         } else {
             Ok(())
         };
@@ -1280,10 +1286,13 @@ pub async fn set<C: CtrlContext>(
             }
             Ok(()) => {
                 if ctx.effectful() {
-                    if country_changed && wifi.country.is_none() {
-                        crate::run_quiet_async(
-                            tokio::process::Command::new("iw").args(["reg", "set", "00"]),
-                        )
+                    if country_changed {
+                        // Blackouts defer Wi-Fi reloads, not regulatory-domain changes.
+                        crate::run_quiet_async(tokio::process::Command::new("iw").args([
+                            "reg",
+                            "set",
+                            wifi.country.as_deref().unwrap_or("00"),
+                        ]))
                         .await
                         .map_err(|e| Error::new(eyre!("iw reg set: {e}"), ErrorKind::Network))?;
                     }
@@ -1297,6 +1306,9 @@ pub async fn set<C: CtrlContext>(
                     .await?;
                     if country_changed {
                         await_regdomain(wifi.country.as_deref().unwrap_or("00")).await;
+                        if let Err(e) = heal_channels(ctx.uci_root()).await {
+                            tracing::error!("WiFi channel repair failed: {e}");
+                        }
                     }
                 }
                 match restart {
@@ -3805,11 +3817,72 @@ Band 2:
 \t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
 ";
 
+    /// `iw phy <phy> channels` for an MT7916 under US rules with a 6 GHz band,
+    /// once mt76 holds it to the AW7916-NPD's FCC grant, trimmed.
+    const IW_CHANNELS_US_FCC_GRANT: &str = "\
+Band 2:
+\t* 5180 MHz [36]
+\t  Maximum TX power: 23.0 dBm
+\t  Channel widths: 20MHz HT40+ VHT80 VHT160
+\t* 5200 MHz [40]
+\t  Maximum TX power: 23.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5220 MHz [44]
+\t  Maximum TX power: 23.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5240 MHz [48]
+\t  Maximum TX power: 23.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5260 MHz [52] (disabled)
+\t* 5280 MHz [56] (disabled)
+\t* 5300 MHz [60] (disabled)
+\t* 5320 MHz [64] (disabled)
+\t* 5500 MHz [100] (disabled)
+\t* 5720 MHz [144] (disabled)
+\t* 5745 MHz [149]
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40+ VHT80 VHT160
+\t* 5765 MHz [153]
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5785 MHz [157]
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5805 MHz [161]
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+\t* 5825 MHz [165]
+\t  Maximum TX power: 30.0 dBm
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+Band 4:
+\t* 5955 MHz [1]
+\t  Maximum TX power: 12.0 dBm
+\t  No IR
+\t  Channel widths: 20MHz HT40+ VHT80 VHT160
+\t* 5975 MHz [5]
+\t  Maximum TX power: 12.0 dBm
+\t  No IR
+\t  Channel widths: 20MHz HT40- HT40+ VHT80 VHT160
+";
+
     fn widths_of(band: &BandChannels) -> Vec<(u32, Vec<u32>)> {
         band.channels
             .iter()
             .map(|c| (c.channel, c.widths.clone()))
             .collect()
+    }
+
+    #[test]
+    fn test_band_channels_follow_the_fcc_grant() {
+        let bands = band_channels(IW_CHANNELS_US_FCC_GRANT);
+        let five = widths_of(&bands["5g"]);
+        assert_eq!(
+            five.iter().map(|(ch, _)| *ch).collect::<Vec<_>>(),
+            [36, 40, 44, 48, 149, 153, 157, 161, 165]
+        );
+        assert_eq!(five[0], (36, vec![20, 40, 80]));
+        assert_eq!(bands["5g"].auto_widths, [20, 40, 80]);
+        assert_eq!(bands["6g"], BandChannels::default());
     }
 
     #[test]
@@ -3952,7 +4025,7 @@ Band 2:
     }
 
     #[tokio::test]
-    async fn test_check_channel_widths_rejects_unusable_blocks() {
+    async fn test_check_channels_rejects_unusable_blocks() {
         let dir = tempfile::tempdir().unwrap();
         setup_test_configs(dir.path());
         write_wireless_config_with_htmode(dir.path(), "HE20", "HE80");
@@ -3968,19 +4041,19 @@ Band 2:
             radios
         };
 
-        assert!(check_channel_widths(&cfgs, &with_5g("165", None), &bands).is_err());
-        assert!(check_channel_widths(&cfgs, &with_5g("165", Some(20)), &bands).is_ok());
-        assert!(check_channel_widths(&cfgs, &with_5g("149", Some(160)), &bands).is_err());
-        assert!(check_channel_widths(&cfgs, &with_5g("36", Some(160)), &bands).is_ok());
-        assert!(check_channel_widths(&cfgs, &with_5g("auto", Some(160)), &bands).is_err());
-        assert!(check_channel_widths(&cfgs, &with_5g("auto", Some(80)), &bands).is_ok());
+        assert!(check_channels(&cfgs, &with_5g("165", None), &bands).is_err());
+        assert!(check_channels(&cfgs, &with_5g("165", Some(20)), &bands).is_ok());
+        assert!(check_channels(&cfgs, &with_5g("149", Some(160)), &bands).is_err());
+        assert!(check_channels(&cfgs, &with_5g("36", Some(160)), &bands).is_ok());
+        assert!(check_channels(&cfgs, &with_5g("auto", Some(160)), &bands).is_err());
+        assert!(check_channels(&cfgs, &with_5g("auto", Some(80)), &bands).is_ok());
         // An unchanged radio is left alone even when its block is unusable.
         let empty = BTreeMap::new();
-        assert!(check_channel_widths(&cfgs, &with_5g("36", Some(80)), &empty).is_ok());
+        assert!(check_channels(&cfgs, &with_5g("36", Some(80)), &empty).is_ok());
     }
 
     #[tokio::test]
-    async fn test_check_channel_widths_covers_a_radio_being_enabled() {
+    async fn test_check_channels_covers_a_radio_being_enabled() {
         let dir = tempfile::tempdir().unwrap();
         setup_test_configs(dir.path());
         write_wireless_config_with_htmode(dir.path(), "HE20", "HE80");
@@ -3996,17 +4069,44 @@ Band 2:
 
         let mut radios = make_dual_radios();
         radios.get_mut("default_radio1").unwrap().channel = "165".into();
-        let err = check_channel_widths(&cfgs, &radios, &bands).unwrap_err();
+        let err = check_channels(&cfgs, &radios, &bands).unwrap_err();
         assert_eq!(err.kind, ErrorKind::InvalidValue);
         radios.get_mut("default_radio1").unwrap().width = Some(20);
-        check_channel_widths(&cfgs, &radios, &bands).unwrap();
+        check_channels(&cfgs, &radios, &bands).unwrap();
         let mut radios = make_dual_radios_disabled();
         radios.get_mut("default_radio1").unwrap().channel = "165".into();
-        check_channel_widths(&cfgs, &radios, &bands).unwrap();
+        check_channels(&cfgs, &radios, &bands).unwrap();
     }
 
     #[tokio::test]
-    async fn test_narrow_unusable_widths() {
+    async fn test_check_channels_rejects_what_the_fcc_grant_disables() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_test_configs(dir.path());
+        write_wireless_config_dual_radio(dir.path(), "TestNet", "TestNet", "");
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
+        let bands = band_channels(IW_CHANNELS_US_FCC_GRANT);
+
+        let with_radio1 = |band: &str, channel: &str, width: Option<u32>| {
+            let mut radios = make_dual_radios();
+            let radio = radios.get_mut("default_radio1").unwrap();
+            radio.band = band.into();
+            radio.channel = channel.into();
+            radio.width = width;
+            radios
+        };
+
+        for width in [None, Some(20)] {
+            assert!(check_channels(&cfgs, &with_radio1("5g", "52", width), &bands).is_err());
+            assert!(check_channels(&cfgs, &with_radio1("5g", "149", width), &bands).is_ok());
+            assert!(check_channels(&cfgs, &with_radio1("6g", "auto", width), &bands).is_err());
+            assert!(check_channels(&cfgs, &with_radio1("6g", "1", width), &bands).is_err());
+        }
+        assert!(check_channels(&cfgs, &with_radio1("5g", "36", Some(160)), &bands).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_heal_unusable_channels() {
         let dir = tempfile::tempdir().unwrap();
         setup_test_configs(dir.path());
         let bands = band_channels(IW_CHANNELS_US);
@@ -4029,7 +4129,7 @@ Band 2:
             async move {
                 let arena = Arena::new();
                 let mut cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
-                let narrowed = narrow_unusable_widths(&mut cfgs, bands).unwrap();
+                let narrowed = heal_unusable_channels(&mut cfgs, bands).unwrap();
                 let htmode = cfgs["wireless"]
                     .sections
                     .iter()
@@ -4068,13 +4168,44 @@ Band 2:
             narrow("165", "NOHT", false).await,
             (vec![], Some("NOHT".into()))
         );
+        assert_eq!(
+            narrow("52", "HE80", false).await,
+            (vec![], Some("HE80".into()))
+        );
         let no_bands = {
             let arena = Arena::new();
             write_wireless_config_with_htmode(dir.path(), "HE20", "HE80");
             let mut cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
-            narrow_unusable_widths(&mut cfgs, &BTreeMap::new()).unwrap()
+            heal_unusable_channels(&mut cfgs, &BTreeMap::new()).unwrap()
         };
         assert!(no_bands.is_empty());
+
+        let path = dir.path().join("wireless");
+        write_wireless_config_with_htmode(dir.path(), "HE20", "HE160");
+        let config = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("\toption channel '36'\n", "\toption channel '52'\n");
+        std::fs::write(&path, config).unwrap();
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["wireless"]).await.unwrap();
+        assert_eq!(
+            heal_unusable_channels(&mut cfgs, &band_channels(IW_CHANNELS_US_FCC_GRANT)).unwrap(),
+            [
+                "radio1 channel 52 to auto",
+                "radio1 channel auto from 160 MHz to 80 MHz"
+            ]
+        );
+        let radio1 = cfgs["wireless"]
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("radio1"))
+            .unwrap()
+            .get::<WifiDevice>()
+            .unwrap();
+        assert_eq!(
+            (radio1.channel, radio1.htmode),
+            (WifiChannel::Auto, Some("HE80".into()))
+        );
     }
 
     #[tokio::test]

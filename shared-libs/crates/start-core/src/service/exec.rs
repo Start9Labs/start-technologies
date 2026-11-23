@@ -18,6 +18,7 @@ use crate::lxc::ContainerId;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::env::Environment;
+use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::{CAP_1_KiB, ImageId, PackageId};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -40,7 +41,7 @@ impl SubcontainerTarget {
     pub(super) async fn resolve(
         ctx: &RpcContext,
         id: &PackageId,
-        subcontainer: Option<Guid>,
+        subcontainer: Option<InternedString>,
         name: Option<InternedString>,
         image_id: Option<ImageId>,
         user: Option<InternedString>,
@@ -200,25 +201,36 @@ pub(crate) fn exit_code(status: ExitStatus) -> i32 {
         .unwrap_or_else(|| 128 + status.signal().unwrap_or_default())
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, clap::Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct ExecParams {
+    #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
     /// Program and arguments, run without a shell. Empty runs the user's login shell.
+    #[arg(trailing_var_arg = true, help = "help.arg.command-to-execute")]
     pub command: Vec<String>,
     /// Written to the command's standard input, which is otherwise empty.
+    #[arg(long, help = "help.arg.exec-stdin")]
     stdin: Option<String>,
     /// Seconds before the command is terminated. Defaults to 120.
+    #[arg(long, help = "help.arg.exec-timeout-secs")]
     timeout_secs: Option<u64>,
     /// Part of the subcontainer's ID. Overrides `name` and `imageId`.
-    subcontainer: Option<Guid>,
+    #[arg(long, help = "help.arg.subcontainer-name")]
+    subcontainer: Option<InternedString>,
     /// Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
+    #[arg(long, help = "help.arg.container-name")]
     name: Option<InternedString>,
     /// Part of the subcontainer's image ID, case-insensitive.
+    #[arg(long, help = "help.arg.image-id")]
     image_id: Option<ImageId>,
     /// Defaults to the image's user, else root.
+    #[arg(long, help = "help.arg.user-name")]
     user: Option<InternedString>,
 }
+
 rpc_toolkit::reflect_ts!(ExecParams);
 
 #[derive(Debug, Default, Deserialize, Serialize, VisitFields)]
@@ -232,6 +244,39 @@ pub struct ExecResult {
     pub truncated: bool,
 }
 rpc_toolkit::reflect_ts!(ExecResult);
+
+/// Writes the result, then fails the CLI for a timed-out or failed command in every format.
+pub fn display_exec(params: WithIoFormat<ExecParams>, result: ExecResult) -> Result<(), Error> {
+    use std::io::Write;
+    let failure = exec_failure(&result);
+    if let Some(format) = params.format {
+        display_serializable(format, result)?;
+    } else {
+        let mut stdout = rpc_toolkit::output::stdout();
+        stdout.write_all(result.stdout.as_bytes())?;
+        stdout.flush()?;
+        let mut stderr = rpc_toolkit::output::stderr();
+        stderr.write_all(result.stderr.as_bytes())?;
+        stderr.flush()?;
+    }
+    failure.map_or(Ok(()), Err)
+}
+
+fn exec_failure(result: &ExecResult) -> Option<Error> {
+    if result.timed_out {
+        Some(Error::new(
+            eyre!("{}", t!("service.exec.timed-out")),
+            ErrorKind::Timeout,
+        ))
+    } else if result.exit_code != 0 {
+        Some(Error::new(
+            eyre!("{}", t!("service.exec.failed", code = result.exit_code)),
+            ErrorKind::Unknown,
+        ))
+    } else {
+        None
+    }
+}
 
 pub async fn exec(
     ctx: RpcContext,
@@ -384,6 +429,80 @@ async fn run_to_completion(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn exec_cli_passes_trailing_arguments_to_the_command() {
+        use clap::Parser;
+        let params = ExecParams::try_parse_from([
+            "exec",
+            "--user",
+            "root",
+            "hello-world",
+            "ls",
+            "-la",
+            "/data",
+        ])
+        .unwrap();
+        assert_eq!(params.command, ["ls", "-la", "/data"]);
+        assert_eq!(params.user.as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn failed_or_timed_out_commands_fail_the_cli() {
+        use clap::Parser;
+        let result = |exit_code, timed_out| ExecResult {
+            exit_code,
+            timed_out,
+            ..Default::default()
+        };
+        assert!(exec_failure(&result(0, false)).is_none());
+        assert!(matches!(
+            exec_failure(&result(2, false)),
+            Some(Error {
+                kind: ErrorKind::Unknown,
+                ..
+            })
+        ));
+        assert!(matches!(
+            exec_failure(&result(137, true)),
+            Some(Error {
+                kind: ErrorKind::Timeout,
+                ..
+            })
+        ));
+        let format = WithIoFormat {
+            format: Some(crate::util::serde::IoFormat::Json),
+            rest: ExecParams::try_parse_from(["exec", "hello-world"]).unwrap(),
+        };
+        assert!(display_exec(format, result(1, false)).is_err());
+    }
+
+    #[test]
+    fn exec_cli_preserves_partial_subcontainer_selectors_in_rpc_params() {
+        use clap::Parser;
+        for selector in ["ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", "ABCDEFGH", "abcdefgh"] {
+            let params = ExecParams::try_parse_from([
+                "exec",
+                "--subcontainer",
+                selector,
+                "hello-world",
+                "true",
+            ])
+            .unwrap();
+            assert_eq!(params.subcontainer.as_deref(), Some(selector));
+            let decoded: ExecParams = from_value(to_value(&params).unwrap()).unwrap();
+            assert_eq!(decoded.subcontainer.as_deref(), Some(selector));
+            let attach: crate::service::AttachParams = serde_json::from_value(serde_json::json!({
+                "id": "hello-world",
+                "command": [],
+                "tty": false,
+                "stderrTty": false,
+                "subcontainer": selector,
+            }))
+            .unwrap();
+            assert_eq!(attach.subcontainer.as_deref(), Some(selector));
+        }
+    }
 
     fn sh(script: &str) -> Command {
         let mut cmd = Command::new("sh");

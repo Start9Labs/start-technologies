@@ -45,7 +45,7 @@ pub struct BackupParams {
     old_password: Option<crate::auth::PasswordType>,
     #[arg(long = "package-ids", help = "help.arg.package-ids-to-backup")]
     package_ids: Option<Vec<PackageId>>,
-    #[arg(long = "shared-volume-ids", help = "help.arg.volume-ids-to-backup", value_parser = volume::parse_id)]
+    #[arg(long = "shared-volume-ids", help = "help.arg.volume-ids-to-backup", value_parser = crate::shared_volumes::parse_id)]
     shared_volume_ids: Option<Vec<SharedVolumeId>>,
     #[arg(help = "help.arg.backup-password")]
     password: crate::auth::PasswordType,

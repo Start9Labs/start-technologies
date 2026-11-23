@@ -1,0 +1,28 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-target-update-cifs 1  "update-cifs "
+.SH NAME
+start\-cli\-backup\-target\-update\-cifs \- Update the connection details of a CIFS backup target
+.SH SYNOPSIS
+\fBstart\-cli backup target update\-cifs\fR [\fB\-\-keep\-password\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> <\fIHOSTNAME\fR> <\fIPATH\fR> <\fIUSERNAME\fR>
+.SH DESCRIPTION
+Update the connection details of a CIFS backup target
+.SH OPTIONS
+.TP
+\fB\-\-keep\-password\fR
+Keep the stored password instead of prompting for one
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Backup target identifier
+.TP
+<\fIHOSTNAME\fR>
+CIFS server hostname
+.TP
+<\fIPATH\fR>
+Path on the CIFS share
+.TP
+<\fIUSERNAME\fR>
+CIFS authentication username

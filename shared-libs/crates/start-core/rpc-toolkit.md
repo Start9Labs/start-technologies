@@ -92,7 +92,7 @@ Chain methods to configure handler behavior.
 | Method                                    | Purpose                                            |
 | ----------------------------------------- | -------------------------------------------------- |
 | `.with_metadata("key", Value)`            | Attach metadata for middleware                     |
-| `.no_cli()`                               | RPC-only, not available via CLI                    |
+| `.no_cli()`                               | RPC-only; pair with a same-named CLI handler       |
 | `.no_display()`                           | No CLI output                                      |
 | `.with_display_serializable()`            | Default JSON/YAML output for CLI                   |
 | `.with_custom_display_fn(\|_, res\| ...)` | Custom CLI output formatting                       |
@@ -220,7 +220,7 @@ rpc_toolkit::reflect_ts!(MyParams);
 1. Define params struct with `Deserialize, Serialize, Parser, visit_rs::VisitFields` and an adjacent `rpc_toolkit::reflect_ts!` bridge (skip if no params needed)
 2. Choose handler type based on sync/async and thread-safety
 3. Write handler function taking `(Context, Params) -> Result<Response, Error>` (omit Params if none needed)
-4. Add to parent handler with appropriate extensions (display modifiers before `with_about`)
+4. Add to parent handler with appropriate extensions (display modifiers before `with_about`) and a CLI binding, as required by the root `AGENTS.md`
 5. TypeScript types auto-generated via `make start-core-ts-bindings`
 
 ### Public (Unauthenticated) Endpoint

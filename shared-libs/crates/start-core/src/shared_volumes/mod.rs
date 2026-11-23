@@ -4,7 +4,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
+use clap::{Parser, Subcommand};
+use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
@@ -14,10 +15,11 @@ pub mod mounts;
 pub mod source;
 #[cfg(target_os = "linux")]
 pub(crate) mod watch;
-use crate::context::RpcContext;
-use crate::disk::mount::filesystem::cifs::Cifs;
+use crate::context::{CliContext, RpcContext};
+use crate::disk::mount::filesystem::cifs::{Cifs, CifsUpdatePasswordArgs};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
+use crate::util::serde::HandlerExtSerde;
 
 /// A 32-character uppercase base32 volume identity.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, VisitFields)]
@@ -57,6 +59,12 @@ impl FromStr for SharedVolumeId {
             ..error
         })
     }
+}
+
+pub(crate) fn parse_id(value: &str) -> Result<SharedVolumeId, String> {
+    value
+        .parse::<SharedVolumeId>()
+        .map_err(|error| error.to_string())
 }
 
 impl From<SharedVolumeId> for String {
@@ -277,36 +285,111 @@ pub(crate) fn access_denied() -> Error {
 
 pub fn handler<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
+        .subcommand(
+            "list",
+            from_fn_async(list)
+                .with_display_serializable()
+                .with_about("about.list-shared-volumes")
+                .with_call_remote::<CliContext>(),
+        )
         .subcommand("create", from_fn_async(create).no_cli())
-        .subcommand("rename", from_fn_async(rename).no_cli())
+        .subcommand(
+            "create",
+            from_fn_async(cli_create::<SharedVolumeId>)
+                .no_ts()
+                .with_about("about.create-shared-volume"),
+        )
+        .subcommand(
+            "rename",
+            from_fn_async(rename)
+                .no_display()
+                .with_about("about.rename-shared-volume")
+                .with_call_remote::<CliContext>(),
+        )
         .subcommand("update-cifs", from_fn_async(update_cifs).no_cli())
+        .subcommand(
+            "update-cifs",
+            from_fn_async(cli_update_cifs)
+                .no_ts()
+                .no_display()
+                .with_about("about.update-cifs-shared-volume"),
+        )
         .subcommand("set-grant", from_fn_async(set_grant).no_cli())
-        .subcommand("remove", from_fn_async(remove).no_cli())
-        .subcommand("inspect", from_fn_async(inspect).no_cli())
+        .subcommand(
+            "set-grant",
+            from_fn_async(cli_set_grant)
+                .no_ts()
+                .no_display()
+                .with_about("about.set-shared-volume-grant"),
+        )
+        .subcommand(
+            "remove",
+            from_fn_async(remove)
+                .no_display()
+                .with_about("about.remove-shared-volume")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "inspect",
+            from_fn_async(inspect)
+                .with_display_serializable()
+                .with_about("about.inspect-shared-volume")
+                .with_call_remote::<CliContext>(),
+        )
 }
 
-#[derive(Deserialize, Serialize, VisitVariants)]
+pub async fn list(ctx: RpcContext) -> Result<BTreeMap<SharedVolumeId, SharedVolume>, Error> {
+    ctx.db.peek().await.as_public().as_shared_volumes().de()
+}
+
+#[derive(Deserialize, Serialize, Subcommand, VisitVariants)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub enum CreateSharedVolumeSource {
+    #[command(about = "about.create-local-shared-volume")]
     Local,
+    #[command(about = "about.create-disk-shared-volume")]
     Disk {
+        #[arg(help = "help.arg.shared-volume-logicalname")]
         logicalname: PathBuf,
+        #[arg(long, default_value = "/", help = "help.arg.shared-volume-disk-path")]
         #[serde(default)]
         path: PathBuf,
     },
+    #[command(about = "about.create-cifs-shared-volume")]
     Cifs(Cifs),
 }
 
 rpc_toolkit::reflect_ts!(CreateSharedVolumeSource);
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct CreateSharedVolumeParams {
+    #[arg(help = "help.arg.shared-volume-name")]
     pub name: String,
+    #[command(subcommand)]
     pub source: CreateSharedVolumeSource,
 }
 
 rpc_toolkit::reflect_ts!(CreateSharedVolumeParams);
+
+/// Fronts a create method taking `CreateSharedVolumeParams`, prompting for a CIFS password.
+pub(crate) async fn cli_create<Id: serde::de::DeserializeOwned>(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        mut params,
+        ..
+    }: HandlerArgs<CliContext, CreateSharedVolumeParams>,
+) -> Result<Id, Error> {
+    if let CreateSharedVolumeSource::Cifs(cifs) = &mut params.source {
+        cifs.password = crate::disk::mount::filesystem::cifs::read_password()?;
+    }
+    context.call_fronted(parent_method, method, &params).await
+}
 
 pub(crate) fn validate_name(name: &str) -> Result<(), Error> {
     if name.trim().is_empty() {
@@ -363,10 +446,14 @@ pub async fn create(
     Ok(id)
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct RenameSharedVolumeParams {
+    #[arg(help = "help.arg.shared-volume-id", value_parser = parse_id)]
     pub id: SharedVolumeId,
+    #[arg(help = "help.arg.shared-volume-name")]
     pub name: String,
 }
 
@@ -390,19 +477,56 @@ pub async fn rename(
         .result
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct UpdateCifsSharedVolumeParams {
+    #[arg(help = "help.arg.shared-volume-id", value_parser = parse_id)]
     pub id: SharedVolumeId,
+    #[arg(help = "help.arg.cifs-hostname")]
     pub hostname: String,
+    #[arg(help = "help.arg.cifs-path")]
     pub path: PathBuf,
+    #[arg(help = "help.arg.cifs-username")]
     pub username: String,
     /// Omitted keeps the stored password; empty clears it.
+    #[arg(skip)]
     #[serde(default)]
     pub password: Option<String>,
 }
 
 rpc_toolkit::reflect_ts!(UpdateCifsSharedVolumeParams);
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
+pub struct CliUpdateCifsSharedVolumeParams {
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub update: UpdateCifsSharedVolumeParams,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub password: CifsUpdatePasswordArgs,
+}
+
+async fn cli_update_cifs(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params:
+            CliUpdateCifsSharedVolumeParams {
+                mut update,
+                password,
+            },
+        ..
+    }: HandlerArgs<CliContext, CliUpdateCifsSharedVolumeParams>,
+) -> Result<(), Error> {
+    update.password = password.read()?;
+    context.call_fronted(parent_method, method, &update).await
+}
 
 pub async fn update_cifs(
     ctx: RpcContext,
@@ -469,6 +593,48 @@ pub struct SetSharedVolumeGrantParams {
 }
 
 rpc_toolkit::reflect_ts!(SetSharedVolumeGrantParams);
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
+pub struct CliSetSharedVolumeGrantParams {
+    #[arg(help = "help.arg.shared-volume-id", value_parser = parse_id)]
+    pub id: SharedVolumeId,
+    #[arg(help = "help.arg.package-id")]
+    pub package_id: PackageId,
+    #[arg(long, help = "help.arg.shared-volume-grant-readonly")]
+    pub readonly: bool,
+    #[arg(
+        long,
+        conflicts_with = "readonly",
+        help = "help.arg.shared-volume-grant-revoke"
+    )]
+    pub revoke: bool,
+}
+
+async fn cli_set_grant(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params:
+            CliSetSharedVolumeGrantParams {
+                id,
+                package_id,
+                readonly,
+                revoke,
+            },
+        ..
+    }: HandlerArgs<CliContext, CliSetSharedVolumeGrantParams>,
+) -> Result<(), Error> {
+    let params = SetSharedVolumeGrantParams {
+        id,
+        package_id,
+        grant: (!revoke).then_some(SharedVolumeGrant { readonly }),
+    };
+    context.call_fronted(parent_method, method, &params).await
+}
 
 /// Applies grant intent before best-effort retirement of incompatible staging sources.
 pub async fn set_grant(
@@ -543,9 +709,12 @@ async fn set_grant_owned(
     result
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct SharedVolumeParams {
+    #[arg(help = "help.arg.shared-volume-id", value_parser = parse_id)]
     pub id: SharedVolumeId,
 }
 
@@ -686,6 +855,68 @@ pub async fn inspect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_volume_ids_use_the_guid_contract() {
+        let id = SharedVolumeId::new();
+        assert_eq!(parse_id(id.as_ref()).unwrap(), id);
+        assert!(parse_id("7cb12a88-783d-4909-9923-d5eb47c7e01f").is_err());
+    }
+
+    #[test]
+    fn create_cli_selects_the_source_and_omits_the_cifs_password() {
+        let params = CreateSharedVolumeParams::try_parse_from([
+            "create", "Media", "cifs", "nas", "/share", "media",
+        ])
+        .unwrap();
+        assert_eq!(
+            to_value(&params).unwrap(),
+            serde_json::from_str::<Value>(
+                r#"{"name":"Media","source":{"kind":"cifs","hostname":"nas","path":"/share","username":"media","password":null}}"#
+            )
+            .unwrap()
+        );
+        let params =
+            CreateSharedVolumeParams::try_parse_from(["create", "Photos", "disk", "/dev/sdb1"])
+                .unwrap();
+        let CreateSharedVolumeSource::Disk { path, .. } = params.source else {
+            panic!("expected a disk source");
+        };
+        assert_eq!(mounts::confined_relative(&path).unwrap(), PathBuf::new());
+        assert!(CreateSharedVolumeParams::try_parse_from(["create", "Photos"]).is_err());
+    }
+
+    #[test]
+    fn update_cifs_cli_keeps_the_rpc_param_shape() {
+        let id = SharedVolumeId::new();
+        let params = CliUpdateCifsSharedVolumeParams::try_parse_from([
+            "update-cifs",
+            id.as_ref(),
+            "nas",
+            "/share",
+            "media",
+            "--keep-password",
+        ])
+        .unwrap();
+        assert!(params.password.keep_password);
+        assert_eq!(params.update.password, None);
+        assert_eq!(params.update.id, id);
+    }
+
+    #[test]
+    fn set_grant_cli_revokes_or_grants() {
+        let id = SharedVolumeId::new();
+        let parse = |args: &[&str]| {
+            CliSetSharedVolumeGrantParams::try_parse_from(
+                ["set-grant", id.as_ref(), "hello-world"]
+                    .into_iter()
+                    .chain(args.iter().copied()),
+            )
+        };
+        assert!(parse(&["--readonly"]).unwrap().readonly);
+        assert!(parse(&["--revoke"]).unwrap().revoke);
+        assert!(parse(&["--readonly", "--revoke"]).is_err());
+    }
 
     #[test]
     fn ids_are_base32_guids_not_paths_or_names() {
