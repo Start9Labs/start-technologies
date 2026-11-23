@@ -132,6 +132,7 @@ mod test {
             "package.exec",
             "package.list",
             "package.logs",
+            "server.registries.package",
             "server.time",
             "volumes.create",
             "volumes.set-grant",
