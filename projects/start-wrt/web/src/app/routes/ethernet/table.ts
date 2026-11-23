@@ -1,5 +1,5 @@
 import { Component, inject, input } from '@angular/core'
-import { FormsModule } from '@angular/forms'
+import { FormsModule, NgModel } from '@angular/forms'
 import { RouterLink } from '@angular/router'
 import { TuiResponsiveDialogService } from '@taiga-ui/addon-mobile'
 import { TuiTable, TuiTableDirective } from '@taiga-ui/addon-table'
@@ -25,6 +25,10 @@ import { fill } from 'src/app/i18n/validation-errors'
 import { leavingProfileMessage } from 'src/app/services/leaving-profile'
 
 import { EthernetPortView, EthernetService } from './service'
+import { VLANS_DIALOG } from './vlans'
+
+/** Dropdown value of the managed-switch choice; a profile name is never empty. */
+const TRUNK = ''
 
 @Component({
   selector: '[ethernetTable]',
@@ -61,9 +65,10 @@ import { EthernetPortView, EthernetService } from './service'
                 tuiChevron
                 tuiButtonSelect
                 tuiDropdownAlign="start"
-                [textContent]="item.profile?.fullname || 'Admin'"
-                [ngModel]="item.profile?.fullname || 'Admin'"
-                (ngModelChange)="onProfileChange(item, $event)"
+                [textContent]="item.profileName"
+                #model="ngModel"
+                [ngModel]="item.trunk ? TRUNK : item.profileName"
+                (ngModelChange)="onProfileChange(item, $event, model)"
               >
                 <tui-data-list *tuiDropdown>
                   @for (profile of service.profiles(); track profile.vlan_tag) {
@@ -71,11 +76,17 @@ import { EthernetPortView, EthernetService } from './service'
                       {{ profile.fullname }}
                     </button>
                   }
+                  @if (!item.usb) {
+                    <hr />
+                    <button tuiOption iconStart="@tui.network" [value]="TRUNK">
+                      {{ 'Delegate' | i18n }}
+                    </button>
+                  }
                   <hr />
                   <a
                     tuiOption
                     tuiAppearance="action"
-                    iconEnd="@tui.user-lock"
+                    iconStart="@tui.user-lock"
                     routerLink="/profiles"
                   >
                     {{ 'Manage Profiles' | i18n }}
@@ -85,6 +96,16 @@ import { EthernetPortView, EthernetService } from './service'
             }
           </td>
           <td tuiTd>
+            @if (item.trunk) {
+              <button
+                tuiButton
+                size="xs"
+                appearance="secondary"
+                (click)="onVlans(item)"
+              >
+                {{ 'VLAN IDs' | i18n }}
+              </button>
+            }
             @if (item.usb; as usb) {
               <button
                 tuiIconButton
@@ -157,7 +178,18 @@ export class EthernetTable {
   private readonly dialogs = inject(TuiResponsiveDialogService)
   private readonly i18n = inject(i18nPipe)
 
+  protected readonly TRUNK = TRUNK
+
   readonly ethernetTable = input<EthernetPortView[]>([])
+
+  onVlans(item: EthernetPortView) {
+    this.dialogs
+      .open(VLANS_DIALOG, {
+        size: 's',
+        data: { port: item.name, profiles: this.service.profiles() },
+      })
+      .subscribe()
+  }
 
   async onRemove(item: EthernetPortView) {
     const confirmed = await firstValueFrom(
@@ -179,46 +211,58 @@ export class EthernetTable {
     if (confirmed) this.service.removeUsbPort(item.name)
   }
 
-  async onProfileChange(item: EthernetPortView, fullname: string) {
-    const previousName = item.profile?.fullname ?? 'Admin'
-    if (fullname === previousName) return
+  async onProfileChange(item: EthernetPortView, value: string, model: NgModel) {
+    const current = item.trunk ? TRUNK : item.profileName
+    if (value === current) return
 
-    const profile =
-      this.service.profiles().find(p => p.fullname === fullname) ?? null
-    item.profile = profile
-    const items = [...this.ethernetTable()]
+    const trunk = value === TRUNK
+
+    const profile = trunk
+      ? null
+      : (this.service.profiles().find(p => p.fullname === value) ?? null)
+    const items = this.ethernetTable().map(p =>
+      p === item ? { ...p, trunk, profile } : p,
+    )
 
     let leaving
     try {
       leaving = await this.service.previewPorts(items)
     } catch {
-      this.service.refresh()
+      model.reset(current)
       return
     }
 
-    const move = fill(
-      this.i18n.transform(
-        'Devices on {port} will move to the {profile} profile. Most reconnect within a few seconds. If a device then has no Internet access or cannot reach other devices, which is common behind a switch, unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.',
-      ),
-      { port: item.name, profile: fullname },
-    )
+    const summary = trunk
+      ? fill(
+          this.i18n.transform(
+            'Every security profile will be sent to {port} as a tagged VLAN, and a managed switch connected to it decides which profile each of its own ports belongs to. Anyone who can log in to the switch can reach every profile, so protect its password and finish its VLAN setup before connecting it.',
+          ),
+          { port: item.name },
+        )
+      : fill(
+          this.i18n.transform(
+            'Devices on {port} will move to the {profile} profile. Most reconnect within a few seconds. If a device then has no Internet access or cannot reach other devices, which is common behind a switch, unplug and replug its cable, or restart the device or the switch. Otherwise it reconnects on its own within 12 hours.',
+          ),
+          { port: item.name, profile: value },
+        )
     const kept = leavingProfileMessage(this.i18n, leaving)
     const confirmed = await firstValueFrom(
       this.dialogs.open<boolean>(TUI_CONFIRM, {
-        label: this.i18n.transform('Change Security Profile?'),
+        label: trunk
+          ? fill(this.i18n.transform('Delegate {port}?'), { port: item.name })
+          : this.i18n.transform('Change Security Profile?'),
         data: {
-          content: kept ? `${move} ${kept}` : move,
-          yes: this.i18n.transform('Change Profile'),
+          content: kept ? `${summary} ${kept}` : summary,
+          yes: this.i18n.transform(trunk ? 'Delegate' : 'Change Profile'),
           no: this.i18n.transform('Cancel'),
         },
       }),
     ).catch(() => false)
 
     if (!confirmed) {
-      this.service.refresh()
-      return
+      model.reset(current)
+    } else if ((await this.service.save(items)) && trunk) {
+      this.onVlans(item)
     }
-
-    this.service.save(items)
   }
 }
