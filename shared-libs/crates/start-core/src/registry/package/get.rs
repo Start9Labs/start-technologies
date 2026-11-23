@@ -397,6 +397,8 @@ fn first_published_at(
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct PackageListing {
+    /// Changes whenever any release this server can run changes.
+    pub details_hash: InternedString,
     pub categories: BTreeSet<InternedString>,
     /// When this registry first published any version it still carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -484,6 +486,11 @@ pub(crate) fn listing(
         return Ok(None);
     };
     let other = other.remove(id).unwrap_or_default();
+    let mut details_hash = blake3::Hasher::new();
+    for (version, info) in releases.iter().chain(other.iter()) {
+        serde_json::to_writer(&mut details_hash, &(version, listed_release(info)))
+            .with_kind(ErrorKind::Serialization)?;
+    }
     let superseded = superseded_revisions(Some(&releases), &other)?;
     let versions: imbl_value::InOMap<_, _> = releases
         .keys()
@@ -507,6 +514,10 @@ pub(crate) fn listing(
         .as_idx(id)
         .or_not_found(lazy_format!("package {id}"))?;
     let mut row = imbl_value::InOMap::new();
+    row.insert(
+        "detailsHash".into(),
+        details_hash.finalize().to_hex().as_str().into(),
+    );
     row.insert(
         "categories".into(),
         package.as_categories().as_value().clone(),

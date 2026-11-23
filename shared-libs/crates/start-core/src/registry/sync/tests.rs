@@ -961,6 +961,81 @@ fn listed_release_metadata_follows_live_replayed_and_snapshot_updates() {
     assert_eq!(row(&db), before);
 }
 
+#[test]
+fn older_signatures_invalidate_details_after_live_replay_and_snapshot_updates() {
+    use connection::{SubscriptionEvent, SubscriptionStart};
+
+    use crate::registry::package::index::tests::version_info_signed_by;
+
+    let mut db = database();
+    let view = RegistryView::new(&device());
+    let (_, mut older) = version_info_signed_by(1);
+    let mut source = to_value(&index()).unwrap();
+    source["package"]["packages"]["test"]["versions"]["1.0.0:0"] = to_value(&older).unwrap();
+    let initial_signatures = to_value(&older.s9pks[0].1.signatures).unwrap();
+    let (_, cosigned) = version_info_signed_by(2);
+    older.s9pks[0]
+        .1
+        .signatures
+        .extend(cosigned.s9pks[0].1.signatures.clone());
+    let signed = to_value(&older.s9pks[0].1.signatures).unwrap();
+    let start = |id, value, revisions| {
+        SubscriptionEvent::Start(SubscriptionStart {
+            epoch: Some("details".into()),
+            id,
+            value,
+            revisions,
+        })
+    };
+    let ingest = |db: &mut DatabaseModel, event| ingest_event(db, &url(), &view, &event, &device());
+    let row = |db: &DatabaseModel| {
+        db.as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .as_listings()
+            .as_idx(&"test".parse().unwrap())
+            .unwrap()
+            .as_value()
+            .clone()
+    };
+    let signatures = |id, value| {
+        revision(
+            id,
+            json!([{
+                "op": "replace",
+                "path": "/package/packages/test/versions/1.0.0:0/s9pks/0/1/signatures",
+                "value": value,
+            }]),
+        )
+    };
+    ingest(&mut db, start(1, source.clone(), None)).unwrap();
+    let before = row(&db);
+    ingest(
+        &mut db,
+        SubscriptionEvent::Revision(signatures(2, signed.clone())),
+    )
+    .unwrap();
+    let live = row(&db);
+    assert_eq!(before["releases"], live["releases"]);
+    assert_eq!(before["versions"], live["versions"]);
+    assert_ne!(before["detailsHash"], live["detailsHash"]);
+    ingest(
+        &mut db,
+        start(
+            3,
+            Value::Null,
+            Some(vec![signatures(3, initial_signatures)]),
+        ),
+    )
+    .unwrap();
+    assert_eq!(before["detailsHash"], row(&db)["detailsHash"]);
+    source["package"]["packages"]["test"]["versions"]["1.0.0:0"]["s9pks"][0][1]["signatures"] =
+        signed;
+    publish_snapshot(&mut db, &Subscription::Index(url()), &source, &device()).unwrap();
+    assert_eq!(live["detailsHash"], row(&db)["detailsHash"]);
+}
+
 #[tokio::test]
 async fn watch_applies_scoped_revisions_and_answers_heartbeats_on_reconnect() {
     let temp = tempfile::tempdir().unwrap();

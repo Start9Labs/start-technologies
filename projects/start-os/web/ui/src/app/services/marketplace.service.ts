@@ -89,6 +89,14 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
+  private watchListing$(registry: string, id: string) {
+    return this.watchRegistry$(registry).pipe(
+      filter(registryReady),
+      map(entry => entry.listings[id]),
+      distinctUntilChanged(),
+    )
+  }
+
   readonly currentRegistryUrl$ = new ReplaySubject<string>(1)
 
   readonly requestErrors$ = this.registries$.pipe(
@@ -148,10 +156,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
     return (registryUrl ? of(registryUrl) : this.currentRegistryUrl$).pipe(
       distinctUntilChanged(),
       switchMap(url =>
-        this.watchRegistry$(url).pipe(
-          filter(registryReady),
-          map(entry => entry.listings[id]),
-          distinctUntilChanged(),
+        this.watchListing$(url, id).pipe(
           switchMap(row => {
             const selected =
               version ?? (row && newestReleases(this.exver, row)[flavor ?? ''])
@@ -159,15 +164,27 @@ export class MarketplaceService extends AbstractMarketplaceService {
             const release = row.releases[selected]
             return release
               ? of(toPkg(this.exver, id, selected, row, release))
-              : this.getDetails$(id, selected, url)
+              : this.fetchOnConnection$(id, selected, url)
           }),
         ),
       ),
     )
   }
 
-  /** A release with every other version's release notes, refetched after reconnecting. */
+  /** A release with every other version's release notes, following live package changes. */
   getDetails$(
+    id: string,
+    version: string,
+    registry: string,
+  ): Observable<MarketplacePkg | null> {
+    return this.watchListing$(registry, id).pipe(
+      switchMap(row =>
+        row ? this.fetchOnConnection$(id, version, registry) : of(null),
+      ),
+    )
+  }
+
+  private fetchOnConnection$(
     id: string,
     version: string,
     registry: string,

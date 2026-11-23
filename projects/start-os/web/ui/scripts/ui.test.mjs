@@ -5099,6 +5099,57 @@ test('an application error is reported and does not end the other-version observ
   assert.equal(values.at(-1).version, '0.9.0:0')
 })
 
+test('expanded details refetch when listed release notes change without reconnecting', async t => {
+  const entry = registryEntry('2.0.0:0')
+  entry.listings.example.releases['2.0.0:0'].releaseNotes = 'Before'
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  f.details.best['2.0.0:0'] = { title: 'Example', releaseNotes: 'Before' }
+  f.details.otherVersions = { '1.5.0:0': { releaseNotes: 'Intermediate' } }
+  const values = f.watch(
+    f.service.getDetails$('example', '2.0.0:0', 'https://registry.test/'),
+  )
+  await tick()
+  assert.equal(values.at(-1).releaseNotes, 'Before')
+  f.details.best['2.0.0:0'] = { title: 'Example', releaseNotes: 'After' }
+  f.replace(
+    '/registryCache/https:~1~1registry.test~1/listings/example/releases/2.0.0:0/releaseNotes',
+    'After',
+  )
+  await tick()
+  assert.equal(f.packageQueries.length, 2)
+  assert.equal(values.at(-1).releaseNotes, 'After')
+})
+
+test('an older release refetches signatures when only its details marker changes', async t => {
+  const entry = registryEntry('2.0.0:0')
+  entry.listings.example.detailsHash = 'before'
+  entry.listings.example.versions['1.0.0:0'] = {}
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  const release = signatures => ({
+    title: 'Older',
+    s9pks: [[{}, { signatures }]],
+  })
+  f.details.best['1.0.0:0'] = release({ first: 'signature' })
+  await f.service.connect('https://registry.test')
+  const values = f.watch(f.service.getPackage$('example', '1.0.0:0', null))
+  await tick()
+  assert.deepEqual(Object.keys(values.at(-1).s9pks[0][1].signatures), ['first'])
+  f.details.best['1.0.0:0'] = release({
+    first: 'signature',
+    second: 'signature',
+  })
+  f.replace(
+    '/registryCache/https:~1~1registry.test~1/listings/example/detailsHash',
+    'after',
+  )
+  await tick()
+  assert.equal(f.packageQueries.length, 2)
+  assert.deepEqual(Object.keys(values.at(-1).s9pks[0][1].signatures), [
+    'first',
+    'second',
+  ])
+})
+
 test('an exact version is fetched once its package is listed and again when its row changes', async t => {
   const f = marketplaceFixture(t)
   f.details.best['1.0.0:0'] = { title: 'Older' }
