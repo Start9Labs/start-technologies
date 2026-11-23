@@ -5,7 +5,7 @@ use imbl::shared_ptr::DefaultSharedPtr;
 use imbl::OrdMap;
 use yasi::InternedString;
 
-use crate::{GenericValue, InOMap, OrdMapIterMut};
+use crate::{GenericValue, InOMap};
 
 /// The map backing a JSON object whose values are `V`.
 pub trait ObjectMap<V>: Clone + Default + FromIterator<(InternedString, V)> {
@@ -104,7 +104,7 @@ impl<V: Clone> ObjectMap<V> for OrdMap<InternedString, V> {
     where
         V: 'a;
     type EntriesMut<'a>
-        = OrdMapIterMut<'a, InternedString, V>
+        = imbl::ordmap::IterMut<'a, InternedString, V, DefaultSharedPtr>
     where
         V: 'a;
     type IntoEntries = <Self as IntoIterator>::IntoIter;
@@ -116,7 +116,7 @@ impl<V: Clone> ObjectMap<V> for OrdMap<InternedString, V> {
         self.iter()
     }
     fn entries_mut(&mut self) -> Self::EntriesMut<'_> {
-        self.into()
+        self.iter_mut()
     }
     fn into_entries(self) -> Self::IntoEntries {
         self.into_iter()

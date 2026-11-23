@@ -8,7 +8,7 @@ use clap::Parser;
 use http::HeaderMap;
 use http::header::AUTHORIZATION;
 use imbl::OrdMap;
-use imbl_value::{InternedString, OrdMapIterMut};
+use imbl_value::InternedString;
 use include_dir::Dir;
 use ipnet::{IpNet, Ipv6Net};
 use patch_db::PatchDb;
@@ -280,7 +280,7 @@ impl TunnelContext {
         let net_iface = db
             .mutate(|db| {
                 db.as_gateways_mut().mutate(|g| {
-                    for (_, v) in OrdMapIterMut::from(&mut *g) {
+                    for (_, v) in g.iter_mut() {
                         v.ip_info = None;
                     }
                     for (id, info) in ip_info {

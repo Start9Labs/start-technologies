@@ -10,7 +10,7 @@ use clap::Parser;
 use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use imbl::{OrdMap, OrdSet};
-use imbl_value::{InternedString, OrdMapIterMut, Value};
+use imbl_value::{InternedString, Value};
 use ipnet::IpNet;
 use itertools::Itertools;
 use nix::net::if_::if_nametoindex;
@@ -1663,7 +1663,7 @@ async fn watcher(
 
                         watch_ip_info.send_if_modified(|m| {
                             let mut changed = false;
-                            for (iface, info) in OrdMapIterMut::from(m) {
+                            for (iface, info) in m.iter_mut() {
                                 if !ifaces.contains(iface) {
                                     info.ip_info = None;
                                     changed = true;
@@ -3342,7 +3342,7 @@ impl NetworkInterfaceController {
                         .de()
                     {
                         Ok(mut info) => {
-                            for (_, info) in OrdMapIterMut::from(&mut info) {
+                            for (_, info) in info.iter_mut() {
                                 info.ip_info = None;
                                 info.dns.refresh(None);
                             }

@@ -36,7 +36,6 @@ use igd_next::PortMappingProtocol;
 use igd_next::aio::Gateway;
 use igd_next::aio::tokio::Tokio;
 use imbl::OrdMap;
-use imbl_value::OrdMapIterMut;
 use ipnet::IpNet;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, interval};
@@ -454,7 +453,7 @@ fn report(
     let now = Utc::now();
     interfaces.send_if_modified(|m| {
         let mut changed = false;
-        for (_, info) in OrdMapIterMut::from(m) {
+        for (_, info) in m.iter_mut() {
             if candidate_gateways(info).iter().any(|(g, _)| *g == gw) {
                 changed |= update(&mut info.port_map, now);
             }
@@ -471,7 +470,7 @@ fn report_local(
     let now = Utc::now();
     interfaces.send_if_modified(|m| {
         let mut changed = false;
-        for (_, info) in OrdMapIterMut::from(m) {
+        for (_, info) in m.iter_mut() {
             let owns = info
                 .ip_info
                 .as_ref()

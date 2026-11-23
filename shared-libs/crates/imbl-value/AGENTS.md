@@ -25,7 +25,6 @@ not that one. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it works.
 - `src/index.rs` — the `Index` trait and impls for `usize`/`str`/`String` indexing.
 - `src/macros.rs` — the `json!` macro (and `json_internal!`/`json_internal_vec!`/`json_unexpected!` helpers)
   for ergonomic `Value` construction, and `ord_json!`, which builds an `OrdValue` from the same syntax.
-- `src/ord_map_iter_mut.rs` — `OrdMapIterMut`, mutable iteration over an `imbl::OrdMap`, which `imbl` lacks.
 - `src/in_order_map/mod.rs` — `InOMap<K, V>`, an insertion-order-preserving persistent map backed by
   `imbl::Vector<(K, V)>`, with get/insert/remove/update plus union/difference/intersection set ops.
 - `src/in_order_map/my_visitor.rs` — `MyVisitor`, the serde `Visitor` for deserializing an `InOMap`.

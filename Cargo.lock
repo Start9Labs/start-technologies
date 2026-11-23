@@ -4026,8 +4026,7 @@ dependencies = [
 [[package]]
 name = "imbl"
 version = "7.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46bad832b9b463ed9398b8506488cc2e3b897a9d44f13af115f382aac71f4fec"
+source = "git+https://github.com/Start9Labs/imbl?rev=7ee376b9c72d7e3e3994944fd4ccb6d17f160ab2#7ee376b9c72d7e3e3994944fd4ccb6d17f160ab2"
 dependencies = [
  "archery",
  "equivalent",
