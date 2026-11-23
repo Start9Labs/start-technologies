@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-target-create-cifs 1  "cifs "
+.SH NAME
+start\-cli\-backup\-target\-create\-cifs \- Create the volume on a CIFS network share
+.SH SYNOPSIS
+\fBstart\-cli backup target create cifs\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIHOSTNAME\fR> <\fIPATH\fR> <\fIUSERNAME\fR>
+.SH DESCRIPTION
+Create the volume on a CIFS network share
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIHOSTNAME\fR>
+CIFS server hostname
+.TP
+<\fIPATH\fR>
+Path on the CIFS share
+.TP
+<\fIUSERNAME\fR>
+CIFS authentication username

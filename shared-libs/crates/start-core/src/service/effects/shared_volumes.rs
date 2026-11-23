@@ -22,9 +22,11 @@ pub struct GrantedSharedVolume {
 rpc_toolkit::reflect_ts!(GrantedSharedVolume);
 rpc_toolkit::ts_export!(GrantedSharedVolume, namespaces = [""]);
 
-#[derive(Serialize, Deserialize, VisitFields)]
+#[derive(Serialize, Deserialize, VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSharedVolumesParams {
+    #[arg(skip)]
     pub callback: Option<CallbackId>,
 }
 
@@ -129,13 +131,20 @@ pub async fn get_shared_volumes(
     Ok(result)
 }
 
-#[derive(Serialize, Deserialize, VisitFields)]
+#[derive(Serialize, Deserialize, VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct MountSharedVolumeParams {
+    #[arg(help = "help.arg.shared-volume-id", value_parser = crate::shared_volumes::parse_id)]
     pub id: SharedVolumeId,
+    #[arg(help = "help.arg.subcontainer-id")]
     pub subcontainer: crate::rpc_continuations::Guid,
+    #[arg(help = "help.arg.mountpoint")]
     pub mountpoint: std::path::PathBuf,
+    #[arg(long, help = "help.arg.shared-volume-subpath")]
     pub subpath: Option<std::path::PathBuf>,
+    #[arg(long, help = "help.arg.mount-readonly")]
     pub readonly: bool,
 }
 

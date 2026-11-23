@@ -65,6 +65,40 @@ fn binding_reassign_port_accepts_server_and_package_targets() {
     }
 }
 
+#[test]
+fn push_cli_exposes_subscription_management_without_browser_registration() {
+    let app = super::app().into_command();
+    let push = app
+        .find_subcommand("notification")
+        .unwrap()
+        .find_subcommand("push")
+        .unwrap();
+    for command in ["key", "subscribe"] {
+        assert!(push.find_subcommand(command).is_none());
+    }
+    for args in [
+        vec!["list"],
+        vec!["list", "--format", "json"],
+        vec!["unsubscribe", "https://push.example/subscription"],
+        vec!["test", "https://push.example/subscription"],
+    ] {
+        let matches = app
+            .clone()
+            .try_get_matches_from(
+                ["start-cli", "notification", "push"]
+                    .into_iter()
+                    .chain(args.iter().copied()),
+            )
+            .unwrap();
+        let push = matches
+            .subcommand_matches("notification")
+            .unwrap()
+            .subcommand_matches("push")
+            .unwrap();
+        assert_eq!(push.subcommand_name(), Some(args[0]));
+    }
+}
+
 fn child(directory: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command

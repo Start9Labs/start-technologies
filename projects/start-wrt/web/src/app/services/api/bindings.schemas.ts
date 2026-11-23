@@ -1657,6 +1657,19 @@ export const WanIpv6Mode: z.ZodEnum<{
   .meta({
     id: 'WanIpv6Mode',
   })
+export const WanOverlap: z.ZodObject<{
+  profile: z.ZodString
+  interface: z.ZodString
+  subnet: z.ZodString
+  wanNetwork: z.ZodString
+}> = /* @__PURE__ */ object({
+  profile: z.string(),
+  interface: z.string(),
+  subnet: z.string(),
+  wanNetwork: z.string(),
+}).meta({
+  id: 'WanOverlap',
+})
 export const WifiRadio: z.ZodObject<{
   band: z.ZodString
   channel: z.ZodString
@@ -2117,6 +2130,10 @@ export const EthernetInfo: z.ZodIntersection<
           z.ZodOptional<z.ZodNullable<typeof ProfileId>>,
           z.ZodNullable<typeof ProfileId>
         >
+        /**
+         * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+         */
+        trunk: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
       }>
     >
   }>
@@ -2137,6 +2154,13 @@ export const EthernetInfo: z.ZodIntersection<
         z.string(),
         object({
           profile: wire(ProfileId.nullable().optional(), ProfileId.nullable()),
+          /**
+           * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+           */
+          trunk: wire(z.boolean().optional(), z.boolean()).meta({
+            description:
+              "Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.",
+          }),
         }),
       ),
     }),
@@ -2167,6 +2191,10 @@ export const EthernetSetRequest: z.ZodIntersection<
           z.ZodOptional<z.ZodNullable<typeof ProfileIdOpt>>,
           z.ZodNullable<typeof ProfileIdOpt>
         >
+        /**
+         * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+         */
+        trunk: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
       }>
     >
   }>
@@ -2183,6 +2211,13 @@ export const EthernetSetRequest: z.ZodIntersection<
             ProfileIdOpt.nullable().optional(),
             ProfileIdOpt.nullable(),
           ),
+          /**
+           * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
+           */
+          trunk: wire(z.boolean().optional(), z.boolean()).meta({
+            description:
+              "Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.",
+          }),
         }),
       ),
     }),
@@ -4035,6 +4070,23 @@ export const Api = {
             }),
           ),
           _RETURN: /* @__PURE__ */ ProfileId,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'wan-overlaps': {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ z.array(WanOverlap),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

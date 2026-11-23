@@ -22,7 +22,13 @@ pub fn api<C: Context>() -> ParentHandler<C> {
                 .with_about("about.add-registry")
                 .with_call_remote::<CliContext>(),
         )
-        .subcommand("refresh", from_fn_async(refresh).no_cli())
+        .subcommand(
+            "refresh",
+            from_fn_async(refresh)
+                .no_display()
+                .with_about("about.refresh-registry")
+                .with_call_remote::<CliContext>(),
+        )
         .subcommand(
             "remove",
             from_fn_async(remove)

@@ -21,17 +21,12 @@ use crate::disk::mount::util::sync_directory;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::shared_volumes::{
-    SharedVolume, SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource, local_path, source,
+    SharedVolume, SharedVolumeAvailability, SharedVolumeId, SharedVolumeSource, local_path,
+    parse_id, source,
 };
 use crate::util::Invoke;
 use crate::util::cleanup::{CleanupTasks, spawn_cleanup};
 use crate::util::io::delete_dir;
-
-pub(super) fn parse_id(value: &str) -> Result<SharedVolumeId, String> {
-    value
-        .parse::<SharedVolumeId>()
-        .map_err(|error| error.to_string())
-}
 
 pub(super) fn selected_ids(
     requested: Option<Vec<SharedVolumeId>>,
@@ -472,13 +467,6 @@ mod tests {
             timestamp: Utc::now(),
             generation,
         }
-    }
-
-    #[test]
-    fn cli_volume_ids_use_the_guid_contract() {
-        let id = SharedVolumeId::new();
-        assert_eq!(parse_id(id.as_ref()).unwrap(), id);
-        assert!(parse_id("7cb12a88-783d-4909-9923-d5eb47c7e01f").is_err());
     }
 
     #[test]

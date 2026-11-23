@@ -54,6 +54,23 @@ mod password_cli_tests {
         assert!(mount.password.is_empty());
         assert!(mount.allow_partial);
         assert!(MountParams::try_parse_from(["mount", "cifs-0", "secret"]).is_err());
+
+        assert!(
+            conversion::ConvertParams::try_parse_from(["convert", "cifs-0", "server-id", "secret"])
+                .is_err()
+        );
+        let update = catalog::CliUpdateCifsTargetParams::try_parse_from([
+            "update-cifs",
+            "cifs-0",
+            "nas",
+            "/share",
+            "user",
+            "--keep-password",
+        ])
+        .unwrap();
+        assert!(update.password.keep_password);
+        assert_eq!(update.password.read().unwrap(), None);
+        assert_eq!(update.update.password, None);
     }
 }
 
@@ -186,11 +203,48 @@ impl FileSystem for BackupTargetFS {
 pub fn target<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand("create", from_fn_async(catalog::create).no_cli())
-        .subcommand("find", from_fn_async(catalog::find).no_cli())
-        .subcommand("rename", from_fn_async(catalog::rename).no_cli())
+        .subcommand(
+            "create",
+            from_fn_async(crate::shared_volumes::cli_create::<BackupTargetId>)
+                .no_ts()
+                .with_about("about.create-backup-target"),
+        )
+        .subcommand(
+            "find",
+            from_fn_async(catalog::find)
+                .with_display_serializable()
+                .with_about("about.find-backup-targets")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "rename",
+            from_fn_async(catalog::rename)
+                .no_display()
+                .with_about("about.rename-backup-target")
+                .with_call_remote::<CliContext>(),
+        )
         .subcommand("update-cifs", from_fn_async(catalog::update_cifs).no_cli())
-        .subcommand("remove", from_fn_async(catalog::remove).no_cli())
-        .subcommand("inspect", from_fn_async(catalog::inspect).no_cli())
+        .subcommand(
+            "update-cifs",
+            from_fn_async(catalog::cli_update_cifs)
+                .no_ts()
+                .no_display()
+                .with_about("about.update-cifs-backup-target"),
+        )
+        .subcommand(
+            "remove",
+            from_fn_async(catalog::remove)
+                .no_display()
+                .with_about("about.remove-backup-target")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "inspect",
+            from_fn_async(catalog::inspect)
+                .with_display_serializable()
+                .with_about("about.inspect-backup-target")
+                .with_call_remote::<CliContext>(),
+        )
         .subcommand(
             "cifs",
             cifs::cifs::<C>().with_about("about.add-remove-update-backup-target"),
@@ -217,6 +271,13 @@ pub fn target<C: Context>() -> ParentHandler<C> {
                 .with_about("about.display-package-backup-information"),
         )
         .subcommand("convert", from_fn_async(conversion::start).no_cli())
+        .subcommand(
+            "convert",
+            from_fn_async(conversion::cli_start)
+                .no_ts()
+                .no_display()
+                .with_about("about.convert-backup"),
+        )
         .subcommand("mount", from_fn_async(mount).no_cli())
         .subcommand(
             "mount",

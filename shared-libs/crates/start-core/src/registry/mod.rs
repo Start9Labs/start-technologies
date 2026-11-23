@@ -19,7 +19,8 @@ use crate::prelude::*;
 use crate::registry::context::RegistryContext;
 use crate::registry::device_info::DeviceInfoMiddleware;
 use crate::registry::os::index::OsIndex;
-use crate::registry::package::index::{PackageIndex, ReaderParams};
+use crate::registry::package::index::{PackageIndex, Reader, ReaderParams};
+use crate::registry::reader::ReaderKey;
 use crate::registry::signer::SignerInfo;
 use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::manifest::LocaleString;
@@ -40,6 +41,7 @@ mod migrations;
 pub mod mirror;
 pub mod os;
 pub mod package;
+pub mod reader;
 pub mod signer;
 pub mod sync;
 pub mod upstream;
@@ -86,12 +88,24 @@ pub struct FullIndex {
     pub signers: BTreeMap<Guid, SignerInfo>,
     #[serde(default)]
     pub trust_signers: BTreeSet<Guid>,
+    /// Keys allowed to read the private s9pks that list them. Admin-only.
+    #[serde(default)]
+    pub readers: BTreeMap<Guid, ReaderKey>,
 }
 
 rpc_toolkit::reflect_ts!(FullIndex);
 rpc_toolkit::ts_export!(FullIndex, namespaces = [""]);
 
 impl Model<FullIndex> {
+    /// Drops what the requester cannot see, and the reader directory for non-admins.
+    pub fn retain_visible(&mut self, reader: Option<&Reader>) -> Result<(), Error> {
+        self.as_package_mut().retain_visible(reader)?;
+        if !reader.is_some_and(|reader| reader.admin) {
+            self.as_readers_mut().ser(&BTreeMap::new())?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn retain_registered_package_signatures(&mut self) -> Result<(), Error> {
         let signers = self.as_signers().de()?;
         self.as_package_mut().mutate(|packages| {
@@ -138,7 +152,7 @@ pub async fn get_full_index(
     let db = ctx.db.peek().await;
     let reader = params.reader(&db)?;
     let mut index = db.into_index();
-    index.as_package_mut().retain_visible(reader.as_ref())?;
+    index.retain_visible(reader.as_ref())?;
     index.de()
 }
 

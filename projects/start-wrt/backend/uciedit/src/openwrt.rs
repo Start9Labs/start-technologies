@@ -274,6 +274,9 @@ pub struct NetworkInterface {
     pub ip4prefixlen: Option<String>,
     #[uci(default)]
     pub proxy_arp: Option<String>,
+    /// netifd also applies it to the interface's connected routes.
+    #[uci(default)]
+    pub metric: Option<u32>,
 }
 
 impl NetworkInterface {

@@ -2,14 +2,16 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use clap::Parser;
 use patch_db::HasModel;
+use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
 use tracing::instrument;
 use zeroize::Zeroizing;
 
 use super::{BackupTargetId, TargetMount};
-use crate::context::RpcContext;
+use crate::context::{CliContext, RpcContext};
 use crate::db::model::{Database, DatabaseModel};
 use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::{ReadWrite, backupfs};
@@ -79,14 +81,28 @@ impl ConversionJob {
 pub type ConversionJobs = BTreeMap<String, BTreeMap<String, ConversionJob>>;
 
 /// Selects an existing server backup and its unlocking credential.
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct ConvertParams {
+    #[arg(help = "help.arg.backup-target-id")]
     target_id: BackupTargetId,
+    #[arg(help = "help.arg.server-id")]
     server_id: String,
+    #[arg(skip = crate::auth::PasswordType::String(String::new()))]
     password: crate::auth::PasswordType,
 }
 rpc_toolkit::reflect_ts!(ConvertParams);
+
+pub(super) async fn cli_start(
+    mut args: HandlerArgs<CliContext, ConvertParams>,
+) -> Result<(), Error> {
+    args.params.password = crate::auth::PasswordType::String(crate::backup::read_password()?);
+    args.context
+        .call_fronted(args.parent_method, args.method, &args.params)
+        .await
+}
 
 pub(crate) fn ensure_available(
     jobs: &ConversionJobs,
