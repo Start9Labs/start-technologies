@@ -1,11 +1,13 @@
 import { inject, Service } from '@angular/core'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { Dump } from 'patch-db-client'
+import { arrayFromPath, Dump, pathFromArray } from 'patch-db-client'
 import { DataModel } from './data-model'
 
 const VALUES = 'values'
 const META = 'meta'
 const CURSOR = 'cursor'
+const KEYED: readonly string[] = ['packageData', 'registryCache']
+const KEYED_ROOT = Object.freeze({})
 
 type Cursor = { id: number; epoch: string | null }
 
@@ -16,6 +18,7 @@ export class PatchDbCache {
   private saved?: Cursor & { value: DataModel }
   epoch: string | null = null
 
+  /** Unavailable persistence yields an empty baseline for live synchronization. */
   async read(): Promise<Dump<DataModel>> {
     try {
       const { keys, values, cursor } = await this.transaction(
@@ -31,9 +34,9 @@ export class PatchDbCache {
         this.saved = undefined
         return { id: 0, value: {} as DataModel }
       }
-      const value = Object.fromEntries(
-        keys.result.map((key, i) => [key, values.result[i]]),
-      ) as DataModel
+      const value = fromEntries(
+        keys.result.map((key, i) => [String(key), values.result[i]]),
+      )
       this.epoch = epoch ?? null
       this.saved = { id, epoch: this.epoch, value }
       return { id, value: { ...value } }
@@ -61,16 +64,15 @@ export class PatchDbCache {
               ? previous.value
               : undefined
           const store = tx.objectStore(VALUES)
-          if (!baseline) store.clear()
-          Object.entries(value).forEach(([key, v]) => {
-            if (!baseline || baseline[key as keyof DataModel] !== v)
-              store.put(v, key)
+          const next = toEntries(value)
+          const prior = baseline && toEntries(baseline)
+          if (!prior) store.clear()
+          next.forEach((v, key) => {
+            if (!prior?.has(key) || prior.get(key) !== v) store.put(v, key)
           })
-          if (baseline) {
-            Object.keys(baseline).forEach(key => {
-              if (!(key in value)) store.delete(key)
-            })
-          }
+          prior?.forEach((_, key) => {
+            if (!next.has(key)) store.delete(key)
+          })
           meta.put({ id, epoch }, CURSOR)
         }
       })
@@ -106,14 +108,62 @@ export class PatchDbCache {
   }
 }
 
+function toEntries(value: DataModel): Map<string, unknown> {
+  const entries = new Map<string, unknown>()
+  Object.entries(value).forEach(([key, v]) => {
+    const pointer = pathFromArray([key])
+    if (KEYED.includes(key) && isMap(v)) {
+      entries.set(pointer, KEYED_ROOT)
+      Object.entries(v).forEach(([child, c]) =>
+        entries.set(pathFromArray([key, child]), c),
+      )
+    } else {
+      entries.set(pointer, v)
+    }
+  })
+  return entries
+}
+
+function fromEntries(entries: [string, unknown][]): DataModel {
+  const value: Record<string, unknown> = {}
+  entries.forEach(([pointer, v]) => {
+    const [key = '', child] = arrayFromPath(pointer)
+    if (child === undefined)
+      value[key] = KEYED.includes(key) && isMap(v) ? {} : v
+  })
+  entries.forEach(([pointer, v]) => {
+    const [key = '', child] = arrayFromPath(pointer)
+    const root = value[key]
+    if (child !== undefined && isMap(root)) root[child] = v
+  })
+  return value as DataModel
+}
+
+function isMap(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
 function open(win: Window): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = win.indexedDB.open('startos-patchdb', 1)
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore(VALUES)
-      request.result.createObjectStore(META)
+    const request = win.indexedDB.open('startos-patchdb', 2)
+    request.onupgradeneeded = ({ oldVersion }) => {
+      const db = request.result
+      if (oldVersion) {
+        db.deleteObjectStore(VALUES)
+        db.deleteObjectStore(META)
+      }
+      db.createObjectStore(VALUES)
+      db.createObjectStore(META)
     }
-    request.onsuccess = () => resolve(request.result)
+    request.onblocked = () => {
+      request.onsuccess = () => request.result.close()
+      reject(new Error('PatchDB cache upgrade is blocked by another tab'))
+    }
+    request.onsuccess = () => {
+      const db = request.result
+      db.onversionchange = () => db.close()
+      resolve(db)
+    }
     request.onerror = () => reject(request.error)
   })
 }
