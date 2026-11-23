@@ -276,7 +276,7 @@ export default class SystemEmailComponent {
 
     const formValue = form.value as Record<string, any>
 
-    this.tasks.run(async () => {
+    await this.tasks.run(async () => {
       if (formValue['smtp'].selection === 'disabled') {
         await this.api.rpc.server.clearSmtp({})
       } else {
@@ -284,7 +284,10 @@ export default class SystemEmailComponent {
           ...this.getSmtpValue(formValue),
           keepPassword: !this.removePassword(),
         })
+        form.get('smtp.value.provider.value.password')?.reset(null)
       }
+      form.markAsPristine()
+      this.removePassword.set(false)
     }, 'Saving')
   }
 
