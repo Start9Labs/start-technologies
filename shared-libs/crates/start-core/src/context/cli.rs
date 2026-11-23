@@ -435,12 +435,7 @@ impl CliContext {
         method: std::collections::VecDeque<&'static str>,
         params: &impl serde::Serialize,
     ) -> Result<T, Error> {
-        use itertools::Itertools;
-        let method = parent_method.into_iter().chain(method).join(".");
-        from_value(
-            self.call_remote::<RpcContext>(&method, to_value(params)?)
-                .await?,
-        )
+        super::call_fronted::<RpcContext, T>(self, parent_method, method, params).await
     }
 
     pub async fn call_remote<RemoteContext>(

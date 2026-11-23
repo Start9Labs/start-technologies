@@ -21,6 +21,433 @@ about.commands-shared-volumes:
   fr_FR: "Commandes pour gérer les volumes partagés"
   pl_PL: "Polecenia do zarządzania współdzielonymi woluminami"
 
+about.container-action-clear:
+  en_US: "Remove registered actions"
+  de_DE: "Registrierte Aktionen entfernen"
+  es_ES: "Eliminar acciones registradas"
+  fr_FR: "Supprimer les actions enregistrées"
+  pl_PL: "Usuń zarejestrowane akcje"
+
+about.container-action-clear-tasks:
+  en_US: "Remove tasks this service created"
+  de_DE: "Von diesem Dienst erstellte Aufgaben entfernen"
+  es_ES: "Eliminar las tareas que creó este servicio"
+  fr_FR: "Supprimer les tâches créées par ce service"
+  pl_PL: "Usuń zadania utworzone przez tę usługę"
+
+about.container-action-create-task:
+  en_US: "Create a task for a service action (JSON parameters on stdin)"
+  de_DE: "Eine Aufgabe für eine Dienstaktion erstellen (JSON-Parameter über stdin)"
+  es_ES: "Crear una tarea para una acción de servicio (parámetros JSON por stdin)"
+  fr_FR: "Créer une tâche pour une action de service (paramètres JSON sur stdin)"
+  pl_PL: "Utwórz zadanie dla akcji usługi (parametry JSON na stdin)"
+
+about.container-action-export:
+  en_US: "Register an action (JSON parameters on stdin)"
+  de_DE: "Eine Aktion registrieren (JSON-Parameter über stdin)"
+  es_ES: "Registrar una acción (parámetros JSON por stdin)"
+  fr_FR: "Enregistrer une action (paramètres JSON sur stdin)"
+  pl_PL: "Zarejestruj akcję (parametry JSON na stdin)"
+
+about.container-action-get-input:
+  en_US: "Display an action's input form"
+  de_DE: "Das Eingabeformular einer Aktion anzeigen"
+  es_ES: "Mostrar el formulario de entrada de una acción"
+  fr_FR: "Afficher le formulaire de saisie d'une action"
+  pl_PL: "Wyświetl formularz danych wejściowych akcji"
+
+about.container-action-run:
+  en_US: "Run an action"
+  de_DE: "Eine Aktion ausführen"
+  es_ES: "Ejecutar una acción"
+  fr_FR: "Exécuter une action"
+  pl_PL: "Uruchom akcję"
+
+about.container-bind:
+  en_US: "Bind a host port to this service (JSON parameters on stdin)"
+  de_DE: "Einen Host-Port an diesen Dienst binden (JSON-Parameter über stdin)"
+  es_ES: "Vincular un puerto del host a este servicio (parámetros JSON por stdin)"
+  fr_FR: "Lier un port de l'hôte à ce service (paramètres JSON sur stdin)"
+  pl_PL: "Powiąż port hosta z tą usługą (parametry JSON na stdin)"
+
+about.container-bind-mount:
+  en_US: "Bind-mount a path inside this container"
+  de_DE: "Einen Pfad in diesem Container per Bind-Mount einhängen"
+  es_ES: "Montar una ruta con bind dentro de este contenedor"
+  fr_FR: "Monter un chemin en bind dans ce conteneur"
+  pl_PL: "Zamontuj ścieżkę (bind) wewnątrz tego kontenera"
+
+about.container-bind-range:
+  en_US: "Bind a range of host ports to this service (JSON parameters on stdin)"
+  de_DE: "Einen Bereich von Host-Ports an diesen Dienst binden (JSON-Parameter über stdin)"
+  es_ES: "Vincular un rango de puertos del host a este servicio (parámetros JSON por stdin)"
+  fr_FR: "Lier une plage de ports de l'hôte à ce service (paramètres JSON sur stdin)"
+  pl_PL: "Powiąż zakres portów hosta z tą usługą (parametry JSON na stdin)"
+
+about.container-check-dependencies:
+  en_US: "Check whether dependencies are satisfied"
+  de_DE: "Prüfen, ob Abhängigkeiten erfüllt sind"
+  es_ES: "Comprobar si se cumplen las dependencias"
+  fr_FR: "Vérifier si les dépendances sont satisfaites"
+  pl_PL: "Sprawdź, czy zależności są spełnione"
+
+about.container-clear-bindings:
+  en_US: "Remove this service's bindings"
+  de_DE: "Die Bindungen dieses Dienstes entfernen"
+  es_ES: "Eliminar los vínculos de este servicio"
+  fr_FR: "Supprimer les liaisons de ce service"
+  pl_PL: "Usuń powiązania tej usługi"
+
+about.container-clear-service-interfaces:
+  en_US: "Remove this service's exported interfaces"
+  de_DE: "Die exportierten Schnittstellen dieses Dienstes entfernen"
+  es_ES: "Eliminar las interfaces exportadas de este servicio"
+  fr_FR: "Supprimer les interfaces exportées de ce service"
+  pl_PL: "Usuń wyeksportowane interfejsy tej usługi"
+
+about.container-commands-action:
+  en_US: "Commands for this service's actions and tasks"
+  de_DE: "Befehle für die Aktionen und Aufgaben dieses Dienstes"
+  es_ES: "Comandos para las acciones y tareas de este servicio"
+  fr_FR: "Commandes pour les actions et tâches de ce service"
+  pl_PL: "Polecenia dla akcji i zadań tej usługi"
+
+about.container-commands-notification:
+  en_US: "Commands for this service's notifications"
+  de_DE: "Befehle für die Benachrichtigungen dieses Dienstes"
+  es_ES: "Comandos para las notificaciones de este servicio"
+  fr_FR: "Commandes pour les notifications de ce service"
+  pl_PL: "Polecenia dla powiadomień tej usługi"
+
+about.container-commands-plugin:
+  en_US: "Commands for this service's plugins"
+  de_DE: "Befehle für die Plugins dieses Dienstes"
+  es_ES: "Comandos para los complementos de este servicio"
+  fr_FR: "Commandes pour les plugins de ce service"
+  pl_PL: "Polecenia dla wtyczek tej usługi"
+
+about.container-commands-plugin-url:
+  en_US: "Commands for the URL plugin"
+  de_DE: "Befehle für das URL-Plugin"
+  es_ES: "Comandos para el complemento de URL"
+  fr_FR: "Commandes pour le plugin d'URL"
+  pl_PL: "Polecenia dla wtyczki URL"
+
+about.container-commands-subcontainer:
+  en_US: "Commands for this service's subcontainers"
+  de_DE: "Befehle für die Subcontainer dieses Dienstes"
+  es_ES: "Comandos para los subcontenedores de este servicio"
+  fr_FR: "Commandes pour les sous-conteneurs de ce service"
+  pl_PL: "Polecenia dla podkontenerów tej usługi"
+
+about.container-echo:
+  en_US: "Echo a message through the host"
+  de_DE: "Eine Nachricht über den Host zurückgeben"
+  es_ES: "Devolver un mensaje a través del host"
+  fr_FR: "Renvoyer un message via l'hôte"
+  pl_PL: "Odeślij wiadomość przez hosta"
+
+about.container-export-range-service-interface:
+  en_US: "Export a service interface over a port range (JSON parameters on stdin)"
+  de_DE: "Eine Dienstschnittstelle über einen Portbereich exportieren (JSON-Parameter über stdin)"
+  es_ES: "Exportar una interfaz de servicio en un rango de puertos (parámetros JSON por stdin)"
+  fr_FR: "Exporter une interface de service sur une plage de ports (paramètres JSON sur stdin)"
+  pl_PL: "Wyeksportuj interfejs usługi w zakresie portów (parametry JSON na stdin)"
+
+about.container-export-service-interface:
+  en_US: "Export a service interface (JSON parameters on stdin)"
+  de_DE: "Eine Dienstschnittstelle exportieren (JSON-Parameter über stdin)"
+  es_ES: "Exportar una interfaz de servicio (parámetros JSON por stdin)"
+  fr_FR: "Exporter une interface de service (paramètres JSON sur stdin)"
+  pl_PL: "Wyeksportuj interfejs usługi (parametry JSON na stdin)"
+
+about.container-get-container-ip:
+  en_US: "Display a service container's IP address"
+  de_DE: "Die IP-Adresse eines Dienstcontainers anzeigen"
+  es_ES: "Mostrar la dirección IP del contenedor de un servicio"
+  fr_FR: "Afficher l'adresse IP du conteneur d'un service"
+  pl_PL: "Wyświetl adres IP kontenera usługi"
+
+about.container-get-data-version:
+  en_US: "Display this service's data version"
+  de_DE: "Die Datenversion dieses Dienstes anzeigen"
+  es_ES: "Mostrar la versión de datos de este servicio"
+  fr_FR: "Afficher la version des données de ce service"
+  pl_PL: "Wyświetl wersję danych tej usługi"
+
+about.container-get-dependencies:
+  en_US: "Display this service's declared dependencies"
+  de_DE: "Die festgelegten Abhängigkeiten dieses Dienstes anzeigen"
+  es_ES: "Mostrar las dependencias declaradas de este servicio"
+  fr_FR: "Afficher les dépendances déclarées de ce service"
+  pl_PL: "Wyświetl zadeklarowane zależności tej usługi"
+
+about.container-get-host-info:
+  en_US: "Display a host's addresses and bindings"
+  de_DE: "Die Adressen und Bindungen eines Hosts anzeigen"
+  es_ES: "Mostrar las direcciones y vínculos de un host"
+  fr_FR: "Afficher les adresses et liaisons d'un hôte"
+  pl_PL: "Wyświetl adresy i powiązania hosta"
+
+about.container-get-installed-packages:
+  en_US: "List installed packages"
+  de_DE: "Installierte Pakete auflisten"
+  es_ES: "Listar los paquetes instalados"
+  fr_FR: "Lister les paquets installés"
+  pl_PL: "Wyświetl zainstalowane pakiety"
+
+about.container-get-os-ip:
+  en_US: "Display the StartOS host's IP address"
+  de_DE: "Die IP-Adresse des StartOS-Hosts anzeigen"
+  es_ES: "Mostrar la dirección IP del host StartOS"
+  fr_FR: "Afficher l'adresse IP de l'hôte StartOS"
+  pl_PL: "Wyświetl adres IP hosta StartOS"
+
+about.container-get-outbound-gateway:
+  en_US: "Display this service's outbound gateway"
+  de_DE: "Das ausgehende Gateway dieses Dienstes anzeigen"
+  es_ES: "Mostrar la puerta de enlace de salida de este servicio"
+  fr_FR: "Afficher la passerelle sortante de ce service"
+  pl_PL: "Wyświetl bramę wychodzącą tej usługi"
+
+about.container-get-service-interface:
+  en_US: "Display a service interface"
+  de_DE: "Eine Dienstschnittstelle anzeigen"
+  es_ES: "Mostrar una interfaz de servicio"
+  fr_FR: "Afficher une interface de service"
+  pl_PL: "Wyświetl interfejs usługi"
+
+about.container-get-service-manifest:
+  en_US: "Display a service's manifest"
+  de_DE: "Das Manifest eines Dienstes anzeigen"
+  es_ES: "Mostrar el manifiesto de un servicio"
+  fr_FR: "Afficher le manifeste d'un service"
+  pl_PL: "Wyświetl manifest usługi"
+
+about.container-get-service-port-forward:
+  en_US: "Display the network details of a binding"
+  de_DE: "Die Netzwerkdetails einer Bindung anzeigen"
+  es_ES: "Mostrar los detalles de red de un vínculo"
+  fr_FR: "Afficher les détails réseau d'une liaison"
+  pl_PL: "Wyświetl szczegóły sieciowe powiązania"
+
+about.container-get-shared-volumes:
+  en_US: "List the shared volumes granted to this service"
+  de_DE: "Die diesem Dienst gewährten gemeinsamen Volumes auflisten"
+  es_ES: "Listar los volúmenes compartidos concedidos a este servicio"
+  fr_FR: "Lister les volumes partagés accordés à ce service"
+  pl_PL: "Wyświetl współdzielone woluminy przyznane tej usłudze"
+
+about.container-get-ssl-certificate:
+  en_US: "Display a certificate chain for hostnames (JSON parameters on stdin)"
+  de_DE: "Eine Zertifikatskette für Hostnamen anzeigen (JSON-Parameter über stdin)"
+  es_ES: "Mostrar una cadena de certificados para nombres de host (parámetros JSON por stdin)"
+  fr_FR: "Afficher une chaîne de certificats pour des noms d'hôte (paramètres JSON sur stdin)"
+  pl_PL: "Wyświetl łańcuch certyfikatów dla nazw hostów (parametry JSON na stdin)"
+
+about.container-get-ssl-key:
+  en_US: "Display the private key for hostnames' certificate (JSON parameters on stdin)"
+  de_DE: "Den privaten Schlüssel des Zertifikats für Hostnamen anzeigen (JSON-Parameter über stdin)"
+  es_ES: "Mostrar la clave privada del certificado de los nombres de host (parámetros JSON por stdin)"
+  fr_FR: "Afficher la clé privée du certificat des noms d'hôte (paramètres JSON sur stdin)"
+  pl_PL: "Wyświetl klucz prywatny certyfikatu dla nazw hostów (parametry JSON na stdin)"
+
+about.container-get-status:
+  en_US: "Display a service's status"
+  de_DE: "Den Status eines Dienstes anzeigen"
+  es_ES: "Mostrar el estado de un servicio"
+  fr_FR: "Afficher l'état d'un service"
+  pl_PL: "Wyświetl stan usługi"
+
+about.container-get-system-smtp:
+  en_US: "Display the server's SMTP settings"
+  de_DE: "Die SMTP-Einstellungen des Servers anzeigen"
+  es_ES: "Mostrar la configuración SMTP del servidor"
+  fr_FR: "Afficher les paramètres SMTP du serveur"
+  pl_PL: "Wyświetl ustawienia SMTP serwera"
+
+about.container-git-info:
+  en_US: "Display the git hash of the running StartOS build"
+  de_DE: "Den Git-Hash des laufenden StartOS-Builds anzeigen"
+  es_ES: "Mostrar el hash de git de la compilación de StartOS en ejecución"
+  fr_FR: "Afficher le hash git de la version de StartOS en cours"
+  pl_PL: "Wyświetl hash git uruchomionej kompilacji StartOS"
+
+about.container-list-service-interfaces:
+  en_US: "List a service's interfaces"
+  de_DE: "Die Schnittstellen eines Dienstes auflisten"
+  es_ES: "Listar las interfaces de un servicio"
+  fr_FR: "Lister les interfaces d'un service"
+  pl_PL: "Wyświetl interfejsy usługi"
+
+about.container-mount:
+  en_US: "Mount a dependency's volume (JSON parameters on stdin)"
+  de_DE: "Ein Volume einer Abhängigkeit einhängen (JSON-Parameter über stdin)"
+  es_ES: "Montar un volumen de una dependencia (parámetros JSON por stdin)"
+  fr_FR: "Monter un volume d'une dépendance (paramètres JSON sur stdin)"
+  pl_PL: "Zamontuj wolumin zależności (parametry JSON na stdin)"
+
+about.container-mount-shared-volume:
+  en_US: "Mount a granted shared volume into a subcontainer"
+  de_DE: "Ein gewährtes gemeinsames Volume in einen Subcontainer einhängen"
+  es_ES: "Montar un volumen compartido concedido en un subcontenedor"
+  fr_FR: "Monter un volume partagé accordé dans un sous-conteneur"
+  pl_PL: "Zamontuj przyznany współdzielony wolumin w podkontenerze"
+
+about.container-notification-create:
+  en_US: "Send a notification from this service"
+  de_DE: "Eine Benachrichtigung von diesem Dienst senden"
+  es_ES: "Enviar una notificación desde este servicio"
+  fr_FR: "Envoyer une notification depuis ce service"
+  pl_PL: "Wyślij powiadomienie z tej usługi"
+
+about.container-pipe-wrap:
+  en_US: "Relay a command's standard streams through pipes"
+  de_DE: "Die Standardströme eines Befehls über Pipes weiterleiten"
+  es_ES: "Retransmitir los flujos estándar de un comando por tuberías"
+  fr_FR: "Relayer les flux standard d'une commande via des tubes"
+  pl_PL: "Przekaż standardowe strumienie polecenia przez potoki"
+
+about.container-plugin-url-clear-urls:
+  en_US: "Remove URLs this plugin exported (JSON parameters on stdin)"
+  de_DE: "Von diesem Plugin exportierte URLs entfernen (JSON-Parameter über stdin)"
+  es_ES: "Eliminar las URL que exportó este complemento (parámetros JSON por stdin)"
+  fr_FR: "Supprimer les URL exportées par ce plugin (paramètres JSON sur stdin)"
+  pl_PL: "Usuń adresy URL wyeksportowane przez tę wtyczkę (parametry JSON na stdin)"
+
+about.container-plugin-url-export-url:
+  en_US: "Export a URL to a host (JSON parameters on stdin)"
+  de_DE: "Eine URL an einen Host exportieren (JSON-Parameter über stdin)"
+  es_ES: "Exportar una URL a un host (parámetros JSON por stdin)"
+  fr_FR: "Exporter une URL vers un hôte (paramètres JSON sur stdin)"
+  pl_PL: "Wyeksportuj adres URL do hosta (parametry JSON na stdin)"
+
+about.container-plugin-url-register:
+  en_US: "Register this service as a URL plugin (JSON parameters on stdin)"
+  de_DE: "Diesen Dienst als URL-Plugin registrieren (JSON-Parameter über stdin)"
+  es_ES: "Registrar este servicio como complemento de URL (parámetros JSON por stdin)"
+  fr_FR: "Enregistrer ce service comme plugin d'URL (paramètres JSON sur stdin)"
+  pl_PL: "Zarejestruj tę usługę jako wtyczkę URL (parametry JSON na stdin)"
+
+about.container-rebuild:
+  en_US: "Rebuild this service's container"
+  de_DE: "Den Container dieses Dienstes neu erstellen"
+  es_ES: "Reconstruir el contenedor de este servicio"
+  fr_FR: "Reconstruire le conteneur de ce service"
+  pl_PL: "Odbuduj kontener tej usługi"
+
+about.container-restart:
+  en_US: "Restart this service"
+  de_DE: "Diesen Dienst neu starten"
+  es_ES: "Reiniciar este servicio"
+  fr_FR: "Redémarrer ce service"
+  pl_PL: "Uruchom ponownie tę usługę"
+
+about.container-retire-binding:
+  en_US: "Retire one of a host's bindings"
+  de_DE: "Eine Bindung eines Hosts stilllegen"
+  es_ES: "Retirar uno de los vínculos de un host"
+  fr_FR: "Retirer une des liaisons d'un hôte"
+  pl_PL: "Wycofaj jedno z powiązań hosta"
+
+about.container-retire-host:
+  en_US: "Retire one of this service's hosts"
+  de_DE: "Einen Host dieses Dienstes stilllegen"
+  es_ES: "Retirar uno de los hosts de este servicio"
+  fr_FR: "Retirer un des hôtes de ce service"
+  pl_PL: "Wycofaj jeden z hostów tej usługi"
+
+about.container-set-backup-progress:
+  en_US: "Report backup progress (JSON parameters on stdin)"
+  de_DE: "Sicherungsfortschritt melden (JSON-Parameter über stdin)"
+  es_ES: "Informar del progreso de la copia de seguridad (parámetros JSON por stdin)"
+  fr_FR: "Signaler la progression de la sauvegarde (paramètres JSON sur stdin)"
+  pl_PL: "Zgłoś postęp kopii zapasowej (parametry JSON na stdin)"
+
+about.container-set-data-version:
+  en_US: "Record this service's data version"
+  de_DE: "Die Datenversion dieses Dienstes festhalten"
+  es_ES: "Registrar la versión de datos de este servicio"
+  fr_FR: "Enregistrer la version des données de ce service"
+  pl_PL: "Zapisz wersję danych tej usługi"
+
+about.container-set-dependencies:
+  en_US: "Declare this service's current dependencies"
+  de_DE: "Die aktuellen Abhängigkeiten dieses Dienstes festlegen"
+  es_ES: "Declarar las dependencias actuales de este servicio"
+  fr_FR: "Déclarer les dépendances actuelles de ce service"
+  pl_PL: "Zadeklaruj bieżące zależności tej usługi"
+
+about.container-set-health:
+  en_US: "Report a health check result (JSON parameters on stdin)"
+  de_DE: "Ein Ergebnis einer Zustandsprüfung melden (JSON-Parameter über stdin)"
+  es_ES: "Informar del resultado de una comprobación de estado (parámetros JSON por stdin)"
+  fr_FR: "Signaler le résultat d'une vérification de santé (paramètres JSON sur stdin)"
+  pl_PL: "Zgłoś wynik kontroli stanu (parametry JSON na stdin)"
+
+about.container-set-init-progress:
+  en_US: "Report initialization progress (JSON parameters on stdin)"
+  de_DE: "Initialisierungsfortschritt melden (JSON-Parameter über stdin)"
+  es_ES: "Informar del progreso de la inicialización (parámetros JSON por stdin)"
+  fr_FR: "Signaler la progression de l'initialisation (paramètres JSON sur stdin)"
+  pl_PL: "Zgłoś postęp inicjalizacji (parametry JSON na stdin)"
+
+about.container-set-main-status:
+  en_US: "Report whether the main daemon is running"
+  de_DE: "Melden, ob der Hauptdienst läuft"
+  es_ES: "Informar si el proceso principal está en ejecución"
+  fr_FR: "Indiquer si le démon principal est en cours d'exécution"
+  pl_PL: "Zgłoś, czy główny proces działa"
+
+about.container-shutdown:
+  en_US: "Stop this service"
+  de_DE: "Diesen Dienst stoppen"
+  es_ES: "Detener este servicio"
+  fr_FR: "Arrêter ce service"
+  pl_PL: "Zatrzymaj tę usługę"
+
+about.container-subcontainer-create-fs:
+  en_US: "Create a subcontainer filesystem from an image"
+  de_DE: "Ein Subcontainer-Dateisystem aus einem Image erstellen"
+  es_ES: "Crear un sistema de archivos de subcontenedor a partir de una imagen"
+  fr_FR: "Créer un système de fichiers de sous-conteneur à partir d'une image"
+  pl_PL: "Utwórz system plików podkontenera z obrazu"
+
+about.container-subcontainer-destroy-fs:
+  en_US: "Destroy a subcontainer filesystem"
+  de_DE: "Ein Subcontainer-Dateisystem entfernen"
+  es_ES: "Destruir un sistema de archivos de subcontenedor"
+  fr_FR: "Détruire un système de fichiers de sous-conteneur"
+  pl_PL: "Usuń system plików podkontenera"
+
+about.container-subcontainer-exec:
+  en_US: "Run a command in a running subcontainer"
+  de_DE: "Einen Befehl in einem laufenden Subcontainer ausführen"
+  es_ES: "Ejecutar un comando en un subcontenedor en ejecución"
+  fr_FR: "Exécuter une commande dans un sous-conteneur en cours"
+  pl_PL: "Wykonaj polecenie w działającym podkontenerze"
+
+about.container-subcontainer-exec-command:
+  en_US: "Run a command in a subcontainer and wait for it"
+  de_DE: "Einen Befehl in einem Subcontainer ausführen und darauf warten"
+  es_ES: "Ejecutar un comando en un subcontenedor y esperar a que termine"
+  fr_FR: "Exécuter une commande dans un sous-conteneur et attendre sa fin"
+  pl_PL: "Wykonaj polecenie w podkontenerze i poczekaj na nie"
+
+about.container-subcontainer-launch:
+  en_US: "Launch a command in a subcontainer"
+  de_DE: "Einen Befehl in einem Subcontainer starten"
+  es_ES: "Lanzar un comando en un subcontenedor"
+  fr_FR: "Lancer une commande dans un sous-conteneur"
+  pl_PL: "Uruchom polecenie w podkontenerze"
+
+about.container-subcontainer-launch-init:
+  en_US: "Launch a subcontainer's init process"
+  de_DE: "Den Init-Prozess eines Subcontainers starten"
+  es_ES: "Lanzar el proceso init de un subcontenedor"
+  fr_FR: "Lancer le processus init d'un sous-conteneur"
+  pl_PL: "Uruchom proces init podkontenera"
+
 about.convert-backup:
   en_US: "Convert a server's backup on a target to the current format"
   de_DE: "Die Sicherung eines Servers auf einem Ziel in das aktuelle Format umwandeln"
@@ -5325,6 +5752,20 @@ help.arg.mount-beneath:
   fr_FR: "Insérer sous le montage supérieur ; son démontage révèle ce montage"
   pl_PL: "Umieść pod najwyższym montowaniem; jego odmontowanie odsłoni to montowanie"
 
+help.arg.mount-readonly:
+  en_US: "Mount read-only"
+  de_DE: "Schreibgeschützt einhängen"
+  es_ES: "Montar en solo lectura"
+  fr_FR: "Monter en lecture seule"
+  pl_PL: "Zamontuj tylko do odczytu"
+
+help.arg.mountpoint:
+  en_US: "Path to mount at inside the subcontainer"
+  de_DE: "Einhängepfad im Subcontainer"
+  es_ES: "Ruta de montaje dentro del subcontenedor"
+  fr_FR: "Chemin de montage dans le sous-conteneur"
+  pl_PL: "Ścieżka montowania wewnątrz podkontenera"
+
 help.arg.multi-arch-s9pks:
   en_US: "Enable multi-architecture s9pk support"
   de_DE: "Multi-Architektur-s9pk-Unterstützung aktivieren"
@@ -5373,6 +5814,13 @@ help.arg.no-verify-sign:
   es_ES: "Firmar los compromisos que lista el registro en lugar de un s9pk local"
   fr_FR: "Signer les engagements listés par le registre au lieu d'un s9pk local"
   pl_PL: "Podpisz zobowiązania wymienione w rejestrze zamiast lokalnego s9pk"
+
+help.arg.notification-data:
+  en_US: "Markdown details shown with the notification"
+  de_DE: "Markdown-Details, die mit der Benachrichtigung angezeigt werden"
+  es_ES: "Detalles en Markdown que se muestran con la notificación"
+  fr_FR: "Détails Markdown affichés avec la notification"
+  pl_PL: "Szczegóły w Markdown wyświetlane z powiadomieniem"
 
 help.arg.nowait:
   en_US: "Return immediately instead of waiting for graceful shutdown to complete"
@@ -5704,6 +6152,13 @@ help.arg.server-id:
   fr_FR: "Identifiant unique du serveur"
   pl_PL: "Unikalny identyfikator serwera"
 
+help.arg.service-interface-id:
+  en_US: "Service interface identifier"
+  de_DE: "Kennung der Dienstschnittstelle"
+  es_ES: "Identificador de la interfaz de servicio"
+  fr_FR: "Identifiant de l'interface de service"
+  pl_PL: "Identyfikator interfejsu usługi"
+
 help.arg.set-as-default-outbound:
   en_US: "Set as the default outbound gateway"
   de_DE: "Als Standard-Ausgangs-Gateway festlegen"
@@ -5759,6 +6214,13 @@ help.arg.shared-volume-name:
   es_ES: "Nombre del volumen compartido"
   fr_FR: "Nom du volume partagé"
   pl_PL: "Nazwa współdzielonego woluminu"
+
+help.arg.shared-volume-subpath:
+  en_US: "Directory within the volume to mount"
+  de_DE: "Zu einhängendes Verzeichnis innerhalb des Volumes"
+  es_ES: "Directorio del volumen que se montará"
+  fr_FR: "Répertoire du volume à monter"
+  pl_PL: "Katalog woluminu do zamontowania"
 
 help.arg.signature-hash:
   en_US: "Hash for signature verification"
@@ -5871,6 +6333,13 @@ help.arg.squashfs-image-path:
   es_ES: "Ruta al archivo de imagen squashfs"
   fr_FR: "Chemin vers le fichier image squashfs"
   pl_PL: "Ścieżka do pliku obrazu squashfs"
+
+help.arg.subcontainer-id:
+  en_US: "Subcontainer identifier"
+  de_DE: "Kennung des Subcontainers"
+  es_ES: "Identificador del subcontenedor"
+  fr_FR: "Identifiant du sous-conteneur"
+  pl_PL: "Identyfikator podkontenera"
 
 help.arg.subcontainer-name:
   en_US: "Guid of the subcontainer, or a prefix; use --name to select by name"
