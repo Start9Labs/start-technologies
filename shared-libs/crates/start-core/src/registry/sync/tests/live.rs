@@ -6,7 +6,7 @@ use crate::sign::{AnySigningKey, Signer};
 use crate::util::net::secure::EncryptedSocket;
 use crate::util::net::tungstenite::transport;
 
-fn signer() -> Signer {
+pub(super) fn signer() -> Signer {
     Signer::Key(AnySigningKey::Ed25519(
         ed25519_dalek::SigningKey::from_bytes(&[71; 32]),
     ))

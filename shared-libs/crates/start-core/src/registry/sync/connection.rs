@@ -201,13 +201,13 @@ fn subscription_event(
             "duplicate registry initial response"
         );
         let response: RpcResponse = from_value(message)?;
+        let start = from_value(response.result?)?;
         state.started = true;
-        Ok(Some(SubscriptionEvent::Start(from_value(
-            response.result?,
-        )?)))
+        Ok(Some(SubscriptionEvent::Start(start)))
     }
 }
 
+/// Failed initial responses discard resume cursors but retain cached indexes.
 pub(super) async fn receive_updates(
     socket: EncryptedSocket,
     db: &TypedPatchDb<Database>,
@@ -237,15 +237,28 @@ pub(super) async fn receive_updates(
     drop(saved);
     let mut follower = SubscriptionFollower::start(socket, requests).await?;
     let mut os = TrackedValue::default();
-    while let Some((id, event)) = follower.next_event().await? {
-        let subscription = by_id[&id];
-        match subscription {
-            Subscription::Index(url) => ingest(db, url, &view, &event, device).await?,
-            Subscription::Os(_) => publish(db, subscription, os.apply(event)?, device).await?,
+    let result = async {
+        while let Some((id, event)) = follower.next_event().await? {
+            let subscription = by_id[&id];
+            match subscription {
+                Subscription::Index(url) => ingest(db, url, &view, &event, device).await?,
+                Subscription::Os(_) => publish(db, subscription, os.apply(event)?, device).await?,
+            }
+            *backoff = INITIAL_BACKOFF;
         }
-        *backoff = INITIAL_BACKOFF;
+        Ok(())
     }
-    Ok(())
+    .await;
+    if result.is_err() {
+        for (&id, &subscription) in &by_id {
+            if let Subscription::Index(url) = subscription
+                && !follower.watches[&id].started
+            {
+                db.mutate(|db| forget_cursor(db, url)).await.result?;
+            }
+        }
+    }
+    result
 }
 
 /// Follows `db.subscribe` streams on one admitted socket.

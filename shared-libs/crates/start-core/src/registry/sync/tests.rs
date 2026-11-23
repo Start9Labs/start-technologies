@@ -18,6 +18,7 @@ mod error_details;
 mod live;
 mod live_legacy;
 mod polling;
+mod resume;
 
 fn url() -> Url {
     registry_url("https://registry.test/catalog/").unwrap()
