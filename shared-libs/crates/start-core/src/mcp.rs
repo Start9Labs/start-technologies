@@ -26,9 +26,11 @@ pub const MCP: &str = "mcp";
 /// What a method does to the server. A read grant admits `Read` methods alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
+    /// Persists nothing and runs no package-defined code.
     Read,
     Write,
-    /// Loses data, or takes the server or a service out of the user's reach.
+    /// Loses user data, or takes the server or a service out of the user's reach. Deleting
+    /// notifications or ordinary configuration is `Write`.
     Destructive,
 }
 
@@ -52,7 +54,7 @@ const EFFECTS: &[(&str, Effect)] = &[
     ("backup.target.convert", Effect::Destructive),
     ("backup.target.create", Effect::Write),
     ("backup.target.delete-legacy", Effect::Destructive),
-    ("backup.target.find", Effect::Read),
+    ("backup.target.find", Effect::Write),
     ("backup.target.info", Effect::Read),
     ("backup.target.inspect", Effect::Read),
     ("backup.target.list", Effect::Read),
@@ -105,7 +107,7 @@ const EFFECTS: &[(&str, Effect)] = &[
     ("notification.mark-seen", Effect::Write),
     ("notification.mark-seen-before", Effect::Write),
     ("notification.mark-unseen", Effect::Write),
-    ("notification.push.key", Effect::Read),
+    ("notification.push.key", Effect::Write),
     ("notification.push.list", Effect::Read),
     ("notification.push.subscribe", Effect::Write),
     ("notification.push.test", Effect::Write),
@@ -113,7 +115,7 @@ const EFFECTS: &[(&str, Effect)] = &[
     ("notification.remove", Effect::Write),
     ("notification.remove-before", Effect::Write),
     ("package.action.clear-task", Effect::Write),
-    ("package.action.get-input", Effect::Read),
+    ("package.action.get-input", Effect::Destructive),
     ("package.action.run", Effect::Destructive),
     ("package.attach", Effect::Destructive),
     ("package.backup.restore", Effect::Destructive),
@@ -126,25 +128,28 @@ const EFFECTS: &[(&str, Effect)] = &[
     ("package.host.address.list", Effect::Read),
     ("package.host.binding.list", Effect::Read),
     ("package.host.binding.reassign-port", Effect::Write),
-    ("package.host.binding.set-address-enabled", Effect::Write),
+    (
+        "package.host.binding.set-address-enabled",
+        Effect::Destructive,
+    ),
     ("package.host.binding.set-gua-wan", Effect::Write),
     (
         "package.host.binding.set-range-address-enabled",
-        Effect::Write,
+        Effect::Destructive,
     ),
     ("package.host.list", Effect::Read),
-    ("package.install", Effect::Write),
+    ("package.install", Effect::Destructive),
     ("package.installed-version", Effect::Read),
     ("package.list", Effect::Read),
     ("package.logs", Effect::Read),
     ("package.logs.follow", Effect::Read),
-    ("package.rebuild", Effect::Write),
-    ("package.restart", Effect::Write),
+    ("package.rebuild", Effect::Destructive),
+    ("package.restart", Effect::Destructive),
     ("package.set-outbound-gateway", Effect::Write),
-    ("package.sideload", Effect::Write),
+    ("package.sideload", Effect::Destructive),
     ("package.start", Effect::Write),
     ("package.stats", Effect::Read),
-    ("package.stop", Effect::Write),
+    ("package.stop", Effect::Destructive),
     ("package.uninstall", Effect::Destructive),
     ("server.clear-nut", Effect::Write),
     ("server.clear-smtp", Effect::Write),
@@ -159,11 +164,14 @@ const EFFECTS: &[(&str, Effect)] = &[
     ("server.host.address.list", Effect::Read),
     ("server.host.binding.list", Effect::Read),
     ("server.host.binding.reassign-port", Effect::Write),
-    ("server.host.binding.set-address-enabled", Effect::Write),
+    (
+        "server.host.binding.set-address-enabled",
+        Effect::Destructive,
+    ),
     ("server.host.binding.set-gua-wan", Effect::Write),
     (
         "server.host.binding.set-range-address-enabled",
-        Effect::Write,
+        Effect::Destructive,
     ),
     ("server.kernel-logs", Effect::Read),
     ("server.kernel-logs.follow", Effect::Read),
@@ -211,11 +219,11 @@ const EFFECTS: &[(&str, Effect)] = &[
     ("volumes.update-cifs", Effect::Write),
     ("wifi.add", Effect::Write),
     ("wifi.available.get", Effect::Read),
-    ("wifi.connect", Effect::Write),
-    ("wifi.country.set", Effect::Write),
+    ("wifi.connect", Effect::Destructive),
+    ("wifi.country.set", Effect::Destructive),
     ("wifi.get", Effect::Read),
     ("wifi.remove", Effect::Write),
-    ("wifi.set-enabled", Effect::Write),
+    ("wifi.set-enabled", Effect::Destructive),
 ];
 
 pub fn effect(method: &str) -> Option<Effect> {
@@ -410,6 +418,36 @@ mod test {
         for (name, read_only, destructive) in [
             ("package.list", Some(true), None),
             ("package.start", Some(false), Some(false)),
+            ("backup.target.find", Some(false), Some(false)),
+            ("notification.push.key", Some(false), Some(false)),
+            ("package.action.get-input", Some(false), Some(true)),
+            ("package.install", Some(false), Some(true)),
+            ("package.stop", Some(false), Some(true)),
+            ("package.restart", Some(false), Some(true)),
+            ("package.rebuild", Some(false), Some(true)),
+            ("wifi.connect", Some(false), Some(true)),
+            ("wifi.country.set", Some(false), Some(true)),
+            ("wifi.set-enabled", Some(false), Some(true)),
+            (
+                "package.host.binding.set-address-enabled",
+                Some(false),
+                Some(true),
+            ),
+            (
+                "package.host.binding.set-range-address-enabled",
+                Some(false),
+                Some(true),
+            ),
+            (
+                "server.host.binding.set-address-enabled",
+                Some(false),
+                Some(true),
+            ),
+            (
+                "server.host.binding.set-range-address-enabled",
+                Some(false),
+                Some(true),
+            ),
             ("package.exec", Some(false), Some(true)),
             ("package.uninstall", Some(false), Some(true)),
         ] {
