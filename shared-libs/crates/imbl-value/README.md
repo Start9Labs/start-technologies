@@ -4,7 +4,8 @@ A JSON `Value` type built on `imbl`.
 
 `imbl-value` mirrors `serde_json::Value` but backs its collections with the persistent immutable data
 structures from the [`imbl`](https://crates.io/crates/imbl) crate: arrays are `imbl::Vector`, objects are an
-insertion-order-preserving `InOMap`, and strings are `Arc<String>`. Cloning a value is therefore cheap, and
+insertion-order-preserving `InOMap`, and strings are `Arc<String>`. `OrdValue` is the same type with
+key-sorted `imbl::OrdMap` objects. Cloning a value is therefore cheap, and
 snapshots structurally share memory. Numbers reuse `serde_json::Number`, so numeric behavior matches
 `serde_json` exactly. The crate ships its own serde (de)serialization, a `json!` macro and optional proptest
 integration. RPC owns the TypeScript bridges for `Value` and `InOMap`.

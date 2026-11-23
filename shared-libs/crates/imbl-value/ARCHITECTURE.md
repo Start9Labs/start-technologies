@@ -19,21 +19,29 @@ several other first-party crates build on.
 ## The Value type
 
 ```rust
-pub enum Value {
+pub enum GenericValue<K: ObjectKind> {
     Null,
     Bool(bool),
     Number(serde_json::Number),
     String(Arc<String>),
-    Array(imbl::Vector<Value>),
-    Object(InOMap<InternedString, Value>),
+    Array(imbl::Vector<GenericValue<K>>),
+    Object(K::Map),
 }
+
+pub type Value = GenericValue<InOrder>;   // objects are InOMap<InternedString, Value>
+pub type OrdValue = GenericValue<Sorted>; // objects are imbl::OrdMap<InternedString, OrdValue>
 ```
 
 The variants are a one-to-one analogue of `serde_json::Value`, with three deliberate substitutions:
 
 - arrays use `imbl::Vector` instead of `Vec`,
-- objects use `InOMap` (this crate) instead of `Map`,
+- objects use the map `K` selects instead of `Map`: `InOMap` (this crate) keeps insertion order, `imbl::OrdMap`
+  keeps keys sorted with O(log n) lookups,
 - strings are `Arc<String>` for cheap shared ownership.
+
+`ObjectKind` (`object.rs`) names the map type, and `ObjectMap` is the set of map operations the crate's
+generic code uses. Every impl is written once over `GenericValue<K>`; `Value` and `OrdValue` convert into each
+other with `From`.
 
 `Number` is re-used directly from `serde_json`, so numeric semantics match `serde_json` exactly. `lib.rs`
 also re-exports `imbl`, `InOMap`, `serde_json::{Number, Error as ErrorSource}`, and `yasi::InternedString`
@@ -43,16 +51,16 @@ so consumers don't need to add those crates themselves.
 
 - **`lib.rs`** holds the enum and its whole core surface: typed accessors (`as_*`, `get`, `get_mut`),
   JSON-pointer navigation, `Index`-trait indexing, `Display`/`Debug`, the `Eq`/`Ord`/`Hash` impls, and the
-  `to_value`/`from_value` round-trip helpers. `to_value::<T>(&T) -> Result<Value, Error>` and
-  `from_value::<T>(Value) -> Result<T, Error>` are the primary entry points for converting between `Value`
-  and arbitrary `Serialize`/`Deserialize` types.
+  `to_value`/`from_value` round-trip helpers. `to_value::<T>(&T) -> Result<Value, Error>` (or `to_ord_value`
+  for an `OrdValue`) and `from_value::<T>(value) -> Result<T, Error>` are the primary entry points for
+  converting between a value and arbitrary `Serialize`/`Deserialize` types.
 - **`ser.rs` / `de.rs`** implement (de)serialization for `Value` by hand rather than deferring to
-  `serde_json`. `ser.rs` also defines a custom `Serializer` that drives the `T -> Value` conversion behind
-  `to_value`; `de.rs` defines the visitors that build a `Value` from any deserializer.
-- **`from.rs`** carries the cheap, infallible conversions: `serde_json::Value` ↔ `Value`, and
-  slices/arrays/`&str` → `Value`.
-- **`index.rs`** implements indexing (`value["key"]`, `value[0]`) via a private `Index` trait, with
-  `parse_index` resolving numeric vs string keys.
+  `serde_json`. `ser.rs` also defines a custom `Serializer<K>` that drives the `T -> GenericValue<K>`
+  conversion behind `to_value`; `de.rs` defines the visitors that build a `Value` from any deserializer.
+- **`from.rs`** carries the cheap, infallible conversions: `serde_json::Value` ↔ `GenericValue`,
+  `Value` ↔ `OrdValue`, and slices/arrays/`&str` → `GenericValue`.
+- **`index.rs`** implements indexing (`value["key"]`, `value[0]`) via the `Index` trait. JSON-pointer
+  navigation in `lib.rs` uses `parse_index` to read array indices.
 - **`macros.rs`** provides the `json!` macro for building a `Value` from JSON-like literal syntax, expanded
   through `json_internal!` and friends.
 
