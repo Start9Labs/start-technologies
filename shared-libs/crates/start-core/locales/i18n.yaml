@@ -1,11 +1,32 @@
 _version: 2
 
+about.clear-nut:
+  en_US: "Disable UPS monitoring and clear its settings"
+  de_DE: "UPS-Überwachung deaktivieren und ihre Einstellungen löschen"
+  es_ES: "Desactivar la supervisión del SAI y borrar su configuración"
+  fr_FR: "Désactiver la surveillance de l'onduleur et effacer ses paramètres"
+  pl_PL: "Wyłącz monitorowanie UPS i wyczyść jego ustawienia"
+
 about.commands-shared-volumes:
   en_US: "Commands for managing shared volumes"
   de_DE: "Befehle zur Verwaltung gemeinsamer Volumes"
   es_ES: "Comandos para gestionar volúmenes compartidos"
   fr_FR: "Commandes pour gérer les volumes partagés"
   pl_PL: "Polecenia do zarządzania współdzielonymi woluminami"
+
+about.convert-backup:
+  en_US: "Convert a server's backup on a target to the current format"
+  de_DE: "Die Sicherung eines Servers auf einem Ziel in das aktuelle Format umwandeln"
+  es_ES: "Convertir la copia de seguridad de un servidor en un destino al formato actual"
+  fr_FR: "Convertir la sauvegarde d'un serveur sur une cible au format actuel"
+  pl_PL: "Przekonwertuj kopię zapasową serwera w miejscu docelowym do bieżącego formatu"
+
+about.create-backup-target:
+  en_US: "Create a backup target"
+  de_DE: "Ein Sicherungsziel erstellen"
+  es_ES: "Crear un destino de copia de seguridad"
+  fr_FR: "Créer une cible de sauvegarde"
+  pl_PL: "Utwórz miejsce docelowe kopii zapasowej"
 
 about.create-cifs-shared-volume:
   en_US: "Create the volume on a CIFS network share"
@@ -35,12 +56,54 @@ about.create-shared-volume:
   fr_FR: "Créer un volume partagé"
   pl_PL: "Utwórz współdzielony wolumin"
 
+about.dns-status:
+  en_US: "Display the active DNS authority"
+  de_DE: "Die aktive DNS-Autorität anzeigen"
+  es_ES: "Mostrar la autoridad DNS activa"
+  fr_FR: "Afficher l'autorité DNS active"
+  pl_PL: "Wyświetl aktywne źródło DNS"
+
+about.edit-gateway:
+  en_US: "Rename a gateway or change its DNS servers"
+  de_DE: "Ein Gateway umbenennen oder seine DNS-Server ändern"
+  es_ES: "Renombrar una puerta de enlace o cambiar sus servidores DNS"
+  fr_FR: "Renommer une passerelle ou modifier ses serveurs DNS"
+  pl_PL: "Zmień nazwę bramy lub jej serwery DNS"
+
+about.exec-command-in-container:
+  en_US: "Run a command in a service container and print its output"
+  de_DE: "Einen Befehl in einem Dienstcontainer ausführen und seine Ausgabe anzeigen"
+  es_ES: "Ejecutar un comando en un contenedor de servicio y mostrar su salida"
+  fr_FR: "Exécuter une commande dans un conteneur de service et afficher sa sortie"
+  pl_PL: "Uruchom polecenie w kontenerze usługi i wyświetl jego wynik"
+
+about.find-backup-targets:
+  en_US: "Register attached partitions that contain StartOS backups"
+  de_DE: "Angeschlossene Partitionen mit StartOS-Sicherungen registrieren"
+  es_ES: "Registrar particiones conectadas que contienen copias de seguridad de StartOS"
+  fr_FR: "Enregistrer les partitions connectées contenant des sauvegardes StartOS"
+  pl_PL: "Zarejestruj podłączone partycje zawierające kopie zapasowe StartOS"
+
+about.inspect-backup-target:
+  en_US: "Check a backup target's availability and free space"
+  de_DE: "Verfügbarkeit und freien Speicher eines Sicherungsziels prüfen"
+  es_ES: "Comprobar la disponibilidad y el espacio libre de un destino de copia de seguridad"
+  fr_FR: "Vérifier la disponibilité et l'espace libre d'une cible de sauvegarde"
+  pl_PL: "Sprawdź dostępność i wolne miejsce miejsca docelowego kopii zapasowej"
+
 about.inspect-shared-volume:
   en_US: "Check a shared volume's availability and free space"
   de_DE: "Verfügbarkeit und freien Speicher eines gemeinsamen Volumes prüfen"
   es_ES: "Comprobar la disponibilidad y el espacio libre de un volumen compartido"
   fr_FR: "Vérifier la disponibilité et l'espace libre d'un volume partagé"
   pl_PL: "Sprawdź dostępność i wolne miejsce współdzielonego woluminu"
+
+about.list-push-subscriptions:
+  en_US: "List browser push notification subscriptions"
+  de_DE: "Browser-Push-Benachrichtigungsabonnements auflisten"
+  es_ES: "Listar las suscripciones a notificaciones push del navegador"
+  fr_FR: "Lister les abonnements aux notifications push du navigateur"
+  pl_PL: "Wyświetl subskrypcje powiadomień push przeglądarki"
 
 about.list-shared-volumes:
   en_US: "List shared volumes"
@@ -49,6 +112,48 @@ about.list-shared-volumes:
   fr_FR: "Lister les volumes partagés"
   pl_PL: "Wyświetl współdzielone woluminy"
 
+about.nut-list-ups:
+  en_US: "List the UPS devices a NUT server serves"
+  de_DE: "Die von einem NUT-Server bereitgestellten USV-Geräte auflisten"
+  es_ES: "Listar los SAI que sirve un servidor NUT"
+  fr_FR: "Lister les onduleurs servis par un serveur NUT"
+  pl_PL: "Wyświetl urządzenia UPS udostępniane przez serwer NUT"
+
+about.nut-scan:
+  en_US: "Scan USB for UPS devices"
+  de_DE: "USB nach USV-Geräten durchsuchen"
+  es_ES: "Buscar dispositivos SAI en USB"
+  fr_FR: "Rechercher des onduleurs sur USB"
+  pl_PL: "Wyszukaj urządzenia UPS na USB"
+
+about.nut-status:
+  en_US: "Display the variables the monitored UPS reports"
+  de_DE: "Die von der überwachten USV gemeldeten Variablen anzeigen"
+  es_ES: "Mostrar las variables que informa el SAI supervisado"
+  fr_FR: "Afficher les variables signalées par l'onduleur surveillé"
+  pl_PL: "Wyświetl zmienne zgłaszane przez monitorowany UPS"
+
+about.refresh-registry:
+  en_US: "Refresh a connected registry's information and signers"
+  de_DE: "Informationen und Signierer einer verbundenen Registry aktualisieren"
+  es_ES: "Actualizar la información y los firmantes de un registro conectado"
+  fr_FR: "Actualiser les informations et les signataires d'un registre connecté"
+  pl_PL: "Odśwież informacje i podpisujących połączonego rejestru"
+
+about.remove-backup-target:
+  en_US: "Remove a backup target; deletes the data of a local target"
+  de_DE: "Ein Sicherungsziel entfernen; löscht die Daten eines lokalen Ziels"
+  es_ES: "Eliminar un destino de copia de seguridad; borra los datos de un destino local"
+  fr_FR: "Supprimer une cible de sauvegarde ; efface les données d'une cible locale"
+  pl_PL: "Usuń miejsce docelowe kopii zapasowej; usuwa dane lokalnego miejsca docelowego"
+
+about.remove-push-subscription:
+  en_US: "Remove a browser push notification subscription"
+  de_DE: "Ein Browser-Push-Benachrichtigungsabonnement entfernen"
+  es_ES: "Eliminar una suscripción a notificaciones push del navegador"
+  fr_FR: "Supprimer un abonnement aux notifications push du navigateur"
+  pl_PL: "Usuń subskrypcję powiadomień push przeglądarki"
+
 about.remove-shared-volume:
   en_US: "Remove a shared volume; deletes the data of a local volume"
   de_DE: "Ein gemeinsames Volume entfernen; löscht die Daten eines lokalen Volumes"
@@ -56,12 +161,47 @@ about.remove-shared-volume:
   fr_FR: "Supprimer un volume partagé ; efface les données d'un volume local"
   pl_PL: "Usuń współdzielony wolumin; usuwa dane woluminu lokalnego"
 
+about.remove-trusted-keys:
+  en_US: "Remove several trusted keys"
+  de_DE: "Mehrere vertrauenswürdige Schlüssel entfernen"
+  es_ES: "Eliminar varias claves de confianza"
+  fr_FR: "Supprimer plusieurs clés de confiance"
+  pl_PL: "Usuń kilka zaufanych kluczy"
+
+about.rename-backup-target:
+  en_US: "Rename a backup target"
+  de_DE: "Ein Sicherungsziel umbenennen"
+  es_ES: "Renombrar un destino de copia de seguridad"
+  fr_FR: "Renommer une cible de sauvegarde"
+  pl_PL: "Zmień nazwę miejsca docelowego kopii zapasowej"
+
 about.rename-shared-volume:
   en_US: "Rename a shared volume"
   de_DE: "Ein gemeinsames Volume umbenennen"
   es_ES: "Renombrar un volumen compartido"
   fr_FR: "Renommer un volume partagé"
   pl_PL: "Zmień nazwę współdzielonego woluminu"
+
+about.set-nut:
+  en_US: "Configure UPS monitoring with Network UPS Tools"
+  de_DE: "UPS-Überwachung mit Network UPS Tools konfigurieren"
+  es_ES: "Configurar la supervisión del SAI con Network UPS Tools"
+  fr_FR: "Configurer la surveillance de l'onduleur avec Network UPS Tools"
+  pl_PL: "Skonfiguruj monitorowanie UPS za pomocą Network UPS Tools"
+
+about.set-nut-client:
+  en_US: "Monitor a UPS served by another NUT server"
+  de_DE: "Eine von einem anderen NUT-Server bereitgestellte USV überwachen"
+  es_ES: "Supervisar un SAI servido por otro servidor NUT"
+  fr_FR: "Surveiller un onduleur servi par un autre serveur NUT"
+  pl_PL: "Monitoruj UPS udostępniany przez inny serwer NUT"
+
+about.set-nut-server:
+  en_US: "Monitor a UPS connected directly to this server"
+  de_DE: "Eine direkt an diesen Server angeschlossene USV überwachen"
+  es_ES: "Supervisar un SAI conectado directamente a este servidor"
+  fr_FR: "Surveiller un onduleur connecté directement à ce serveur"
+  pl_PL: "Monitoruj UPS podłączony bezpośrednio do tego serwera"
 
 about.set-shared-volume-grant:
   en_US: "Grant or revoke a package's access to a shared volume"
@@ -2589,6 +2729,13 @@ nut.monitor-not-running:
   fr_FR: "Le moniteur d’arrêt NUT ne fonctionne pas. Vérifiez la configuration NUT et redémarrez la surveillance."
   pl_PL: "Monitor wyłączania NUT nie działa. Sprawdź konfigurację NUT i uruchom ponownie monitorowanie."
 
+nut.prompt-password:
+  en_US: "NUT Password: "
+  de_DE: "NUT-Passwort: "
+  es_ES: "Contraseña de NUT: "
+  fr_FR: "Mot de passe NUT : "
+  pl_PL: "Hasło NUT: "
+
 nut.scan-failed:
   en_US: "Could not scan for UPS devices: %{error}"
   de_DE: "USV-Geräte konnten nicht gesucht werden: %{error}"
@@ -3478,6 +3625,20 @@ sign.gpg.invalid-public-key:
   es_ES: "Use una clave pública de firma Ed25519 en formato PEM o GPG"
   fr_FR: "Utilisez une clé publique de signature Ed25519 au format PEM ou GPG"
   pl_PL: "Użyj publicznego klucza podpisującego Ed25519 w formacie PEM lub GPG"
+
+service.exec.failed:
+  en_US: "Command exited with code %{code}"
+  de_DE: "Befehl wurde mit Code %{code} beendet"
+  es_ES: "El comando terminó con el código %{code}"
+  fr_FR: "La commande s'est terminée avec le code %{code}"
+  pl_PL: "Polecenie zakończyło się kodem %{code}"
+
+service.exec.timed-out:
+  en_US: "Command timed out and was terminated"
+  de_DE: "Zeitüberschreitung des Befehls; er wurde beendet"
+  es_ES: "El comando agotó el tiempo de espera y se terminó"
+  fr_FR: "La commande a expiré et a été arrêtée"
+  pl_PL: "Przekroczono limit czasu polecenia; zostało zakończone"
 
 service.mod.service-actor-held-after-shutdown:
   en_US: "ServiceActor held somewhere after actor shutdown"
@@ -4611,6 +4772,41 @@ help.arg.auth-key-name:
   fr_FR: "Nom affiché pour la clé dans la liste des clés"
   pl_PL: "Nazwa klucza wyświetlana na liście kluczy"
 
+help.arg.backup-target-name:
+  en_US: "Backup target name"
+  de_DE: "Name des Sicherungsziels"
+  es_ES: "Nombre del destino de copia de seguridad"
+  fr_FR: "Nom de la cible de sauvegarde"
+  pl_PL: "Nazwa miejsca docelowego kopii zapasowej"
+
+help.arg.exec-stdin:
+  en_US: "Text written to the command's standard input"
+  de_DE: "Text, der in die Standardeingabe des Befehls geschrieben wird"
+  es_ES: "Texto escrito en la entrada estándar del comando"
+  fr_FR: "Texte écrit sur l'entrée standard de la commande"
+  pl_PL: "Tekst zapisywany na standardowe wejście polecenia"
+
+help.arg.exec-timeout-secs:
+  en_US: "Seconds before the command is terminated; defaults to 120"
+  de_DE: "Sekunden bis zum Beenden des Befehls; Standard ist 120"
+  es_ES: "Segundos antes de terminar el comando; por defecto 120"
+  fr_FR: "Secondes avant l'arrêt de la commande ; 120 par défaut"
+  pl_PL: "Sekundy do zakończenia polecenia; domyślnie 120"
+
+help.arg.gateway-automatic-dns:
+  en_US: "Use the DNS servers the gateway provides"
+  de_DE: "Die vom Gateway bereitgestellten DNS-Server verwenden"
+  es_ES: "Usar los servidores DNS que proporciona la puerta de enlace"
+  fr_FR: "Utiliser les serveurs DNS fournis par la passerelle"
+  pl_PL: "Używaj serwerów DNS dostarczanych przez bramę"
+
+help.arg.gateway-dns-server:
+  en_US: "Static DNS server; repeat for several"
+  de_DE: "Statischer DNS-Server; für mehrere wiederholen"
+  es_ES: "Servidor DNS estático; repetir para varios"
+  fr_FR: "Serveur DNS statique ; répéter pour plusieurs"
+  pl_PL: "Statyczny serwer DNS; powtórz dla kilku"
+
 help.arg.gua-wan:
   en_US: "Expose the IPv6 GUA to the WAN (false = LAN-only)"
   de_DE: "IPv6-GUA zum WAN freigeben (false = nur LAN)"
@@ -5178,6 +5374,118 @@ help.arg.nowait:
   fr_FR: "Renvoyer immédiatement au lieu d'attendre la fin de l'arrêt propre"
   pl_PL: "Zwróć natychmiast zamiast czekać na zakończenie kontrolowanego zamykania"
 
+help.arg.nut-bus:
+  en_US: "USB bus"
+  de_DE: "USB-Bus"
+  es_ES: "Bus USB"
+  fr_FR: "Bus USB"
+  pl_PL: "Magistrala USB"
+
+help.arg.nut-bus-port:
+  en_US: "USB port that pins a device without a serial number"
+  de_DE: "USB-Port, der ein Gerät ohne Seriennummer festlegt"
+  es_ES: "Puerto USB que fija un dispositivo sin número de serie"
+  fr_FR: "Port USB qui fixe un périphérique sans numéro de série"
+  pl_PL: "Port USB przypinający urządzenie bez numeru seryjnego"
+
+help.arg.nut-device-port:
+  en_US: "Device port, as reported by nut-scan"
+  de_DE: "Geräteport, wie von nut-scan gemeldet"
+  es_ES: "Puerto del dispositivo, tal como lo indica nut-scan"
+  fr_FR: "Port du périphérique, tel que signalé par nut-scan"
+  pl_PL: "Port urządzenia zgłoszony przez nut-scan"
+
+help.arg.nut-disabled:
+  en_US: "Store the settings without starting monitoring"
+  de_DE: "Die Einstellungen speichern, ohne die Überwachung zu starten"
+  es_ES: "Guardar la configuración sin iniciar la supervisión"
+  fr_FR: "Enregistrer les paramètres sans démarrer la surveillance"
+  pl_PL: "Zapisz ustawienia bez uruchamiania monitorowania"
+
+help.arg.nut-driver:
+  en_US: "NUT driver, as reported by nut-scan"
+  de_DE: "NUT-Treiber, wie von nut-scan gemeldet"
+  es_ES: "Controlador NUT, tal como lo indica nut-scan"
+  fr_FR: "Pilote NUT, tel que signalé par nut-scan"
+  pl_PL: "Sterownik NUT zgłoszony przez nut-scan"
+
+help.arg.nut-host:
+  en_US: "NUT server hostname or IP address"
+  de_DE: "Hostname oder IP-Adresse des NUT-Servers"
+  es_ES: "Nombre de host o dirección IP del servidor NUT"
+  fr_FR: "Nom d'hôte ou adresse IP du serveur NUT"
+  pl_PL: "Nazwa hosta lub adres IP serwera NUT"
+
+help.arg.nut-listen-all:
+  en_US: "Serve the UPS to other NUT clients on the network"
+  de_DE: "Die USV anderen NUT-Clients im Netzwerk bereitstellen"
+  es_ES: "Servir el SAI a otros clientes NUT de la red"
+  fr_FR: "Servir l'onduleur aux autres clients NUT du réseau"
+  pl_PL: "Udostępniaj UPS innym klientom NUT w sieci"
+
+help.arg.nut-monitor-username:
+  en_US: "Username for monitoring the remote UPS"
+  de_DE: "Benutzername für die Überwachung der entfernten USV"
+  es_ES: "Nombre de usuario para supervisar el SAI remoto"
+  fr_FR: "Nom d'utilisateur pour surveiller l'onduleur distant"
+  pl_PL: "Nazwa użytkownika do monitorowania zdalnego UPS"
+
+help.arg.nut-port:
+  en_US: "NUT server port"
+  de_DE: "Port des NUT-Servers"
+  es_ES: "Puerto del servidor NUT"
+  fr_FR: "Port du serveur NUT"
+  pl_PL: "Port serwera NUT"
+
+help.arg.nut-product:
+  en_US: "UPS product name"
+  de_DE: "Produktname der USV"
+  es_ES: "Nombre del producto del SAI"
+  fr_FR: "Nom du produit de l'onduleur"
+  pl_PL: "Nazwa produktu UPS"
+
+help.arg.nut-product-id:
+  en_US: "USB product ID"
+  de_DE: "USB-Produkt-ID"
+  es_ES: "ID de producto USB"
+  fr_FR: "Identifiant produit USB"
+  pl_PL: "Identyfikator produktu USB"
+
+help.arg.nut-remote-username:
+  en_US: "Username remote NUT clients authenticate with"
+  de_DE: "Benutzername, mit dem sich entfernte NUT-Clients anmelden"
+  es_ES: "Nombre de usuario con el que se autentican los clientes NUT remotos"
+  fr_FR: "Nom d'utilisateur des clients NUT distants"
+  pl_PL: "Nazwa użytkownika zdalnych klientów NUT"
+
+help.arg.nut-serial:
+  en_US: "UPS serial number"
+  de_DE: "Seriennummer der USV"
+  es_ES: "Número de serie del SAI"
+  fr_FR: "Numéro de série de l'onduleur"
+  pl_PL: "Numer seryjny UPS"
+
+help.arg.nut-ups-name:
+  en_US: "UPS name on the NUT server"
+  de_DE: "USV-Name auf dem NUT-Server"
+  es_ES: "Nombre del SAI en el servidor NUT"
+  fr_FR: "Nom de l'onduleur sur le serveur NUT"
+  pl_PL: "Nazwa UPS na serwerze NUT"
+
+help.arg.nut-vendor:
+  en_US: "UPS vendor name"
+  de_DE: "Herstellername der USV"
+  es_ES: "Nombre del fabricante del SAI"
+  fr_FR: "Nom du fabricant de l'onduleur"
+  pl_PL: "Nazwa producenta UPS"
+
+help.arg.nut-vendor-id:
+  en_US: "USB vendor ID"
+  de_DE: "USB-Hersteller-ID"
+  es_ES: "ID de fabricante USB"
+  fr_FR: "Identifiant fabricant USB"
+  pl_PL: "Identyfikator producenta USB"
+
 help.arg.nvidia-container:
   en_US: "Enable NVIDIA container support"
   de_DE: "NVIDIA-Container-Unterstützung aktivieren"
@@ -5283,6 +5591,13 @@ help.arg.pty-size:
   fr_FR: "Taille du terminal PTY (<lignes>:<cols>[:<x>:<y>])"
   pl_PL: "Rozmiar terminala PTY (<wiersze>:<kolumny>[:<x>:<y>])"
 
+
+help.arg.push-endpoint:
+  en_US: "Push subscription endpoint URL"
+  de_DE: "Endpunkt-URL des Push-Abonnements"
+  es_ES: "URL del punto final de la suscripción push"
+  fr_FR: "URL du point de terminaison de l'abonnement push"
+  pl_PL: "Adres URL punktu końcowego subskrypcji push"
 
 help.arg.registry-hostname:
   en_US: "Registry server hostname"
@@ -5626,6 +5941,13 @@ help.arg.trusted-key-id:
   es_ES: "ID de la clave de confianza, tal como aparece en la lista"
   fr_FR: "Identifiant de la clé de confiance, tel qu'il apparaît dans la liste"
   pl_PL: "Identyfikator zaufanego klucza, taki jak na liście"
+
+help.arg.trusted-key-ids:
+  en_US: "Trusted key identifiers"
+  de_DE: "Kennungen vertrauenswürdiger Schlüssel"
+  es_ES: "Identificadores de claves de confianza"
+  fr_FR: "Identifiants des clés de confiance"
+  pl_PL: "Identyfikatory zaufanych kluczy"
 
 help.arg.trusted-key-name:
   en_US: "Name for the key; blank names each GPG key after its identity"
@@ -8214,6 +8536,13 @@ about.set-os-registry:
   fr_FR: "Utiliser un registre connecté pour les mises à jour de StartOS"
   pl_PL: "Używaj połączonego rejestru do aktualizacji StartOS"
 
+about.test-push-subscription:
+  en_US: "Send a test notification to a push subscription"
+  de_DE: "Eine Testbenachrichtigung an ein Push-Abonnement senden"
+  es_ES: "Enviar una notificación de prueba a una suscripción push"
+  fr_FR: "Envoyer une notification de test à un abonnement push"
+  pl_PL: "Wyślij powiadomienie testowe do subskrypcji push"
+
 about.uninitialize-webserver:
   en_US: "Uninitialize the webserver"
   de_DE: "Den Webserver deinitialisieren"
@@ -8641,6 +8970,13 @@ about.update-categories-registry:
   es_ES: "Actualizar categorías en el registro"
   fr_FR: "Mettre à jour les catégories dans le registre"
   pl_PL: "Zaktualizuj kategorie w rejestrze"
+
+about.update-cifs-backup-target:
+  en_US: "Update the connection details of a CIFS backup target"
+  de_DE: "Die Verbindungsdaten eines CIFS-Sicherungsziels aktualisieren"
+  es_ES: "Actualizar los datos de conexión de un destino de copia de seguridad CIFS"
+  fr_FR: "Mettre à jour les informations de connexion d'une cible de sauvegarde CIFS"
+  pl_PL: "Zaktualizuj dane połączenia miejsca docelowego kopii zapasowej CIFS"
 
 about.update-cifs-shared-volume:
   en_US: "Update the connection details of a CIFS shared volume"

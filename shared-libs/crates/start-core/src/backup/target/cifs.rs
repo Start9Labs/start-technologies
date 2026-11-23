@@ -79,15 +79,10 @@ pub struct CifsAddParams {
 rpc_toolkit::reflect_ts!(CifsAddParams);
 rpc_toolkit::ts_export!(CifsAddParams, namespaces = [""]);
 
-fn read_password() -> Result<Option<String>, Error> {
-    let password = crate::disk::mount::filesystem::cifs::read_password()?;
-    Ok((!password.is_empty()).then_some(password))
-}
-
 async fn cli_add(
     mut args: rpc_toolkit::HandlerArgs<CliContext, CifsAddParams>,
 ) -> Result<(), Error> {
-    args.params.password = read_password()?;
+    args.params.password = crate::disk::mount::filesystem::cifs::read_password()?;
     crate::backup::call_remote(args).await?;
     Ok(())
 }
@@ -152,7 +147,7 @@ rpc_toolkit::ts_export!(CifsUpdateParams, namespaces = [""]);
 async fn cli_update(
     mut args: rpc_toolkit::HandlerArgs<CliContext, CifsUpdateParams>,
 ) -> Result<(), Error> {
-    args.params.password = read_password()?;
+    args.params.password = crate::disk::mount::filesystem::cifs::read_password()?;
     crate::backup::call_remote(args).await?;
     Ok(())
 }

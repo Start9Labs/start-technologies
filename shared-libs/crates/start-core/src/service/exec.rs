@@ -18,6 +18,7 @@ use crate::lxc::ContainerId;
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::env::Environment;
+use crate::util::serde::{WithIoFormat, display_serializable};
 use crate::{CAP_1_KiB, ImageId, PackageId};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -200,24 +201,38 @@ pub(crate) fn exit_code(status: ExitStatus) -> i32 {
         .unwrap_or_else(|| 128 + status.signal().unwrap_or_default())
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, clap::Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct ExecParams {
+    #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
     /// Program and arguments, run without a shell. Empty runs the user's login shell.
+    #[arg(trailing_var_arg = true, help = "help.arg.command-to-execute")]
     pub command: Vec<String>,
     /// Written to the command's standard input, which is otherwise empty.
+    #[arg(long, help = "help.arg.exec-stdin")]
     stdin: Option<String>,
     /// Seconds before the command is terminated. Defaults to 120.
+    #[arg(long, help = "help.arg.exec-timeout-secs")]
     timeout_secs: Option<u64>,
     /// Part of the subcontainer's ID. Overrides `name` and `imageId`.
+    #[arg(long, value_parser = parse_guid, help = "help.arg.subcontainer-name")]
     subcontainer: Option<Guid>,
     /// Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
+    #[arg(long, help = "help.arg.container-name")]
     name: Option<InternedString>,
     /// Part of the subcontainer's image ID, case-insensitive.
+    #[arg(long, help = "help.arg.image-id")]
     image_id: Option<ImageId>,
     /// Defaults to the image's user, else root.
+    #[arg(long, help = "help.arg.user-name")]
     user: Option<InternedString>,
+}
+
+fn parse_guid(value: &str) -> Result<Guid, String> {
+    value.parse().map_err(|error: Error| error.to_string())
 }
 rpc_toolkit::reflect_ts!(ExecParams);
 
@@ -232,6 +247,33 @@ pub struct ExecResult {
     pub truncated: bool,
 }
 rpc_toolkit::reflect_ts!(ExecResult);
+
+/// Writes the command's output streams; a failed command fails the CLI.
+pub fn display_exec(params: WithIoFormat<ExecParams>, result: ExecResult) -> Result<(), Error> {
+    use std::io::Write;
+    if let Some(format) = params.format {
+        return display_serializable(format, result);
+    }
+    let mut stdout = rpc_toolkit::output::stdout();
+    stdout.write_all(result.stdout.as_bytes())?;
+    stdout.flush()?;
+    let mut stderr = rpc_toolkit::output::stderr();
+    stderr.write_all(result.stderr.as_bytes())?;
+    stderr.flush()?;
+    if result.timed_out {
+        Err(Error::new(
+            eyre!("{}", t!("service.exec.timed-out")),
+            ErrorKind::Timeout,
+        ))
+    } else if result.exit_code != 0 {
+        Err(Error::new(
+            eyre!("{}", t!("service.exec.failed", code = result.exit_code)),
+            ErrorKind::Unknown,
+        ))
+    } else {
+        Ok(())
+    }
+}
 
 pub async fn exec(
     ctx: RpcContext,
@@ -384,6 +426,26 @@ async fn run_to_completion(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn exec_cli_passes_trailing_arguments_to_the_command() {
+        use clap::Parser;
+        let params = ExecParams::try_parse_from([
+            "exec",
+            "--user",
+            "root",
+            "hello-world",
+            "ls",
+            "-la",
+            "/data",
+        ])
+        .unwrap();
+        assert_eq!(params.command, ["ls", "-la", "/data"]);
+        assert_eq!(params.user.as_deref(), Some("root"));
+        assert!(
+            ExecParams::try_parse_from(["exec", "hello-world", "--subcontainer", "x"]).is_err()
+        );
+    }
 
     fn sh(script: &str) -> Command {
         let mut cmd = Command::new("sh");

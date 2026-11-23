@@ -5334,7 +5334,18 @@ export const Api = {
               _FINAL: /* @__PURE__ */ z.null(),
             },
             find: {
-              _PARAMS: /* @__PURE__ */ empty,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
               _RETURN: /* @__PURE__ */ z.array(BackupTargetId),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -5357,7 +5368,18 @@ export const Api = {
               _FINAL: /* @__PURE__ */ z.null(),
             },
             inspect: {
-              _PARAMS: /* @__PURE__ */ TargetParams,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                TargetParams,
+              ),
               _RETURN: /* @__PURE__ */ SharedVolumeInspection,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -5633,7 +5655,18 @@ export const Api = {
               _FINAL: /* @__PURE__ */ z.null(),
             },
             status: {
-              _PARAMS: /* @__PURE__ */ empty,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
               _RETURN: /* @__PURE__ */ DnsStatus,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -5929,7 +5962,18 @@ export const Api = {
               _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
-              _PARAMS: /* @__PURE__ */ empty,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
               _RETURN: /* @__PURE__ */ z.array(PushSubscription),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -6040,7 +6084,18 @@ export const Api = {
           _FINAL: /* @__PURE__ */ z.null(),
         },
         exec: {
-          _PARAMS: /* @__PURE__ */ ExecParams,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            ExecParams,
+          ),
           _RETURN: /* @__PURE__ */ ExecResult,
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
@@ -6728,19 +6783,52 @@ export const Api = {
           },
         },
         'nut-list-ups': {
-          _PARAMS: /* @__PURE__ */ ListNutUpsParams,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            ListNutUpsParams,
+          ),
           _RETURN: /* @__PURE__ */ z.array(NutRemoteUps),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
         'nut-scan': {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
           _RETURN: /* @__PURE__ */ z.array(NutDevice),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
         'nut-status': {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
           _RETURN: /* @__PURE__ */ NutStatus,
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),

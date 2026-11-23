@@ -1064,8 +1064,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     }
   },
   {
@@ -1190,7 +1199,24 @@
     "name": "backup.target.inspect",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/TargetParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "TargetParams": {
           "type": "object",
           "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
@@ -1202,10 +1228,7 @@
           "description": "A registered-target identity; migrated CIFS targets retain their existing IDs."
         }
       },
-      "type": "object",
-      "properties": { "id": { "$ref": "#/$defs/BackupTargetId" } },
-      "required": ["id"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2083,8 +2106,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3323,8 +3355,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     }
   },
   {
@@ -3751,7 +3792,24 @@
     "name": "package.exec",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/ExecParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "ExecParams": {
           "type": "object",
           "properties": {
@@ -3800,48 +3858,7 @@
         "Guid": { "type": "string" },
         "ImageId": { "type": "string" }
       },
-      "type": "object",
-      "properties": {
-        "id": { "$ref": "#/$defs/PackageId" },
-        "command": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Program and arguments, run without a shell. Empty runs the user's login shell."
-        },
-        "stdin": {
-          "description": "Written to the command's standard input, which is otherwise empty.",
-          "type": ["string", "null"]
-        },
-        "timeoutSecs": {
-          "description": "Seconds before the command is terminated. Defaults to 120.",
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            { "type": "null" }
-          ]
-        },
-        "subcontainer": {
-          "description": "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
-          "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
-        },
-        "name": {
-          "description": "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
-          "type": ["string", "null"]
-        },
-        "imageId": {
-          "description": "Part of the subcontainer's image ID, case-insensitive.",
-          "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
-        },
-        "user": {
-          "description": "Defaults to the image's user, else root.",
-          "type": ["string", "null"]
-        }
-      },
-      "required": ["id", "command"],
-      "additionalProperties": true
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7818,7 +7835,24 @@
     "name": "server.nut-list-ups",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "type": "object", "properties": {}, "additionalProperties": true },
+        { "$ref": "#/$defs/ListNutUpsParams" }
+      ],
       "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        },
         "ListNutUpsParams": {
           "type": "object",
           "properties": {
@@ -7834,18 +7868,7 @@
           "description": "Address of the NUT server to list UPS devices from."
         }
       },
-      "type": "object",
-      "properties": {
-        "host": { "type": "string" },
-        "port": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": ["host"],
-      "additionalProperties": true,
-      "description": "Address of the NUT server to list UPS devices from."
+      "type": "object"
     }
   },
   {
@@ -7853,8 +7876,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     }
   },
   {
@@ -7862,8 +7894,17 @@
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "additionalProperties": true
+      "properties": {
+        "format": {
+          "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
+        }
+      },
+      "$defs": {
+        "IoFormat": {
+          "type": "string",
+          "enum": ["json", "json-pretty", "yaml", "cbor", "toml", "toml-pretty"]
+        }
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

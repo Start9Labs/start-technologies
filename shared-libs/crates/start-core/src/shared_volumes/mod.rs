@@ -1,11 +1,10 @@
+use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::BTreeSet;
-use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use clap::{Parser, Subcommand};
-use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +16,7 @@ pub mod source;
 #[cfg(target_os = "linux")]
 pub(crate) mod watch;
 use crate::context::{CliContext, RpcContext};
-use crate::disk::mount::filesystem::cifs::Cifs;
+use crate::disk::mount::filesystem::cifs::{Cifs, CifsUpdatePasswordArgs};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::HandlerExtSerde;
@@ -296,7 +295,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand("create", from_fn_async(create).no_cli())
         .subcommand(
             "create",
-            from_fn_async(cli_create)
+            from_fn_async(cli_create::<SharedVolumeId>)
                 .no_ts()
                 .with_about("about.create-shared-volume"),
         )
@@ -339,10 +338,6 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         )
 }
 
-fn method(parent_method: VecDeque<&'static str>, method: VecDeque<&'static str>) -> String {
-    parent_method.into_iter().chain(method).join(".")
-}
-
 pub async fn list(ctx: RpcContext) -> Result<BTreeMap<SharedVolumeId, SharedVolume>, Error> {
     ctx.db.peek().await.as_public().as_shared_volumes().de()
 }
@@ -380,24 +375,20 @@ pub struct CreateSharedVolumeParams {
 
 rpc_toolkit::reflect_ts!(CreateSharedVolumeParams);
 
-async fn cli_create(
+/// Fronts a create method taking `CreateSharedVolumeParams`, prompting for a CIFS password.
+pub(crate) async fn cli_create<Id: serde::de::DeserializeOwned>(
     HandlerArgs {
         context,
         parent_method,
-        method: name,
+        method,
         mut params,
         ..
     }: HandlerArgs<CliContext, CreateSharedVolumeParams>,
-) -> Result<SharedVolumeId, Error> {
+) -> Result<Id, Error> {
     if let CreateSharedVolumeSource::Cifs(cifs) = &mut params.source {
-        let password = crate::disk::mount::filesystem::cifs::read_password()?;
-        cifs.password = (!password.is_empty()).then_some(password);
+        cifs.password = crate::disk::mount::filesystem::cifs::read_password()?;
     }
-    from_value(
-        context
-            .call_remote::<RpcContext>(&method(parent_method, name), to_value(&params)?)
-            .await?,
-    )
+    context.call_fronted(parent_method, method, &params).await
 }
 
 pub(crate) fn validate_name(name: &str) -> Result<(), Error> {
@@ -515,30 +506,26 @@ pub struct CliUpdateCifsSharedVolumeParams {
     #[command(flatten)]
     #[serde(flatten)]
     pub update: UpdateCifsSharedVolumeParams,
-    #[arg(long, help = "help.arg.keep-cifs-password")]
-    pub keep_password: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    pub password: CifsUpdatePasswordArgs,
 }
 
 async fn cli_update_cifs(
     HandlerArgs {
         context,
         parent_method,
-        method: name,
+        method,
         params:
             CliUpdateCifsSharedVolumeParams {
                 mut update,
-                keep_password,
+                password,
             },
         ..
     }: HandlerArgs<CliContext, CliUpdateCifsSharedVolumeParams>,
 ) -> Result<(), Error> {
-    if !keep_password {
-        update.password = Some(crate::disk::mount::filesystem::cifs::read_password()?);
-    }
-    context
-        .call_remote::<RpcContext>(&method(parent_method, name), to_value(&update)?)
-        .await?;
-    Ok(())
+    update.password = password.read()?;
+    context.call_fronted(parent_method, method, &update).await
 }
 
 pub async fn update_cifs(
@@ -630,7 +617,7 @@ async fn cli_set_grant(
     HandlerArgs {
         context,
         parent_method,
-        method: name,
+        method,
         params:
             CliSetSharedVolumeGrantParams {
                 id,
@@ -646,10 +633,7 @@ async fn cli_set_grant(
         package_id,
         grant: (!revoke).then_some(SharedVolumeGrant { readonly }),
     };
-    context
-        .call_remote::<RpcContext>(&method(parent_method, name), to_value(&params)?)
-        .await?;
-    Ok(())
+    context.call_fronted(parent_method, method, &params).await
 }
 
 /// Applies grant intent before best-effort retirement of incompatible staging sources.
@@ -914,7 +898,7 @@ mod tests {
             "--keep-password",
         ])
         .unwrap();
-        assert!(params.keep_password);
+        assert!(params.password.keep_password);
         assert_eq!(params.update.password, None);
         assert_eq!(params.update.id, id);
     }

@@ -428,6 +428,21 @@ impl CliContext {
             .with_ctx(|error| (error.kind, method))
     }
 
+    /// Calls the `RpcContext` method a CLI-only handler fronts.
+    pub async fn call_fronted<T: serde::de::DeserializeOwned>(
+        &self,
+        parent_method: std::collections::VecDeque<&'static str>,
+        method: std::collections::VecDeque<&'static str>,
+        params: &impl serde::Serialize,
+    ) -> Result<T, Error> {
+        use itertools::Itertools;
+        let method = parent_method.into_iter().chain(method).join(".");
+        from_value(
+            self.call_remote::<RpcContext>(&method, to_value(params)?)
+                .await?,
+        )
+    }
+
     pub async fn call_remote<RemoteContext>(
         &self,
         method: &str,
