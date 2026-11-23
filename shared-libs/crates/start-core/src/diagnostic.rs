@@ -102,7 +102,11 @@ pub async fn rebuild(ctx: DiagnosticContext) -> Result<(), Error> {
 
 pub fn disk<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("forget", from_fn_async(forget_disk::<C>).no_cli())
+        .subcommand(
+            "forget",
+            from_fn_async(forget_disk::<DiagnosticContext>).no_cli(),
+        )
+        .subcommand("forget", from_fn_async(forget_disk::<RpcContext>).no_cli())
         .subcommand(
             "forget",
             CallRemoteHandler::<CliContext, _, _>::new(
@@ -111,7 +115,11 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
             .no_display()
             .with_about("about.remove-disk-filesystem"),
         )
-        .subcommand("repair", from_fn_async(|_: C| repair()).no_cli())
+        .subcommand(
+            "repair",
+            from_fn_async(|_: DiagnosticContext| repair()).no_cli(),
+        )
+        .subcommand("repair", from_fn_async(|_: RpcContext| repair()).no_cli())
         .subcommand(
             "repair",
             CallRemoteHandler::<CliContext, _, _>::new(
