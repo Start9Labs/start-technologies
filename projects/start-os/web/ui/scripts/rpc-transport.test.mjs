@@ -403,11 +403,14 @@ test('database streams emit their initiating dump without awaiting its cache fen
     new URL('services/rpc-stream.ts', shared)
   )
   f.sockets.stream = (body, identity, options) => {
-    assert.deepEqual(JSON.parse(body), { method: 'db.subscribe', params: {} })
+    assert.deepEqual(JSON.parse(body), {
+      method: 'db.subscribe',
+      params: { pointer: '/public/serverInfo' },
+    })
     assert.equal(identity, f.lease)
     return rpcResponseStream(messages, options)
   }
-  const subscription = f.api.watchDb$().subscribe({
+  const subscription = f.api.watchDb$(['serverInfo'], null).subscribe({
     next: value => received.push(value),
     error: error => {
       failure = error

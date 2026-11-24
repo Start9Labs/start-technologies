@@ -48,7 +48,7 @@ unrelated redesigns in a separate PR; do not turn touching a component into a st
 | `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.29  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                 |
 | `start9-store`         | `ops/start9-store/web`                          | 22      | 5.32  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                  |
 | `ops-server`           | `ops/ops-server/web`                            | 22      | 5.29  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                   |
-| `support-server`       | `ops/support-server/portal/web`                 | 22      | 5.29  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | RPC `/api` + socket.io, same-origin; `mock/` in dev |
+| `support-server`       | `ops/support-server/portal/web`                 | 22      | 5.34  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | RPC `/api` + socket.io, same-origin; `mock/` in dev |
 | `start-equity`         | `ops/start-equity/web`                          | 22      | 5.29  | **zoneless**               | dual (OS, `TUI_DARK_MODE` toggle)    | no                 | REST `/_api`, same-origin Express; `MockApiService` |
 
 TypeScript ~6.0, rxjs ~7.8 everywhere. Taiga is **pinned exact** — bump only with the

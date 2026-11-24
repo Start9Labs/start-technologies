@@ -536,7 +536,10 @@ export const Api = {
     },
     db: {
       _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: { put: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} } },
+      _CHILDREN: {
+        put: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        subscription: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+      },
     },
     diagnostic: {
       _PARAMS: /* @__PURE__ */ empty,

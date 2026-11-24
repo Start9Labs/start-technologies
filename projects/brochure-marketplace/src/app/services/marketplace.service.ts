@@ -80,15 +80,15 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   readonly currentRegistryUrl$ = new ReplaySubject<string>(1)
 
-  private readonly fetched = new Map<string, StoreDataWithUrl>()
+  private readonly fetched = new Map<string, StoreDataWithUrl<MarketplacePkg>>()
 
-  readonly currentRegistry$: Observable<StoreDataWithUrl> =
+  readonly currentRegistry$: Observable<StoreDataWithUrl<MarketplacePkg>> =
     this.currentRegistryUrl$.pipe(
       distinctUntilChanged((a: string, b: string) => sameUrl(a, b)),
       switchMap(url =>
         this.fetchRegistry$(url).pipe(startWith(this.fetched.get(toUrl(url)))),
       ),
-      filter((r): r is StoreDataWithUrl => !!r),
+      filter((r): r is StoreDataWithUrl<MarketplacePkg> => !!r),
       tap(reg => {
         this.fetched.set(toUrl(reg.url), reg)
         if (!isDefaultRegistry(reg.url)) {
@@ -156,7 +156,9 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
-  private fetchRegistry$(url: string): Observable<StoreDataWithUrl | null> {
+  private fetchRegistry$(
+    url: string,
+  ): Observable<StoreDataWithUrl<MarketplacePkg> | null> {
     return combineLatest([this.fetchInfo$(url), this.fetchPackages$(url)]).pipe(
       map(([info, packages]) => ({ info, packages, url })),
       catchError(e => {
