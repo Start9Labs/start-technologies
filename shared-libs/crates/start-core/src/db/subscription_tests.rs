@@ -117,7 +117,7 @@ async fn projected_stream_start_dumps_and_replays_only_the_projection() {
     .await;
     assert_eq!(
         start.value,
-        Some(imbl_value::json!({ "x": { "state": 1 } }))
+        Some(imbl_value::ord_json!({ "x": { "state": 1 } }))
     );
     db.put(
         &"/public/packageData/x/icon".parse::<JsonPointer>().unwrap(),

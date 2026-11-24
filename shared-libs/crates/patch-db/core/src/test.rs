@@ -120,7 +120,7 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
     let db = PatchDb::in_memory();
     db.put(
         &ROOT,
-        &json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
+        &ord_json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
     )
     .await
     .unwrap();
@@ -133,7 +133,7 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
     let Catchup::Dump(dump) = catchup else {
         panic!("expected a dump")
     };
-    assert_eq!(dump.value, json!({ "x": { "state": 1 } }));
+    assert_eq!(dump.value, ord_json!({ "x": { "state": 1 } }));
     assert_eq!(
         db.dump_projected(&pkgs, &projection).await.value,
         dump.value
@@ -147,7 +147,7 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
         .unwrap();
     db.put(
         &"/pkgs/y".parse::<JsonPointer>().unwrap(),
-        &json!({ "state": 2, "icon": "big" }),
+        &ord_json!({ "state": 2, "icon": "big" }),
     )
     .await
     .unwrap();
@@ -156,7 +156,10 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
     assert_eq!(shared.recv().await.unwrap().id, 3);
     let mut value = dump.value.clone();
     json_patch::patch(&mut value, &streamed.patch).unwrap();
-    assert_eq!(value, json!({ "x": { "state": 1 }, "y": { "state": 2 } }));
+    assert_eq!(
+        value,
+        ord_json!({ "x": { "state": 1 }, "y": { "state": 2 } })
+    );
 
     let (_, catchup, _) = db
         .catch_up_and_sub_projected(pkgs, projection, Some((&epoch, dump.id)))

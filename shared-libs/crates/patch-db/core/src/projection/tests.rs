@@ -1,4 +1,4 @@
-use imbl_value::{json, Value};
+use imbl_value::{ord_json, OrdValue};
 use json_ptr::{JsonPointer, ROOT};
 use proptest::prelude::*;
 
@@ -33,7 +33,7 @@ fn projections() -> Vec<Projection> {
 }
 
 /// Projecting the new value equals applying the projected patch to the projected old value.
-fn assert_commutes(projection: &Projection, old: &Value, new: &Value) {
+fn assert_commutes(projection: &Projection, old: &OrdValue, new: &OrdValue) {
     let revision = Revision {
         id: 1,
         patch: diff(old, new),
@@ -59,30 +59,30 @@ fn assert_commutes(projection: &Projection, old: &Value, new: &Value) {
 
 #[test]
 fn values_keep_included_paths_minus_exclusions() {
-    let value = json!({
+    let value = ord_json!({
         "a": { "x": { "b": 1, "c": 2 }, "y": { "b": 3 } },
         "b": { "a": [1, 2] },
         "arr": [{ "a": 1, "b": 2 }, { "a": 3, "b": 4 }],
     });
     assert_eq!(
         projection(None, &["/*/b"], &[]).project_root(&value),
-        json!({ "a": {}, "b": {}, "arr": [] }),
+        ord_json!({ "a": {}, "b": {}, "arr": [] }),
     );
     assert_eq!(
         projection(None, &["/a"], &["/a/*/b"]).project_root(&value),
-        json!({ "a": { "x": { "c": 2 }, "y": {} } }),
+        ord_json!({ "a": { "x": { "c": 2 }, "y": {} } }),
     );
     assert_eq!(
         projection(Some(1), &[], &[]).project_root(&value),
-        json!({ "a": {}, "b": {}, "arr": [] }),
+        ord_json!({ "a": {}, "b": {}, "arr": [] }),
     );
     assert_eq!(
         projection(None, &[], &["/arr/*/b"]).project_root(&value)["arr"],
-        json!([{ "a": 1 }, { "a": 3 }]),
+        ord_json!([{ "a": 1 }, { "a": 3 }]),
     );
     assert_eq!(
         projection(None, &[], &[""]).project_root(&value),
-        Value::Null
+        OrdValue::Null
     );
     assert_eq!(Projection::default().project_root(&value), value);
 }
@@ -90,8 +90,8 @@ fn values_keep_included_paths_minus_exclusions() {
 #[test]
 fn revisions_drop_operations_outside_the_projection() {
     let projection = projection(None, &["/a"], &["/a/*/b"]);
-    let old = json!({ "a": { "x": { "b": 1 } }, "z": 1 });
-    let new = json!({ "a": { "x": { "b": 2, "c": 3 } }, "z": 2 });
+    let old = ord_json!({ "a": { "x": { "b": 1 } }, "z": 1 });
+    let new = ord_json!({ "a": { "x": { "b": 2, "c": 3 } }, "z": 2 });
     let projected = projection.project_revision(Revision {
         id: 1,
         patch: diff(&old, &new),
@@ -113,15 +113,15 @@ fn equivalent_projections_share_a_key() {
 #[test]
 fn projected_revisions_track_the_projected_document() {
     let states = [
-        json!(null),
-        json!({}),
-        json!({ "a": { "x": { "b": 1, "c": 2 } } }),
-        json!({ "a": { "x": { "b": 2 }, "y": { "c": [1] } }, "b": { "a": 1 } }),
-        json!({ "a": 5, "b": { "a": { "c": 1 } } }),
-        json!({ "arr": [{ "a": 1, "b": 2 }] }),
-        json!({ "arr": [{ "a": 0, "b": 0 }, { "a": 1, "b": 2 }, { "a": 3 }] }),
-        json!({ "arr": [{ "a": 3 }] }),
-        json!({ "a": [ { "b": 1 } ], "arr": {} }),
+        ord_json!(null),
+        ord_json!({}),
+        ord_json!({ "a": { "x": { "b": 1, "c": 2 } } }),
+        ord_json!({ "a": { "x": { "b": 2 }, "y": { "c": [1] } }, "b": { "a": 1 } }),
+        ord_json!({ "a": 5, "b": { "a": { "c": 1 } } }),
+        ord_json!({ "arr": [{ "a": 1, "b": 2 }] }),
+        ord_json!({ "arr": [{ "a": 0, "b": 0 }, { "a": 1, "b": 2 }, { "a": 3 }] }),
+        ord_json!({ "arr": [{ "a": 3 }] }),
+        ord_json!({ "a": [ { "b": 1 } ], "arr": {} }),
     ];
     for projection in projections() {
         for old in &states {
@@ -132,27 +132,27 @@ fn projected_revisions_track_the_projected_document() {
     }
 }
 
-fn value() -> impl Strategy<Value = Value> {
+fn value() -> impl Strategy<Value = OrdValue> {
     let leaf = prop_oneof![
-        Just(Value::Null),
-        any::<bool>().prop_map(Value::Bool),
-        (0u8..4).prop_map(|n| json!(n)),
+        Just(OrdValue::Null),
+        any::<bool>().prop_map(OrdValue::Bool),
+        (0u8..4).prop_map(|n| ord_json!(n)),
     ];
     leaf.prop_recursive(4, 24, 4, |inner| {
         prop_oneof![
             prop::collection::vec(inner.clone(), 0..4)
-                .prop_map(|items| Value::Array(items.into_iter().collect())),
+                .prop_map(|items| OrdValue::Array(items.into_iter().collect())),
             prop::collection::btree_map(
                 prop::sample::select(vec!["a", "b", "c", "arr"]),
                 inner,
                 0..4
             )
             .prop_map(|map| {
-                let mut object = imbl_value::InOMap::new();
+                let mut object = imbl_value::imbl::OrdMap::new();
                 for (key, value) in map {
                     object.insert(key.into(), value);
                 }
-                Value::Object(object)
+                OrdValue::Object(object)
             }),
         ]
     })
@@ -171,8 +171,8 @@ proptest! {
 fn subtree_scoping_composes_with_projection() {
     let ptr: JsonPointer = "/a".parse().unwrap();
     let projection = projection(None, &["/*/b"], &[]);
-    let old = json!({ "a": { "x": { "b": 1, "c": 1 } } });
-    let new = json!({ "a": { "x": { "b": 2, "c": 2 }, "y": { "b": 3 } } });
+    let old = ord_json!({ "a": { "x": { "b": 1, "c": 1 } } });
+    let new = ord_json!({ "a": { "x": { "b": 2, "c": 2 }, "y": { "b": 3 } } });
     let mut applied = projection.project_root(ptr.get(&old).unwrap());
     let projected = projection.project_revision(
         Revision {
@@ -182,7 +182,7 @@ fn subtree_scoping_composes_with_projection() {
         .for_path(&ptr),
     );
     json_patch::patch(&mut applied, &projected.patch.0).unwrap();
-    assert_eq!(applied, json!({ "x": { "b": 2 }, "y": { "b": 3 } }));
+    assert_eq!(applied, ord_json!({ "x": { "b": 2 }, "y": { "b": 3 } }));
 }
 
 #[test]

@@ -1,4 +1,5 @@
-use imbl_value::{InOMap, Value};
+use imbl_value::imbl::OrdMap;
+use imbl_value::OrdValue;
 use json_patch::{AddOperation, Patch, PatchOperation, ReplaceOperation};
 use json_ptr::JsonPointer;
 
@@ -89,15 +90,15 @@ impl Projection {
     }
 
     /// The projected value at a path the projection reaches.
-    pub fn project_value(&self, path: &mut Vec<String>, value: &Value) -> Value {
+    pub fn project_value(&self, path: &mut Vec<String>, value: &OrdValue) -> OrdValue {
         let segments = path.iter().map(String::as_str).collect::<Vec<_>>();
         let reach = self.reach(&segments);
         if reach == Reach::In && self.whole_below(&segments) {
             return value.clone();
         }
         match value {
-            Value::Object(map) => {
-                let mut projected = InOMap::new();
+            OrdValue::Object(map) => {
+                let mut projected = OrdMap::new();
                 for (key, child) in map.iter() {
                     path.push(key.to_string());
                     if self.reach_owned(path) != Reach::Out {
@@ -105,9 +106,9 @@ impl Projection {
                     }
                     path.pop();
                 }
-                Value::Object(projected)
+                OrdValue::Object(projected)
             }
-            Value::Array(items) => {
+            OrdValue::Array(items) => {
                 let mut projected = imbl_value::imbl::Vector::new();
                 for (index, child) in items.iter().enumerate() {
                     path.push(index.to_string());
@@ -116,7 +117,7 @@ impl Projection {
                     }
                     path.pop();
                 }
-                Value::Array(projected)
+                OrdValue::Array(projected)
             }
             other => other.clone(),
         }
@@ -127,12 +128,12 @@ impl Projection {
     }
 
     /// The projected subtree value; null when the projection excludes the subtree itself.
-    pub fn project_root(&self, value: &Value) -> Value {
+    pub fn project_root(&self, value: &OrdValue) -> OrdValue {
         if self.is_identity() {
             return value.clone();
         }
         if self.reach(&[]) == Reach::Out {
-            return Value::Null;
+            return OrdValue::Null;
         }
         self.project_value(&mut Vec::new(), value)
     }
