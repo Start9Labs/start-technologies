@@ -1105,7 +1105,8 @@ export default {
   1311: 'Obtener ayuda',
   1312: 'Última sincronización',
   1313: 'justo ahora',
-  1314: 'Forzar detención',
-  1315: 'Forzando detención',
-  1316: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
+  1314: 'Introduzca su contraseña maestra para continuar.',
+  1315: 'Forzar detención',
+  1316: 'Forzando detención',
+  1317: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

@@ -1105,7 +1105,8 @@ export default {
   1311: 'Hilfe erhalten',
   1312: 'Zuletzt synchronisiert',
   1313: 'gerade eben',
-  1314: 'Stopp erzwingen',
-  1315: 'Stopp wird erzwungen',
-  1316: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
+  1314: 'Geben Sie Ihr Master-Passwort ein, um fortzufahren.',
+  1315: 'Stopp erzwingen',
+  1316: 'Stopp wird erzwungen',
+  1317: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n
