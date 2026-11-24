@@ -432,6 +432,58 @@ test('overlapping projections share one covering subscription that owns their st
   assert.deepEqual(f.cache.value.value.rows, [{ a: 1, b: 2 }])
 })
 
+for (const supersede of ['pending', 'publication']) {
+  test(`a superseded covering subscription retires its predecessors: ${supersede}`, t => {
+    const f = fixture(t)
+    f.db.start()
+    const projection = { include: ['/*/a'] }
+    f.project(projection, 'rows')
+    const original = f.calls[0]
+    f.start(original, 1, [{ a: 1 }])
+    f.project({ include: ['/*/b'] }, 'rows')
+    const intermediate = f.calls[1]
+    let third
+    let publishing = false
+    if (supersede === 'publication') {
+      const subscription = f.db
+        .watchProjection$(projection, 'rows')
+        .subscribe(() => {
+          if (publishing && !third)
+            third = f.project({ include: ['/*/c'] }, 'rows')
+        })
+      t.after(() => subscription.unsubscribe())
+      publishing = true
+    } else {
+      third = f.project({ include: ['/*/c'] }, 'rows')
+    }
+    f.start(intermediate, 1, [{ a: 1, b: 2 }])
+    const latest = f.calls[2]
+    assert.equal(original.closed, true)
+    assert.equal(intermediate.closed, false)
+    assert.deepEqual(third.values, [])
+    f.revision(original, 2, [{ op: 'add', path: '/0', value: { a: 3 } }])
+    f.revision(intermediate, 2, [
+      { op: 'add', path: '/0', value: { a: 3, b: 4 } },
+    ])
+    t.mock.timers.tick(250)
+    assert.deepEqual(f.cache.value.value.rows, [
+      { a: 3, b: 4 },
+      { a: 1, b: 2 },
+    ])
+    assert.equal(f.cache.value.id, 2)
+    f.start(latest, 2, [
+      { a: 3, b: 4, c: 5 },
+      { a: 1, b: 2, c: 6 },
+    ])
+    assert.equal(intermediate.closed, true)
+    assert.deepEqual(third.values.at(-1), [{ c: 5 }, { c: 6 }])
+    assert.deepEqual(f.cache.value.value.rows, [
+      { a: 3, b: 4, c: 5 },
+      { a: 1, b: 2, c: 6 },
+    ])
+  })
+}
+
 test('a projected parent and a full child share one covering subscription', t => {
   const f = fixture(t)
   f.db.start()

@@ -72,8 +72,9 @@ type Active = {
  *
  * Invariant: live server subscriptions never overlap, so exactly one stream
  * patches each region's structure. Watches whose subtrees overlap are served by
- * one covering subscription, which replaces their own once it is live. A
- * projected subscription writes the shared document only at paths it keeps.
+ * one covering subscription, which replaces their own once it is live.
+ * Each start retires covered streams before publishing, including superseded handovers.
+ * A projected subscription writes the shared document only at paths it keeps.
  * Every subscription keeps its own cursor so it fast-forwards on reconnect, and
  * data from a released subscription stays readable until it is subscribed again.
  * The document cursor follows the lowest live subscription, including handovers.
@@ -291,11 +292,15 @@ export class SubtreePatchDB<
   }
 
   private close(key: string) {
+    if (this.retire(key)) this.emit(this.cache$.value)
+  }
+
+  private retire(key: string): boolean {
     const entry = this.active.get(key)
-    if (!entry) return
+    if (!entry) return false
     this.active.delete(key)
     entry.subscription.unsubscribe()
-    this.emit(this.cache$.value)
+    return true
   }
 
   private suspend() {
@@ -323,6 +328,9 @@ export class SubtreePatchDB<
       }, this.batch)
       return
     }
+    ;[...this.active.keys()]
+      .filter(other => other !== key && contains(key, other))
+      .forEach(other => this.retire(other))
     const epoch = event.epoch ?? entry.cursor?.epoch ?? ''
     const cache = this.cache$.value
     if (event.revisions) {
@@ -370,7 +378,6 @@ export class SubtreePatchDB<
     this.emit(cache)
   }
 
-  /** Localizes each operation against the document as the previous one left it. */
   private applyRevision(cache: Dump<T>, entry: Active, revision: Revision) {
     const pointer = pathFromArray(entry.path)
     const patch = revision.patch.map(op => {
