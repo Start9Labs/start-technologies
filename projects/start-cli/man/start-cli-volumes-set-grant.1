@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-volumes-set-grant 1  "set-grant "
+.SH NAME
+start\-cli\-volumes\-set\-grant \- Grant or revoke a package\*(Aqs access to a shared volume
+.SH SYNOPSIS
+\fBstart\-cli volumes set\-grant\fR [\fB\-\-readonly\fR] [\fB\-\-revoke\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> <\fIPACKAGE_ID\fR>
+.SH DESCRIPTION
+Grant or revoke a package\*(Aqs access to a shared volume
+.SH OPTIONS
+.TP
+\fB\-\-readonly\fR
+Grant read\-only access
+.TP
+\fB\-\-revoke\fR
+Revoke the package\*(Aqs access
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Shared volume ID
+.TP
+<\fIPACKAGE_ID\fR>
+Package identifier
