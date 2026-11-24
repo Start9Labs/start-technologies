@@ -543,6 +543,9 @@ await writeFile(`${await appSub.rootfs}/app/config.py`, generateConfig({ secretK
 ```
 
 > [!WARNING]
+> A file built as a string is only as safe as its escaping. Never interpolate a user's value between bare quotes (`name = "${v}"`): a quote and a newline in it close the string and add keys of their own. Encode each value for the format — `JSON.stringify(v)` is a valid YAML double-quoted scalar and, with DEL escaped, a valid TOML basic string — and for line-based formats (torrc, nginx) refuse control characters and a trailing `\` in the field's `patterns`. A [file model](file-models.md) serializes for you; prefer one wherever the format has a `FileHelper`.
+
+> [!WARNING]
 > If the config file is managed by a FileModel, do NOT read it and write it back to rootfs. Mount it from the volume instead — the file already exists there.
 
 **When to use rootfs vs volume mounts:**
