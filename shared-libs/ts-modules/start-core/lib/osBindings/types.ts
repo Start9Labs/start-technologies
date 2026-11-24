@@ -338,6 +338,16 @@ export type OutboundDnsUpdate = z.output<typeof schemas.OutboundDnsUpdate>
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export type OutboundDnsUpdateInput = z.input<typeof schemas.OutboundDnsUpdate>
+
+/**
+ * A network whose addresses a URL plugin provides.
+ */
+export type OverlayNetwork = z.output<typeof schemas.OverlayNetwork>
+
+/**
+ * A network whose addresses a URL plugin provides.
+ */
+export type OverlayNetworkInput = z.input<typeof schemas.OverlayNetwork>
 export type PackageBackupReport = z.output<typeof schemas.PackageBackupReport>
 export type PackageBackupReportInput = z.input<
   typeof schemas.PackageBackupReport

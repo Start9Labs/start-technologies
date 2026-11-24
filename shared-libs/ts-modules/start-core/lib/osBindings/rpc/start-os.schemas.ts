@@ -5022,6 +5022,10 @@ export const CompatibleBindOptions: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
     z.ZodNullable<typeof ProxyOptions>
   >
+  networkPorts: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodInt>>,
+    z.ZodRecord<z.ZodString, z.ZodInt>
+  >
 }> = /* @__PURE__ */ object({
   transport: wire(Transport.optional(), Transport),
   preferredExternalPort: z.int(),
@@ -5031,6 +5035,10 @@ export const CompatibleBindOptions: z.ZodObject<{
   ),
   secure: wire(Security.nullable().optional(), Security.nullable()),
   proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
+  networkPorts: wire(
+    z.record(z.string(), z.int()).optional(),
+    z.record(z.string(), z.int()),
+  ),
 }).meta({
   id: 'CompatibleBindOptions',
 })
@@ -5076,6 +5084,14 @@ export const BindOptions: z.ZodCodec<
      * HTTP request policy shared by every exposed leg of this binding.
      */
     proxy: z.ZodNullable<typeof ProxyOptions>
+    /**
+     * Plugin-owned forwarding targets for this binding's overlay connections.
+     * Each port names another binding on this host. Plugins must forward to
+     * that binding only while it is enabled and has no exported interfaces;
+     * otherwise they must stop forwarding, without falling back to this
+     * binding's own port. An absent network entry retains the default target.
+     */
+    networkPorts: z.ZodRecord<z.ZodString, z.ZodInt>
   }>
 > = /* @__PURE__ */ wire(
   CompatibleBindOptions,
@@ -5096,6 +5112,17 @@ export const BindOptions: z.ZodCodec<
     proxy: ProxyOptions.nullable().meta({
       description:
         'HTTP request policy shared by every exposed leg of this binding.',
+    }),
+    /**
+     * Plugin-owned forwarding targets for this binding's overlay connections.
+     * Each port names another binding on this host. Plugins must forward to
+     * that binding only while it is enabled and has no exported interfaces;
+     * otherwise they must stop forwarding, without falling back to this
+     * binding's own port. An absent network entry retains the default target.
+     */
+    networkPorts: z.record(z.string(), z.int()).meta({
+      description:
+        "Plugin-owned forwarding targets for this binding's overlay connections.\nEach port names another binding on this host. Plugins must forward to\nthat binding only while it is enabled and has no exported interfaces;\notherwise they must stop forwarding, without falling back to this\nbinding's own port. An absent network entry retains the default target.",
     }),
   }),
 ).meta({

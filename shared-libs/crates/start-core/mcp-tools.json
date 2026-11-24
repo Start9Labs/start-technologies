@@ -4279,6 +4279,16 @@
             "proxy": {
               "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
               "description": "HTTP request policy shared by every exposed leg of this binding."
+            },
+            "networkPorts": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "description": "Plugin-owned forwarding targets for this binding's overlay connections.\nEach port names another binding on this host. Plugins must forward to\nthat binding only while it is enabled and has no exported interfaces;\notherwise they must stop forwarding, without falling back to this\nbinding's own port. An absent network entry retains the default target."
             }
           },
           "required": [
@@ -4286,7 +4296,8 @@
             "preferredExternalPort",
             "addSsl",
             "secure",
-            "proxy"
+            "proxy",
+            "networkPorts"
           ],
           "additionalProperties": true
         },
@@ -6369,6 +6380,16 @@
             "proxy": {
               "anyOf": [{ "$ref": "#/$defs/ProxyOptions" }, { "type": "null" }],
               "description": "HTTP request policy shared by every exposed leg of this binding."
+            },
+            "networkPorts": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "description": "Plugin-owned forwarding targets for this binding's overlay connections.\nEach port names another binding on this host. Plugins must forward to\nthat binding only while it is enabled and has no exported interfaces;\notherwise they must stop forwarding, without falling back to this\nbinding's own port. An absent network entry retains the default target."
             }
           },
           "required": [
@@ -6376,7 +6397,8 @@
             "preferredExternalPort",
             "addSsl",
             "secure",
-            "proxy"
+            "proxy",
+            "networkPorts"
           ],
           "additionalProperties": true
         },
