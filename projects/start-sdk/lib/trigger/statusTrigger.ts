@@ -1,6 +1,6 @@
 import { HealthStatus } from '@start9labs/start-core/types'
 import { Trigger } from '.'
-import { delay } from './delay'
+import { delay } from '../util/delay'
 
 type StatusIntervals = { [K in HealthStatus]?: number }
 

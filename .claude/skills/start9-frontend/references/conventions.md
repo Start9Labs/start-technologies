@@ -30,8 +30,10 @@
 - **No barrels in apps** (`index.ts` means "the routed component", not re-exports); libs expose
   one `public-api.ts`. Imports: `src/`-absolute (ui) or relative within a feature; shared code
   by package name (`@start9labs/shared|marketplace|start-core`).
-- Import order: external before local, blank line between groups, `@angular/common` before
-  `@angular/core`, members alphabetized (normalized by hand in review).
+- Import order: external before local, blank line between groups, modules sorted by path
+  within a group (`@angular/common`, `@angular/core`, `@taiga-ui/addon-mobile`,
+  `@taiga-ui/cdk`, `@taiga-ui/core`, `rxjs`), members alphabetized (normalized by hand in
+  review).
 - Umbrella Taiga imports over granular: `TuiDataList, TuiDropdown` — not
   `TuiDataListComponent, TuiDropdownDirective, TuiDropdownOpen, …`.
 - Comments follow the repo's comment rules (`start-technologies/AGENTS.md` § Code style): none

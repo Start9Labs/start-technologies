@@ -110,10 +110,10 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       ...load('shared-libs/ts-modules/shared/src/util/with-abort.ts'),
       pauseFor: async (_, signal) => signal?.throwIfAborted(),
       getErrorMessage: load(
-        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+        'shared-libs/ts-modules/shared/src/util/error-message.ts',
       ).getErrorMessage,
       isNetworkError: load(
-        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+        'shared-libs/ts-modules/shared/src/util/error-message.ts',
       ).isNetworkError,
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
@@ -196,6 +196,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
 }
 
 function mockPatchFixture(data) {
+  data.registryIndexes ??= {}
   return {
     mockPatchData: data,
     mockRegistryCache: () => ({
@@ -206,9 +207,10 @@ function mockPatchFixture(data) {
         categories: {},
         trustSigners: {},
       },
-      packages: {},
+      selections: {},
       status: 'connected',
     }),
+    mockRegistryIndex: () => ({}),
     mockOsUpdateCache: registry => ({
       registry,
       versions: {},
@@ -660,7 +662,7 @@ test('normal stream cache failure releases an acquired iterator before exposing 
 
 test('shared transport classification accepts numeric zero, not RPC or cancellation codes', () => {
   const { isNetworkError, getErrorMessage } = harness().load(
-    'shared-libs/ts-modules/shared/src/services/error.service.ts',
+    'shared-libs/ts-modules/shared/src/util/error-message.ts',
   )
   assert.equal(isNetworkError({ code: 0 }), true)
   for (const value of [
@@ -688,7 +690,7 @@ function setupObservationHarness(status) {
   })
   overrides.set('@start9labs/shared', {
     ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
-    ...load('shared-libs/ts-modules/shared/src/services/error.service.ts'),
+    ...load('shared-libs/ts-modules/shared/src/util/error-message.ts'),
     pauseFor: load('shared-libs/ts-modules/shared/src/util/misc.util.ts')
       .pauseFor,
   })
@@ -1576,19 +1578,20 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
             osRegistry: 'https://registry.test/',
             trustedKeys: {},
             registryKeys: {},
+            network: {
+              gateways: {
+                wg0: { dns: {}, ipInfo: { dnsServers: ['10.64.0.1'] } },
+                fresh: { dns: {}, ipInfo: null },
+              },
+            },
           },
         }),
       ],
       ['./md-sample.md', ''],
     ]),
   )
-  const gateway = { dns: {}, ipInfo: { dnsServers: ['10.64.0.1'] } }
-  const cache = new BehaviorSubject({
-    value: { serverInfo: { network: { gateways: { wg0: gateway } } } },
-  })
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
-  dependencies.set(tokens.PATCH_CACHE, cache)
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
@@ -1632,10 +1635,6 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
     servers: ['10.64.0.1:53'],
     source: 'gateway',
   })
-  cache.value.value.serverInfo.network.gateways.fresh = {
-    dns: {},
-    ipInfo: null,
-  }
   await client.rpc.net.dns.setStatic({ gateway: 'fresh', servers: null })
   assert.deepEqual(JSON.parse(JSON.stringify(patches.pop()[0])), {
     op: 'replace',

@@ -50,6 +50,12 @@ Per the published policy, we will:
 
 Pending fixes are described in `security` fragments under the affected product's `changelog/` directory. Releases compile them under `### Security` in the generated history, for example [`projects/start-os/CHANGELOG.md`](projects/start-os/CHANGELOG.md).
 
+## What we treat as a vulnerability
+
+A vulnerability, for us, is a flaw that an attacker can exploit without the owner approving it and without a package that is already malicious, **and** that could do a user real harm — loss of funds, or someone else taking control of a server, a service or its data. Both must hold. Only those need the private channels above.
+
+Everything else — hardening, least privilege, robustness, defence in depth, a low-impact flaw — is welcome as a public issue or pull request on the repository concerned. Reporting it in public is not a premature disclosure, and it puts the finding in front of the people who maintain the code. If you are not sure which side of the line a finding falls on, ask first.
+
 ## Scope
 
 This repository holds six independently released products. A vulnerability in any of them belongs here:
@@ -72,14 +78,13 @@ The registries Start9 operates and Start9's websites are in scope for the publis
 Each service in the marketplace is packaged in its own `*-startos` repository, separate from this monorepo — Bitcoin Core is [`bitcoin-core-startos`](https://github.com/Start9Labs/bitcoin-core-startos), and the rest are listed under [Start9Labs](https://github.com/Start9Labs) and, for community packages, [Start9-Community](https://github.com/Start9-Community):
 
 - **A flaw in the packaged application itself** goes to that application's upstream project. They can fix it and we cannot.
-- **A flaw in the packaging** — the manifest, the health checks, the interfaces a package exposes, the credentials it generates — goes to [security@start9.com](mailto:security@start9.com) if an attacker could exploit it, or to the advisory form above with the package named. An issue opened on a `*-startos` repository is a public disclosure. Packaging bugs with no security impact are welcome there; if you are not sure which side of that line yours falls on, ask us first.
-- **Tell us as well** at [security@start9.com](mailto:security@start9.com) if a Start9 packaging decision makes an upstream vulnerability worse, or if you think a package should be pulled from a registry.
-
-The Community Registry distributes software written by other people, and the same split applies to it.
+- **A flaw in the packaging of a Start9 package** — the manifest, the health checks, the interfaces a package exposes, the credentials it generates — goes to [security@start9.com](mailto:security@start9.com) if it is a vulnerability as defined above, or to the advisory form above with the package named. Anything short of that goes in an issue or pull request on the package's `*-startos` repository.
+- **A community package is maintained by its developer, not by Start9.** Report anything you find in one, vulnerability or not, to its developer through the package's repository; they can fix it and we cannot.
+- **Tell us as well** at [security@start9.com](mailto:security@start9.com) if a Start9 packaging decision makes a vulnerability worse, or if you think a package should be pulled from a registry.
 
 ### Support questions are not vulnerability reports
 
-A server that will not start, a service that will not connect, a lost password, or a backup that will not restore is a support question. Those get faster answers in the community channels listed on <https://start9.com/contact>. Use the security channels for a defect an attacker could exploit.
+A server that will not start, a service that will not connect, a lost password, or a backup that will not restore is a support question. Those get faster answers in the community channels listed on <https://start9.com/contact>. Use the security channels only for a vulnerability as defined above.
 
 ## Versions
 

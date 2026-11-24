@@ -60,6 +60,8 @@ export * from './types/workspace-config'
 export * from './tokens/relative-url'
 
 export * from './util/convert-ansi'
+export * from './util/error-message'
+export * from './util/escape-html'
 export * from './util/format-progress'
 export * from './util/get-new-entries'
 export * from './util/get-pkg-id'

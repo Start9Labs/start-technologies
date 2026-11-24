@@ -4,7 +4,7 @@ Every request for help is a chat, opened under the topic it is about, and other 
 
 ## Starting a Chat
 
-Choose **+** (**New chat**) above your chat list and pick a topic. **General** holds StartOS, StartTunnel, StartWRT, Start9 hardware, DIY hardware (installing StartOS on your own machine) and Upgrading to 0.4.0; **Services** holds every service in the Start9 Registry. Then describe what is going on.
+Choose **+** (**New chat**) above your chat list and pick a topic. **General** holds StartOS, StartTunnel, StartWRT, Start9 hardware, DIY hardware (installing StartOS on your own machine), Upgrading to 0.4.0 and Start9 Support (this app); **Services** holds every service in the Start9 Registry. Then describe what is going on.
 
 The topic tells Dux which product's or service's documentation to work from, so pick the one the question is about. A question about another service belongs in a new chat under that service.
 

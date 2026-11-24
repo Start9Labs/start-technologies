@@ -85,6 +85,7 @@ import {
   BackupCreateRes,
   BackupRestoreRes,
   DiagnosticsCreateRes,
+  WanOverlap,
 } from './api.service'
 import type { RpcStreamOptions } from '@start9labs/start-core'
 import { RpcService } from '../rpc.service'
@@ -142,6 +143,10 @@ export class LiveApiService extends ApiService {
 
   async configCheck(): Promise<ConfigCheck> {
     return this.rpc.request({ method: 'config.check', params: {} })
+  }
+
+  async profilesWanOverlaps(): Promise<WanOverlap[]> {
+    return this.rpc.request({ method: 'profiles.wan-overlaps', params: {} })
   }
 
   async systemNewerVersions(): Promise<VersionInfo[]> {

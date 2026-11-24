@@ -16,7 +16,7 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 | [Generate Config Files](recipe-config-files.md)             | Produce YAML, TOML, INI, JSON, or ENV files from user settings using FileModel                                                                      |
 | [Pass Config via Environment Variables](recipe-env-vars.md) | Configure your service through environment variables in the daemon definition                                                                       |
 | [Hardcode Config Values](recipe-hardcode-config.md)         | Lock down ports, paths, or auth modes so users cannot change them                                                                                   |
-| [Set a Primary URL](recipe-primary-url.md)                  | Let users choose which hostname the service uses for links, invites, and federation                                                                 |
+| [Set a Primary URL](recipe-primary-url.md)                  | Let users choose which hostname the service uses for links, invites, notifications, and federation                                                  |
 | [Set Up SMTP / Email](recipe-smtp.md)                       | Let users configure email sending with disabled/system/custom modes                                                                                 |
 
 ## Credentials & Access Control
