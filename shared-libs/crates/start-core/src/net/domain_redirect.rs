@@ -235,6 +235,7 @@ mod test {
                 preferred_external_port: 80,
                 add_ssl: None,
                 secure: None,
+                network_ports: Default::default(),
                 proxy: None,
             },
             net: NetInfo {

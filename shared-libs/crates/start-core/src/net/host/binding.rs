@@ -778,7 +778,26 @@ pub struct BindOptions {
     pub secure: Option<Security>,
     /// HTTP request policy shared by every exposed leg of this binding.
     pub proxy: Option<ProxyOptions>,
+    /// Internal ports on this host that receive the binding's connections
+    /// arriving over each overlay network. A plugin serving that network
+    /// forwards there instead of to this binding's port, and serves nothing
+    /// while the target port is unbound.
+    #[serde(default)]
+    pub network_ports: BTreeMap<OverlayNetwork, u16>,
 }
+
+/// A network whose addresses a URL plugin provides.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, VisitVariants,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum OverlayNetwork {
+    /// Tor onion services.
+    Onion,
+}
+
+rpc_toolkit::reflect_ts!(OverlayNetwork);
+rpc_toolkit::ts_export!(OverlayNetwork, namespaces = [""]);
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
 #[serde(
@@ -810,6 +829,8 @@ struct CompatibleBindOptions {
     add_ssl: Option<LegacyProxySslOptions>,
     secure: Option<Security>,
     proxy: Option<ProxyOptions>,
+    #[serde(default)]
+    network_ports: BTreeMap<OverlayNetwork, u16>,
 }
 
 rpc_toolkit::reflect_ts!(CompatibleBindOptions);
@@ -847,6 +868,7 @@ impl TryFrom<CompatibleBindOptions> for BindOptions {
             add_ssl,
             secure: options.secure,
             proxy,
+            network_ports: options.network_ports,
         };
         if !options
             .transport
@@ -887,6 +909,7 @@ impl BindOptions {
                 upstream_cert_validation: None,
             }),
             secure: None,
+            network_ports: BTreeMap::new(),
             proxy: None,
         }
     }
@@ -2108,6 +2131,7 @@ mod test {
                 upstream_cert_validation: None,
             }),
             secure: ssl.map(|ssl| Security { ssl }),
+            network_ports: Default::default(),
             proxy: None,
         }
     }

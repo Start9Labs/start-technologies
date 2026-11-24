@@ -1045,6 +1045,7 @@ mod tests {
                 transport: Default::default(),
                 preferred_external_port: 80,
                 secure: None,
+                network_ports: Default::default(),
                 proxy: None,
                 add_ssl: Some(AddSslOptions {
                     preferred_external_port: 443,

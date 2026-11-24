@@ -721,6 +721,14 @@ impl Model<Host> {
         options: BindOptions,
         privileged: bool,
     ) -> Result<(), Error> {
+        if options.network_ports.values().any(|p| *p == internal_port) {
+            return Err(Error::new(
+                eyre!(
+                    "networkPorts must name a port other than the binding's own ({internal_port})"
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
         let claim = internal_port..=internal_port;
         if let Some(existing) = self
             .as_binding_ranges()
@@ -1083,8 +1091,51 @@ mod tests {
             preferred_external_port,
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
+            network_ports: Default::default(),
             proxy: None,
         }
+    }
+
+    #[test]
+    fn network_ports_must_name_another_port() {
+        use crate::net::host::binding::OverlayNetwork;
+
+        let mut ports = AvailablePorts::new();
+        let mut host = host();
+        let to = |port| BindOptions {
+            network_ports: [(OverlayNetwork::Onion, port)].into_iter().collect(),
+            ..plain(8333)
+        };
+        assert!(
+            host.add_binding(&mut ports, 58333, to(58333), false)
+                .is_err()
+        );
+        assert!(host.as_bindings().de().unwrap().is_empty());
+        host.add_binding(&mut ports, 58333, to(58335), false)
+            .unwrap();
+        let bindings = host.as_bindings().de().unwrap();
+        assert_eq!(
+            bindings[&58333]
+                .options
+                .network_ports
+                .get(&OverlayNetwork::Onion),
+            Some(&58335)
+        );
+    }
+
+    #[test]
+    fn network_ports_deserialize_as_optional() {
+        use crate::net::host::binding::OverlayNetwork;
+
+        let without: BindOptions =
+            serde_json::from_str(r#"{"preferredExternalPort":8333,"addSsl":null,"secure":null}"#)
+                .unwrap();
+        assert!(without.network_ports.is_empty());
+        let with: BindOptions = serde_json::from_str(
+            r#"{"preferredExternalPort":8333,"addSsl":null,"secure":null,"networkPorts":{"onion":58335}}"#,
+        )
+        .unwrap();
+        assert_eq!(with.network_ports.get(&OverlayNetwork::Onion), Some(&58335));
     }
 
     #[test]

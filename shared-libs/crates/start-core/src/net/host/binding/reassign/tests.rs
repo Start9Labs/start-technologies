@@ -23,6 +23,7 @@ fn options(port: u16, ssl: Option<u16>, own_tls: bool) -> BindOptions {
             upstream_cert_validation: None,
         }),
         secure: Some(Security { ssl: own_tls }),
+        network_ports: Default::default(),
         proxy: None,
     }
 }

@@ -225,6 +225,7 @@ The handler then re-runs when the new value lands, updating the interface in pla
 | `proxy.addXForwardedHeaders`    | `boolean`                                                                  | Generate trusted forwarded headers. Defaults to `true` in `bindPort`.                                                                                                                                                                                                                                        |
 | `proxy.auth`                    | `ProxyAuth` \| `null`                                                      | Auth gate on both the original and TLS-wrapper legs. Defaults to `null`. See [Authenticating at the Proxy](#authenticating-at-the-proxy).                                                                                                                                                                    |
 | `secure`                        | `{ ssl: boolean }` \| `null`                                               | For `protocol: null`, whether the original port is safe to expose on untrusted networks and whether it speaks TLS itself. See [Choosing `secure`](#choosing-secure).                                                                                                                                         |
+| `networkPorts`                  | `{ onion?: number }`                                                       | Another internal port on the same host that receives this binding’s connections from an overlay network. See [Separating Overlay Traffic](#separating-overlay-traffic).                                                                                                                                      |
 
 Omitting `proxy` inherits the protocol's default: enabled for `http`, `https`, `ws`, and `wss`, otherwise `null`. Set `proxy: null` to forward traffic without HTTP handling. An explicit object enables HTTP proxying for any protocol and merges partial settings with the defaults. The service must speak HTTP on that binding; proxying does not translate other application protocols. Setting `proxy: { addXForwardedHeaders: false, auth: null }` retains HTTP parsing.
 
@@ -650,6 +651,31 @@ A single dual-stack socket presents IPv4 clients to the daemon as IPv4-mapped ad
 When the daemon cannot listen on IPv6 at all, or only on a single dual-stack socket that would break those comparisons, leave it on IPv4 and say so in `README.md`: the interface listens on IPv4 only because of the upstream limitation, StartOS still lists its IPv6 addresses, and connections to them are refused. Don't add a relay in front of it — an IPv4 socket cannot receive an IPv6 client's address, so every IPv6 client would reach the daemon as the relay.
 
 An HTTP-proxied binding, with or without `addSsl`, reaches your container over IPv4, so a `0.0.0.0` listener behind it loses nothing.
+
+## Separating Overlay Traffic
+
+Every address on a binding reaches the same container port, and a connection a plugin forwards, such as one to a `.onion` address, arrives from the bridge rather than from the client. A daemon that must treat those connections differently names a second port in `networkPorts`. Bitcoin is the example: it tells an onion peer only its onion address, and needs its own onion listener to know which peers those are.
+
+```typescript
+const peer = sdk.MultiHost.of(effects, 'peer')
+await peer.bindPort(58335, {
+  protocol: null,
+  preferredExternalPort: 58335,
+  addSsl: null,
+  secure: { ssl: false },
+})
+const peerOrigin = await peer.bindPort(58333, {
+  protocol: null,
+  preferredExternalPort: 8333,
+  addSsl: null,
+  secure: { ssl: false },
+  networkPorts: { onion: 58335 },
+})
+```
+
+The user still adds the `.onion` address to the exported interface. The plugin serving that network forwards it to the named port, and serves nothing there while that port is unbound, disabled or exports an interface. Export no interface on the named port: an exported binding is on the LAN, where clearnet clients would reach the listener meant for the overlay network. The named port must differ from the binding’s own.
+
+A plugin that predates `networkPorts` forwards to the binding’s own port. Require a version that honours it in the dependency’s version range.
 
 ## Authenticating at the Proxy
 

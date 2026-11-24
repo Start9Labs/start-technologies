@@ -12,6 +12,7 @@ fn options() -> BindOptions {
             upstream_cert_validation: None,
         }),
         secure: None,
+        network_ports: Default::default(),
         proxy: None,
     }
 }

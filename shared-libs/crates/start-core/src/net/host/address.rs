@@ -778,6 +778,7 @@ mod test {
                     upstream_cert_validation: None,
                 }),
                 secure: Some(Security { ssl: false }),
+                network_ports: Default::default(),
                 proxy: None,
             },
             true,

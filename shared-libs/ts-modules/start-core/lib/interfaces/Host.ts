@@ -85,6 +85,7 @@ type BindOptionsByKnownProtocol = {
   transport?: BindOptions['transport']
   addSsl?: Partial<AddSslOptions> | null
   proxy?: BindOptions['proxy']
+  networkPorts?: BindOptions['networkPorts']
 }
 
 export type BindOptionsByProtocol =
@@ -357,6 +358,7 @@ export class MultiHost {
       addSsl,
       secure,
       proxy,
+      networkPorts: options.networkPorts,
     })
 
     return new Origin(this, internalPort, options.protocol, sslProto)

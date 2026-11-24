@@ -142,6 +142,7 @@ mod tests {
                 preferred_external_port: 8080,
                 add_ssl: None,
                 secure: None,
+                network_ports: Default::default(),
                 proxy: None,
             },
             false,

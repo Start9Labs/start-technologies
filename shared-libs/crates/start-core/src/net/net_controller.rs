@@ -1747,6 +1747,7 @@ mod tests {
                 upstream_cert_validation: None,
             }),
             secure: secure_ssl.map(|ssl| Security { ssl }),
+            network_ports: Default::default(),
             proxy: None,
         }
     }
