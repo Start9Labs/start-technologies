@@ -16,11 +16,12 @@ const MAX_TIMEOUT_MS = 30000
  *
  * When started, the daemon automatically restarts its underlying command on
  * failure, waiting one second longer after each failure (up to 30 seconds).
- * While the daemon is running, it holds a use-token (`subcontainer.hold()`) on its SubContainer
- * so the container is not destroyed out from under it. There are two ways to
- * bring it down: {@link stop} releases the hold but leaves the SubContainer
- * intact so a later {@link start} can resume in it (a restartable pause);
- * {@link term} additionally destroys the SubContainer (genuine teardown).
+ * While the daemon is running, it holds a use-token (`subcontainer.hold()`)
+ * on its SubContainer so the container is not destroyed out from under it.
+ * There are two ways to bring it down: {@link stop} releases the hold but
+ * leaves the SubContainer intact so a later {@link start} can resume in it
+ * (a restartable pause); {@link term} additionally destroys the SubContainer
+ * (genuine teardown).
  *
  * @typeParam Manifest - The service manifest type
  * @typeParam C - The subcontainer type, or `null` for JS-only daemons
@@ -179,7 +180,7 @@ export class Daemon<
           if (!signal.aborted) logErrorOnce(e)
         }
         if (signal.aborted) break
-        await delay(timeoutCounter, signal)
+        await delay(timeoutCounter, { signal })
         timeoutCounter += TIMEOUT_INCREMENT_MS
         timeoutCounter = Math.min(MAX_TIMEOUT_MS, timeoutCounter)
       }

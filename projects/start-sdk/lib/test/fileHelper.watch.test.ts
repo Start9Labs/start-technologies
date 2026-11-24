@@ -441,6 +441,34 @@ describe('FileHelper watch retry backoff', () => {
     }
   })
 
+  test('backoff sleep does not keep the process alive', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'file-backoff-ref-'))
+    const path = join(dir, 'config.txt')
+    await fs.writeFile(path, 'initial')
+
+    const { waitForErrors } = createErrorTracker()
+    mockFailingWatch()
+    const timers = jest.spyOn(globalThis, 'setTimeout')
+
+    const abort = new AbortController()
+    const wait = FileHelper.string(path)
+      .read()
+      .waitFor(effects, value => value === 'updated', abort.signal)
+
+    try {
+      await waitForErrors(1)
+      await flushImmediate()
+      const retryTimers = timers.mock.calls.flatMap(([, ms], i) =>
+        ms === BACKOFF_SCHEDULE[0] ? [timers.mock.results[i].value] : [],
+      )
+      expect(retryTimers.map(timer => timer.hasRef())).toEqual([false])
+    } finally {
+      abort.abort()
+      await wait.catch(() => {})
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
   test('terminates immediately on effects.onLeaveContext during backoff sleep without accumulating listeners', async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'file-backoff-leave-'))
     const path = join(dir, 'config.txt')

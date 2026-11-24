@@ -1,16 +1,24 @@
 const MAX_TIMEOUT_MS = 2 ** 31 - 1
 
+export type DelayOptions = {
+  signal?: AbortSignal
+  ref?: boolean
+}
+
 /**
- * Resolves after `ms`, however long, or as soon as the abort signal fires.
- * Never resolves for `Infinity` without an abort.
+ * Resolves after `ms`, however long, or as soon as the signal aborts.
+ * Never resolves for `Infinity` without a signal.
  */
-export function delay(ms: number, abort?: AbortSignal): Promise<void> {
-  if (abort?.aborted) return Promise.resolve()
+export function delay(
+  ms: number,
+  { signal, ref = true }: DelayOptions = {},
+): Promise<void> {
+  if (signal?.aborted) return Promise.resolve()
   return new Promise<void>(resolve => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const wake = () => {
       clearTimeout(timer)
-      abort?.removeEventListener('abort', wake)
+      signal?.removeEventListener('abort', wake)
       resolve()
     }
     const wait = (remaining: number) => {
@@ -20,8 +28,9 @@ export function delay(ms: number, abort?: AbortSignal): Promise<void> {
         () => (remaining > step ? wait(remaining - step) : wake()),
         step,
       )
+      if (!ref) timer.unref()
     }
-    abort?.addEventListener('abort', wake)
+    signal?.addEventListener('abort', wake)
     wait(ms)
   })
 }

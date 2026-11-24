@@ -401,7 +401,8 @@ class FileHelperImpl<A> implements FileHelper<A> {
               yield null
               await onCreated(filePath, signal).catch(onWatchError)
             }
-            if (failed) await delay(retry.next(), signal)
+            // A waiting reader never holds the event loop.
+            if (failed) await delay(retry.next(), { signal, ref: false })
             else retry.reset()
           }
         } finally {

@@ -16,13 +16,14 @@ describe('delay', () => {
   it('resolves at once when already aborted', async () => {
     const ctrl = new AbortController()
     ctrl.abort()
-    expect(await settledBy(delay(Infinity, ctrl.signal), 0)).toBe(true)
+    const pending = delay(Infinity, { signal: ctrl.signal })
+    expect(await settledBy(pending, 0)).toBe(true)
     expect(jest.getTimerCount()).toBe(0)
   })
 
   it('resolves on abort and clears its timer', async () => {
     const ctrl = new AbortController()
-    const pending = delay(MAX_TIMEOUT_MS + 1_000, ctrl.signal)
+    const pending = delay(MAX_TIMEOUT_MS + 1_000, { signal: ctrl.signal })
     expect(await settledBy(pending, MAX_TIMEOUT_MS)).toBe(false)
     ctrl.abort()
     expect(await settledBy(pending, 0)).toBe(true)
@@ -31,10 +32,29 @@ describe('delay', () => {
 
   it('resolves an infinite delay on abort', async () => {
     const ctrl = new AbortController()
-    const pending = delay(Infinity, ctrl.signal)
+    const pending = delay(Infinity, { signal: ctrl.signal })
     expect(await settledBy(pending, MAX_TIMEOUT_MS)).toBe(false)
     ctrl.abort()
     expect(await settledBy(pending, 0)).toBe(true)
+  })
+})
+
+describe('delay timer ref', () => {
+  afterEach(() => jest.restoreAllMocks())
+
+  it('holds the event loop unless ref is false', async () => {
+    const timers = jest.spyOn(globalThis, 'setTimeout')
+    const ctrl = new AbortController()
+    const pending = [
+      delay(60_000, { signal: ctrl.signal }),
+      delay(60_000, { signal: ctrl.signal, ref: false }),
+    ]
+    const refs = timers.mock.results.map(r =>
+      (r.value as NodeJS.Timeout).hasRef(),
+    )
+    ctrl.abort()
+    await Promise.all(pending)
+    expect(refs).toEqual([true, false])
   })
 })
 
