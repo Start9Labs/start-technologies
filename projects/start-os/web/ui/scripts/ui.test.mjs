@@ -12,7 +12,9 @@ import {
 import { FormBuilder, NonNullableFormBuilder, Validators } from '@angular/forms'
 import {
   BehaviorSubject,
+  defer,
   EMPTY,
+  filter,
   firstValueFrom,
   map,
   of,
@@ -48,7 +50,7 @@ boundary(
     'ExverComparesPipe',
     'LeafProgressPipe',
   ],
-  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const isDefaultRegistry = url => Object.values(defaultRegistries).some(known => defaultUrl(known, url)); export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; ' +
+  'export const LANGUAGES = []; export const LANGUAGE_TO_CODE = {}; export const getKeyboardName = () => ""; export const getAllKeyboardsSorted = () => []; export const pauseFor = async () => {}; export const FALLBACK_ICON = "fallback.png"; export const defaultRegistries = { start9: "https://registry.test", community: "https://community.test" }; export const isDefaultRegistry = url => Object.values(defaultRegistries).some(known => defaultUrl(known, url)); export const convertBytes = value => String(value); export const getErrorMessage = error => error.message; export const leafProgress = progress => progress; export const isNetworkError = error => error?.code === 0; ' +
     `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
@@ -227,7 +229,8 @@ const { ActivatedRoute, convertToParamMap, Router } =
   await import('@angular/router')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
-const { PatchDB } = await import('patch-db-client')
+const { PatchDB, SubtreePatchDB, projectRoot, selectorKey, watchSelection } =
+  await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
 const { i18nService: ProductionI18nService } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.service.ts')
@@ -4191,7 +4194,7 @@ test('a late registry cache update cannot restore a removed registry', async t =
     'https://registry.test/': {
       status: 'connected',
       info: { name: 'New name' },
-      catalog: {},
+      selections: {},
     },
   })
   await new Promise(setImmediate)
@@ -4210,7 +4213,7 @@ test('registry status keeps its last known observation while the server is disco
       status: 'error',
       error: 'connection timed out',
       info: { name: 'Test' },
-      catalog: {},
+      selections: {},
     },
   })
   const registries = of({ 'https://registry.test': 'Test' })
@@ -4228,6 +4231,7 @@ test('registry status keeps its last known observation while the server is disco
       { provide: PackageIconService, useValue: {} },
       { provide: ApiService, useValue: {} },
       { provide: ConnectionService, useValue: connected },
+      { provide: ErrorService, useValue: { handleError: assert.fail } },
     ],
     null,
   )
@@ -4246,6 +4250,7 @@ test('registry status keeps its last known observation while the server is disco
     'https://registry.test/',
   ])
   assert.equal((await current()).status, 'error')
+  const observed = catalogs.length
 
   connected.next(false)
   const [registry] = await firstValueFrom(service.registries$)
@@ -4255,7 +4260,8 @@ test('registry status keeps its last known observation while the server is disco
     'https://registry.test/',
   ])
   assert.equal((await current()).status, 'error')
-  assert.equal(catalogs.length, 1)
+  assert.equal(catalogs.length, observed)
+  assert.equal(catalogs.at(-1)['https://registry.test/'].status, 'error')
 })
 
 test('header status separates offline, unreachable server, connecting, restarting and live', async t => {
@@ -4479,15 +4485,36 @@ const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
     categories: { bitcoin: { name: 'Bitcoin' } },
     icon: null,
   },
-  catalog: {
+  selections: {
     example: {
-      categories: ['bitcoin'],
-      versions: { [version]: { title: version } },
+      best: [version],
+      versions: { [version]: { s9pks: [0], compatible: true } },
     },
   },
 })
 
-function marketplaceFixture(t, entries = {}) {
+const registryIndex = (versions = ['1.0.0:0', '2.0.0:0', '3.0.0:0']) => ({
+  package: {
+    packages: {
+      example: {
+        authorized: {},
+        categories: ['bitcoin'],
+        versions: Object.fromEntries(
+          versions.map(version => [
+            version,
+            { title: version, description: { short: '', long: '' }, s9pks: [] },
+          ]),
+        ),
+      },
+    },
+    categories: {},
+  },
+})
+
+const indexedRelease = version =>
+  `/registryIndexes/https:~1~1registry.test~1/package/packages/example/versions/${version}`
+
+function marketplaceFixture(t, entries = {}, index = registryIndex()) {
   const source = new Subject()
   const connection = new BehaviorSubject(true)
   const cache = new BehaviorSubject({
@@ -4496,12 +4523,18 @@ function marketplaceFixture(t, entries = {}) {
       ui: {},
       serverInfo: { registries: { 'https://registry.test': 'Saved name' } },
       registryCache: entries,
+      registryIndexes: { 'https://registry.test/': index },
     },
   })
   const patch = new PatchDB(source, cache)
+  patch.watchProjection$ = (projection, ...path) =>
+    patch
+      .watch$(...path)
+      .pipe(map(value => projectRoot(watchSelection(projection), value)))
   patch.start()
   const queries = []
   const responses = []
+  const errors = []
   const refreshes = []
   const connections = []
   const iconRequests = []
@@ -4549,6 +4582,10 @@ function marketplaceFixture(t, entries = {}) {
     {
       provide: PackageIconService,
       useFactory: () => new ProductionPackageIconService(),
+    },
+    {
+      provide: ErrorService,
+      useValue: { handleError: error => errors.push(error) },
     },
     { provide: ConnectionService, useValue: connection },
     { provide: MarketplaceService, useFactory: () => new MarketplaceService() },
@@ -4598,12 +4635,14 @@ function marketplaceFixture(t, entries = {}) {
   })
   return {
     service,
+    patch,
     injector,
     source,
     cache,
     connection,
     queries,
     responses,
+    errors,
     refreshes,
     connections,
     iconRequests,
@@ -4643,7 +4682,7 @@ test('registry availability distinguishes first sync, empty success and cached r
   const packages = f.watch(f.service.getPackage$('missing', null, null))
   assert.equal(rows.at(-1)[0].status, 'connecting')
   assert.deepEqual(errors.at(-1), [])
-  const entry = { ...registryEntry(), status: 'connecting', catalog: {} }
+  const entry = { ...registryEntry(), status: 'connecting', selections: {} }
   f.replace('/registryCache', { 'https://registry.test/': entry })
   assert.equal(
     isRegistryLoading(stores.at(-1).status, stores.at(-1).packages.length),
@@ -4773,9 +4812,10 @@ for (const status of ['connected', 'connecting', 'error']) {
 
 test('the visible refresh action retries failed icons when the refreshed cache arrives and shares successful loads', async t => {
   const entry = registryEntry()
+  const index = registryIndex()
   const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
-  entry.catalog.example.versions['1.0.0:0'].icon = icon
-  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  index.package.packages.example.versions['1.0.0:0'].icon = icon
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
   f.makePage()
   const refresh = f.makeRefresh('https://registry.test/')
   const visible = f.watch(
@@ -4942,7 +4982,57 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   assert.deepEqual(f.queries, [])
 })
 
-test('marketplace tolerates browser snapshots without a catalog and consumes the live replacement', async t => {
+test('a connected catalog shows no listing until its index projection arrives', async t => {
+  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
+  const projected = new Subject()
+  f.patch.watchProjection$ = () => projected
+  const marketplace = f.watch(f.service.marketplace$)
+  await f.service.connect('https://registry.test')
+  const stores = f.watch(f.service.currentRegistry$)
+  assert.deepEqual(stores, [])
+  assert.ok(marketplace.length > 0)
+  assert.ok(marketplace.every(m => m['https://registry.test/'] === null))
+
+  projected.next(registryIndex().package.packages)
+  assert.deepEqual(
+    stores.map(store => store.packages.map(({ version }) => version)),
+    [['1.0.0:0']],
+  )
+  assert.deepEqual(
+    marketplace
+      .at(-1)
+      ['https://registry.test/'].packages.map(({ version }) => version),
+    ['1.0.0:0'],
+  )
+})
+
+test('a status-only registry change updates the listing without resubscribing the index projection', async t => {
+  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
+  const watchProjection$ = f.patch.watchProjection$
+  let subscriptions = 0
+  f.patch.watchProjection$ = (...args) =>
+    defer(() => {
+      subscriptions++
+      return watchProjection$(...args)
+    })
+  await f.service.connect('https://registry.test')
+  const stores = f.watch(f.service.currentRegistry$)
+  assert.equal(stores.at(-1).status, 'connected')
+  assert.equal(subscriptions, 1)
+
+  f.replace('/registryCache', {
+    'https://registry.test/': {
+      ...registryEntry('1.0.0:0', 'error'),
+      error: 'connection timed out',
+    },
+  })
+  assert.equal(stores.at(-1).status, 'error')
+  assert.equal(stores.at(-1).error, 'connection timed out')
+  assert.ok(stores.every(store => store.packages.length === 1))
+  assert.equal(subscriptions, 1)
+})
+
+test('marketplace tolerates browser snapshots without selections and consumes the live replacement', async t => {
   const legacy = {
     status: 'connected',
     info: registryEntry().info,
@@ -4962,62 +5052,227 @@ test('marketplace tolerates browser snapshots without a catalog and consumes the
   assert.deepEqual(marketplace.at(-1)['https://registry.test/'].packages, [])
   assert.deepEqual(stores.at(-1).packages, [])
   assert.equal(packages.at(-1), null)
-  assert.equal(legacy.catalog, undefined)
+  assert.equal(legacy.selections, undefined)
 
   f.replace('/registryCache', { 'https://registry.test/': registryEntry() })
   assert.equal(marketplace.at(-1)['https://registry.test/'].packages.length, 1)
   assert.equal(stores.at(-1).packages[0].version, '1.0.0:0')
+  await tick()
   assert.equal(packages.at(-1).version, '1.0.0:0')
   assert.deepEqual(f.queries, [])
 })
 
-test('marketplace lists the update target as the installable update and keeps the newer release selectable', async t => {
+test('marketplace lists the newest release and the update target from the index without long descriptions', async t => {
   const entry = registryEntry('3.0.0:0')
-  entry.catalog.example.versions = {
-    '3.0.0:0': { title: '3.0.0:0', releaseNotes: 'Latest' },
-    '2.0.0:0': { title: '2.0.0:0', releaseNotes: 'Stepping stone' },
-    '1.0.0:0': { title: '1.0.0:0', releaseNotes: 'Revision', superseded: true },
+  entry.selections.example.versions = {
+    '1.0.0:0': { s9pks: [0], superseded: true, compatible: true },
+    '2.0.0:0': { s9pks: [0], compatible: true },
+    '3.0.0:0': { s9pks: [0], compatible: true },
   }
-  entry.catalog.example.updateTarget = '2.0.0:0'
-  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  entry.selections.example.updateTarget = '2.0.0:0'
+  const index = registryIndex()
+  Object.assign(index.package.packages.example.versions['2.0.0:0'], {
+    description: { short: '', long: 'Stepping stone details' },
+    releaseNotes: 'Stepping stone',
+  })
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
   await f.service.connect('https://registry.test')
   const store = await firstValueFrom(f.service.currentRegistry$)
+  assert.deepEqual(
+    store.packages.map(({ version }) => version),
+    ['3.0.0:0'],
+  )
   assert.deepEqual(
     store.updates.map(({ version }) => version),
     ['2.0.0:0'],
   )
-  const pkg = await firstValueFrom(f.service.getPackage$('example', null, null))
-  assert.equal(pkg.version, '2.0.0:0')
-  assert.equal(pkg.title, '2.0.0:0')
-  assert.equal(pkg.superseded, undefined)
-  assert.deepEqual(pkg.otherVersions, {
-    '1.0.0:0': {
-      releaseNotes: 'Revision',
-      defaultLocale: undefined,
-      superseded: true,
-    },
-    '3.0.0:0': {
-      releaseNotes: 'Latest',
-      defaultLocale: undefined,
-      superseded: undefined,
-    },
+  assert.equal(store.updates[0].releaseNotes, 'Stepping stone')
+  assert.equal(store.updates[0].description.long, undefined)
+  const newest = await firstValueFrom(
+    f.service.getPackage$('example', null, null),
+  )
+  assert.equal(newest.version, '3.0.0:0')
+  assert.deepEqual(newest.otherVersions, {
+    '1.0.0:0': { superseded: true },
+    '2.0.0:0': {},
   })
+  const target = await firstValueFrom(
+    f.service.getPackage$('example', '2.0.0:0', null),
+  )
+  assert.equal(target.description.long, 'Stepping stone details')
   assert.deepEqual(f.queries, [])
 })
 
-test('an exact version reads the registry cache and tracks its revisions without querying', async t => {
+test('registry asset positions keep trust, install pins and static files on the selected hardware', async t => {
+  const entry = registryEntry()
+  entry.selections.example.versions['1.0.0:0'].s9pks = [1]
+  const index = registryIndex(['1.0.0:0'])
+  const arm = [
+    { arch: ['aarch64'] },
+    {
+      signatures: { [untrustedSigner]: 'arm-signature' },
+      urls: ['https://assets.test/arm.s9pk'],
+      commitment: { rootSighash: 'arm-root', rootMaxsize: 10 },
+    },
+  ]
+  const native = [
+    { arch: ['x86_64'] },
+    {
+      signatures: { [OS_UPDATE_SIGNERS[0]]: 'native-signature' },
+      urls: ['https://assets.test/native.s9pk'],
+      commitment: { rootSighash: 'native-root', rootMaxsize: 20 },
+    },
+  ]
+  index.package.packages.example.versions['1.0.0:0'].s9pks = [arm, native]
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
+  const api = f.injector.get(ApiService)
+  const submissions = []
+  const files = []
+  api.rpc.package = { install: async params => submissions.push(params) }
+  api.getStatic = async (urls, commitment) => {
+    files.push({ urls, commitment })
+    return 'instructions'
+  }
+  f.replace('/serverInfo/trustedKeys', trustedSigners)
+  await f.service.connect('https://registry.test')
+  const store = await firstValueFrom(f.service.currentRegistry$)
+  assert.deepEqual(store.packages[0].s9pks, [native])
+  const details = await firstValueFrom(
+    f.service.getDetails$('example', '1.0.0:0', 'https://registry.test/'),
+  )
+  assert.deepEqual(details.s9pks, [native])
+  assert.deepEqual(details.best['1.0.0:0'].s9pks, [native])
+  await f.service.installPackage(details, 'https://registry.test')
+  assert.deepEqual(submissions[0].acceptSigners, {
+    any: [{ signer: OS_UPDATE_SIGNERS[0] }],
+  })
+  assert.equal(
+    await firstValueFrom(f.service.fetchStatic$(details, 'instructions.md')),
+    'instructions',
+  )
+  assert.deepEqual(files, [
+    {
+      urls: [
+        '/s9pk/proxy/https%3A%2F%2Fassets.test%2Fnative.s9pk/instructions.md',
+      ],
+      commitment: { rootSighash: 'native-root', rootMaxsize: 20 },
+    },
+  ])
+  assert.deepEqual(index.package.packages.example.versions['1.0.0:0'].s9pks, [
+    arm,
+    native,
+  ])
+})
+
+test("details carry every other version's release notes from the index, which a release alone omits", async t => {
+  const entry = registryEntry()
+  entry.selections.example.versions['0.9.0:0'] = {
+    s9pks: [0],
+    compatible: true,
+  }
+  const index = registryIndex(['0.9.0:0', '1.0.0:0'])
+  Object.assign(index.package.packages.example.versions['0.9.0:0'], {
+    releaseNotes: 'Older notes',
+    defaultLocale: 'en_US',
+  })
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
+  const details = await firstValueFrom(
+    f.service
+      .getDetails$('example', '1.0.0:0', 'https://registry.test/')
+      .pipe(filter(Boolean)),
+  )
+  assert.deepEqual(details.otherVersions['0.9.0:0'], {
+    releaseNotes: 'Older notes',
+    defaultLocale: 'en_US',
+  })
+  await f.service.connect('https://registry.test')
+  const release = await firstValueFrom(
+    f.service.getPackage$('example', '1.0.0:0', null).pipe(filter(Boolean)),
+  )
+  assert.deepEqual(release.otherVersions['0.9.0:0'], {})
+  assert.deepEqual(f.queries, [])
+})
+
+test('expanded details follow live index changes to every version', async t => {
   const entry = registryEntry('2.0.0:0')
-  entry.catalog.example.versions['1.0.0:0'] = { title: 'Older' }
+  entry.selections.example.versions['1.5.0:0'] = {
+    s9pks: [0],
+    compatible: true,
+  }
+  const index = registryIndex(['1.5.0:0', '2.0.0:0'])
+  index.package.packages.example.versions['2.0.0:0'].releaseNotes = 'Before'
+  index.package.packages.example.versions['1.5.0:0'].releaseNotes =
+    'Intermediate'
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
+  const values = f.watch(
+    f.service.getDetails$('example', '2.0.0:0', 'https://registry.test/'),
+  )
+  assert.equal(values.at(-1).releaseNotes, 'Before')
+  assert.equal(
+    values.at(-1).otherVersions['1.5.0:0'].releaseNotes,
+    'Intermediate',
+  )
+  f.replace(`${indexedRelease('2.0.0:0')}/releaseNotes`, 'After')
+  f.replace(`${indexedRelease('1.5.0:0')}/releaseNotes`, 'Edited')
+  assert.equal(values.at(-1).releaseNotes, 'After')
+  assert.equal(values.at(-1).otherVersions['1.5.0:0'].releaseNotes, 'Edited')
+  assert.deepEqual(f.queries, [])
+})
+
+test('an unlisted exact version is read from the index and follows its live signatures', async t => {
+  const entry = registryEntry('2.0.0:0')
+  entry.selections.example.versions['1.0.0:0'] = {
+    s9pks: [0],
+    compatible: true,
+  }
+  const index = registryIndex(['1.0.0:0', '2.0.0:0'])
+  const s9pks = signatures => [[{}, { signatures }]]
+  index.package.packages.example.versions['1.0.0:0'].s9pks = s9pks({
+    first: 'signature',
+  })
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
+  await f.service.connect('https://registry.test')
+  const store = await firstValueFrom(f.service.currentRegistry$)
+  assert.deepEqual(
+    store.packages.map(({ version }) => version),
+    ['2.0.0:0'],
+  )
+  const values = f.watch(f.service.getPackage$('example', '1.0.0:0', null))
+  assert.deepEqual(Object.keys(values.at(-1).s9pks[0][1].signatures), ['first'])
+  f.replace(
+    `${indexedRelease('1.0.0:0')}/s9pks`,
+    s9pks({ first: 'signature', second: 'signature' }),
+  )
+  assert.deepEqual(Object.keys(values.at(-1).s9pks[0][1].signatures), [
+    'first',
+    'second',
+  ])
+  assert.deepEqual(f.queries, [])
+})
+
+test('an exact version resolves while its registry selects it and the index holds it', async t => {
   const f = marketplaceFixture(t)
   await f.service.connect('https://registry.test')
   const values = f.watch(f.service.getPackage$('example', '1.0.0:0', null))
   assert.deepEqual(values, [])
+  const entry = registryEntry('2.0.0:0')
+  entry.selections.example.versions['1.0.0:0'] = {
+    s9pks: [0],
+    compatible: true,
+  }
   f.replace('/registryCache', { 'https://registry.test/': entry })
   assert.equal(values.at(-1).version, '1.0.0:0')
-  assert.equal(values.at(-1).title, 'Older')
+  assert.equal(values.at(-1).title, '1.0.0:0')
   f.replace('/registryCache', {
-    'https://registry.test/': registryEntry('2.0.0:0'),
+    'https://registry.test/': registryEntry('3.0.0:0'),
   })
+  assert.equal(values.at(-1), null)
+  f.replace('/registryCache', { 'https://registry.test/': entry })
+  assert.equal(values.at(-1).version, '1.0.0:0')
+  f.replace(
+    '/registryIndexes/https:~1~1registry.test~1/package/packages/example/versions',
+    registryIndex(['2.0.0:0']).package.packages.example.versions,
+  )
   assert.equal(values.at(-1), null)
   assert.deepEqual(f.queries, [])
 })
@@ -5075,7 +5330,7 @@ function fakeIndexedDb() {
   return { win, control }
 }
 
-async function patchDbCache(t, win) {
+async function rawPatchDbCache(t, win) {
   const { PatchDbCache } =
     await import('src/app/services/patch-db/patch-db-cache')
   const injector = createEnvironmentInjector([
@@ -5085,14 +5340,29 @@ async function patchDbCache(t, win) {
   return runInInjectionContext(injector, () => new PatchDbCache())
 }
 
+const ROOTS = { '/ui': { epoch: 'boot', id: 1 } }
+
+async function patchDbCache(t, win) {
+  const cache = await rawPatchDbCache(t, win)
+  return {
+    roots: ROOTS,
+    read: async () => (await cache.read()).dump,
+    write(dump) {
+      return cache.write(dump, this.roots)
+    },
+    markSynced: () => cache.markSynced(),
+    clear: () => cache.clear(),
+    synced: () => cache.synced(),
+  }
+}
+
 test('patch cache rewrites only replaced top-level values', async t => {
   const { win, control } = fakeIndexedDb()
   t.mock.method(console, 'error', () => {})
   const writer = await patchDbCache(t, win)
   assert.deepEqual(await writer.read(), { id: 0, value: {} })
-  writer.epoch = 'boot'
   await writer.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
-  assert.deepEqual(control.puts, ['ui', 'packageData'])
+  assert.deepEqual(control.puts, ['/ui', '/packageData'])
 
   const reader = await patchDbCache(t, win)
   const cached = await reader.read()
@@ -5100,18 +5370,213 @@ test('patch cache rewrites only replaced top-level values', async t => {
     id: 3,
     value: { ui: { a: 1 }, packageData: {} },
   })
-  assert.equal(reader.epoch, 'boot')
   control.puts = []
   await reader.write({
     id: 4,
     value: { ...cached.value, packageData: { x: 1 } },
   })
-  assert.deepEqual(control.puts, ['packageData'])
+  assert.deepEqual(control.puts, ['/packageData/x'])
   await reader.write({ id: 5, value: { ui: cached.value.ui } })
   assert.deepEqual(await (await patchDbCache(t, win)).read(), {
     id: 5,
     value: { ui: { a: 1 } },
   })
+})
+
+test('patch cache stores keyed maps one entry per child', async t => {
+  const { win, control } = fakeIndexedDb()
+  const writer = await patchDbCache(t, win)
+  const alpha = { title: 'Alpha' }
+  const beta = { title: 'Beta' }
+  await writer.write({
+    id: 3,
+    value: { ui: { a: 1 }, packageData: { 'a/b': alpha, 'b~c': beta } },
+  })
+  assert.deepEqual(control.puts, [
+    '/ui',
+    '/packageData',
+    '/packageData/a~1b',
+    '/packageData/b~0c',
+  ])
+  const reader = await patchDbCache(t, win)
+  const cached = await reader.read()
+  assert.deepEqual(cached.value.packageData, { 'a/b': alpha, 'b~c': beta })
+  control.puts = []
+  const { 'b~c': _, ...rest } = cached.value.packageData
+  await reader.write({
+    id: 4,
+    value: {
+      ...cached.value,
+      packageData: { ...rest, 'a/b': { title: 'A2' } },
+    },
+  })
+  assert.deepEqual(control.puts, ['/packageData/a~1b'])
+  assert.deepEqual((await (await patchDbCache(t, win)).read()).value, {
+    ui: { a: 1 },
+    packageData: { 'a/b': { title: 'A2' } },
+  })
+})
+
+test('patch cache never persists registry or OS update data, or their cursors', async t => {
+  const { win, control } = fakeIndexedDb()
+  const cache = await rawPatchDbCache(t, win)
+  const roots = {
+    '/serverInfo': { epoch: 'boot', id: 3 },
+    '/registryCache': { epoch: 'boot', id: 3 },
+    '/registryIndexes': { epoch: 'boot', id: 3 },
+    '/osUpdateCache': { epoch: 'boot', id: 3 },
+  }
+  await cache.write(
+    {
+      id: 3,
+      value: {
+        serverInfo: { a: 1 },
+        registryCache: { 'https://a.test/': {} },
+        registryIndexes: { 'https://a.test/': {} },
+        osUpdateCache: { versions: {} },
+      },
+    },
+    roots,
+  )
+  assert.deepEqual(control.puts, ['/serverInfo'])
+  assert.deepEqual(await (await rawPatchDbCache(t, win)).read(), {
+    dump: { id: 3, value: { serverInfo: { a: 1 } } },
+    cursors: { '/serverInfo': { epoch: 'boot', id: 3 } },
+  })
+})
+
+test('whole-document subscriptions retain offline coverage without persisting external caches', async t => {
+  const { win } = fakeIndexedDb()
+  const cache = await rawPatchDbCache(t, win)
+  const cursor = { epoch: 'boot', id: 5 }
+  const projected = selectorKey({ include: '/ui', depth: 2 })
+  const value = {
+    serverInfo: { hostname: 'cached' },
+    packageData: {},
+    ui: { a: 1 },
+    registryCache: { r: {} },
+    registryIndexes: { r: {} },
+    osUpdateCache: { versions: {} },
+  }
+  await cache.write(
+    { id: 5, value },
+    {
+      '': cursor,
+      [projected]: cursor,
+      [selectorKey({ include: '/registryIndexes/r', exclude: ['/x'] })]: cursor,
+    },
+  )
+  const { dump, cursors } = await (await rawPatchDbCache(t, win)).read()
+  assert.deepEqual(cursors, {
+    '/serverInfo': cursor,
+    '/packageData': cursor,
+    '/ui': cursor,
+    [projected]: cursor,
+  })
+  assert.deepEqual(Object.keys(dump.value).sort(), [
+    'packageData',
+    'serverInfo',
+    'ui',
+  ])
+  const patch = new SubtreePatchDB({ subscribe: () => EMPTY })
+  patch.restore(dump, cursors)
+  const values = []
+  const subscription = patch.watch$('serverInfo').subscribe(v => values.push(v))
+  t.after(() => {
+    subscription.unsubscribe()
+    patch.stop()
+  })
+  assert.deepEqual(values, [{ hostname: 'cached' }])
+})
+
+test('patch cache stores a keyed root that is not a map whole', async t => {
+  const { win, control } = fakeIndexedDb()
+  const cache = await patchDbCache(t, win)
+  await cache.write({ id: 3, value: { packageData: { x: 1 } } })
+  await cache.write({ id: 4, value: { packageData: null } })
+  assert.deepEqual(await (await patchDbCache(t, win)).read(), {
+    id: 4,
+    value: { packageData: null },
+  })
+  control.puts = []
+  await cache.write({ id: 5, value: { packageData: { y: 1 } } })
+  assert.deepEqual(control.puts, ['/packageData', '/packageData/y'])
+})
+
+test(
+  'a blocked patch cache upgrade yields an empty baseline without waiting for the old tab',
+  { timeout: 1000 },
+  async t => {
+    t.mock.method(console, 'error', () => {})
+    const request = {}
+    const win = {
+      indexedDB: {
+        open: () => {
+          queueMicrotask(() => request.onblocked())
+          return request
+        },
+      },
+    }
+    const cache = await patchDbCache(t, win)
+    assert.deepEqual(await cache.read(), { id: 0, value: {} })
+
+    let closed = false
+    request.result = {
+      close: () => {
+        closed = true
+      },
+    }
+    request.onsuccess()
+    assert.equal(closed, true)
+  },
+)
+
+test('patch cache releases its connection for a later schema upgrade', async t => {
+  const { win } = fakeIndexedDb()
+  const open = win.indexedDB.open
+  let db
+  let closed = false
+  win.indexedDB.open = (...args) => {
+    const request = open(...args)
+    queueMicrotask(() => {
+      db = request.result
+      db.close = () => {
+        closed = true
+      }
+    })
+    return request
+  }
+  const cache = await patchDbCache(t, win)
+  await cache.read()
+  db.onversionchange()
+  assert.equal(closed, true)
+})
+
+test('patch cache drops a store written in the top-level layout', async t => {
+  const { win } = fakeIndexedDb()
+  const calls = []
+  const open = win.indexedDB.open
+  win.indexedDB.open = (name, version) => {
+    calls.push(['open', version])
+    let request
+    queueMicrotask(() => {
+      request.result = {
+        deleteObjectStore: store => calls.push(['delete', store]),
+        createObjectStore: store => calls.push(['create', store]),
+      }
+      request.onupgradeneeded({ oldVersion: 1 })
+    })
+    request = open(name, version)
+    return request
+  }
+  await (await patchDbCache(t, win)).read()
+  assert.deepEqual(calls, [
+    ['open', 3],
+    ['delete', 'values'],
+    ['delete', 'meta'],
+    ['create', 'values'],
+    ['create', 'meta'],
+  ])
 })
 
 test('patch cache keeps a complete snapshot when another tab advances the stored revision', async t => {
@@ -5136,10 +5601,10 @@ test('patch cache rewrites every key when another tab stored the same revision f
   const { win } = fakeIndexedDb()
   const rebooted = await patchDbCache(t, win)
   const stale = await patchDbCache(t, win)
-  rebooted.epoch = 'boot-1'
+  rebooted.roots = { '/ui': { epoch: 'boot-1', id: 3 } }
   await rebooted.write({ id: 3, value: { ui: { a: 1 }, packageData: {} } })
   const cached = await stale.read()
-  rebooted.epoch = 'boot-2'
+  rebooted.roots = { '/ui': { epoch: 'boot-2', id: 3 } }
   await rebooted.write({
     id: 3,
     value: { ui: { a: 9 }, packageData: { x: 9 } },
@@ -5151,7 +5616,6 @@ test('patch cache rewrites every key when another tab stored the same revision f
   await stale.write(delayed)
   const reader = await patchDbCache(t, win)
   assert.deepEqual(await reader.read(), delayed)
-  assert.equal(reader.epoch, 'boot-1')
 })
 
 test('patch cache restores every key after another tab clears the snapshot', async t => {
@@ -5166,11 +5630,84 @@ test('patch cache restores every key after another tab clears the snapshot', asy
   assert.deepEqual(await (await patchDbCache(t, win)).read(), next)
 })
 
+test('patch cache restores freshness with a saved snapshot and clears it on logout', async t => {
+  const { win } = fakeIndexedDb()
+  t.mock.method(Date, 'now', () => 1000)
+  const cache = await patchDbCache(t, win)
+  await cache.markSynced()
+  assert.equal(cache.synced(), null)
+  const emptyReader = await patchDbCache(t, win)
+  assert.deepEqual(await emptyReader.read(), { id: 0, value: {} })
+  assert.equal(emptyReader.synced(), null)
+
+  const snapshot = { id: 3, value: { ui: { a: 1 } } }
+  await cache.write(snapshot)
+  await cache.markSynced()
+  assert.equal(cache.synced(), 1000)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), snapshot)
+  assert.equal(reader.synced(), 1000)
+
+  await cache.clear()
+  assert.equal(cache.synced(), null)
+  assert.deepEqual(await reader.read(), { id: 0, value: {} })
+  assert.equal(reader.synced(), null)
+})
+
+test('patch cache discards freshness when a failed write invalidates its snapshot', async t => {
+  const { win, control } = fakeIndexedDb()
+  t.mock.method(console, 'error', () => {})
+  t.mock.method(Date, 'now', () => 1000)
+  const cache = await patchDbCache(t, win)
+  await cache.write({ id: 3, value: { ui: { a: 1 } } })
+  await cache.markSynced()
+  control.fail = true
+  await cache.write({ id: 4, value: { ui: { a: 2 } } })
+  assert.equal(cache.synced(), null)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), { id: 0, value: {} })
+  assert.equal(reader.synced(), null)
+})
+
+test('patch cache does not refresh metadata after another tab clears the snapshot', async t => {
+  const { win } = fakeIndexedDb()
+  let now = 1000
+  t.mock.method(Date, 'now', () => now)
+  const active = await patchDbCache(t, win)
+  await active.write({ id: 3, value: { ui: { a: 1 } } })
+  await active.markSynced()
+  const other = await patchDbCache(t, win)
+  await other.clear()
+  now = 2000
+  await active.markSynced()
+  assert.equal(active.synced(), 1000)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), { id: 0, value: {} })
+  assert.equal(reader.synced(), null)
+})
+
+test('patch cache retains the previous freshness when its metadata write fails', async t => {
+  const { win, control } = fakeIndexedDb()
+  let now = 1000
+  t.mock.method(console, 'error', () => {})
+  t.mock.method(Date, 'now', () => now)
+  const cache = await patchDbCache(t, win)
+  const snapshot = { id: 3, value: { ui: { a: 1 } } }
+  await cache.write(snapshot)
+  await cache.markSynced()
+  now = 2000
+  control.fail = true
+  await cache.markSynced()
+  assert.equal(cache.synced(), 1000)
+  const reader = await patchDbCache(t, win)
+  assert.deepEqual(await reader.read(), snapshot)
+  assert.equal(reader.synced(), 1000)
+})
+
 test('patch cache discards its snapshot after a failed write and clears on demand', async t => {
   const { win, control } = fakeIndexedDb()
   t.mock.method(console, 'error', () => {})
   const cache = await patchDbCache(t, win)
-  cache.epoch = 'boot'
   const value = { ui: { a: 1 }, packageData: {} }
   await cache.write({ id: 3, value })
   control.fail = true
@@ -5181,9 +5718,8 @@ test('patch cache discards its snapshot after a failed write and clears on deman
   })
   control.puts = []
   await cache.write({ id: 5, value })
-  assert.deepEqual(control.puts, ['ui', 'packageData'])
+  assert.deepEqual(control.puts, ['/ui', '/packageData'])
   await cache.clear()
-  assert.equal(cache.epoch, null)
   assert.deepEqual(await (await patchDbCache(t, win)).read(), {
     id: 0,
     value: {},

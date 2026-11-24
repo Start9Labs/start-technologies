@@ -1,8 +1,9 @@
 import { DatePipe, NgTemplateOutlet } from '@angular/common'
 import { Component, computed, inject, input, signal } from '@angular/core'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import {
   MarketplaceIconDirective,
-  MarketplacePkg,
+  MarketplaceListing,
   matchingTrustedKeys,
   MarketplaceSignerChipsComponent,
   packageSigners,
@@ -28,7 +29,15 @@ import {
   TuiProgressCircle,
   TuiSkeleton,
 } from '@taiga-ui/kit'
-import { filter } from 'rxjs'
+import {
+  combineLatest,
+  distinctUntilChanged,
+  filter,
+  of,
+  startWith,
+  switchMap,
+  take,
+} from 'rxjs'
 import { InstallingProgressPipe } from 'src/app/routes/portal/routes/services/pipes/install-progress.pipe'
 import { HiddenUpdatesService } from 'src/app/services/hidden-updates.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
@@ -352,14 +361,35 @@ export class UpdatesItemComponent {
   readonly error = signal('')
   readonly ready = signal(true)
 
-  readonly item = input.required<MarketplacePkg>()
+  readonly item = input.required<MarketplaceListing>()
   readonly local =
     input.required<PackageDataEntry<InstalledState | UpdatingState>>()
+
+  private readonly pkg = toSignal(
+    combineLatest([
+      toObservable(this.expanded).pipe(filter(Boolean), take(1)),
+      toObservable(this.item).pipe(
+        distinctUntilChanged(
+          (a, b) =>
+            a.id === b.id && a.version === b.version && a.flavor === b.flavor,
+        ),
+      ),
+      toObservable(computed(() => this.parent.current()?.url)),
+    ]).pipe(
+      switchMap(([, { id, version }, registry]) =>
+        registry
+          ? this.service
+              .getDetails$(id, version, registry)
+              .pipe(startWith(null))
+          : of(null),
+      ),
+    ),
+  )
 
   protected readonly releases = computed(() =>
     pendingReleases(
       this.exver,
-      this.item(),
+      this.pkg() ?? this.item(),
       this.local().stateInfo.manifest.version,
     ),
   )

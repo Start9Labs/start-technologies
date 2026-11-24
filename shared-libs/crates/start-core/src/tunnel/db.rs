@@ -22,8 +22,8 @@ use crate::context::CliContext;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::db::subscribe_start;
 pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DumpParams, SubscribeParams, SubscribeRes,
-    SubscribeStartResult,
+    ApplyWithPathParams as ApplyParams, DumpParams, ProjectionParams, SubscribeParams,
+    SubscribeRes, SubscribeStartResult,
 };
 use crate::net::transport::Transport;
 use crate::prelude::*;
@@ -476,6 +476,9 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
 pub struct CliDumpParams {
     #[arg(long = "pointer", short = 'p', help = "help.arg.json-pointer")]
     pointer: Option<JsonPointer>,
+    #[command(flatten)]
+    #[serde(flatten)]
+    projection: ProjectionParams,
     #[arg(help = "help.arg.database-path")]
     path: Option<PathBuf>,
 }
@@ -486,17 +489,34 @@ async fn cli_dump(
         context,
         parent_method,
         method,
-        params: CliDumpParams { pointer, path },
+        params:
+            CliDumpParams {
+                pointer,
+                projection,
+                path,
+            },
         ..
     }: HandlerArgs<CliContext, CliDumpParams>,
 ) -> Result<Dump, RpcError> {
     let dump = if let Some(path) = path {
-        PatchDb::open(path).await?.dump(&ROOT).await
+        PatchDb::open(path)
+            .await?
+            .dump_projected(
+                &pointer.as_ref().map_or(ROOT, |p| p.borrowed()),
+                &projection.into(),
+            )
+            .await
     } else {
         let method = parent_method.into_iter().chain(method).join(".");
         from_value::<Dump>(
             context
-                .call_remote::<TunnelContext>(&method, imbl_value::json!({ "pointer": pointer }))
+                .call_remote::<TunnelContext>(
+                    &method,
+                    to_value(&DumpParams {
+                        pointer,
+                        projection,
+                    })?,
+                )
                 .await?,
         )?
     };
@@ -504,10 +524,19 @@ async fn cli_dump(
     Ok(dump)
 }
 
-pub async fn dump(ctx: TunnelContext, DumpParams { pointer }: DumpParams) -> Result<Dump, Error> {
+pub async fn dump(
+    ctx: TunnelContext,
+    DumpParams {
+        pointer,
+        projection,
+    }: DumpParams,
+) -> Result<Dump, Error> {
     Ok(ctx
         .db
-        .dump(&pointer.as_ref().map_or(ROOT, |p| p.borrowed()))
+        .dump_projected(
+            &pointer.as_ref().map_or(ROOT, |p| p.borrowed()),
+            &projection.into(),
+        )
         .await)
 }
 
@@ -605,6 +634,7 @@ pub async fn subscribe(
             SubscribeParams {
                 pointer,
                 since,
+                projection,
                 signer,
             },
         rpc_stream,
@@ -613,7 +643,8 @@ pub async fn subscribe(
 ) -> Result<SubscribeStartResult, Error> {
     let pointer = pointer.unwrap_or_else(|| ROOT.to_owned());
     if let Some(stream) = rpc_stream {
-        let (start, sub) = subscribe_start(&ctx.db, pointer, since.as_ref()).await;
+        let (start, sub) =
+            subscribe_start(&ctx.db, pointer, projection.into(), since.as_ref()).await;
         crate::auth::continuation_subscription(&ctx, signer)
             .await?
             .forward_stream(
@@ -624,7 +655,10 @@ pub async fn subscribe(
             );
         return Ok(SubscribeStartResult::Stream(start));
     }
-    let (dump, mut sub) = ctx.db.dump_and_sub(pointer).await;
+    let (dump, mut sub) = ctx
+        .db
+        .dump_and_sub_projected(pointer, projection.into())
+        .await;
     let guid = Guid::new();
     ctx.rpc_continuations
         .add(

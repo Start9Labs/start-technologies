@@ -14,12 +14,28 @@ use json_ptr::JsonPointer;
 use serde::de::DeserializeOwned;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{Dump, Error, HasModel, ModelExt, Revision};
+use crate::{shifted_arrays, Dump, Error, HasModel, ModelExt, Projection, Revision};
 
 #[cfg(test)]
 mod tests;
 
 pub type Subscriber = mpsc::UnboundedReceiver<Revision>;
+
+/// What a subscription with a changeable projection receives, in order.
+#[derive(Clone, Debug)]
+pub enum Update {
+    /// A revision, projected.
+    Revision(Revision),
+    /// What the latest projection change added, current as of its id; one per change.
+    Extend(Revision),
+}
+
+/// A subscription whose projection [`PatchDb::reproject`](crate::PatchDb::reproject) changes.
+#[derive(Debug)]
+pub struct ProjectedSubscriber {
+    pub id: u64,
+    pub receiver: mpsc::UnboundedReceiver<Update>,
+}
 
 type JsonRevision = Result<Bytes, Arc<serde_json::Error>>;
 
@@ -55,16 +71,18 @@ impl JsonSubscriber {
 #[derive(Debug, Default)]
 struct ScopedBroadcast {
     unbounded: Vec<mpsc::UnboundedSender<Revision>>,
+    projected: BTreeMap<u64, mpsc::UnboundedSender<Update>>,
     json: BTreeMap<NonZeroUsize, broadcast::Sender<JsonRevision>>,
     dump: Option<Bytes>,
 }
 impl ScopedBroadcast {
     fn prune_unbounded(&mut self) {
         self.unbounded.retain(|sender| !sender.is_closed());
+        self.projected.retain(|_, sender| !sender.is_closed());
     }
 
     fn is_empty(&self) -> bool {
-        self.unbounded.is_empty() && self.json.is_empty()
+        self.unbounded.is_empty() && self.projected.is_empty() && self.json.is_empty()
     }
 }
 
@@ -72,14 +90,20 @@ const HISTORY_LEN: usize = 1024;
 
 #[derive(Debug)]
 pub struct Broadcast {
-    listeners: BTreeMap<JsonPointer, ScopedBroadcast>,
-    history: VecDeque<Arc<Revision>>,
+    listeners: BTreeMap<(JsonPointer, Projection), ScopedBroadcast>,
+    /// The listener of each subscription with a changeable projection.
+    projected: BTreeMap<u64, (JsonPointer, Projection)>,
+    next_projected: u64,
+    /// Each retained revision with the arrays it shifted.
+    history: VecDeque<(Arc<Revision>, Arc<[JsonPointer]>)>,
     epoch: InternedString,
 }
 impl Default for Broadcast {
     fn default() -> Self {
         Self {
             listeners: BTreeMap::new(),
+            projected: BTreeMap::new(),
+            next_projected: 0,
             history: VecDeque::new(),
             epoch: InternedString::from_display(&format_args!(
                 "{:016x}",
@@ -89,6 +113,22 @@ impl Default for Broadcast {
     }
 }
 impl Broadcast {
+    fn prune(&mut self) {
+        self.listeners.retain(|_, listeners| {
+            listeners.prune_unbounded();
+            listeners
+                .json
+                .retain(|_, sender| sender.receiver_count() != 0);
+            !listeners.is_empty()
+        });
+        let listeners = &self.listeners;
+        self.projected.retain(|id, key| {
+            listeners
+                .get(key)
+                .is_some_and(|l| l.projected.contains_key(id))
+        });
+    }
+
     pub fn new() -> Self {
         Default::default()
     }
@@ -98,43 +138,52 @@ impl Broadcast {
         &self.epoch
     }
 
-    /// Returns the revisions after `since` up to `current`, scoped to `ptr`,
+    /// Returns the revisions after `since` up to `current`, scoped to `ptr` and projected,
     /// or `None` once the retained history no longer reaches back to `since`.
-    pub fn replay(&self, ptr: &JsonPointer, since: u64, current: u64) -> Option<Vec<Revision>> {
+    pub fn replay(
+        &self,
+        ptr: &JsonPointer,
+        projection: &Projection,
+        since: u64,
+        current: u64,
+    ) -> Option<Vec<Revision>> {
         if since > current
-            || since < current && self.history.front().map_or(true, |rev| rev.id > since + 1)
+            || since < current
+                && self
+                    .history
+                    .front()
+                    .map_or(true, |(rev, _)| rev.id > since + 1)
         {
             return None;
         }
-        Some(
-            self.history
-                .iter()
-                .filter(|rev| rev.id > since)
-                .map(|rev| rev.for_path(ptr))
-                .filter(|rev| !rev.patch.is_empty())
-                .collect(),
-        )
+        self.history
+            .iter()
+            .filter(|(rev, _)| rev.id > since)
+            .map(|(rev, shifted)| projection.project_scoped(ptr, rev, shifted, None))
+            .filter(|rev| rev.as_ref().map_or(true, |rev| !rev.patch.is_empty()))
+            .collect()
     }
 
-    pub fn send(&mut self, value: &Arc<Revision>) {
+    /// Sends a revision, given the database after it, to every listener.
+    pub fn send(&mut self, value: &Arc<Revision>, after: &Value) {
+        self.prune();
         while self.history.len() >= HISTORY_LEN {
             self.history.pop_front();
         }
-        self.history.push_back(value.clone());
-        self.listeners.retain(|ptr, listeners| {
+        let shifted: Arc<[JsonPointer]> = shifted_arrays(&value.patch, after).into();
+        self.history.push_back((value.clone(), shifted.clone()));
+        self.listeners.retain(|(ptr, projection), listeners| {
             listeners.dump = None;
-            listeners.prune_unbounded();
-            listeners
-                .json
-                .retain(|_, sender| sender.receiver_count() != 0);
-            if listeners.is_empty() {
-                return false;
-            }
-            let scoped = value.for_path(ptr);
+            let Some(scoped) = projection.project_scoped(ptr, value, &shifted, Some(after)) else {
+                return true;
+            };
             if !scoped.patch.is_empty() {
                 listeners
                     .unbounded
                     .retain(|sender| sender.send(scoped.clone()).is_ok());
+                listeners
+                    .projected
+                    .retain(|_, sender| sender.send(Update::Revision(scoped.clone())).is_ok());
                 if !listeners.json.is_empty() {
                     let json = serde_json::to_vec(&scoped)
                         .map(Bytes::from)
@@ -149,13 +198,78 @@ impl Broadcast {
     }
 
     pub fn subscribe(&mut self, ptr: JsonPointer) -> Subscriber {
-        self.listeners.retain(|_, listeners| {
-            listeners.prune_unbounded();
-            !listeners.is_empty()
-        });
+        self.subscribe_projected(ptr, Projection::default())
+    }
+
+    /// Subscribers with equal pointers and projections share one listener.
+    pub fn subscribe_projected(&mut self, ptr: JsonPointer, projection: Projection) -> Subscriber {
+        self.prune();
         let (send, recv) = mpsc::unbounded_channel();
-        self.listeners.entry(ptr).or_default().unbounded.push(send);
+        self.listeners
+            .entry((ptr, projection))
+            .or_default()
+            .unbounded
+            .push(send);
         recv
+    }
+
+    /// A subscription whose projection [`Broadcast::reproject`] changes; subscriptions holding
+    /// equal projections share one listener.
+    pub fn subscribe_mutable(
+        &mut self,
+        ptr: JsonPointer,
+        projection: Projection,
+    ) -> ProjectedSubscriber {
+        self.prune();
+        let id = self.next_projected;
+        self.next_projected += 1;
+        let (send, receiver) = mpsc::unbounded_channel();
+        let key = (ptr, projection);
+        self.listeners
+            .entry(key.clone())
+            .or_default()
+            .projected
+            .insert(id, send);
+        self.projected.insert(id, key);
+        ProjectedSubscriber { id, receiver }
+    }
+
+    /// Moves a subscription to another projection, first sending it the extension of the
+    /// subtree value as of the revision. False once the subscription has closed.
+    pub fn reproject(
+        &mut self,
+        id: u64,
+        projection: Projection,
+        root: &Value,
+        revision: u64,
+    ) -> bool {
+        let Some((ptr, held)) = self.projected.remove(&id) else {
+            return false;
+        };
+        let Some(sender) = self
+            .listeners
+            .get_mut(&(ptr.clone(), held.clone()))
+            .and_then(|listeners| listeners.projected.remove(&id))
+        else {
+            return false;
+        };
+        self.prune();
+        let value = ptr.get(root).unwrap_or(&Value::Null);
+        let extension = Revision {
+            id: revision,
+            patch: held.extension(&projection, value),
+        };
+        if sender.send(Update::Extend(extension)).is_err() {
+            return false;
+        }
+        let key = (ptr, projection);
+        self.listeners
+            .entry(key.clone())
+            .or_default()
+            .projected
+            .insert(id, sender);
+        self.projected.insert(id, key);
+        true
     }
 
     pub fn subscribe_json(
@@ -164,7 +278,10 @@ impl Broadcast {
         dump: Dump,
         capacity: NonZeroUsize,
     ) -> Result<(Bytes, JsonSubscriber), Error> {
-        let listeners = self.listeners.entry(ptr).or_default();
+        let listeners = self
+            .listeners
+            .entry((ptr.clone(), Projection::default()))
+            .or_default();
         let json = match &listeners.dump {
             Some(json) => json.clone(),
             None => {
@@ -173,17 +290,26 @@ impl Broadcast {
                 json
             }
         };
-        let receiver = listeners
+        Ok((json, self.subscribe_json_revisions(ptr, capacity)))
+    }
+
+    /// A bounded JSON revision stream without a dump, for subscribers resuming from a replay.
+    pub fn subscribe_json_revisions(
+        &mut self,
+        ptr: JsonPointer,
+        capacity: NonZeroUsize,
+    ) -> JsonSubscriber {
+        let receiver = self
+            .listeners
+            .entry((ptr, Projection::default()))
+            .or_default()
             .json
             .entry(capacity)
             .or_insert_with(|| broadcast::channel(capacity.get()).0)
             .subscribe();
-        Ok((
-            json,
-            JsonSubscriber {
-                receiver: Some(receiver),
-            },
-        ))
+        JsonSubscriber {
+            receiver: Some(receiver),
+        }
     }
 }
 

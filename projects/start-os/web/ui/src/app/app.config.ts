@@ -74,10 +74,7 @@ import {
 import { AuthService } from 'src/app/services/auth.service'
 import { ConfigService } from 'src/app/services/config.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
-import {
-  PATCH_CACHE,
-  PatchDbSource,
-} from 'src/app/services/patch-db/patch-db-source'
+import { PATCH_DB } from 'src/app/services/patch-db/patch-db-source'
 import { PluginsService } from 'src/app/services/plugins.service'
 import { StateService } from 'src/app/services/state.service'
 import { StorageService } from 'src/app/services/storage.service'
@@ -137,11 +134,7 @@ export const APP_CONFIG: ApplicationConfig = {
       StartupApiService,
       useMocks ? MockApiService : StartupLiveApiService,
     ),
-    {
-      provide: PatchDB,
-      deps: [PatchDbSource, PATCH_CACHE],
-      useClass: PatchDB,
-    },
+    { provide: PatchDB, useFactory: () => inject(PATCH_DB) },
     tuiProvide(AbstractMarketplaceService, MarketplaceService),
     tuiProvide(MarketplaceTrust, TrustedKeysService),
     provideAppInitializer(() => {
