@@ -4,7 +4,7 @@ An HTTP proxy plugin processes requests and responses in front of another servic
 
 ## Declare and publish profiles
 
-This API requires StartOS 0.4.3 and SDK 4.2.0. Add `plugins: ['http-proxy-v0']` and `osVersion: '0.4.3'` to your [manifest](manifest.md). The SDK exposes `sdk.plugin.httpProxy` for that capability.
+This API requires StartOS 0.4.3 and SDK 5.0.0. Add `plugins: ['http-proxy-v0']` and `osVersion: '0.4.3'` to your [manifest](manifest.md). The SDK exposes `sdk.plugin.httpProxy` for that capability.
 
 Publish the complete selectable profile list from your lifecycle code:
 
@@ -46,6 +46,18 @@ Each attachment contains:
 `gateway` is either `{ kind: 'network', gatewayId }` or `{ kind: 'url-plugin', packageId }`. The URL-plugin package ID identifies the service container originating traffic, not the protected application or this HTTP proxy provider.
 
 Within this provider, the identity is `(binding.packageId, binding.hostId, binding.internalPort, gateway.kind, gateway ID, profileId)`. The gateway ID is `gatewayId` for network gateways and `packageId` for URL plugins. Reordering and changing **Public only** preserve that identity. The same provider/profile can be selected independently on multiple gateways, with separate sockets. Different profiles from the same provider can appear in one chain; each provider/profile pair occurs once within it. Derive process/configuration keys from that tuple rather than the attachment's position.
+
+## Command-line access
+
+Inside the provider's container, publish the same parameter object as JSON on standard input and read attachments without registering a callback:
+
+```bash
+printf '%s\n' '{"profiles":[{"id":"standard","name":"Standard protection","protocols":["http1"]}]}' |
+  start-container plugin http-proxy set-profiles
+start-container plugin http-proxy get-attachments --format json
+```
+
+Operators select a gateway's chain with `start-cli package host <package-id> binding <host-id> set-http-proxy-chain <internal-port> '<policy-json>'`. For the StartOS UI binding, use `start-cli server host binding set-http-proxy-chain <internal-port> '<policy-json>'`. The policy argument is the same `{ gateway, chain, publicOnly }` object described below; the command replaces only that gateway's policy.
 
 ## Socket ownership and readiness
 

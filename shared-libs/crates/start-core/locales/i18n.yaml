@@ -126,6 +126,13 @@ about.container-commands-plugin:
   fr_FR: "Commandes pour les plugins de ce service"
   pl_PL: "Polecenia dla wtyczek tej usługi"
 
+about.container-commands-plugin-http-proxy:
+  en_US: "Commands for the HTTP proxy plugin"
+  de_DE: "Befehle für das HTTP-Proxy-Plugin"
+  es_ES: "Comandos para el complemento de proxy HTTP"
+  fr_FR: "Commandes pour le plugin de proxy HTTP"
+  pl_PL: "Polecenia dla wtyczki proxy HTTP"
+
 about.container-commands-plugin-url:
   en_US: "Commands for the URL plugin"
   de_DE: "Befehle für das URL-Plugin"
@@ -307,6 +314,20 @@ about.container-pipe-wrap:
   es_ES: "Retransmitir los flujos estándar de un comando por tuberías"
   fr_FR: "Relayer les flux standard d'une commande via des tubes"
   pl_PL: "Przekaż standardowe strumienie polecenia przez potoki"
+
+about.container-plugin-http-proxy-get-attachments:
+  en_US: "Read this provider's HTTP proxy attachments"
+  de_DE: "HTTP-Proxy-Zuordnungen dieses Anbieters lesen"
+  es_ES: "Consultar las asociaciones de proxy HTTP de este proveedor"
+  fr_FR: "Lire les associations de proxy HTTP de ce fournisseur"
+  pl_PL: "Odczytaj przypisania proxy HTTP tego dostawcy"
+
+about.container-plugin-http-proxy-set-profiles:
+  en_US: "Replace HTTP proxy profiles (JSON parameters on stdin)"
+  de_DE: "HTTP-Proxy-Profile ersetzen (JSON-Parameter über stdin)"
+  es_ES: "Reemplazar los perfiles de proxy HTTP (parámetros JSON por stdin)"
+  fr_FR: "Remplacer les profils de proxy HTTP (paramètres JSON sur stdin)"
+  pl_PL: "Zastąp profile proxy HTTP (parametry JSON na stdin)"
 
 about.container-plugin-url-clear-urls:
   en_US: "Remove URLs this plugin exported (JSON parameters on stdin)"
@@ -5626,6 +5647,13 @@ help.arg.hostnames:
   fr_FR: "Noms d'hôtes à inclure dans le certificat"
   pl_PL: "Nazwy hostów do uwzględnienia w certyfikacie"
 
+help.arg.http-proxy-policy:
+  en_US: "Gateway, ordered chain and publicOnly policy as JSON"
+  de_DE: "Gateway, geordnete Kette und publicOnly-Richtlinie als JSON"
+  es_ES: "Puerta de enlace, cadena ordenada y política publicOnly en JSON"
+  fr_FR: "Passerelle, chaîne ordonnée et politique publicOnly au format JSON"
+  pl_PL: "Brama, uporządkowany łańcuch i zasada publicOnly w formacie JSON"
+
 help.arg.icon-path:
   en_US: "Path to service icon file"
   de_DE: "Pfad zur Service-Icon-Datei"
@@ -9179,6 +9207,13 @@ about.set-gateway-enabled-for-binding:
   es_ES: "Establecer gateway habilitado para enlace"
   fr_FR: "Définir la passerelle activée pour la liaison"
   pl_PL: "Ustaw bramę jako włączoną dla powiązania"
+
+about.set-http-proxy-chain:
+  en_US: "Replace one gateway's HTTP proxy chain"
+  de_DE: "HTTP-Proxy-Kette eines Gateways ersetzen"
+  es_ES: "Reemplazar la cadena de proxy HTTP de una puerta de enlace"
+  fr_FR: "Remplacer la chaîne de proxy HTTP d'une passerelle"
+  pl_PL: "Zastąp łańcuch proxy HTTP jednej bramy"
 
 about.set-keyboard:
   en_US: "Set the keyboard layout"

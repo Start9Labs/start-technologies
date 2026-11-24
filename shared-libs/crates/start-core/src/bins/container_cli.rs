@@ -87,6 +87,8 @@ fn effects_without_callbacks_or_streams_have_commands() {
         &["plugin", "url", "register"],
         &["plugin", "url", "export-url"],
         &["plugin", "url", "clear-urls"],
+        &["plugin", "http-proxy", "set-profiles"],
+        &["plugin", "http-proxy", "get-attachments"],
         &["action", "export"],
         &["action", "create-task"],
     ] {
@@ -106,6 +108,33 @@ fn effects_without_callbacks_or_streams_have_commands() {
     ] {
         assert!(cmd.find_subcommand(hidden).is_none(), "{hidden}");
     }
+}
+
+#[test]
+fn http_proxy_attachment_cli_does_not_register_callbacks() {
+    let cmd = app().into_command();
+    let command = cmd
+        .find_subcommand("plugin")
+        .unwrap()
+        .find_subcommand("http-proxy")
+        .unwrap();
+    let attachments = command.find_subcommand("get-attachments").unwrap();
+    assert!(
+        attachments
+            .get_arguments()
+            .all(|arg| arg.get_id() != "callback")
+    );
+    assert!(
+        cmd.try_get_matches_from([
+            "start-container",
+            "plugin",
+            "http-proxy",
+            "get-attachments",
+            "--format",
+            "json",
+        ])
+        .is_ok()
+    );
 }
 
 #[test]

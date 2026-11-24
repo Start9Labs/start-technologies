@@ -74,9 +74,11 @@ pub async fn set_profiles(
         .result
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct GetHttpProxyAttachmentsParams {
+    #[arg(skip)]
     pub callback: Option<CallbackId>,
 }
 

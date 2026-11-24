@@ -49,6 +49,56 @@ fn binding_reassign_port_accepts_server_and_package_targets() {
 }
 
 #[test]
+fn http_proxy_chain_cli_preserves_the_structured_policy_wire_format() {
+    use crate::net::http_proxy::{HttpProxyGateway, SetHttpProxyChainParams};
+
+    let policy =
+        r#"{"gateway":{"kind":"network","gatewayId":"eth0"},"chain":[],"publicOnly":true}"#;
+    for prefix in [
+        vec!["start-cli", "server", "host", "binding"],
+        vec!["start-cli", "package", "host", "example", "binding", "main"],
+    ] {
+        let matches = super::app()
+            .into_command()
+            .try_get_matches_from(prefix.iter().copied().chain([
+                "set-http-proxy-chain",
+                "8080",
+                policy,
+            ]))
+            .unwrap();
+        let mut leaf = &matches;
+        while let Some((_, sub)) = leaf.subcommand() {
+            leaf = sub;
+        }
+        let params =
+            <SetHttpProxyChainParams as clap::FromArgMatches>::from_arg_matches(leaf).unwrap();
+        assert_eq!(params.internal_port, 8080);
+        assert_eq!(
+            params.policy.gateway,
+            HttpProxyGateway::Network {
+                gateway_id: "eth0".parse().unwrap()
+            },
+        );
+        let wire = serde_json::to_value(&params).unwrap();
+        assert_eq!(
+            wire["policy"],
+            serde_json::from_str::<serde_json::Value>(policy).unwrap()
+        );
+        assert_eq!(wire["internalPort"], 8080);
+        assert!(
+            super::app()
+                .into_command()
+                .try_get_matches_from(prefix.iter().copied().chain([
+                    "set-http-proxy-chain",
+                    "8080",
+                    "{"
+                ]),)
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn push_cli_exposes_subscription_management_without_browser_registration() {
     let app = super::app().into_command();
     let push = app

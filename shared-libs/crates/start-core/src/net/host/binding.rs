@@ -1127,7 +1127,9 @@ pub fn binding<C: Context, Kind: HostApiKind>()
             from_fn_async(crate::net::http_proxy::set_chain::<Kind>)
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
-                .no_cli(),
+                .no_display()
+                .with_about("about.set-http-proxy-chain")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "set-address-enabled",

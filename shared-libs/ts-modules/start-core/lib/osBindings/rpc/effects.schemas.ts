@@ -3826,7 +3826,18 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             'get-attachments': {
-              _PARAMS: /* @__PURE__ */ GetHttpProxyAttachmentsParams,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                GetHttpProxyAttachmentsParams,
+              ),
               _RETURN: /* @__PURE__ */ z.array(HttpProxyAttachment),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),

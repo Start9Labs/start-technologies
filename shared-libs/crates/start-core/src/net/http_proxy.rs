@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::model::package::{AllPackageData, PackageDataEntry};
 use crate::prelude::*;
 use crate::s9pk::manifest::LocaleString;
+use crate::util::serde::CliFromJsonString;
 use crate::{GatewayId, HostId, PackageId};
 
 mod routing;
@@ -257,11 +258,18 @@ pub fn host_attachments(
     attachments
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, VisitFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, VisitFields, clap::Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 /// Replaces one gateway's chain without changing the binding's other gateways.
 pub struct SetHttpProxyChainParams {
+    #[arg(help = "help.arg.internal-port")]
     pub internal_port: u16,
+    #[arg(
+        help = "help.arg.http-proxy-policy",
+        value_parser = |value: &str| value.parse::<CliFromJsonString<HttpProxyChain>>().map(|policy| policy.0).map_err(|error| error.to_string())
+    )]
     pub policy: HttpProxyChain,
 }
 
