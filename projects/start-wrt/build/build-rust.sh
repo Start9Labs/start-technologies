@@ -39,8 +39,17 @@ rust-zig-builder cargo zigbuild \
     --locked \
     --target=${RUST_ARCH}-unknown-linux-musl
 
+# A separate build keeps the forwarder's dependency features out of startwrt.
+rust-zig-builder cargo zigbuild \
+    --manifest-path=./$PROJECT_DIR/backend/dnsfwd/Cargo.toml \
+    "${BUILD_FLAGS[@]}" \
+    --locked \
+    --target=${RUST_ARCH}-unknown-linux-musl
+
 if [ "$RUST_ARCH" = "riscv64gc" ]; then
-    bash "$PROJECT_DIR/build/verify-isa.sh" "target/${RUST_ARCH}-unknown-linux-musl/${PROFILE}/startwrt"
+    for bin in startwrt startwrt-dnsfwd; do
+        bash "$PROJECT_DIR/build/verify-isa.sh" "target/${RUST_ARCH}-unknown-linux-musl/${PROFILE}/$bin"
+    done
 fi
 
 echo "==> Rust build complete."

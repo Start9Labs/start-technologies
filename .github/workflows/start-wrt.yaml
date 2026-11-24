@@ -94,7 +94,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: startwrt-riscv64
-          path: target/riscv64gc-unknown-linux-musl/release/startwrt
+          path: |
+            target/riscv64gc-unknown-linux-musl/release/startwrt
+            target/riscv64gc-unknown-linux-musl/release/startwrt-dnsfwd
           retention-days: 14
 
   # Heavy path: full flashable OpenWrt image. It downloads the pinned upstream

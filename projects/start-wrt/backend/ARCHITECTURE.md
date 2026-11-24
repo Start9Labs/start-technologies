@@ -1,6 +1,6 @@
 # Backend Architecture
 
-Rust crates powering the StartWRT router daemon and CLI. Three crates: `ctrl` (RPC server + CLI), `uciedit` (UCI parser library), `uciedit_macros` (proc macros for typed UCI sections).
+Rust crates powering the StartWRT router daemon and CLI. Four crates: `ctrl` (RPC server + CLI), `uciedit` (UCI parser library), `uciedit_macros` (proc macros for typed UCI sections), `dnsfwd` (the per-profile DNS forwarder).
 
 ## Transport
 
@@ -312,6 +312,21 @@ Shared, OpenWrt-native typed sections live in `uciedit/src/openwrt.rs`; feature-
 | **ddns**     | `DdnsService`                                                                                                                              |
 
 `NetworkVlanPort` (a plain struct) and `NetworkVlanPortTagging` (an enum) are not `TypedSection`s — they are used as fields within `NetworkBridgeVlan`.
+
+## DNS forwarder (dnsfwd)
+
+`startwrt-dnsfwd <config.json>` answers DNS on one loopback address over UDP and TCP and forwards each query to the servers that the JSON file lists, over plain DNS, DNS over TLS or DNS over HTTPS. It has no `start-core` dependency and builds in its own cargo invocation, so its dependency features never reach `startwrt`.
+
+| Module        | Holds                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `config.rs`   | The JSON config and its validation: listen address, optional interface, query method, servers                                  |
+| `listen.rs`   | The UDP and TCP listeners                                                                                                      |
+| `lib.rs`      | `Forwarder::answer`: decodes a query, picks the answer, writes SERVFAIL, FORMERR and truncated replies itself                  |
+| `methods.rs`  | `fastest` (every server at once), `in_order`, and `random` (a shuffled `in_order`), each with per-server timeouts              |
+| `upstream.rs` | One hickory-net exchange per server; plain DNS retries a truncated UDP answer over TCP; every answer gets the client's ID back |
+| `bind.rs`     | `BoundProvider`, the hickory `RuntimeProvider` that binds every upstream socket to the configured interface                    |
+
+A query reaches the servers with its flags and EDNS record intact. NOERROR and NXDOMAIN are final; any other answer, an error or a timeout moves on to the next server. When no server gives a final answer, the client gets the last answer received, else SERVFAIL. A missing interface fails the socket, so nothing is sent unbound.
 
 ## Error Types
 

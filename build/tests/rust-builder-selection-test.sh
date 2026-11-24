@@ -217,6 +217,7 @@ assert_log_contains "$image"
 assert_log_contains PKG_CONFIG_SYSROOT_DIR=/opt/sysroot/x86_64
 assert_log_contains startwrt-core
 assert_log_contains uciedit_macros
+assert_log_contains startwrt-dnsfwd
 
 : > "$DOCKER_LOG"
 RUST_BUILDER_IMAGE="$custom" bash projects/start-wrt/build/run-tests.sh

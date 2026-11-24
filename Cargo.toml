@@ -24,6 +24,7 @@ members = [
   "projects/start-wrt/backend/uciedit",
   "projects/start-wrt/backend/uciedit_macros",
   "projects/start-wrt/backend/ctrl",
+  "projects/start-wrt/backend/dnsfwd",
 ]
 resolver = "3"
 

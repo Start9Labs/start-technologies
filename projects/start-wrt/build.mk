@@ -6,6 +6,7 @@ STARTWRT_RUST_ARCH := riscv64gc
 STARTWRT_ARCH := riscv64
 
 STARTWRT_BIN := target/$(STARTWRT_RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startwrt
+STARTWRT_DNSFWD_BIN := target/$(STARTWRT_RUST_ARCH)-unknown-linux-musl/$(PROFILE)/startwrt-dnsfwd
 STARTWRT_WEB_DIST := $(STARTWRT_DIR)/web/dist/startwrt/browser/immutable-assets.txt
 STARTWRT_WEB_CONFIG := $(STARTWRT_DIR)/web/config.json
 STARTWRT_BINDINGS_DIR := $(STARTWRT_DIR)/web/src/app/services/api
@@ -54,16 +55,16 @@ STARTWRT_SDCARD_NAME := $(STARTWRT_BASENAME)-sdcard.img.gz
 STARTWRT_SYSUPGRADE_NAME := $(STARTWRT_BASENAME)-sysupgrade.img.gz
 STARTWRT_IMAGES := results/$(STARTWRT_SDCARD_NAME) results/$(STARTWRT_SYSUPGRADE_NAME)
 
-# Remote deploy target (binary only — web UI is embedded in the binary).
+# Remote deploy target (binaries only — web UI is embedded in the startwrt binary).
 STARTWRT_REMOTE ?= root@192.168.0.1
 
 .PHONY: start-wrt
-start-wrt: $(STARTWRT_BIN)
+start-wrt: $(STARTWRT_BIN) $(STARTWRT_DNSFWD_BIN)
 
-$(STARTWRT_BIN): $(STARTWRT_RUST_SRC) $(STARTWRT_SHARED_RUST_SRC) Cargo.toml Cargo.lock $(STARTWRT_WEB_DIST) \
+$(STARTWRT_BIN) $(STARTWRT_DNSFWD_BIN) &: $(STARTWRT_RUST_SRC) $(STARTWRT_SHARED_RUST_SRC) Cargo.toml Cargo.lock $(STARTWRT_WEB_DIST) \
 	$(addprefix $(STARTWRT_DIR)/build/,build-rust.sh builder-alias.sh zigcc-k1.sh zigcxx-k1.sh verify-isa.sh)
 	ARCH=$(STARTWRT_ARCH) RUST_ARCH=$(STARTWRT_RUST_ARCH) PROFILE=$(PROFILE) ./$(STARTWRT_DIR)/build/build-rust.sh
-	@touch $(STARTWRT_BIN)
+	@touch $(STARTWRT_BIN) $(STARTWRT_DNSFWD_BIN)
 
 define STARTWRT_GENERATE_BINDINGS
 bash $(STARTWRT_DIR)/build/generate-bindings.sh $(STARTWRT_BINDINGS)
@@ -110,7 +111,7 @@ $(STARTWRT_OPENWRT)/.config: $(STARTWRT_DIR)/build/openwrt.diffconfig $(STARTWRT
 # Stage the binary + UCI configs + init scripts into openwrt/files/.
 .PHONY: start-wrt-stage
 start-wrt-stage: $(STARTWRT_OPENWRT)/files/.staged
-$(STARTWRT_OPENWRT)/files/.staged: $(STARTWRT_BIN) $(call ls-files, $(STARTWRT_DIR)/backend/firstboot_config) \
+$(STARTWRT_OPENWRT)/files/.staged: $(STARTWRT_BIN) $(STARTWRT_DNSFWD_BIN) $(call ls-files, $(STARTWRT_DIR)/backend/firstboot_config) \
 		$(call ls-files, $(STARTWRT_DIR)/backend/hotplug) $(call ls-files, $(STARTWRT_DIR)/backend/nftables) \
 		$(STARTWRT_DIR)/build/stage-files.sh
 	ARCH=$(STARTWRT_ARCH) RUST_ARCH=$(STARTWRT_RUST_ARCH) PROFILE=$(PROFILE) ./$(STARTWRT_DIR)/build/stage-files.sh
@@ -131,9 +132,16 @@ $(STARTWRT_IMAGES) &: $(STARTWRT_OPENWRT)/.config $(STARTWRT_OPENWRT)/files/.sta
 start-wrt-ca-test:
 	./$(STARTWRT_DIR)/build/test-ca-certificates.sh
 
-# Deploy binary + restart daemon over SSH (atomic temp -> sync -> rename).
+# Deploy the binaries + restart daemon over SSH (atomic temp -> sync -> rename).
 .PHONY: start-wrt-update
-start-wrt-update: $(STARTWRT_BIN)
+start-wrt-update: $(STARTWRT_BIN) $(STARTWRT_DNSFWD_BIN)
+	cat $(STARTWRT_DNSFWD_BIN) | \
+	ssh $(STARTWRT_REMOTE) 'set -e; \
+		trap "rm -f /usr/bin/.startwrt-dnsfwd.new" EXIT; \
+		cat > /usr/bin/.startwrt-dnsfwd.new; \
+		chmod +x /usr/bin/.startwrt-dnsfwd.new; \
+		sync; \
+		mv /usr/bin/.startwrt-dnsfwd.new /usr/bin/startwrt-dnsfwd'
 	cat $(STARTWRT_BIN) | \
 	ssh $(STARTWRT_REMOTE) 'set -e; \
 		trap "rm -f /usr/bin/.startwrt.new" EXIT; \
@@ -157,7 +165,7 @@ start-wrt-clean:
 # through `web-format`/`web-format-check`. This target is just the Rust crate.
 .PHONY: start-wrt-format start-wrt-format-check
 start-wrt-format:
-	$(FMT) cargo fmt -p startwrt-core -p uciedit -p uciedit_macros
+	$(FMT) cargo fmt -p startwrt-core -p uciedit -p uciedit_macros -p startwrt-dnsfwd
 
 start-wrt-format-check:
-	$(FMT) cargo fmt --check -p startwrt-core -p uciedit -p uciedit_macros
+	$(FMT) cargo fmt --check -p startwrt-core -p uciedit -p uciedit_macros -p startwrt-dnsfwd

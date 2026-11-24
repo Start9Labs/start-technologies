@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rust crates for StartWRT (crates `ctrl`/`startwrt-core`, `uciedit`, `uciedit_macros`).
+Rust crates for StartWRT (crates `ctrl`/`startwrt-core`, `uciedit`, `uciedit_macros`, `dnsfwd`/`startwrt-dnsfwd`).
 Assumes you've read the parent [`../AGENTS.md`](../AGENTS.md) — note especially that these
 crates are members of the **root** Cargo workspace (build with `cargo build -p startwrt-core
 --bin startwrt` from the repo root; the binary lands in the workspace-root `target/`), and that
@@ -9,7 +9,7 @@ crates are members of the **root** Cargo workspace (build with `cargo build -p s
 ## Tests
 
 - Run from the repo root, **always `-p`-scoped**:
-  `cargo test -p startwrt-core -p uciedit -p uciedit_macros` (or `make start-wrt-test` to run the
+  `cargo test -p startwrt-core -p uciedit -p uciedit_macros -p startwrt-dnsfwd` (or `make start-wrt-test` to run the
   same set inside the shared GHCR builder selected by `build/rust-builder/image.sh`, mirroring `start-core-test`).
 - **Footgun:** a bare `cargo test` from `backend/` selects the root workspace
   rather than only StartWRT. Scope with `-p` to avoid unrelated product builds and

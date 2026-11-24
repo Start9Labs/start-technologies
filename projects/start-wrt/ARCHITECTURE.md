@@ -19,6 +19,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 │   ├── ctrl/            # RPC server + CLI binary ("startwrt")
 │   ├── uciedit/         # UCI config parser/writer library
 │   ├── uciedit_macros/  # #[derive(TypedSection)] proc macro
+│   ├── dnsfwd/          # Per-profile DNS forwarder binary ("startwrt-dnsfwd")
 │   ├── firstboot_config/# Factory-default UCI configs (staged into the image)
 │   ├── hotplug/         # Interface hotplug scripts (shipped into the image)
 │   ├── nftables/        # fw4 include files (shipped into the image)
@@ -45,7 +46,7 @@ StartWRT is an OpenWrt-based router OS for home self-hosting. It pairs a Rust ba
 
 ## Components
 
-- **`backend/`** — Rust daemon and CLI. Produces a single binary `startwrt` that is symlinked as `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI). Handles all backend logic: RPC API, security profiles, WiFi, Ethernet, VPN, authentication, and UCI config management. See [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md).
+- **`backend/`** — Rust daemon and CLI. Produces the binary `startwrt`, symlinked as `startwrt-ctrld` (daemon) and `startwrt-cli` (CLI), and the DNS forwarder `startwrt-dnsfwd`. Handles all backend logic: RPC API, security profiles, WiFi, Ethernet, VPN, authentication, and UCI config management. See [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md).
 
 - **`web/`** — Angular SPA using Taiga UI. Signal-based state, zoneless change detection, standalone components. Communicates with the backend over encrypted JSON-RPC 2.0 at `/rpc/v2`, plus the streaming and continuation routes listed under Data Flow. Embeds contextual help on every page. See [web/ARCHITECTURE.md](web/ARCHITECTURE.md).
 

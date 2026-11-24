@@ -18,11 +18,12 @@ echo "==> Staging files into ${FILES_DIR}..."
 # Clean previous staging
 rm -rf "${FILES_DIR}"
 
-# Single binary + symlinks for backward compatibility
+# Binaries, with symlinks for backward compatibility
 mkdir -p "${FILES_DIR}/usr/bin"
 cp "${RUST_TARGET_DIR}/startwrt" "${FILES_DIR}/usr/bin/startwrt"
 ln -s startwrt "${FILES_DIR}/usr/bin/startwrt-ctrld"
 ln -s startwrt "${FILES_DIR}/usr/bin/startwrt-cli"
+cp "${RUST_TARGET_DIR}/startwrt-dnsfwd" "${FILES_DIR}/usr/bin/startwrt-dnsfwd"
 
 # UCI config defaults from firstboot_config/
 mkdir -p "${FILES_DIR}/etc/config"

@@ -3,7 +3,7 @@
 Operating rules for **StartWRT** — Start's OpenWrt-based router OS. This scope assumes
 you've read the root [`AGENTS.md`](../../AGENTS.md); only start-wrt-specific rules live here.
 
-StartWRT pairs a Rust backend (single `startwrt` binary: RPC daemon + CLI) with an Angular UI
+StartWRT pairs a Rust backend (the `startwrt` binary: RPC daemon + CLI) with an Angular UI
 (a project in the root Angular workspace) embedded into that binary, shipped as a flashable
 OpenWrt image for the SpaceMiT K1 (BananaPi-F3). See [ARCHITECTURE.md](ARCHITECTURE.md) and [API_CONTRACT.md](API_CONTRACT.md) (the RPC contract).
 
@@ -11,7 +11,7 @@ OpenWrt image for the SpaceMiT K1 (BananaPi-F3). See [ARCHITECTURE.md](ARCHITECT
 
 start-wrt was migrated from its own repo into this monorepo. Key consequences:
 
-- **Backend crates are members of the root Cargo workspace** (`projects/start-wrt/backend/{ctrl,uciedit,uciedit_macros}`), not a separate workspace. The binary therefore lands in the **workspace-root `target/`**, not `backend/target/`. Build with `cargo build -p startwrt-core --bin startwrt` from the repo root.
+- **Backend crates are members of the root Cargo workspace** (`projects/start-wrt/backend/{ctrl,uciedit,uciedit_macros,dnsfwd}`), not a separate workspace. The binary therefore lands in the **workspace-root `target/`**, not `backend/target/`. Build with `cargo build -p startwrt-core --bin startwrt` from the repo root.
 - **`startwrt-core` consumes shared code directly:** the old embedded `start-os` submodule is gone — its `core/` crate is now the shared `start-core`, pulled in **aliased** as `startos` (`startos = { package = "start-core", path = "../../../../shared-libs/crates/start-core" }`) so existing `use startos::…` imports resolve unchanged. `rpc-toolkit` and `imbl-value` likewise point at the vendored `shared-libs/crates/` copies, not git/crates.io.
 - **The web is a project in the root Angular workspace** (`start-wrt` in the root `angular.json`), sharing the root `package.json`/`node_modules`/`tsconfig.json` like every other app. Build it with `npm run build:wrt`, serve with `npm run start:wrt`, type-check with `npm run check:wrt` (all run from the repo root). It adopts `@start9labs/shared` for its common utilities — see [`web/AGENTS.md`](web/AGENTS.md).
 - **`openwrt/` is a disposable, gitignored build workspace** (no submodule, no fork, no git repo inside). `make start-wrt-openwrt-setup` rebuilds it from the sha256-pinned upstream release tarball ([`build/openwrt-version`](build/openwrt-version)) and applies the Start9 delta: [`openwrt-patches/`](openwrt-patches/) (modified upstream files, applied with `patch -p1`) + [`openwrt-overlay/`](openwrt-overlay/) (added files, rsynced over the tree). Every setup run **rebuilds the tree** (generated state — `dl/`, `build_dir/`, `feeds/`, `files/`, `.config`, keys — is preserved) — never keep work inside it; change the patch/overlay dirs instead (workflow in [AGENTS.md](AGENTS.md#openwrt-tree-pinned-upstream--patches--overlay)). The binary build does _not_ need the workspace, only the full image does.
@@ -234,7 +234,7 @@ as what its upstream router offers.
 
 ## Sub-scopes
 
-- [`backend/AGENTS.md`](backend/AGENTS.md) — Rust workspace (ctrl, uciedit, uciedit_macros)
+- [`backend/AGENTS.md`](backend/AGENTS.md) — Rust workspace (ctrl, uciedit, uciedit_macros, dnsfwd)
 - [`web/AGENTS.md`](web/AGENTS.md) — Angular + Taiga UI frontend
 
 ## Contributor workflow
@@ -243,13 +243,13 @@ Run commands from the repo root unless a block explicitly changes directory.
 
 ## Backend (Rust)
 
-The three crates (`startwrt-core`/`ctrl`, `uciedit`, `uciedit_macros`) are members of the root
-Cargo workspace.
+The four crates (`startwrt-core`/`ctrl`, `uciedit`, `uciedit_macros`, `startwrt-dnsfwd`/`dnsfwd`) are
+members of the root Cargo workspace.
 
 ```bash
 cargo build -p startwrt-core --bin startwrt                     # host build of the daemon+CLI binary
 cargo check -p startwrt-core --bin startwrt                     # fast type-check
-cargo test  -p startwrt-core -p uciedit -p uciedit_macros       # all start-wrt unit tests
+cargo test  -p startwrt-core -p uciedit -p uciedit_macros -p startwrt-dnsfwd  # all start-wrt unit tests
 make start-wrt-test                                              # same tests, containerized (mirrors start-core-test)
 ```
 
@@ -295,7 +295,7 @@ and retain their selected `PROFILE`.
 | `make start-wrt`                                | web → riscv64 binary (cross-compiled via dockerized cargo-zigbuild)                |
 | `make start-wrt-openwrt-setup`                  | fetch/reset the pinned OpenWrt tree, apply the Start9 delta, feeds/config/download |
 | `make start-wrt-image`                          | full flashable OpenWrt image → `results/` (**hours**)                              |
-| `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy binary over SSH (default `root@192.168.0.1`)                                |
+| `make start-wrt-update STARTWRT_REMOTE=root@IP` | deploy the binaries over SSH (default `root@192.168.0.1`)                          |
 | `make start-wrt-clean`                          | remove start-wrt build artifacts                                                   |
 
 `make start-wrt-ca-test` checks the built image's certificate stores: they must exclude

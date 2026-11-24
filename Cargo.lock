@@ -3438,12 +3438,15 @@ checksum = "c480823ed7c2c5d0f09c41020cb6b7c28029ce60ec42dc942158dcf22f8e0a4d"
 dependencies = [
  "async-trait",
  "bitflags 2.13.2",
+ "bytes",
  "cfg-if",
  "data-encoding",
  "futures-channel",
  "futures-io",
  "futures-util",
+ "h2",
  "hickory-proto",
+ "http",
  "idna",
  "ipnet",
  "jni",
@@ -3451,13 +3454,16 @@ dependencies = [
  "parking_lot 0.12.5",
  "rand 0.10.3",
  "ring",
+ "rustls",
  "rustls-pki-types",
  "thiserror 2.0.21",
  "time",
  "tinyvec",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "url",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
@@ -8656,6 +8662,23 @@ dependencies = [
  "visit-rs",
  "x25519-dalek 2.0.1",
  "zeroize",
+]
+
+[[package]]
+name = "startwrt-dnsfwd"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "hickory-net",
+ "hickory-proto",
+ "rand 0.9.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "socket2 0.6.5",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

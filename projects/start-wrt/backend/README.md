@@ -9,6 +9,7 @@ Rust crates powering the StartWRT router daemon and CLI — members of the root 
 | `ctrl`           | `startwrt-core` (lib `startwrt`) | RPC server (Axum) + CLI. Produces a single `startwrt` binary.                 |
 | `uciedit`        | `uciedit`                        | Zero-copy UCI config parser/writer with atomic writes and conflict detection. |
 | `uciedit_macros` | `uciedit_macros`                 | `#[derive(TypedSection)]` proc macro for compile-time-safe UCI access.        |
+| `dnsfwd`         | `startwrt-dnsfwd` (lib `dnsfwd`) | DNS forwarder for one profile. Produces the `startwrt-dnsfwd` binary.         |
 
 Other directories:
 
