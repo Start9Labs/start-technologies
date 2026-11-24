@@ -38,7 +38,7 @@ impl VersionT for Version {
         V0_4_3.clone()
     }
     fn migration_revision(self) -> usize {
-        4
+        5
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
@@ -295,7 +295,7 @@ mod tests {
         let version = super::super::Version::from_exver_version(Version.semver())
             .as_version_t()
             .unwrap();
-        for applied in [0, 1, 2, 3] {
+        for applied in [0, 1, 2, 3, 4] {
             let mut db = json!({ "public": { "serverInfo": {
                 "version": "0.4.3",
                 "packageVersionCompat": ">=0.3.0 <0.5.0",
