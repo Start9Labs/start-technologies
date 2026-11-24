@@ -510,9 +510,7 @@ async fn turn_off_remote_access(root: &Path) -> Result<(), Error> {
         break;
     }
     if legacy {
-        let sections = cfgs["firewall"].sections.len();
-        crate::system::apply_remote_access_config(&mut cfgs, "never", None, &[]);
-        changed |= cfgs["firewall"].sections.len() != sections;
+        changed |= crate::system::apply_remote_access_config(&mut cfgs, "never", None, &[]);
     }
     if changed {
         dump_all(uci_root(root), cfgs).await?;
