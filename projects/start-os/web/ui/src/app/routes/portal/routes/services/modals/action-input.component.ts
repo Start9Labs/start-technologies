@@ -1,9 +1,12 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core'
 import {
   DialogService,
+  escapeHtml,
   getErrorMessage,
   i18nKey,
   i18nPipe,
+  MarkdownPipe,
+  SafeLinksDirective,
   TaskService,
 } from '@start9labs/shared'
 import { IST, T, utils } from '@start9labs/start-core'
@@ -13,6 +16,7 @@ import {
   TuiLoader,
   TuiNotification,
 } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiProgress } from '@taiga-ui/kit'
 import { injectContext } from '@taiga-ui/polymorpheus'
 import { compare, Operation } from 'fast-json-patch'
@@ -58,9 +62,7 @@ export type PackageActionData = {
       <h4>{{ pkgInfo.title }}</h4>
     </div>
     @if (error()) {
-      <div tuiNotification appearance="negative">
-        <div [innerHTML]="error()"></div>
-      </div>
+      <div tuiNotification appearance="negative">{{ error() }}</div>
     }
     @if (uploads().length) {
       @for (upload of uploads(); track upload.id) {
@@ -78,7 +80,11 @@ export type PackageActionData = {
     } @else if (res(); as res) {
       @if (warning) {
         <div tuiNotification appearance="warning">
-          <div [innerHTML]="warning"></div>
+          <div
+            class="g-markdown"
+            safeLinks
+            [innerHTML]="warning | markdown | dompurify"
+          ></div>
         </div>
       }
 
@@ -119,6 +125,9 @@ export type PackageActionData = {
     }
   `,
   imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     TuiNotification,
     TuiLoader,
     TuiButton,
@@ -203,7 +212,7 @@ export class ActionInputModal {
             : null,
       })
     } catch (e) {
-      this.error.set(String(getErrorMessage(e)))
+      this.error.set(getErrorMessage(e))
     }
   }
 
@@ -296,7 +305,7 @@ export class ActionInputModal {
 
     const message = `${this.i18n.transform('As a result of this change, the following services will no longer work properly and may crash')}:<ul>`
     const content =
-      `${message}${breakages.map(id => `<li><b>${getManifest(packages[id]!).title}</b></li>`).join('')}</ul>` as i18nKey
+      `${message}${breakages.map(id => `<li><b>${escapeHtml(getManifest(packages[id]!).title)}</b></li>`).join('')}</ul>` as i18nKey
 
     return firstValueFrom(
       this.dialog

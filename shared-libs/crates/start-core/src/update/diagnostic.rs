@@ -6,7 +6,6 @@ use clap::{ArgAction, Parser};
 use color_eyre::eyre::eyre;
 use exver::{Version, VersionRange};
 use http::HeaderMap;
-use imbl_value::json;
 use itertools::Itertools;
 use reqwest::{Client, Url};
 use rpc_toolkit::HandlerArgs;
@@ -14,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use crate::PLATFORM;
 use crate::context::{CliContext, DiagnosticContext};
+use crate::diagnostic::{call_with_password, prompt_server_password};
 use crate::middleware::auth::signature;
 use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, ProgressUnits};
@@ -46,6 +45,9 @@ pub struct DiagnosticUpdateSystemParams {
     #[arg(long = "no-progress", action = ArgAction::SetFalse, help = "help.arg.no-progress")]
     #[serde(default)]
     progress: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    auth: crate::diagnostic::DiagnosticPasswordParams,
 }
 rpc_toolkit::reflect_ts!(DiagnosticUpdateSystemParams);
 
@@ -242,11 +244,7 @@ async fn get_versions(
         registry,
         HeaderMap::new(),
         "os.version.get",
-        json!({
-            "sourceVersion": source,
-            "targetVersion": target,
-            "platform": &**PLATFORM,
-        }),
+        super::version_query_params(source, target),
     )
     .await
     .map_err(Error::from)?;
@@ -266,15 +264,19 @@ pub async fn cli_update_system(
     let method = parent_method.into_iter().chain(method).join(".");
     if !progress {
         super::display_update_started(from_value(
-            context
-                .call_remote::<DiagnosticContext>(&method, raw_params)
-                .await?,
+            call_with_password(raw_params, prompt_server_password, |params| async {
+                Ok(context
+                    .call_remote::<DiagnosticContext>(&method, params)
+                    .await?)
+            })
+            .await?,
         )?);
         return Ok(());
     }
-    let response = context
-        .call_diagnostic_stream::<FullProgress, ()>(&method, raw_params)
-        .await?;
+    let response = call_with_password(raw_params, prompt_server_password, |params| {
+        context.call_diagnostic_stream::<FullProgress, ()>(&method, params)
+    })
+    .await?;
     super::render_update_progress(response).await
 }
 
@@ -298,6 +300,7 @@ mod tests {
                     assert!(headers.get(signature::AUTH_SIG_HEADER).is_none());
                     assert_eq!(body["method"], "os.version.get");
                     assert_eq!(body["params"]["sourceVersion"], "0.4.2");
+                    assert_eq!(body["params"]["platform"], &**crate::PLATFORM);
                     axum::Json(serde_json::json!({"jsonrpc":"2.0","id":0,"result":{}}))
                 },
             ),
@@ -338,10 +341,10 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_ui_keeps_signed_updates_public() {
+    fn diagnostic_ui_updates_require_authentication() {
         let metadata =
             DiagnosticContext::api().metadata(["diagnostic", "update"].into_iter().collect());
-        assert_eq!(metadata.get("authenticated"), Some(&Value::Bool(false)));
+        assert_eq!(metadata.get("authenticated"), Some(&Value::Bool(true)));
         assert_eq!(metadata.get("get_local_auth"), Some(&Value::Bool(true)));
     }
 }

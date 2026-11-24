@@ -7,8 +7,11 @@ export type GetPackageReq = PackageParams & {
   id: string
   otherVersions: 'short'
 }
-export type GetPackageRes = T.GetPackageResponse & {
-  otherVersions: { [version: string]: T.PackageInfoShort }
+/** StartOS's cached version list carries no release notes; fetched details do. */
+export type OtherVersion = Partial<T.PackageInfoShort>
+
+export type GetPackageRes = Omit<T.GetPackageResponse, 'otherVersions'> & {
+  otherVersions: { [version: string]: OtherVersion }
 }
 
 export type GetPackagesReq = PackageParams & {
@@ -56,10 +59,34 @@ export type StoreIdentity = RegistryObservation & {
 
 export type Marketplace = Record<string, StoreDataWithUrl | null>
 
-export type StoreData = RegistryObservation & {
-  info: T.RegistryInfo
-  packages: MarketplacePkg[]
-}
+export type StoreData<P extends MarketplaceListing = MarketplaceListing> =
+  RegistryObservation & {
+    info: T.RegistryInfo
+    packages: P[]
+    /** Installable updates of installed packages; absent outside StartOS. */
+    updates?: P[]
+  }
+
+/** A release as a registry listing shows it. */
+export type MarketplaceListing = Pick<
+  T.PackageVersionInfo,
+  | 'title'
+  | 'icon'
+  | 'releaseNotes'
+  | 'preDownloadAlert'
+  | 'defaultLocale'
+  | 'osVersion'
+  | 'sourceVersion'
+  | 'satisfies'
+  | 'gitHash'
+  | 's9pks'
+> &
+  Pick<GetPackageRes, 'categories' | 'firstPublishedAt'> & {
+    id: T.PackageId
+    version: string
+    flavor: string | null
+    description: Pick<T.Description, 'short'> & Partial<T.Description>
+  }
 
 export type MarketplacePkgBase = T.PackageVersionInfo & {
   id: T.PackageId
@@ -74,4 +101,6 @@ export type MarketplacePkg = MarketplacePkgBase &
   GetPackageRes &
   T.PackageVersionInfo
 
-export type StoreDataWithUrl = StoreData & { url: string }
+export type StoreDataWithUrl<
+  P extends MarketplaceListing = MarketplaceListing,
+> = StoreData<P> & { url: string }

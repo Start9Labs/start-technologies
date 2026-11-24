@@ -53,6 +53,7 @@ fn auth(
         local: local.map(|accepted| credential(accepted, "local")),
         bearer: None,
         signature: signature.map(|accepted| credential(accepted, "signature")),
+        password: None,
     }
 }
 
@@ -104,7 +105,7 @@ async fn ordinary_local_requests_still_process_signatures() {
     for signature in [false, true] {
         let calls = Arc::new(AtomicUsize::new(0));
         auth(Some(true), Some(signature), &calls)
-            .process_rpc_request(&TestContext, json!({}), &mut request("auth.session.list"))
+            .process_rpc_request(&TestContext, json!({}), &mut request("auth.key.list"))
             .await
             .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -115,7 +116,7 @@ async fn ordinary_local_requests_still_process_signatures() {
 async fn rejected_credentials_still_require_authorization() {
     let calls = Arc::new(AtomicUsize::new(0));
     let error = auth(Some(false), Some(false), &calls)
-        .process_rpc_request(&TestContext, json!({}), &mut request("auth.session.list"))
+        .process_rpc_request(&TestContext, json!({}), &mut request("auth.key.list"))
         .await
         .unwrap_err()
         .result
@@ -155,4 +156,30 @@ async fn public_requests_do_not_require_credentials() {
         )
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn password_is_checked_only_without_another_credential() {
+    for (local, password_calls) in [(true, 0), (false, 1)] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let password_attempts = Arc::new(AtomicUsize::new(0));
+        let mut auth = auth(Some(local), None, &calls);
+        auth.password = Some(DynMiddleware::new(Credential {
+            accepted: false,
+            calls: password_attempts.clone(),
+            name: "password",
+        }));
+        let result = auth
+            .process_rpc_request(&TestContext, json!({}), &mut request("diagnostic.rebuild"))
+            .await;
+        assert_eq!(result.is_ok(), local);
+        assert_eq!(password_attempts.load(Ordering::SeqCst), password_calls);
+        if let Err(response) = result {
+            let error = response.result.unwrap_err();
+            assert_eq!(
+                serde_json::to_value(&error).unwrap()["data"]["details"],
+                "password"
+            );
+        }
+    }
 }

@@ -5,7 +5,14 @@ import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
 import { UntypedFormBuilder } from '@angular/forms'
 import { loadTypeScript } from './typescript-loader.mjs'
 
-loadTypeScript(new Map())
+loadTypeScript(
+  new Map([
+    [
+      '@start9labs/shared',
+      `export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)}`,
+    ],
+  ]),
+)
 const { FormService, numberInRange, isInteger } =
   await import('../src/app/services/form.service.ts')
 
@@ -107,6 +114,29 @@ test('extension filters match case-insensitive filename suffixes, including comp
     form({ extensions: ['.tar.gz'] }, new File(['x'], 'backup.gz')).valid,
     false,
   )
+})
+
+test('acknowledgements start unticked regardless of saved acceptance', () => {
+  const injector = createEnvironmentInjector([
+    { provide: UntypedFormBuilder, useFactory: () => new UntypedFormBuilder() },
+  ])
+  try {
+    const service = runInInjectionContext(injector, () => new FormService())
+    for (const confirm of [undefined, false, true]) {
+      const form = service.createForm(
+        { confirm: { type: 'acknowledgement' } },
+        { confirm },
+      )
+      assert.equal(form.value.confirm, false)
+      assert.equal(form.valid, false)
+      form.controls.confirm.setValue(true)
+      assert.equal(form.valid, true)
+      form.controls.confirm.setValue(false)
+      assert.equal(form.valid, false)
+    }
+  } finally {
+    injector.destroy()
+  }
 })
 
 test('numeric controls preserve zero defaults and share inclusive bounds with action validation', () => {

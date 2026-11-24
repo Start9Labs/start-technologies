@@ -142,7 +142,6 @@ export type DnsModeInput = z.input<typeof schemas.DnsMode>
  */
 export type DnsRecordEntry = z.output<typeof schemas.DnsRecordEntry>
 export type Dump = z.output<typeof schemas.Dump>
-export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 
 /**
  * Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
@@ -161,7 +160,7 @@ export type HasUnenrolledKeys = z.output<typeof schemas.HasUnenrolledKeys>
 export type HttpRedirectStatus = z.output<typeof schemas.HttpRedirectStatus>
 export type IoFormatInput = z.input<typeof schemas.IoFormat>
 export type ListDevicesParamsInput = z.input<typeof schemas.ListDevicesParams>
-export type ListParamsInput = z.input<typeof schemas.ListParams>
+export type ListKeysParamsInput = z.input<typeof schemas.ListKeysParams>
 export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
 
 /**
@@ -182,6 +181,11 @@ export type RemoveOperation = z.output<typeof schemas.RemoveOperation>
  * JSON Patch 'replace' operation representation
  */
 export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export type SelectorParamsInput = z.input<typeof schemas.SelectorParams>
 export type Session = z.output<typeof schemas.Session>
 export type SetAutoPortForwardParamsInput = z.input<
   typeof schemas.SetAutoPortForwardParams
@@ -235,13 +239,17 @@ export type ApplyWithPathParamsInput = z.input<
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
-export type KillParamsInput = z.input<typeof schemas.KillParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 
 /**
  * JSON Patch single patch operation
  */
 export type PatchOperation = z.output<typeof schemas.PatchOperation>
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
 export type RemoveKeyParamsInput = z.input<typeof schemas.RemoveKeyParams>
 export type RemovePortForwardParamsInput = z.input<
   typeof schemas.RemovePortForwardParams
@@ -253,23 +261,24 @@ export type SetPortForwardEnabledParamsInput = z.input<
   typeof schemas.SetPortForwardEnabledParams
 >
 export type SetSubnetDnsParamsInput = z.input<typeof schemas.SetSubnetDnsParams>
-export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TransportWireInput = z.input<typeof schemas.TransportWire>
 export type UpdatePortForwardLabelParamsInput = z.input<
   typeof schemas.UpdatePortForwardLabelParams
 >
 export type WgConfig = z.output<typeof schemas.WgConfig>
+export type DumpParamsInput = z.input<typeof schemas.DumpParams>
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export type KeyList = z.output<typeof schemas.KeyList>
 
 /**
  * Representation of JSON Patch (list of patch operations)
  */
 export type Patch = z.output<typeof schemas.Patch>
-
-/**
- * The server's sessions, by credential type.
- */
-export type Sessions = z.output<typeof schemas.Sessions>
+export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -285,7 +294,6 @@ export type DiffPatch = z.output<typeof schemas.DiffPatch>
 export type RemovePinholeParamsInput = z.input<
   typeof schemas.RemovePinholeParams
 >
-export type SessionList = z.output<typeof schemas.SessionList>
 export type SetPinholeEnabledParamsInput = z.input<
   typeof schemas.SetPinholeEnabledParams
 >

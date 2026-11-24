@@ -888,7 +888,7 @@ export const Api = {
     auth: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
-        session: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        key: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         token: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },
@@ -907,41 +907,16 @@ export const Api = {
     },
     db: {
       _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: { put: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} } },
+      _CHILDREN: {
+        put: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        subscription: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+      },
     },
     diagnostic: {
       _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: {
-        disk: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            forget: {
-              _PARAMS: /* @__PURE__ */ empty,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            repair: {
-              _PARAMS: /* @__PURE__ */ empty,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-      },
+      _CHILDREN: { disk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} } },
     },
-    disk: {
-      _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: {
-        repair: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ z.null(),
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
-      },
-    },
+    disk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),

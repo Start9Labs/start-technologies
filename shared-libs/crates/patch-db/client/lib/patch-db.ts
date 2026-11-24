@@ -39,7 +39,7 @@ import {
  */
 export class PatchDB<T extends { [key: string]: any }> {
   private sub: Subscription | null = null
-  private watchedNodes: {
+  protected watchedNodes: {
     [path: string]: {
       subject: BehaviorSubject<any>
       pathArr: string[]
@@ -52,7 +52,7 @@ export class PatchDB<T extends { [key: string]: any }> {
    */
   constructor(
     private readonly source$: Observable<Update<T>[]>,
-    private readonly cache$ = new BehaviorSubject<Dump<T>>({
+    protected readonly cache$ = new BehaviorSubject<Dump<T>>({
       id: 0,
       value: {} as T,
     }),
@@ -220,19 +220,19 @@ export class PatchDB<T extends { [key: string]: any }> {
     this.processUpdates(updates, cache)
   }
 
-  private handleRevision(revision: Revision, cache: Dump<T>): void {
-    // apply operations
+  protected handleRevision(revision: Revision, cache: Dump<T>): void {
     revision.patch.forEach(op => {
       applyOperation(cache, op)
     })
-    // @claude fix #20: Previously, arrayFromPath(op.path) was called for every
-    // (watchedNode, patchOp) pair — O(watchedNodes × patchOps) redundant parsing.
-    // Pre-converting once outside the loop makes it O(patchOps + watchedNodes).
+    this.publishRevision(revision, cache)
+  }
+
+  /** Watchers observe complete revisions; callers must apply every operation first. */
+  protected publishRevision(revision: Revision, cache: Dump<T>): void {
     const patchArrs = revision.patch.map(op => ({
       path: op.path,
       arr: arrayFromPath(op.path),
     }))
-    // update watched nodes
     Object.entries(this.watchedNodes).forEach(([watchedPath, { pathArr }]) => {
       const match = patchArrs.find(
         ({ arr }) => startsWith(pathArr, arr) || startsWith(arr, pathArr),
@@ -241,14 +241,14 @@ export class PatchDB<T extends { [key: string]: any }> {
     })
   }
 
-  private handleDump(dump: Dump<T>, cache: Dump<T>): void {
+  protected handleDump(dump: Dump<T>, cache: Dump<T>): void {
     cache.value = { ...dump.value }
     Object.keys(this.watchedNodes).forEach(watchedPath => {
       this.updateWatchedNode(watchedPath, cache.value)
     })
   }
 
-  private updateWatchedNode(path: string, data: T): void {
+  protected updateWatchedNode(path: string, data: T): void {
     const value = getValueByPointer(data, path)
     this.watchedNodes[path]?.subject.next(value)
   }

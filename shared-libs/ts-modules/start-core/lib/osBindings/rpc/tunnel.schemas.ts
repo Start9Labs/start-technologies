@@ -352,16 +352,6 @@ export const Dump: z.ZodObject<{ id: z.ZodInt; value: z.ZodUnknown }> =
   /* @__PURE__ */ object({ id: z.int(), value: z.unknown() }).meta({
     id: 'Dump',
   })
-export const DumpParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'DumpParams',
-})
 
 /**
  * Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
@@ -437,8 +427,8 @@ export const ListDevicesParams: z.ZodObject<{ subnet: z.ZodString }> =
   /* @__PURE__ */ object({ subnet: z.string() }).meta({
     id: 'ListDevicesParams',
   })
-export const ListParams: typeof empty = /* @__PURE__ */ empty.meta({
-  id: 'ListParams',
+export const ListKeysParams: typeof empty = /* @__PURE__ */ empty.meta({
+  id: 'ListKeysParams',
 })
 export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
@@ -552,6 +542,23 @@ export const ReplaceOperation: z.ZodObject<{
 }).meta({
   id: 'ReplaceOperation',
   description: "JSON Patch 'replace' operation representation",
+})
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export const SelectorParams: z.ZodObject<{
+  include: z.ZodString
+  exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
+  depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+}> = /* @__PURE__ */ object({
+  include: z.string(),
+  exclude: z.array(z.string()).optional(),
+  depth: z.int().nullable().optional(),
+}).meta({
+  id: 'SelectorParams',
+  description:
+    'One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.',
 })
 export const Session: z.ZodObject<{
   /**
@@ -826,9 +833,20 @@ export const AddDeviceParams: z.ZodObject<{
   id: 'AddDeviceParams',
 })
 export const AddKeyParams: z.ZodObject<{
-  name: z.ZodString
   key: typeof AnyVerifyingKey
-}> = /* @__PURE__ */ object({ name: z.string(), key: AnyVerifyingKey }).meta({
+  name: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  userAgent: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+}> = /* @__PURE__ */ object({
+  key: AnyVerifyingKey,
+  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+}).meta({
   id: 'AddKeyParams',
 })
 export const ApplyWithPathParams: z.ZodIntersection<
@@ -858,21 +876,6 @@ export const AuthKeys: z.ZodRecord<z.ZodString, typeof Session> =
     id: 'AuthKeys',
     description: 'Enrolled sign-ins indexed by canonical DER64 SPKI.',
   })
-export const KillParams: z.ZodObject<{
-  pubkeys: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
-    z.ZodArray<typeof AnyVerifyingKey>
-  >
-  tokens: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pubkeys: wire(z.array(AnyVerifyingKey).optional(), z.array(AnyVerifyingKey)),
-  tokens: wire(z.array(z.string()).optional(), z.array(z.string())),
-}).meta({
-  id: 'KillParams',
-})
 export const LoginParams: z.ZodObject<{
   password: z.ZodString
   /**
@@ -1042,10 +1045,70 @@ export const PatchOperation: z.ZodUnion<
     id: 'PatchOperation',
     description: 'JSON Patch single patch operation',
   })
-export const RemoveKeyParams: z.ZodObject<{ key: typeof AnyVerifyingKey }> =
-  /* @__PURE__ */ object({ key: AnyVerifyingKey }).meta({
-    id: 'RemoveKeyParams',
-  })
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export const ProjectionParams: z.ZodObject<{
+  /**
+   * Levels kept below the pointer; deeper objects and arrays become empty.
+   */
+  depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+  /**
+   * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+   * Empty keeps everything. A numeric segment matches that key or array position.
+   */
+  include: z.ZodOptional<z.ZodArray<z.ZodString>>
+  /**
+   * Subtrees removed from what `include` keeps, in the same form.
+   */
+  exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
+  /**
+   * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
+   */
+  selectors: z.ZodOptional<z.ZodArray<typeof SelectorParams>>
+}> = /* @__PURE__ */ object({
+  /**
+   * Levels kept below the pointer; deeper objects and arrays become empty.
+   */
+  depth: z.int().nullable().optional().meta({
+    description:
+      'Levels kept below the pointer; deeper objects and arrays become empty.',
+  }),
+  /**
+   * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+   * Empty keeps everything. A numeric segment matches that key or array position.
+   */
+  include: z.array(z.string()).optional().meta({
+    description:
+      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.',
+  }),
+  /**
+   * Subtrees removed from what `include` keeps, in the same form.
+   */
+  exclude: z.array(z.string()).optional().meta({
+    description:
+      'Subtrees removed from what `include` keeps, in the same form.',
+  }),
+  /**
+   * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
+   */
+  selectors: z.array(SelectorParams).optional().meta({
+    description:
+      'More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.',
+  }),
+}).meta({
+  id: 'ProjectionParams',
+  description:
+    'Narrows a dumped or subscribed subtree; omitted fields narrow nothing.',
+})
+export const RemoveKeyParams: z.ZodObject<{
+  keys: z.ZodArray<typeof AnyVerifyingKey>
+}> = /* @__PURE__ */ object({ keys: z.array(AnyVerifyingKey) }).meta({
+  id: 'RemoveKeyParams',
+})
 export const RemovePortForwardParams: z.ZodObject<{
   source: typeof ForwardAddress
   /**
@@ -1132,30 +1195,6 @@ export const SetSubnetDnsParams: z.ZodObject<{
   }),
 }).meta({
   id: 'SetSubnetDnsParams',
-})
-export const SubscribeParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  /**
-   * The subscriber's last revision; resumes only within the epoch that reported it.
-   */
-  since: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
-    z.ZodNullable<typeof DbCursor>
-  >
-}> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
-  /**
-   * The subscriber's last revision; resumes only within the epoch that reported it.
-   */
-  since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
-    description:
-      "The subscriber's last revision; resumes only within the epoch that reported it.",
-  }),
-}).meta({
-  id: 'SubscribeParams',
 })
 export const SubscribeRes: z.ZodObject<{
   dump: typeof Dump
@@ -1268,6 +1307,41 @@ export const WgConfig: z.ZodObject<{
 }).meta({
   id: 'WgConfig',
 })
+export const DumpParams: z.ZodIntersection<
+  z.ZodObject<{
+    pointer: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>,
+  typeof ProjectionParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+    }),
+    ProjectionParams,
+  )
+  .meta({
+    id: 'DumpParams',
+  })
+
+/**
+ * Enrolled keys, including ephemeral ones, and the caller's own.
+ */
+export const KeyList: z.ZodObject<{
+  current: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
+  >
+  keys: typeof AuthKeys
+}> = /* @__PURE__ */ object({
+  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  keys: AuthKeys,
+}).meta({
+  id: 'KeyList',
+  description: "Enrolled keys, including ephemeral ones, and the caller's own.",
+})
 
 /**
  * Representation of JSON Patch (list of patch operations)
@@ -1278,20 +1352,38 @@ export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
     id: 'Patch',
     description: 'Representation of JSON Patch (list of patch operations)',
   })
-
-/**
- * The server's sessions, by credential type.
- */
-export const Sessions: z.ZodObject<{
-  pubkeys: typeof AuthKeys
-  tokens: z.ZodRecord<z.ZodString, typeof Session>
-}> = /* @__PURE__ */ object({
-  pubkeys: AuthKeys,
-  tokens: z.record(z.string(), Session),
-}).meta({
-  id: 'Sessions',
-  description: "The server's sessions, by credential type.",
-})
+export const SubscribeParams: z.ZodIntersection<
+  z.ZodObject<{
+    pointer: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+    /**
+     * The subscriber's last revision; resumes only within the epoch that reported it.
+     */
+    since: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
+      z.ZodNullable<typeof DbCursor>
+    >
+  }>,
+  typeof ProjectionParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+      /**
+       * The subscriber's last revision; resumes only within the epoch that reported it.
+       */
+      since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
+        description:
+          "The subscriber's last revision; resumes only within the epoch that reported it.",
+      }),
+    }),
+    ProjectionParams,
+  )
+  .meta({
+    id: 'SubscribeParams',
+  })
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -1328,18 +1420,6 @@ export const RemovePinholeParams: z.ZodObject<{
   transport: wire(Transport.optional(), Transport),
 }).meta({
   id: 'RemovePinholeParams',
-})
-export const SessionList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sessions: typeof Sessions
-}> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
-  sessions: Sessions,
-}).meta({
-  id: 'SessionList',
 })
 export const SetPinholeEnabledParams: z.ZodObject<{
   gua: z.ZodString
@@ -1434,6 +1514,10 @@ export const SubscribeStart: z.ZodObject<{
     z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
     z.ZodNullable<z.ZodArray<typeof Revision>>
   >
+  /**
+   * Names the stream to `db.subscription.update`; absent where its projection is fixed.
+   */
+  subscription: z.ZodOptional<z.ZodNullable<typeof Guid>>
 }> = /* @__PURE__ */ object({
   epoch: z.string(),
   id: z.int(),
@@ -1442,6 +1526,13 @@ export const SubscribeStart: z.ZodObject<{
     z.array(Revision).nullable().optional(),
     z.array(Revision).nullable(),
   ),
+  /**
+   * Names the stream to `db.subscription.update`; absent where its projection is fixed.
+   */
+  subscription: Guid.nullable().optional().meta({
+    description:
+      'Names the stream to `db.subscription.update`; absent where its projection is fixed.',
+  }),
 }).meta({
   id: 'SubscribeStart',
   description:
@@ -1484,9 +1575,9 @@ export const Api = {
                   }),
                   empty,
                 ),
-                empty,
+                ListKeysParams,
               ),
-              _RETURN: /* @__PURE__ */ AuthKeys,
+              _RETURN: /* @__PURE__ */ KeyList,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },
@@ -1509,34 +1600,6 @@ export const Api = {
           _RETURN: /* @__PURE__ */ HasUnenrolledKeys.nullable(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
-        },
-        session: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            kill: {
-              _PARAMS: /* @__PURE__ */ KillParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            list: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
-                  empty,
-                ),
-                ListParams,
-              ),
-              _RETURN: /* @__PURE__ */ SessionList,
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-          },
         },
         'set-password': {
           _PARAMS: /* @__PURE__ */ SetPasswordParams,

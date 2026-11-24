@@ -1,13 +1,10 @@
 import type { Api, ApiClient, Params, Result } from './api.types'
 import { inject, Injectable } from '@angular/core'
 import { WA_CRYPTO, WA_SESSION_STORAGE } from '@ng-web-apis/common'
+import { FALLBACK_ICON, registrySigningKeys } from '@start9labs/marketplace'
 import {
-  FALLBACK_ICON,
-  GetPackageRes,
-  GetPackagesRes,
-  registrySigningKeys,
-} from '@start9labs/marketplace'
-import {
+  DatabaseCursor,
+  DatabaseUpdate,
   FullKeyboard,
   i18nPipe,
   pauseFor,
@@ -31,14 +28,21 @@ import {
   AddOperation,
   applyOperation,
   Dump,
+  getValueByPointer,
   Operation,
   PatchOp,
+  extension,
+  normalizeSelector,
   pathFromArray,
+  projectRoot,
+  projectScoped,
+  Selection,
   RemoveOperation,
   ReplaceOperation,
   Revision,
 } from 'patch-db-client'
 import {
+  defer,
   endWith,
   finalize,
   from,
@@ -48,6 +52,7 @@ import {
   shareReplay,
   startWith,
   Subject,
+  switchMap,
 } from 'rxjs'
 import { WebSocketSubject } from 'rxjs/webSocket'
 import {
@@ -60,11 +65,11 @@ import {
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { ConfigService } from 'src/app/services/config.service'
-import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
 import { getDriveName } from 'src/app/utils/get-drive-name'
 import { parsePemPublicKey, parsePublicKeys } from 'src/app/utils/public-keys'
+import { sshKeyRows } from 'src/app/utils/ssh-keys'
 import { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import { Mock } from './api.fixures'
 import { BTC_ICON, LND_ICON, PROXY_ICON } from './api-icons'
@@ -76,8 +81,6 @@ import {
   FollowServerLogsReq,
   GetActionInputRes,
   GetPackageLogsReq,
-  GetRegistryPackageReq,
-  GetRegistryPackagesReq,
   PkgAddPrivateDomainReq,
   PkgAddPublicDomainReq,
   PkgBindingSetAddressEnabledReq,
@@ -95,6 +98,7 @@ import {
   mockOsUpdateCache,
   mockPatchData,
   mockRegistryCache,
+  mockRegistryIndex,
 } from './mock-patch'
 
 import markdown from './md-sample.md'
@@ -150,7 +154,15 @@ export class MockApiService extends ApiService implements StartupApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
-  private readonly cache = inject(PATCH_CACHE)
+  private mockDocument?: Promise<Dump<DataModel>>
+  private mockDoc?: Dump<DataModel>
+
+  private get document(): Dump<DataModel> {
+    return (this.mockDoc ??= {
+      id: this.sequence,
+      value: structuredClone(mockPatchData),
+    })
+  }
   private readonly gitHash = inject(ConfigService).gitHash
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
@@ -225,6 +237,11 @@ export class MockApiService extends ApiService implements StartupApiService {
           mockRegistryCache(url, this.mockRegistryInfo(url)),
         ]),
       )
+      mockPatchData.registryIndexes = Object.fromEntries(
+        Object.entries(mockPatchData.registryCache)
+          .filter(([, entry]) => entry.status !== 'error')
+          .map(([url, entry]) => [url, mockRegistryIndex(entry.info)]),
+      )
       mockPatchData.serverInfo.gitHash = this.gitHash
       mockPatchData.osUpdateCache = mockOsUpdateCache(
         mockPatchData.serverInfo.osRegistry,
@@ -255,11 +272,19 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
-    'auth.session.list': async params => {
+    'auth.key.list': async params => {
       await pauseFor(2000)
-      return Mock.Sessions
+      return Mock.Keys
     },
-    'auth.session.kill': async params => {
+    'auth.key.remove': async params => {
+      await pauseFor(2000)
+      return null
+    },
+    'auth.token.list': async params => {
+      await pauseFor(2000)
+      return Mock.Tokens
+    },
+    'auth.token.remove': async params => {
       await pauseFor(2000)
       return null
     },
@@ -340,6 +365,7 @@ export class MockApiService extends ApiService implements StartupApiService {
         normalized,
         info,
       )
+      mockPatchData.registryIndexes[normalized] = mockRegistryIndex(info)
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
@@ -367,6 +393,7 @@ export class MockApiService extends ApiService implements StartupApiService {
         normalized,
         info,
       )
+      mockPatchData.registryIndexes[normalized] = mockRegistryIndex(info)
       this.importRegistryKeys(normalized, info)
       await this.publishTrust()
       return null
@@ -380,6 +407,9 @@ export class MockApiService extends ApiService implements StartupApiService {
       const offered = this.offeredKeys(url)
       for (const saved of Object.keys(mockPatchData.registryCache)) {
         if (sameUrl(saved, url)) delete mockPatchData.registryCache[saved]
+      }
+      for (const saved of Object.keys(mockPatchData.registryIndexes)) {
+        if (sameUrl(saved, url)) delete mockPatchData.registryIndexes[saved]
       }
       for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
         if (sameUrl(saved, url))
@@ -676,14 +706,6 @@ export class MockApiService extends ApiService implements StartupApiService {
 
       return false
     },
-    'registry.os.version.get': async params => {
-      await pauseFor(2000)
-      return mockOsUpdateCache(params.registry).versions
-    },
-    'registry.info': async params => {
-      await pauseFor(2000)
-      return Mock.RegistryInfo
-    },
     'notification.push.key': async () =>
       'BMPJ4K-bgv51B65CU1VyQTEkdx1KpAEwNW1yBT1s1L897jXuwArMYD6evcHvlejf27P-ouK7X_LwifLqyBkL6Hs',
     'notification.push.list': async () => [...this.pushSubscriptions.values()],
@@ -921,20 +943,37 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
-    'ssh.list': async params => {
+    'ssh.list': async () => {
       await pauseFor(2000)
-      return Mock.SshKeys
+      return sshKeyRows(mockPatchData.sshPubkeys)
     },
-    'ssh.add': async params => {
+    'ssh.add': async ({ key }) => {
       await pauseFor(2000)
-      return Mock.SshKey
+      const fingerprint = Mock.SshKey.fingerprint
+      const existing = mockPatchData.sshPubkeys[fingerprint]
+      const now = new Date().toISOString()
+      const stored = {
+        created_at: existing?.created_at ?? now,
+        updated_at: now,
+        value: key,
+      }
+      mockPatchData.sshPubkeys[fingerprint] = stored
+      await this.mockRevision([
+        { op: PatchOp.ADD, path: `/sshPubkeys/${fingerprint}`, value: stored },
+      ])
+      return sshKeyRows({ [fingerprint]: stored })[0]!
     },
-    'ssh.remove': async params => {
+    'ssh.remove': async ({ fingerprint }) => {
       await pauseFor(2000)
+      delete mockPatchData.sshPubkeys[fingerprint]
+      await this.mockRevision([
+        { op: PatchOp.REMOVE, path: `/sshPubkeys/${fingerprint}` },
+      ])
       return null
     },
     'volumes.create': async ({ name, source }) => {
       await pauseFor(1000)
+      this.mockEnsureVolumeNameAvailable(name)
       const id = this.guid()
       const volume: T.SharedVolume = {
         name,
@@ -978,6 +1017,7 @@ export class MockApiService extends ApiService implements StartupApiService {
         `/sharedVolumes/${id}`,
       )
       if (!volume) throw new Error('Volume not found')
+      this.mockEnsureVolumeNameAvailable(name, id)
       await this.mockRevision([
         { op: PatchOp.REPLACE, path: `/sharedVolumes/${id}/name`, value: name },
       ])
@@ -1395,9 +1435,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       if (existing && existing.stateInfo.state === 'installed') {
         // Updating: preserve the installed manifest so LocalPackagesService
         // keeps the row visible and the item component renders its progress
-        // circle. Previously we always used the 'installing' state here, which
-        // dropped the row out of localPkgs mid-update and left the Updates tab
-        // briefly showing "Finding suitable version..." before the row vanished.
+        // circle.
         const manifest = existing.stateInfo.manifest
         finalManifest = { ...manifest, version: params.version }
         value = {
@@ -1548,7 +1586,7 @@ export class MockApiService extends ApiService implements StartupApiService {
           continue
         }
         const restored = await this.rpc.volumes.create({
-          name: info.name,
+          name: this.mockUnusedVolumeName(info.name),
           source: { kind: 'local' },
         })
         await this.mockRevision([
@@ -2041,10 +2079,6 @@ export class MockApiService extends ApiService implements StartupApiService {
 
       return null
     },
-    'registry.package.get': async params =>
-      params.id
-        ? this.getRegistryPackage(params as GetRegistryPackageReq)
-        : this.getRegistryPackages(params as GetRegistryPackagesReq),
     'kiosk.enable': () => this.toggleKiosk(true),
     'kiosk.disable': () => this.toggleKiosk(false),
   }
@@ -2070,6 +2104,10 @@ export class MockApiService extends ApiService implements StartupApiService {
       }
     },
   })
+
+  private async *idle(signal?: AbortSignal): AsyncGenerator<never, null> {
+    while (true) await pauseFor(60_000, signal)
+  }
 
   private async metricsFollow(signal?: AbortSignal) {
     await pauseFor(2000, signal)
@@ -2201,6 +2239,11 @@ export class MockApiService extends ApiService implements StartupApiService {
   }
 
   // state
+
+  async checkEnrollment(): Promise<unknown> {
+    await pauseFor(1000)
+    return null
+  }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {
     if (url) {
@@ -3102,6 +3145,40 @@ export class MockApiService extends ApiService implements StartupApiService {
     return target
   }
 
+  private mockVolumeNameTaken(name: string, except?: string) {
+    const volumes: Record<string, T.SharedVolume> =
+      this.mockData('/sharedVolumes') ?? {}
+    return Object.entries(volumes).some(
+      ([id, volume]) => id !== except && volume.name === name,
+    )
+  }
+
+  private mockVolumeNameIsFolder(name: string) {
+    return !['.', '..'].includes(name) && !/[\/\0]/.test(name)
+  }
+
+  private mockEnsureVolumeNameAvailable(name: string, except?: string) {
+    if (!name.trim()) throw new Error('Enter a volume name')
+    if (!this.mockVolumeNameIsFolder(name))
+      throw new Error(
+        'A volume name must work as a folder name: no / and not . or ..',
+      )
+    if (this.mockVolumeNameTaken(name, except))
+      throw new Error(`Another volume is already named ${name}`)
+  }
+
+  private mockUnusedVolumeName(name: string) {
+    const repaired = name.replace(/[\/\0]/g, '-')
+    const base =
+      repaired.trim() && this.mockVolumeNameIsFolder(repaired)
+        ? repaired
+        : 'Volume'
+    let candidate = base
+    for (let n = 2; this.mockVolumeNameTaken(candidate); n++)
+      candidate = `${base} (${n})`
+    return candidate
+  }
+
   private mockSource(
     source: Params<'volumes.create'>['source'],
   ): T.SharedVolumeSource {
@@ -3265,12 +3342,103 @@ export class MockApiService extends ApiService implements StartupApiService {
   }
 
   private mockData(path: string): any {
-    const parts = path.split('/').filter(Boolean)
-    let obj: any = this.cache.value.value
-    for (const part of parts) {
-      obj = obj[part]
+    return getValueByPointer(this.document.value as any, path)
+  }
+
+  private mockSubscriptionCount = 0
+  private readonly mockSubscriptions = new Map<
+    string,
+    {
+      pointer: string
+      selection: Selection
+      out: Subject<DatabaseUpdate<unknown>>
     }
-    return obj
+  >()
+
+  override watchDb$(
+    path: string[],
+    _since: DatabaseCursor | null,
+    selection: Selection | null = null,
+  ): Observable<DatabaseUpdate<unknown>> {
+    const pointer = pathFromArray(path)
+    return defer(() => {
+      selection?.forEach(normalizeSelector)
+      return (this.mockDocument ??= this.handlers['db.subscribe']!({}).then(
+        result => {
+          const { value } = (result as { dump: Dump<DataModel> }).dump
+          const document = this.document
+          document.value = {
+            ...document.value,
+            ui: value.ui,
+            registryCache: value.registryCache,
+            osUpdateCache: value.osUpdateCache,
+            serverInfo: {
+              ...document.value.serverInfo,
+              gitHash: value.serverInfo.gitHash,
+            },
+          }
+          return document
+        },
+      ))
+    }).pipe(
+      switchMap(
+        document =>
+          new Observable<DatabaseUpdate<unknown>>(subscriber => {
+            const subscription = `mock-${++this.mockSubscriptionCount}`
+            const entry = {
+              pointer,
+              selection: selection ?? [],
+              out: new Subject<DatabaseUpdate<unknown>>(),
+            }
+            this.mockSubscriptions.set(subscription, entry)
+            const forward = entry.out.subscribe(subscriber)
+            subscriber.next({
+              id: document.id,
+              subscription,
+              value: projectRoot(
+                entry.selection,
+                getValueByPointer(document.value as any, pointer) ?? null,
+              ),
+            })
+            const revisions = this.mockWsSource$.subscribe(({ id, patch }) =>
+              entry.out.next({
+                id,
+                patch: projectScoped(
+                  patch,
+                  pointer,
+                  entry.selection,
+                  this.document.value,
+                ),
+              }),
+            )
+            return () => {
+              revisions.unsubscribe()
+              forward.unsubscribe()
+              this.mockSubscriptions.delete(subscription)
+            }
+          }),
+      ),
+    )
+  }
+
+  override async updateDbSubscription(
+    subscription: string,
+    selection: Selection,
+  ): Promise<void> {
+    selection.forEach(normalizeSelector)
+    const entry = this.mockSubscriptions.get(subscription)
+    if (!entry) throw new Error(`Database subscription ${subscription} ended`)
+    const document = this.document
+    entry.out.next({
+      id: document.id,
+      extend: true,
+      patch: extension(
+        entry.selection,
+        selection,
+        getValueByPointer(document.value as any, entry.pointer) ?? null,
+      ),
+    })
+    entry.selection = selection
   }
 
   private async mockRevision<T>(patch: Operation<T>[]): Promise<void> {
@@ -3278,31 +3446,14 @@ export class MockApiService extends ApiService implements StartupApiService {
       id: ++this.sequence,
       patch,
     }
+    const document = this.document
+    patch.forEach(op => {
+      try {
+        applyOperation(document, op)
+      } catch {}
+    })
+    document.id = revision.id
     this.mockWsSource$.next(revision)
-  }
-
-  private async getRegistryPackage(params: GetRegistryPackageReq) {
-    await pauseFor(2000)
-
-    const { targetVersion, sourceVersion, id } = params
-
-    if (sourceVersion) {
-      // Mock registry refinement: return a reachable stepping-stone version
-      if (id === 'bitcoind') {
-        return Mock.OtherPackageVersions['bitcoind']!['=26.1.0:0.1.0']!
-      }
-      return Mock.RegistryPackages[id]!
-    }
-
-    if (!targetVersion || targetVersion === '=*') {
-      return Mock.RegistryPackages[id]!
-    } else {
-      return Mock.OtherPackageVersions[id]![targetVersion]!
-    }
-  }
-  private async getRegistryPackages(params: GetRegistryPackagesReq) {
-    await pauseFor(2000)
-    return Mock.RegistryPackages
   }
 
   private async setNut(params: Params<'server.set-nut'>): Promise<null> {

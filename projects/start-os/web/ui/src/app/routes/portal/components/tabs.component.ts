@@ -59,13 +59,15 @@ const FILTER = ['services', 'system', 'marketplace']
           />
         }
       </a>
-      <button
-        tuiTabBarItem
-        icon="@tui.ellipsis"
-        (click)="more(content)"
-        [badge]="all()"
-      >
+      <button tuiTabBarItem icon="@tui.ellipsis" (click)="more(content)">
         {{ 'More' | i18n }}
+        @if (status(); as status) {
+          <tui-badge-notification
+            size="xs"
+            class="dot"
+            [style.background]="'var(--tui-status-' + status + ')'"
+          />
+        }
         <ng-template #content let-observer>
           @for (item of menu; track $index) {
             <a
@@ -123,6 +125,12 @@ const FILTER = ['services', 'system', 'marketplace']
       color: var(--tui-status-warning);
     }
 
+    .dot {
+      position: absolute;
+      inset-block-start: 0.5rem;
+      inset-inline-start: calc(50% + 0.75rem);
+    }
+
     .item {
       @include taiga.button-clear();
 
@@ -164,9 +172,17 @@ export class TabsComponent {
     initialValue: false,
   })
 
-  readonly all = computed(() =>
-    this.menu.reduce((acc, item) => acc + item.badge(), 0),
-  )
+  readonly status = computed(() => {
+    const statuses = this.menu.map(item => {
+      if (item.badge()) {
+        return item.routerLink !== 'updates' ? 'negative' : 'positive'
+      }
+      return item.warning() ? 'warning' : null
+    })
+    return (['negative', 'warning', 'positive'] as const).find(s =>
+      statuses.includes(s),
+    )
+  })
 
   more(content: TemplateRef<any>) {
     this.dialogs.open(content, { label: 'StartOS' }).subscribe({

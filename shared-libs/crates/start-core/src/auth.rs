@@ -27,7 +27,7 @@ use crate::rpc_continuations::{OpenAuthedContinuations, RevocationSubscription};
 use crate::sign::{AnyVerifyingKey, Signer};
 use crate::util::crypto::EncryptedWire;
 use crate::util::io::create_file_mod;
-use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
+use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::SyncMutex;
 use crate::{Error, ResultExt, ensure_code};
 
@@ -86,7 +86,7 @@ rpc_toolkit::reflect_ts!(Sessions);
 rpc_toolkit::ts_export!(Sessions, namespaces = [""]);
 
 /// Contexts where a password can enroll an auth key (login), plus access to
-/// the enrolled-key store that login writes and the session list reads.
+/// the enrolled-key store that login writes and the key list reads.
 pub trait LoginContext: SignatureAuthorizationContext {
     /// The persisted enrolled-key store. Enrollment happens via login; never
     /// remove a key directly — unenrollment goes through
@@ -116,7 +116,14 @@ pub trait LoginContext: SignatureAuthorizationContext {
     fn auth_token_is_enrolled(&self, db: &Model<Self::Database>, token: &InternedString) -> bool {
         Self::access_tokens(&mut db.clone()).is_some_and(|tokens| tokens.as_idx(token).is_some())
     }
-    fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error>;
+    /// Database-owned password hash. External credential stores return `None`.
+    #[allow(unused_variables)]
+    fn password_hash(db: &Model<Self::Database>) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+    fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error> {
+        check_password(&Self::password_hash(db)?.unwrap_or_default(), password)
+    }
     /// Whether a sign-in has ended, judged by a trusted clock. Defaults to
     /// [`MAX_IDLE`] without use.
     fn sign_in_expired(session: &Session, now: DateTime<Utc>) -> bool {
@@ -192,8 +199,8 @@ impl LoginContext for RpcContext {
     fn access_tokens(db: &mut Model<Self::Database>) -> Option<&mut Model<TokenSessions>> {
         Some(db.as_private_mut().as_sessions_mut().as_tokens_mut())
     }
-    fn check_password(db: &Model<Self::Database>, password: &str) -> Result<(), Error> {
-        check_password(&db.as_private().as_password().de()?, password)
+    fn password_hash(db: &Model<Self::Database>) -> Result<Option<String>, Error> {
+        Ok(Some(db.as_private().as_password().de()?))
     }
     async fn post_login_hook(&self, password: &str) -> Result<(), Error> {
         if tokio::fs::metadata("/media/startos/config/overlay/etc/shadow")
@@ -240,6 +247,27 @@ pub async fn write_shadow(password: &str) -> Result<(), Error> {
         .log_err();
 
     Ok(())
+}
+
+/// The start9 user's crypt(3) hash in `<root>/etc/shadow`. `None` when the user is absent or locked.
+pub(crate) async fn start9_password_hash(root: &Path) -> Result<Option<String>, Error> {
+    let shadow = tokio::fs::read_to_string(root.join("etc/shadow")).await?;
+    Ok(shadow
+        .lines()
+        .find_map(|line| line.strip_prefix("start9:"))
+        .and_then(|rest| rest.split(':').next())
+        .filter(|hash| hash.starts_with('$'))
+        .map(str::to_owned))
+}
+
+/// Accepts SHA-512 crypt hashes, the format [`write_shadow`] writes.
+pub(crate) fn check_shadow_password(hash: &str, password: &str) -> Result<(), Error> {
+    sha_crypt::sha512_check(password, hash).map_err(|_| {
+        Error::new(
+            eyre!("{}", t!("auth.password-incorrect")),
+            ErrorKind::IncorrectPassword,
+        )
+    })
 }
 
 #[derive(Clone, Serialize, Deserialize, VisitVariants)]
@@ -355,31 +383,150 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
                 .with_call_remote::<CC>(),
         )
         .subcommand(
-            "session",
-            session::<C, AC, CC>().with_about("about.list-or-kill-auth-sessions"),
+            "key",
+            key::<C, AC, CC>().with_about("about.commands-authorized-keys"),
         )
 }
 
-/// Bearer-token commands; a token is a named session, listed and revoked with `auth.session`.
+fn key<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
+    ParentHandler::new()
+        .subcommand(
+            "add",
+            from_fn_async(add_key::<AC>)
+                .with_metadata("sync_db", Value::Bool(true))
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_display()
+                .with_about("about.add-new-authorized-key")
+                .with_call_remote::<CC>(),
+        )
+        .subcommand(
+            "remove",
+            from_fn_async(remove_key::<AC>)
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.remove-authorized-key")
+                .with_call_remote::<CC>(),
+        )
+        .subcommand(
+            "list",
+            from_fn_async(list_keys::<AC>)
+                .with_metadata("get_signer", Value::Bool(true))
+                .with_display_serializable()
+                .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
+                    if let Some(format) = params.format {
+                        return display_serializable(format, res);
+                    }
+                    display_sessions(&res.keys.0, res.current.as_ref())
+                })
+                .with_about("about.list-authorized-keys")
+                .with_call_remote::<CC>(),
+        )
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
+pub struct AddKeyParams {
+    #[arg(help = "help.arg.auth-key")]
+    pub key: AnyVerifyingKey,
+    #[arg(long, help = "help.arg.auth-key-name")]
+    #[serde(default)]
+    pub name: Option<InternedString>,
+    #[arg(long, help = "help.arg.user-agent")]
+    #[serde(default)]
+    pub user_agent: Option<String>,
+}
+
+rpc_toolkit::reflect_ts!(AddKeyParams);
+rpc_toolkit::ts_export!(AddKeyParams, namespaces = [""]);
+
+/// Enrolls a key without a password or the login rate limit.
+pub async fn add_key<C: LoginContext>(
+    ctx: C,
+    AddKeyParams {
+        key,
+        name,
+        user_agent,
+    }: AddKeyParams,
+) -> Result<(), Error> {
+    let now = Utc::now();
+    let record = Session {
+        name,
+        logged_in: now,
+        last_active: now,
+        user_agent,
+    };
+    ctx.db()
+        .mutate(|db| {
+            C::access_auth_keys(db).insert(&key.interned_der64(), &record)?;
+            Ok(())
+        })
+        .await
+        .result
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveKeyParams {
+    #[arg(required = true, help = "help.arg.session-pubkeys")]
+    pub keys: Vec<AnyVerifyingKey>,
+}
+
+rpc_toolkit::reflect_ts!(RemoveKeyParams);
+rpc_toolkit::ts_export!(RemoveKeyParams, namespaces = [""]);
+
+pub async fn remove_key<C: LoginContext>(
+    ctx: C,
+    RemoveKeyParams { keys }: RemoveKeyParams,
+) -> Result<(), Error> {
+    ctx.unenroll(keys.iter().map(AnyVerifyingKey::interned_der64))
+        .await?;
+    Ok(())
+}
+
+/// Bearer-token commands; a token is a named session.
 pub fn token<C: Context, AC: LoginContext>() -> ParentHandler<C>
 where
     CliContext: CallRemote<AC>,
 {
-    ParentHandler::new().subcommand(
-        "create",
-        from_fn_async(create_token::<AC>)
-            .with_metadata(crate::mcp::MCP, Value::Bool(false))
-            .with_display_serializable()
-            .with_custom_display_fn(|handle, result| {
-                if let Some(format) = handle.params.format {
-                    return display_serializable(format, result);
-                }
-                println!("{}", result.token);
-                Ok(())
-            })
-            .with_about("about.create-auth-token")
-            .with_call_remote::<CliContext>(),
-    )
+    ParentHandler::new()
+        .subcommand(
+            "create",
+            from_fn_async(create_token::<AC>)
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    if let Some(format) = handle.params.format {
+                        return display_serializable(format, result);
+                    }
+                    println!("{}", result.token);
+                    Ok(())
+                })
+                .with_about("about.create-auth-token")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "list",
+            from_fn_async(list_tokens::<AC>)
+                .with_display_serializable()
+                .with_custom_display_fn(|handle, result| {
+                    if let Some(format) = handle.params.format {
+                        return display_serializable(format, result);
+                    }
+                    display_sessions(&result, None)
+                })
+                .with_about("about.list-auth-tokens")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "remove",
+            from_fn_async(remove_tokens::<AC>)
+                .no_display()
+                .with_about("about.remove-auth-tokens")
+                .with_call_remote::<CliContext>(),
+        )
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
@@ -397,7 +544,7 @@ rpc_toolkit::ts_export!(CreateTokenParams, namespaces = [""]);
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedToken {
-    /// The session id the token authenticates as, for `auth.session.kill`.
+    /// The session id the token authenticates as, for `auth.token.remove`.
     pub id: InternedString,
     /// The bearer secret. It is not stored and cannot be retrieved again.
     pub token: String,
@@ -693,6 +840,34 @@ pub async fn login_impl<C: LoginContext>(
     result
 }
 
+/// Returns the verified database hash; holds no database lock while hashing.
+async fn verify_password<C: LoginContext>(
+    ctx: &C,
+    password: &str,
+) -> Result<Option<String>, Error> {
+    let db = ctx.db().peek().await;
+    let password = password.to_owned();
+    tokio::task::spawn_blocking(move || {
+        C::check_password(&db, &password)?;
+        C::password_hash(&db)
+    })
+    .await
+    .with_kind(ErrorKind::Unknown)?
+}
+
+/// Enrollment rejects a replaced database password before inserting persistent or ephemeral keys.
+fn check_verified_password<C: LoginContext>(
+    db: &Model<C::Database>,
+    verified_hash: &Option<String>,
+) -> Result<(), Error> {
+    ensure_code!(
+        &C::password_hash(db)? == verified_hash,
+        ErrorKind::IncorrectPassword,
+        t!("auth.password-incorrect")
+    );
+    Ok(())
+}
+
 async fn enroll<C: LoginContext>(
     ctx: &C,
     password: &str,
@@ -708,27 +883,31 @@ async fn enroll<C: LoginContext>(
         last_active: now,
         user_agent,
     };
-    if ephemeral {
-        let Some(ephemeral_keys) = ctx.ephemeral_auth_keys() else {
-            return Err(Error::new(
+    let ephemeral_keys = if ephemeral {
+        Some(ctx.ephemeral_auth_keys().ok_or_else(|| {
+            Error::new(
                 eyre!("{}", t!("middleware.auth.ephemeral-unsupported")),
                 ErrorKind::InvalidRequest,
-            ));
-        };
-        C::check_password(&ctx.db().peek().await, password)?;
-        ephemeral_keys.mutate(|keys| {
-            keys.0.insert(pubkey.clone(), record);
-        });
+            )
+        })?)
     } else {
-        ctx.db()
-            .mutate(|db| {
-                C::check_password(db, password)?;
+        None
+    };
+    let verified_hash = verify_password::<C>(ctx, password).await?;
+    ctx.db()
+        .mutate(|db| {
+            check_verified_password::<C>(db, &verified_hash)?;
+            if let Some(ephemeral_keys) = ephemeral_keys {
+                ephemeral_keys.mutate(|keys| {
+                    keys.0.insert(pubkey.clone(), record);
+                });
+            } else {
                 C::access_auth_keys(db).insert(&pubkey, &record)?;
-                Ok(())
-            })
-            .await
-            .result?;
-    }
+            }
+            Ok(())
+        })
+        .await
+        .result?;
 
     ctx.post_login_hook(password).await
 }
@@ -783,64 +962,40 @@ pub struct Session {
 rpc_toolkit::reflect_ts!(Session);
 rpc_toolkit::ts_export!(Session, namespaces = [""]);
 
+/// Enrolled keys, including ephemeral ones, and the caller's own.
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionList {
+pub struct KeyList {
     current: Option<InternedString>,
-    sessions: Sessions,
+    keys: AuthKeys,
 }
 
-rpc_toolkit::reflect_ts!(SessionList);
-rpc_toolkit::ts_export!(SessionList, namespaces = [""]);
+rpc_toolkit::reflect_ts!(KeyList);
+rpc_toolkit::ts_export!(KeyList, namespaces = [""]);
 
-pub fn session<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
-    ParentHandler::new()
-        .subcommand(
-            "list",
-            from_fn_async(list::<AC>)
-                .with_metadata("get_signer", Value::Bool(true))
-                .with_display_serializable()
-                .with_custom_display_fn(|handle, result| display_sessions(handle.params, result))
-                .with_about("about.display-all-auth-sessions")
-                .with_call_remote::<CC>(),
-        )
-        .subcommand(
-            "kill",
-            from_fn_async(kill::<AC>)
-                .no_display()
-                .with_about("about.terminate-auth-sessions")
-                .with_call_remote::<CC>(),
-        )
-}
-
-fn display_sessions(params: WithIoFormat<ListParams>, arg: SessionList) -> Result<(), Error> {
+fn display_sessions<'a>(
+    sessions: impl IntoIterator<Item = (&'a InternedString, &'a Session)>,
+    current: Option<&InternedString>,
+) -> Result<(), Error> {
     use prettytable::*;
-
-    if let Some(format) = params.format {
-        return display_serializable(format, arg);
-    }
 
     let mut table = Table::new();
     table.add_row(row![bc =>
-        "TYPE",
         "ID",
         "NAME",
         "LOGGED IN",
         "LAST ACTIVE",
         "USER AGENT",
     ]);
-    let pubkeys = arg.sessions.pubkeys.0.into_iter().map(|s| ("pubkey", s));
-    let tokens = arg.sessions.tokens.into_iter().map(|s| ("token", s));
-    for (kind, (id, session)) in pubkeys.chain(tokens) {
+    for (id, session) in sessions {
         let mut row = row![
-            kind,
-            &id,
+            id,
             session.name.as_deref().unwrap_or("N/A"),
             &format!("{}", session.logged_in),
             &format!("{}", session.last_active),
             session.user_agent.as_deref().unwrap_or("N/A"),
         ];
-        if Some(id) == arg.current {
+        if Some(id) == current {
             row.iter_mut()
                 .map(|c| c.style(Attr::ForegroundColor(color::GREEN)))
                 .collect::<()>()
@@ -855,62 +1010,58 @@ fn display_sessions(params: WithIoFormat<ListParams>, arg: SessionList) -> Resul
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-pub struct ListParams {
+pub struct ListKeysParams {
     #[arg(skip)]
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     signer: Option<InternedString>,
 }
 
-rpc_toolkit::reflect_ts!(ListParams);
+rpc_toolkit::reflect_ts!(ListKeysParams);
 
 #[instrument(skip_all)]
-pub async fn list<C: LoginContext>(
+pub async fn list_keys<C: LoginContext>(
     ctx: C,
-    ListParams { signer }: ListParams,
-) -> Result<SessionList, Error> {
-    let mut db = ctx.db().peek().await;
-    let mut pubkeys = C::access_auth_keys(&mut db).de()?;
+    ListKeysParams { signer }: ListKeysParams,
+) -> Result<KeyList, Error> {
+    let mut keys = C::access_auth_keys(&mut ctx.db().peek().await).de()?;
     if let Some(ephemeral) = ctx.ephemeral_auth_keys() {
         ephemeral.peek(|e| {
-            pubkeys
-                .0
+            keys.0
                 .extend(e.0.iter().map(|(k, v)| (k.clone(), v.clone())))
         });
     }
-    let tokens = C::access_tokens(&mut db)
-        .map(|tokens| tokens.de())
-        .transpose()?
-        .unwrap_or_default();
-    Ok(SessionList {
+    Ok(KeyList {
         current: signer,
-        sessions: Sessions { pubkeys, tokens },
+        keys,
     })
+}
+
+#[instrument(skip_all)]
+pub async fn list_tokens<C: LoginContext>(ctx: C) -> Result<TokenSessions, Error> {
+    C::access_tokens(&mut ctx.db().peek().await)
+        .map(|tokens| tokens.de())
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 #[derive(Deserialize, Serialize, Parser, VisitFields)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
-pub struct KillParams {
-    #[arg(long = "pubkey", help = "help.arg.session-pubkeys")]
-    #[serde(default)]
-    pubkeys: Vec<AnyVerifyingKey>,
-    #[arg(long = "token", help = "help.arg.session-tokens")]
-    #[serde(default)]
+pub struct RemoveTokensParams {
+    #[arg(required = true, help = "help.arg.session-tokens")]
     tokens: Vec<InternedString>,
 }
 
-rpc_toolkit::reflect_ts!(KillParams);
-rpc_toolkit::ts_export!(KillParams, namespaces = [""]);
+rpc_toolkit::reflect_ts!(RemoveTokensParams);
+rpc_toolkit::ts_export!(RemoveTokensParams, namespaces = [""]);
 
 #[instrument(skip_all)]
-pub async fn kill<C: LoginContext>(
+pub async fn remove_tokens<C: LoginContext>(
     ctx: C,
-    KillParams { pubkeys, tokens }: KillParams,
+    RemoveTokensParams { tokens }: RemoveTokensParams,
 ) -> Result<(), Error> {
-    ctx.unenroll(pubkeys.iter().map(AnyVerifyingKey::interned_der64))
-        .await?;
     let continuations = ctx.open_authed_continuations();
     ctx.db()
         .mutate(|db| revoke_tokens::<C>(continuations, db, tokens))
@@ -983,4 +1134,78 @@ pub async fn get_pubkey(ctx: RpcContext) -> Result<Jwk, RpcError> {
     let secret = <RpcContext as AsRef<Jwk>>::as_ref(&ctx).clone();
     let pub_key = secret.to_public_key()?;
     Ok(pub_key)
+}
+
+#[cfg(test)]
+mod password_snapshot_tests {
+    use super::*;
+    use crate::tunnel::context::TunnelContext;
+    use crate::tunnel::db::TunnelDatabase;
+
+    #[test]
+    fn startos_password_replacement_invalidates_verified_snapshot() {
+        let mut db = Model::<crate::db::model::Database>::from(imbl_value::json!({
+            "private": { "password": "verified" }
+        }));
+        let verified_hash = RpcContext::password_hash(&db).unwrap();
+        check_verified_password::<RpcContext>(&db, &verified_hash).unwrap();
+        db.as_private_mut()
+            .as_password_mut()
+            .ser(&"replacement".to_owned())
+            .unwrap();
+        assert_eq!(
+            check_verified_password::<RpcContext>(&db, &verified_hash)
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectPassword
+        );
+    }
+
+    #[test]
+    fn tunnel_password_replacement_or_removal_invalidates_verified_snapshot() {
+        let mut db = Model::<TunnelDatabase>::from(imbl_value::json!({
+            "password": "verified"
+        }));
+        let verified_hash = TunnelContext::password_hash(&db).unwrap();
+        check_verified_password::<TunnelContext>(&db, &verified_hash).unwrap();
+        for password in [Some("replacement".to_owned()), None] {
+            db.as_password_mut().ser(&password).unwrap();
+            assert_eq!(
+                check_verified_password::<TunnelContext>(&db, &verified_hash)
+                    .unwrap_err()
+                    .kind,
+                ErrorKind::IncorrectPassword
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::*;
+    use crate::util::io::{TmpDir, write_file_atomic};
+
+    #[tokio::test]
+    async fn start9_password_hash_ignores_locked_and_unset_passwords() {
+        for (field, expected) in [
+            ("$6$salt$hash", Some("$6$salt$hash")),
+            ("!$y$j9T$factory", None),
+            ("!", None),
+            ("*", None),
+            ("", None),
+        ] {
+            let root = TmpDir::new().await.unwrap();
+            write_file_atomic(
+                root.join("etc/shadow"),
+                format!("start9x:$6$other:1::::::\nstart9:{field}:19000:0:99999:7:::\n"),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                start9_password_hash(&root).await.unwrap().as_deref(),
+                expected,
+                "{field:?}",
+            );
+        }
+    }
 }

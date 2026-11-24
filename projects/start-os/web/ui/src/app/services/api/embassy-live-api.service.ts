@@ -12,6 +12,7 @@ import {
   HttpOptions,
   HttpService,
   RpcError,
+  RPCOptions,
   RpcSocketService,
   ServerIdentityService,
   rpcRequestBody,
@@ -19,7 +20,12 @@ import {
 } from '@start9labs/shared'
 import { createRpcClient, createRpcStreamClient } from '@start9labs/start-core'
 import type { RpcStreamOptions } from '@start9labs/start-core'
-import { Dump } from 'patch-db-client'
+import {
+  Dump,
+  normalizeSelector,
+  pathFromArray,
+  Selection,
+} from 'patch-db-client'
 import { catchError } from 'rxjs'
 import type { Observable } from 'rxjs'
 import type { WebSocketSubject } from 'rxjs/webSocket'
@@ -44,18 +50,11 @@ export class LiveApiService extends ApiService {
   )
   readonly rpc = createRpcClient<ApiClient>({
     call: (method, params, options) =>
-      localRpcRequest(
-        this.http,
-        this.sockets,
-        this.authKeys,
-        this.identity,
-        this.cache$,
-        {
-          method,
-          params: params as Record<string, unknown>,
-          ...options,
-        },
-      ).catch(error => this.raiseError(error)),
+      this.request({
+        method,
+        params: params as Record<string, unknown>,
+        ...options,
+      }).catch(error => this.raiseError(error)),
   })
   readonly streams = createRpcStreamClient<ApiService['streams']>({
     stream: (method, params, options) =>
@@ -146,14 +145,43 @@ export class LiveApiService extends ApiService {
   }
 
   override watchDb$(
-    since?: () => DatabaseCursor | null,
-  ): Observable<DatabaseUpdate<DataModel>> {
-    return databaseSubscription<DataModel>(
+    path: string[],
+    since: DatabaseCursor | null,
+    selection: Selection | null = null,
+  ): Observable<DatabaseUpdate<unknown>> {
+    return databaseSubscription<unknown>(
       this.sockets,
       this.authKeys,
       this.identity,
-      since,
+      () => since,
+      pathFromArray(['public', ...path]),
+      selection,
     ).pipe(catchError(error => this.raiseError(error)))
+  }
+
+  override async updateDbSubscription(
+    subscription: string,
+    selection: Selection,
+  ): Promise<void> {
+    await this.rpc.db.subscription.update({
+      subscription,
+      selectors: selection.map(normalizeSelector),
+    })
+  }
+
+  checkEnrollment(): Promise<unknown> {
+    return this.request({ method: 'auth.key.list', params: {} })
+  }
+
+  private request<T>(options: RPCOptions): Promise<T> {
+    return localRpcRequest<T>(
+      this.http,
+      this.sockets,
+      this.authKeys,
+      this.identity,
+      this.cache$,
+      options,
+    )
   }
 
   async echo(params: Params<'echo'>, url: string): Promise<string> {

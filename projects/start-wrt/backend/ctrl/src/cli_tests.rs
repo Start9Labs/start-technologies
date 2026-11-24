@@ -58,7 +58,7 @@ async fn configured_root_ca_applies_to_http_and_websocket_clients() {
     acceptor.set_certificate(&cert).unwrap();
     let acceptor = acceptor.build();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let host: Url = format!("https://{}/rpc/v1", listener.local_addr().unwrap())
+    let host: Url = format!("https://{}", listener.local_addr().unwrap())
         .parse()
         .unwrap();
     let server = tokio::task::spawn_blocking(move || {
@@ -115,17 +115,14 @@ async fn configured_root_ca_applies_to_http_and_websocket_clients() {
 async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() {
     let temp = tempfile::tempdir().unwrap();
     let (url, server, _task, http_calls, upgrades) = crate::rpc::tests::server().await;
-    let ctx = client(
-        url.join("rpc/v1").unwrap(),
-        temp.path().join("identity.pem"),
-    );
+    let ctx = client(url.clone(), temp.path().join("identity.pem"));
     let signer: Signer = AnySigningKey::generate().into();
     ctx.id_key.set(signer.clone()).unwrap();
     let key = crate::rpc::tests::enroll(&server, &signer).await;
     assert_eq!(upgrades.load(Ordering::Relaxed), 0);
     let response = <CliContext as CallRemote<ServerContext>>::call_remote(
         &ctx,
-        "auth.session.list",
+        "auth.key.list",
         Default::default(),
         imbl_value::json!({}),
         rpc_toolkit::Empty {},
@@ -136,7 +133,7 @@ async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() 
     use startos::middleware::auth::signature::SignatureAuthorizationContext;
     server.unenroll([key]).await.unwrap();
     assert_eq!(
-        ctx.call("auth.session.list", imbl_value::json!({}))
+        ctx.call("auth.key.list", imbl_value::json!({}))
             .await
             .unwrap_err()
             .code,
@@ -151,13 +148,13 @@ async fn absent_identity_uses_unenrolled_admission_but_malformed_identity_never_
     let temp = tempfile::tempdir().unwrap();
     let (url, server, _task, http_calls, upgrades) = crate::rpc::tests::server().await;
     let path = temp.path().join("identity.pem");
-    let ctx = client(url.join("rpc/v1").unwrap(), path.clone());
+    let ctx = client(url.clone(), path.clone());
     assert_eq!(
         ctx.signing_key().unwrap_err().kind,
         startos::ErrorKind::Uninitialized
     );
     assert_eq!(
-        ctx.call("auth.session.list", imbl_value::json!({}))
+        ctx.call("auth.key.list", imbl_value::json!({}))
             .await
             .unwrap_err()
             .code,
@@ -178,7 +175,7 @@ async fn absent_identity_uses_unenrolled_admission_but_malformed_identity_never_
         .is_empty());
     std::fs::write(path, "not a private key").unwrap();
     assert!(ctx
-        .call("auth.session.list", imbl_value::json!({}))
+        .call("auth.key.list", imbl_value::json!({}))
         .await
         .is_err());
     assert_eq!(http_calls.load(Ordering::Relaxed), 0);
@@ -192,7 +189,7 @@ async fn absent_identity_uses_unenrolled_admission_but_malformed_identity_never_
 async fn refused_admission_never_retries_plaintext_rpc() {
     let temp = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let host = format!("http://{}/rpc/v1", listener.local_addr().unwrap())
+    let host = format!("http://{}", listener.local_addr().unwrap())
         .parse()
         .unwrap();
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -212,7 +209,7 @@ async fn refused_admission_never_retries_plaintext_rpc() {
     let ctx = client(host, temp.path().join("identity.pem"));
     ctx.id_key.set(AnySigningKey::generate().into()).unwrap();
     assert!(ctx
-        .call("auth.session.list", imbl_value::json!({}))
+        .call("auth.key.list", imbl_value::json!({}))
         .await
         .is_err());
     assert_eq!(attempts.load(Ordering::Relaxed), 0);
@@ -241,7 +238,7 @@ async fn built_wrt_cli_uses_encrypted_admission_without_stdout_changes() {
         .args([
             "startwrt-cli",
             "--host",
-            url.join("rpc/v1").unwrap().as_str(),
+            url.as_str(),
             "auth",
             "session",
             "list",

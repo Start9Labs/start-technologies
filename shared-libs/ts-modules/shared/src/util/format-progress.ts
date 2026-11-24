@@ -1,5 +1,7 @@
 import { T } from '@start9labs/start-core'
 
+import { escapeHtml } from './escape-html'
+
 export function formatProgress({ phases, overall }: T.FullProgress): {
   total: number
   message: string
@@ -16,7 +18,7 @@ export function formatProgress({ phases, overall }: T.FullProgress): {
           progress: false | ProgressDetails
         } => p.progress !== true && p.progress !== null,
       )
-      .map(p => `<b>${p.name}</b>${getDetails(p.progress)}`)
+      .map(p => `<b>${escapeHtml(p.name)}</b>${getDetails(p.progress)}`)
       .join(', '),
   }
 }

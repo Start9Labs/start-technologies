@@ -22,8 +22,9 @@ use crate::prelude::*;
 use crate::progress::{
     FullProgress, FullProgressTracker, forward_progress, progress_until_complete, with_cli_progress,
 };
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
-use crate::registry::package::get::GetPackageResponse;
+use crate::registry::context::RegistryContext;
+use crate::registry::device_info::DeviceInfo;
+use crate::registry::package::get::{GetPackageParams, GetPackageResponse};
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::s9pk::manifest::PackageId;
 use crate::s9pk::v2::SIG_CONTEXT;
@@ -141,23 +142,20 @@ pub async fn install(
         accept_signers,
     }: InstallParams,
 ) -> Result<(), Error> {
-    let package: GetPackageResponse = from_value(
-        ctx.call_remote_with::<RegistryContext, _>(
-            "package.get",
-            [("get_device_info", Value::Bool(true))]
-                .into_iter()
-                .collect(),
-            json!({
-                "id": id,
-                "targetVersion": VersionRange::exactly(version.deref().clone()),
-                "otherVersions": "none",
-            }),
-            RegistryUrlParams {
-                registry: registry.clone(),
-            },
-        )
-        .await?,
-    )?;
+    let device = DeviceInfo::load(&ctx).await?;
+    let package: GetPackageResponse = from_value(crate::registry::sync::synced_packages(
+        &ctx.db.peek().await,
+        &registry,
+        &GetPackageParams {
+            id: Some(id.clone()),
+            target_version: Some(VersionRange::exactly(version.deref().clone())),
+            source_version: None,
+            device_info: Some(device),
+            other_versions: None,
+            all_revisions: false,
+            reader: Default::default(),
+        },
+    )?)?;
 
     let (_, asset) = package
         .best
@@ -526,9 +524,8 @@ pub async fn cli_install(
             let registry = ctx
                 .registry_url
                 .as_ref()
-                .or_not_found("--registry")?
-                .get()?
-                .clone();
+                .map(|registry| registry.unpinned().clone())
+                .or_not_found("--registry")?;
             let source_version: Option<VersionString> = from_value(
                 ctx.call_remote::<RpcContext>("package.installed-version", json!({ "id": &id }))
                     .await?,

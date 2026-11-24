@@ -38,48 +38,26 @@ export const CapabilityVerdict: z.ZodObject<{
 }).meta({
   id: 'CapabilityVerdict',
 })
-export const DiagnosticUpdateSystemParams: z.ZodCodec<
-  z.ZodObject<{
-    /**
-     * Accepts an untrusted signer without skipping signature or integrity verification.
-     */
-    trust: z.ZodOptional<z.ZodBoolean>
-    targetVersion: z.ZodOptional<z.ZodNullable<z.ZodString>>
-    progress: z.ZodOptional<z.ZodBoolean>
-  }>,
-  z.ZodObject<{
-    /**
-     * Accepts an untrusted signer without skipping signature or integrity verification.
-     */
-    trust: z.ZodBoolean
-    targetVersion: z.ZodNullable<z.ZodString>
-    progress: z.ZodBoolean
-  }>
-> = /* @__PURE__ */ wire(
-  object({
-    /**
-     * Accepts an untrusted signer without skipping signature or integrity verification.
-     */
-    trust: z.boolean().optional().meta({
-      description:
-        'Accepts an untrusted signer without skipping signature or integrity verification.',
-    }),
-    targetVersion: z.string().nullable().optional(),
-    progress: z.boolean().optional(),
+
+/**
+ * Credential for a diagnostic command that changes the server.
+ */
+export const DiagnosticPasswordParams: z.ZodObject<{
+  /**
+   * The server password. Unnecessary on the server itself, or before a password is set.
+   */
+  password: z.ZodOptional<z.ZodNullable<z.ZodString>>
+}> = /* @__PURE__ */ object({
+  /**
+   * The server password. Unnecessary on the server itself, or before a password is set.
+   */
+  password: z.string().nullable().optional().meta({
+    description:
+      'The server password. Unnecessary on the server itself, or before a password is set.',
   }),
-  object({
-    /**
-     * Accepts an untrusted signer without skipping signature or integrity verification.
-     */
-    trust: z.boolean().meta({
-      description:
-        'Accepts an untrusted signer without skipping signature or integrity verification.',
-    }),
-    targetVersion: z.string().nullable(),
-    progress: z.boolean(),
-  }),
-).meta({
-  id: 'DiagnosticUpdateSystemParams',
+}).meta({
+  id: 'DiagnosticPasswordParams',
+  description: 'Credential for a diagnostic command that changes the server.',
 })
 export const DnsSource: z.ZodEnum<{
   gateway: 'gateway'
@@ -181,6 +159,61 @@ export const QueryDnsRes: z.ZodObject<{
   id: 'QueryDnsRes',
   description:
     "What a public domain currently resolves to, per address family. A public\ndomain is DualStack: the operator points an `A` record at the gateway's WAN\nIPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.",
+})
+export const DiagnosticUpdateSystemParams: z.ZodCodec<
+  z.ZodIntersection<
+    z.ZodObject<{
+      /**
+       * Accepts an untrusted signer without skipping signature or integrity verification.
+       */
+      trust: z.ZodOptional<z.ZodBoolean>
+      targetVersion: z.ZodOptional<z.ZodNullable<z.ZodString>>
+      progress: z.ZodOptional<z.ZodBoolean>
+    }>,
+    typeof DiagnosticPasswordParams
+  >,
+  z.ZodIntersection<
+    z.ZodObject<{
+      /**
+       * Accepts an untrusted signer without skipping signature or integrity verification.
+       */
+      trust: z.ZodBoolean
+      targetVersion: z.ZodNullable<z.ZodString>
+      progress: z.ZodBoolean
+    }>,
+    typeof DiagnosticPasswordParams
+  >
+> = /* @__PURE__ */ wire(
+  z.intersection(
+    object({
+      /**
+       * Accepts an untrusted signer without skipping signature or integrity verification.
+       */
+      trust: z.boolean().optional().meta({
+        description:
+          'Accepts an untrusted signer without skipping signature or integrity verification.',
+      }),
+      targetVersion: z.string().nullable().optional(),
+      progress: z.boolean().optional(),
+    }),
+    DiagnosticPasswordParams,
+  ),
+  z.intersection(
+    object({
+      /**
+       * Accepts an untrusted signer without skipping signature or integrity verification.
+       */
+      trust: z.boolean().meta({
+        description:
+          'Accepts an untrusted signer without skipping signature or integrity verification.',
+      }),
+      targetVersion: z.string().nullable(),
+      progress: z.boolean(),
+    }),
+    DiagnosticPasswordParams,
+  ),
+).meta({
+  id: 'DiagnosticUpdateSystemParams',
 })
 
 /**
@@ -563,7 +596,7 @@ export const Api = {
     auth: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
-        session: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        key: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
         token: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
       },
     },
@@ -582,7 +615,10 @@ export const Api = {
     },
     db: {
       _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: { put: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} } },
+      _CHILDREN: {
+        put: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+        subscription: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
+      },
     },
     diagnostic: {
       _PARAMS: /* @__PURE__ */ empty,
@@ -591,13 +627,13 @@ export const Api = {
           _PARAMS: /* @__PURE__ */ empty,
           _CHILDREN: {
             forget: {
-              _PARAMS: /* @__PURE__ */ empty,
+              _PARAMS: /* @__PURE__ */ DiagnosticPasswordParams,
               _RETURN: /* @__PURE__ */ z.null(),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },
             repair: {
-              _PARAMS: /* @__PURE__ */ empty,
+              _PARAMS: /* @__PURE__ */ DiagnosticPasswordParams,
               _RETURN: /* @__PURE__ */ z.null(),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -749,7 +785,7 @@ export const Api = {
           },
         },
         rebuild: {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ DiagnosticPasswordParams,
           _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
@@ -768,17 +804,7 @@ export const Api = {
         },
       },
     },
-    disk: {
-      _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: {
-        repair: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ z.null(),
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
-      },
-    },
+    disk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),

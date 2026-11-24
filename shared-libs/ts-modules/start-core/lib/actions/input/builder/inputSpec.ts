@@ -221,6 +221,7 @@ export class InputSpec<
     deepPartial(this.validator)
   /**
    * Builds the runtime form specification and combined Zod validator from this InputSpec's fields.
+   * The validator drops every key the form doesn't declare; `validator` and `partialValidator` keep them, for file models.
    *
    * @returns An object containing the resolved `spec` (field specs keyed by name) and a combined `validator`
    */
@@ -243,8 +244,24 @@ export class InputSpec<
     }
     return {
       spec: answer,
-      validator: z.looseObject(validator) as any,
+      validator: z.object(validator) as any,
     }
+  }
+
+  /**
+   * Builds this InputSpec as the contents of an object, a union variant or a list item.
+   *
+   * @throws when it holds a {@link Value.acknowledgement}
+   */
+  async buildNested<OuterType>(options: LazyBuildOptions<OuterType>) {
+    const built = await this.build(options)
+    for (const [key, spec] of Object.entries<ValueSpec>(built.spec)) {
+      if (spec.type === 'acknowledgement')
+        throw new Error(
+          `acknowledgement "${key}" must be at the top level of an InputSpec, not nested in an object, union or list`,
+        )
+    }
+    return built
   }
 
   /**

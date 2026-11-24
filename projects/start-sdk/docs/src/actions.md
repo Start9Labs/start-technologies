@@ -427,7 +427,15 @@ sessionTimeout: Value.text({
 Two details worth knowing:
 
 - **A pattern is anchored.** `[a-z]+` matches the whole value, not a substring — write it as though `^` and `$` were there, because they are added if you leave them off.
-- **An empty string skips its patterns.** For `Value.text`, `required: true` rejects a missing field or `null`, but accepts `''`.
+- **Text-like fields require a non-empty string.** `Value.text`, `Value.textarea`, `Value.color` and `Value.datetime` reject `''`, including their dynamic variants. With `required: false`, submit `null` for an empty field; with `required: true`, missing values and `null` are rejected too. Each item in `List.text` or `List.dynamicText` must be a non-empty string.
+
+When the user has to accept a consequence before the action runs, add a `Value.acknowledgement`. It renders as a checkbox, starts unticked even when the action prefills its input, and the form does not submit until it is ticked; the validator accepts only `true`, so the rule holds on every other path too. It belongs at the top level of the action's `InputSpec`: building one nested in a `Value.object`, a union variant or a `List.obj` item throws. The form shows acknowledgements after every other field, whatever their position in the spec. A StartOS release older than the one this SDK version targets does not render the checkbox, and the validator rejects the submission.
+
+```typescript
+keysConfirmed: Value.acknowledgement({
+  name: i18n('I hold the keys of this address'),
+}),
+```
 
 Reserve handler guards for additional semantic requirements, such as a cross-field rule, a value that has to exist on disk, or a string that must be non-blank after trimming. A `throw` surfaces the error to the caller.
 

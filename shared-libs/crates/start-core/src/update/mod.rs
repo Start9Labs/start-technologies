@@ -5,8 +5,6 @@ use std::time::Duration;
 use clap::{ArgAction, Parser};
 use color_eyre::eyre::{Result, eyre};
 use exver::{Version, VersionRange};
-use imbl::OrdMap;
-use imbl_value::json;
 use itertools::Itertools;
 use reqwest::{Client, Url};
 use rpc_toolkit::HandlerArgs;
@@ -24,6 +22,7 @@ mod signature_tests;
 use crate::PLATFORM;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::RestartReason;
+use crate::middleware::auth::signature::SigningContext;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::progress::{
@@ -31,7 +30,6 @@ use crate::progress::{
     progress_until_complete, with_cli_progress,
 };
 use crate::registry::asset::RegistryAsset;
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::registry::os::SIG_CONTEXT;
 use crate::registry::os::index::OsVersionInfo;
 use crate::registry::signer::AcceptSigners;
@@ -53,8 +51,10 @@ use crate::version::release_notes::{UpdateNotes, save_update_notes};
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct UpdateSystemParams {
+    /// Fetches once from this registry instead of using the selected update registry's
+    /// synchronized releases.
     #[arg(help = "help.arg.registry-url")]
-    registry: Url,
+    registry: Option<Url>,
     /// Additional signer requirements checked before starting the update.
     #[arg(skip)]
     pub accept_signers: Option<AcceptSigners>,
@@ -290,28 +290,42 @@ struct StartedUpdate {
     done: tokio::task::JoinHandle<Result<(), Error>>,
 }
 
+/// Update listings exclude releases without a squashfs for this server's platform.
+fn version_query_params(source: &Version, target: &VersionRange) -> Value {
+    imbl_value::json!({
+        "sourceVersion": source,
+        "targetVersion": target,
+        "platform": &**PLATFORM,
+    })
+}
+
 #[instrument(skip_all)]
 async fn maybe_do_update(
     ctx: RpcContext,
-    registry: Url,
+    registry: Option<Url>,
     target: VersionRange,
     accept_signers: Option<AcceptSigners>,
     trust: bool,
 ) -> Result<Option<StartedUpdate>, Error> {
     let peeked = ctx.db.peek().await;
     let current_version = peeked.as_public().as_server_info().as_version().de()?;
-    let mut available = from_value::<BTreeMap<Version, OsVersionInfo>>(
-        ctx.call_remote_with::<RegistryContext, _>(
-            "os.version.get",
-            OrdMap::new(),
-            json!({
-                "sourceVersion": current_version,
-                "targetVersion": target,
-            }),
-            RegistryUrlParams { registry },
-        )
-        .await?,
-    )?;
+    let mut available: BTreeMap<Version, OsVersionInfo> = match &registry {
+        None => crate::registry::sync::synced_os_versions(&peeked)?,
+        Some(registry) => from_value(
+            crate::registry::context::call(
+                &ctx.client,
+                &ctx.signing_key()?,
+                registry,
+                reqwest::header::HeaderMap::new(),
+                "os.version.get",
+                version_query_params(&current_version, &target),
+            )
+            .await?,
+        )?,
+    };
+    available.retain(|version, info| {
+        version.satisfies(&target) && current_version.satisfies(&info.source_version)
+    });
     let Some((target_version, asset, notes)) = available.pop_last().and_then(target_asset) else {
         return Ok(None);
     };
@@ -554,5 +568,72 @@ mod tests {
         let default =
             UpdateSystemParams::try_parse_from(["update", "https://registry.start9.com"]).unwrap();
         assert!(!default.trust);
+    }
+
+    #[test]
+    fn update_registry_defaults_to_the_selected_source() {
+        let cli = UpdateSystemParams::try_parse_from(["update"]).unwrap();
+        assert!(cli.registry.is_none());
+        let rpc: UpdateSystemParams = from_value(imbl_value::json!({})).unwrap();
+        assert!(rpc.registry.is_none());
+    }
+
+    #[test]
+    fn update_query_keeps_other_platforms_from_hiding_an_available_release() {
+        use crate::registry::os::index::{OsIndex, OsVersionInfoMap};
+        use crate::registry::os::version::{GetOsVersionParams, select_versions};
+
+        let other_platform = if &**PLATFORM == "x86_64" {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
+        let release = |platform: &str| OsVersionInfo {
+            source_version: "*".parse().unwrap(),
+            squashfs: [(
+                platform.into(),
+                RegistryAsset {
+                    published_at: "2026-01-01T00:00:00Z".parse().unwrap(),
+                    urls: Vec::new(),
+                    commitment: Blake3Commitment {
+                        hash: crate::util::serde::Base64([0; 32]),
+                        size: 1,
+                    },
+                    signatures: Default::default(),
+                    private: None,
+                    readers: Default::default(),
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        let index = OsIndex {
+            versions: OsVersionInfoMap(BTreeMap::from([
+                ("0.4.0.6".parse().unwrap(), release(&PLATFORM)),
+                ("0.4.0.7".parse().unwrap(), release(other_platform)),
+            ])),
+        };
+        let params: GetOsVersionParams = from_value(version_query_params(
+            &"0.4.0.5".parse().unwrap(),
+            &VersionRange::Any,
+        ))
+        .unwrap();
+        let available: BTreeMap<Version, OsVersionInfo> = from_value(
+            select_versions(
+                &Model::new(&index).unwrap(),
+                params.source_version.as_ref(),
+                params.target_version.as_ref(),
+                params.platform.as_ref(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            available
+                .keys()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["0.4.0.6"]
+        );
     }
 }

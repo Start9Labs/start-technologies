@@ -2771,6 +2771,8 @@ export const DepInfo: z.ZodIntersection<
 export const DerivedAddressInfo: z.ZodObject<{
   /**
    * User override: enable these addresses (only for public IP & port)
+   * An opt-in names one literal address and lapses when the gateway renumbers.
+   * Only an enabled plain public domain carries its group's public IPs across.
    */
   enabled: z.ZodArray<z.ZodString>
   /**
@@ -2827,10 +2829,12 @@ export const DerivedAddressInfo: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   /**
    * User override: enable these addresses (only for public IP & port)
+   * An opt-in names one literal address and lapses when the gateway renumbers.
+   * Only an enabled plain public domain carries its group's public IPs across.
    */
   enabled: z.array(z.string()).meta({
     description:
-      'User override: enable these addresses (only for public IP & port)',
+      "User override: enable these addresses (only for public IP & port)\nAn opt-in names one literal address and lapses when the gateway renumbers.\nOnly an enabled plain public domain carries its group's public IPs across.",
   }),
   /**
    * User override: disable these addresses (only for domains and private IP & port)
@@ -3348,7 +3352,15 @@ export const Api = {
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'check-dependencies': {
-      _PARAMS: /* @__PURE__ */ CheckDependenciesParam,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        CheckDependenciesParam,
+      ),
       _RETURN: /* @__PURE__ */ z.array(CheckDependenciesResult),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
@@ -3390,7 +3402,15 @@ export const Api = {
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-container-ip': {
-      _PARAMS: /* @__PURE__ */ GetContainerIpParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetContainerIpParams,
+      ),
       _RETURN: /* @__PURE__ */ z.string().nullable(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
@@ -3402,19 +3422,43 @@ export const Api = {
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-dependencies': {
-      _PARAMS: /* @__PURE__ */ empty,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        empty,
+      ),
       _RETURN: /* @__PURE__ */ z.array(DependencyRequirement),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-host-info': {
-      _PARAMS: /* @__PURE__ */ GetHostInfoParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetHostInfoParams,
+      ),
       _RETURN: /* @__PURE__ */ Host.nullable(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-installed-packages': {
-      _PARAMS: /* @__PURE__ */ empty,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        empty,
+      ),
       _RETURN: /* @__PURE__ */ z.array(PackageId),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
@@ -3426,31 +3470,71 @@ export const Api = {
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-outbound-gateway': {
-      _PARAMS: /* @__PURE__ */ GetOutboundGatewayParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetOutboundGatewayParams,
+      ),
       _RETURN: /* @__PURE__ */ GatewayId,
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-interface': {
-      _PARAMS: /* @__PURE__ */ GetServiceInterfaceParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetServiceInterfaceParams,
+      ),
       _RETURN: /* @__PURE__ */ ServiceInterface.nullable(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-manifest': {
-      _PARAMS: /* @__PURE__ */ GetServiceManifestParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetServiceManifestParams,
+      ),
       _RETURN: /* @__PURE__ */ Manifest.nullable(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-service-port-forward': {
-      _PARAMS: /* @__PURE__ */ GetServicePortForwardParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetServicePortForwardParams,
+      ),
       _RETURN: /* @__PURE__ */ NetInfo.nullable(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-shared-volumes': {
-      _PARAMS: /* @__PURE__ */ GetSharedVolumesParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetSharedVolumesParams,
+      ),
       _RETURN: /* @__PURE__ */ z.array(GrantedSharedVolume),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
@@ -3468,13 +3552,29 @@ export const Api = {
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-status': {
-      _PARAMS: /* @__PURE__ */ GetStatusParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetStatusParams,
+      ),
       _RETURN: /* @__PURE__ */ StatusInfo.nullable(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'get-system-smtp': {
-      _PARAMS: /* @__PURE__ */ GetSystemSmtpParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        GetSystemSmtpParams,
+      ),
       _RETURN: /* @__PURE__ */ SmtpValue.nullable(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
@@ -3492,7 +3592,15 @@ export const Api = {
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'list-service-interfaces': {
-      _PARAMS: /* @__PURE__ */ ListServiceInterfacesParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        ListServiceInterfacesParams,
+      ),
       _RETURN: /* @__PURE__ */ z.record(z.string(), ServiceInterface),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
@@ -3504,7 +3612,15 @@ export const Api = {
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'mount-shared-volume': {
-      _PARAMS: /* @__PURE__ */ MountSharedVolumeParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        MountSharedVolumeParams,
+      ),
       _RETURN: /* @__PURE__ */ SharedVolumeMountResult,
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
@@ -3579,13 +3695,29 @@ export const Api = {
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'retire-binding': {
-      _PARAMS: /* @__PURE__ */ RetireBindingParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        RetireBindingParams,
+      ),
       _RETURN: /* @__PURE__ */ z.boolean(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
     'retire-host': {
-      _PARAMS: /* @__PURE__ */ RetireHostParams,
+      _PARAMS: /* @__PURE__ */ z.intersection(
+        z.intersection(
+          object({
+            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
+          }),
+          empty,
+        ),
+        RetireHostParams,
+      ),
       _RETURN: /* @__PURE__ */ z.boolean(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),

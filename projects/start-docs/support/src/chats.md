@@ -4,7 +4,7 @@ Every request for help is a chat, opened under the topic it is about, and other 
 
 ## Starting a Chat
 
-Choose **+** (**New chat**) above your chat list and pick a topic. **General** holds StartOS, StartTunnel, StartWRT, Start9 hardware, DIY hardware (installing StartOS on your own machine) and Upgrading to 0.4.0; **Services** holds every service in the Start9 Registry. Then describe what is going on.
+Choose **+** (**New chat**) above your chat list and pick a topic. **General** holds StartOS, StartTunnel, StartWRT, Start9 hardware, DIY hardware (installing StartOS on your own machine), Upgrading to 0.4.0 and Start9 Support (this app); **Services** holds every service in the Start9 Registry. Then describe what is going on.
 
 The topic tells Dux which product's or service's documentation to work from, so pick the one the question is about. A question about another service belongs in a new chat under that service.
 
@@ -49,7 +49,7 @@ A chat's status is in **Chat info**:
 A chat closes when:
 
 - **You close it**, with **Close chat** in **Actions** or in **Chat info**.
-- **Start9 closes it**, usually once the problem is solved. Dux may close a chat it has handled alone, with a final reply.
+- **Start9 closes it**, usually once the problem is solved. Dux may close a chat it has handled alone, with a final reply, and sometimes asks you for a review of Start9 as it does. See [Dux](dux.md#reviewing-start9).
 - **Nobody writes in it for a while.** An inactive chat closes on its own, but never while you are waiting on a person. The chat says it closed due to inactivity.
 
 To pick a closed chat back up, choose **Continue in a new chat** at the bottom of it and write your first message. The new chat is linked to the old one, and Dux opens it with a short summary of the earlier chat, under the line linking back to it. A chat can be continued once; after that, its link takes you to the newer chat.
@@ -58,4 +58,4 @@ To pick a closed chat back up, choose **Continue in a new chat** at the bottom o
 
 **Download as a zip**, under **Export** in **Chat info**, saves the whole chat: a `chat.md` file with every message in order, and an `attachments` folder with the files. If the chat continues an earlier one, that chat comes along too.
 
-Your name, your email address and the chat's private thread are in a separate `private` folder; everywhere else, you appear as Customer. Delete that folder before you pass the zip on to anyone. Anything you wrote in the chat itself stays in `chat.md`.
+Your name, your email address, the chat's private thread and any review question it asked you are in a separate `private` folder; everywhere else, you appear as Customer. Delete that folder before you pass the zip on to anyone. Anything you wrote in the chat itself stays in `chat.md`.

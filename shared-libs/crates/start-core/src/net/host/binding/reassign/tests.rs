@@ -71,12 +71,14 @@ fn database(host: Host, server: Host, ports: AvailablePorts) -> DatabaseModel {
     };
     let mut db = DatabaseModel::from(imbl_value::json!({
         "public": {
+            "registryIndexes": {},
             "registryCache": {},
             "osUpdateCache": null,
             "ui": {},
             "disks": [],
             "sharedVolumes": {},
             "backupTargets": {},
+            "sshPubkeys": {},
             "serverInfo": {
                 "hostname": "server",
                 "network": {

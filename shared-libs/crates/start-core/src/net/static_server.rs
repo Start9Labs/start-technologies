@@ -47,6 +47,7 @@ use crate::rpc_continuations::{Guid, RpcContinuations};
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::file_contents::FileContents;
 use crate::s9pk::merkle_archive::source::FileSource;
+use crate::s9pk::merkle_archive::source::encrypted::KeyStreamSource;
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::Signer;
@@ -203,7 +204,7 @@ impl UiContext for DiagnosticContext {
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(RequireJson)
-            .middleware(Auth::new().with_local_auth())
+            .middleware(Auth::new().with_local_auth().with_shadow_password_auth())
     }
     fn apply_outer_layers(self, router: Router) -> Router {
         local_hosts_only(router)
@@ -552,14 +553,25 @@ fn s9pk_router(ctx: RpcContext) -> Router {
                  x::RawQuery(query): x::RawQuery,
                  request: Request| async move {
                     if_authorized(&ctx, request, |request| async {
+                        let commitment = query
+                            .as_deref()
+                            .map(MerkleArchiveCommitment::from_query)
+                            .and_then(|a| a.transpose())
+                            .transpose()?;
+                        let private = match &commitment {
+                            Some(commitment) => crate::registry::sync::synced_keystream(
+                                &ctx.db.peek().await,
+                                &url,
+                                commitment,
+                            )?,
+                            None => None,
+                        };
                         let s9pk = S9pk::deserialize(
-                            &Arc::new(HttpSource::new(ctx.client.get(), url).await?),
-                            query
-                                .as_deref()
-                                .map(MerkleArchiveCommitment::from_query)
-                                .and_then(|a| a.transpose())
-                                .transpose()?
-                                .as_ref(),
+                            &Arc::new(KeyStreamSource::new(
+                                HttpSource::new(ctx.client.get(), url).await?,
+                                private,
+                            )),
+                            commitment.as_ref(),
                         )
                         .await?;
                         let (parts, _) = request.into_parts();

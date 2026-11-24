@@ -1,12 +1,7 @@
-import {
-  DatabaseCursor,
-  DatabaseUpdate,
-  legacyDatabaseSubscription,
-} from '@start9labs/shared'
+import { DatabaseCursor, DatabaseUpdate } from '@start9labs/shared'
 import type { RPC, RpcStreamClient } from '@start9labs/start-core'
-import type { Revision } from 'patch-db-client'
-import type { DataModel } from '../patch-db/data-model'
 import { Observable } from 'rxjs'
+import type { Selection } from 'patch-db-client'
 import { ApiClient, Params, WebsocketConfig } from './api.types'
 
 export type FileUploadOptions = {
@@ -22,14 +17,18 @@ export abstract class ApiService {
   /** Waits for initiating PatchDB fences; database observation belongs to watchDb$. */
   abstract readonly streams: Omit<RpcStreamClient<RPC.StartOS>, 'db'>
 
-  watchDb$(
-    _since?: () => DatabaseCursor | null,
-  ): Observable<DatabaseUpdate<DataModel>> {
-    return legacyDatabaseSubscription<DataModel>(
-      () => this.rpc.db.subscribe({}),
-      guid => this.openWebsocket$<Revision>(guid),
-    )
-  }
+  /** Streams the selection of the public database subtree at `path`, resuming after `since` when it can. */
+  abstract watchDb$(
+    path: string[],
+    since: DatabaseCursor | null,
+    selection?: Selection | null,
+  ): Observable<DatabaseUpdate<unknown>>
+
+  /** Replaces a `watchDb$` stream's selection; the stream then sends what it adds. */
+  abstract updateDbSubscription(
+    subscription: string,
+    selection: Selection,
+  ): Promise<void>
 
   abstract uploadFile(
     guid: string,
@@ -53,4 +52,7 @@ export abstract class ApiService {
 
   /** Reaches a foreign server unsigned; rejection never changes local authentication. */
   abstract echo(params: Params<'echo'>, url: string): Promise<string>
+
+  /** Rejects while this browser's key is not enrolled, without signing out. */
+  abstract checkEnrollment(): Promise<unknown>
 }

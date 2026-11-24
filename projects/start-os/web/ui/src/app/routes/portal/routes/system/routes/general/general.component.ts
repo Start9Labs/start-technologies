@@ -6,6 +6,7 @@ import { RouterLink } from '@angular/router'
 import { WA_WINDOW } from '@ng-web-apis/common'
 import {
   DialogService,
+  escapeHtml,
   getAllKeyboardsSorted,
   getKeyboardName,
   i18nKey,
@@ -392,7 +393,7 @@ export default class SystemGeneralComponent {
           label: 'Hostname Changed',
           data: {
             content:
-              `${this.i18n.transform('Your server is now reachable at')} ${hostname}.local` as i18nKey,
+              `${this.i18n.transform('Your server is now reachable at')} ${escapeHtml(hostname)}.local` as i18nKey,
             yes: 'Open new address',
             no: 'Dismiss',
           },

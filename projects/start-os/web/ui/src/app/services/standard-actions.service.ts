@@ -2,6 +2,7 @@ import { inject, Injectable } from '@angular/core'
 import { Router } from '@angular/router'
 import {
   DialogService,
+  escapeHtml,
   i18nKey,
   i18nPipe,
   TaskService,
@@ -41,10 +42,10 @@ export class StandardActionsService {
   ): Promise<void> {
     let content = soft
       ? ''
-      : `${this.i18n.transform('Uninstalling')} ${title} ${this.i18n.transform('will permanently delete its data.')}`
+      : `${this.i18n.transform('Uninstalling')} ${escapeHtml(title)} ${this.i18n.transform('will permanently delete its data.')}`
 
     if (hasCurrentDeps(id, await getAllPackages(this.patch))) {
-      content = `${content ? `${content} ` : ''}${this.i18n.transform('Services that depend on')} ${title} ${this.i18n.transform('will no longer work properly and may crash.')}`
+      content = `${content ? `${content} ` : ''}${this.i18n.transform('Services that depend on')} ${escapeHtml(title)} ${this.i18n.transform('will no longer work properly and may crash.')}`
     }
 
     if (!content) {

@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-target-create-disk 1  "disk "
+.SH NAME
+start\-cli\-backup\-target\-create\-disk \- Create the volume on an external drive partition
+.SH SYNOPSIS
+\fBstart\-cli backup target create disk\fR [\fB\-\-path\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fILOGICALNAME\fR>
+.SH DESCRIPTION
+Create the volume on an external drive partition
+.SH OPTIONS
+.TP
+\fB\-\-path\fR \fI<PATH>\fR [default: /]
+Directory on the partition, created if missing
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fILOGICALNAME\fR>
+Partition device path, e.g. /dev/sdb1

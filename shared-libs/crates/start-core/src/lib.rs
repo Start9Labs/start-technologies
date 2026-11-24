@@ -116,14 +116,12 @@ pub use id::*;
 use imbl_value::Value;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
-    CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async,
-    from_fn_async_local,
+    Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async, from_fn_async_local,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext};
 use crate::disk::fsck::RequiresReboot;
-use crate::registry::context::{RegistryContext, RegistryUrlParams};
 use crate::system::kiosk;
 use crate::util::output::print_table;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
@@ -263,7 +261,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
             "volumes",
             shared_volumes::handler::<C>()
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .with_about("about.commands-shared-volumes"),
         )
         .subcommand("db", db::db::<C>().with_about("about.commands-db"))
         .subcommand("ssh", ssh::ssh::<C>().with_about("about.commands-ssh-keys"))
@@ -279,13 +277,6 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "backup",
             backup::backup::<C>().with_about("about.commands-backup"),
-        )
-        .subcommand(
-            "registry",
-            CallRemoteHandler::<RpcContext, _, _, RegistryUrlParams>::new(
-                registry::registry_api::<RegistryContext>(),
-            )
-            .no_cli(),
         )
         .subcommand(
             "registry",
@@ -531,10 +522,41 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand("set-nut", from_fn_async(nut::set_nut).no_cli())
-        .subcommand("clear-nut", from_fn_async(nut::clear_nut).no_cli())
-        .subcommand("nut-status", from_fn_async(nut::get_nut_status).no_cli())
-        .subcommand("nut-scan", from_fn_async(nut::scan_nut).no_cli())
-        .subcommand("nut-list-ups", from_fn_async(nut::list_nut_ups).no_cli())
+        .subcommand(
+            "set-nut",
+            from_fn_async(nut::cli_set_nut)
+                .no_ts()
+                .no_display()
+                .with_about("about.set-nut"),
+        )
+        .subcommand(
+            "clear-nut",
+            from_fn_async(nut::clear_nut)
+                .no_display()
+                .with_about("about.clear-nut")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "nut-status",
+            from_fn_async(nut::get_nut_status)
+                .with_display_serializable()
+                .with_about("about.nut-status")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "nut-scan",
+            from_fn_async(nut::scan_nut)
+                .with_display_serializable()
+                .with_about("about.nut-scan")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "nut-list-ups",
+            from_fn_async(nut::list_nut_ups)
+                .with_display_serializable()
+                .with_about("about.nut-list-ups")
+                .with_call_remote::<CliContext>(),
+        )
         .subcommand(
             "host",
             net::host::server_host_api::<C>().with_about("about.commands-host-system-ui"),
@@ -727,8 +749,12 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "exec",
             from_fn_async(service::exec::exec)
-                .with_about("about.execute-commands-container")
-                .no_cli(),
+                .with_display_serializable()
+                .with_custom_display_fn::<CliContext, _>(|args, result| {
+                    service::exec::display_exec(args.params, result)
+                })
+                .with_about("about.exec-command-in-container")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "attach",

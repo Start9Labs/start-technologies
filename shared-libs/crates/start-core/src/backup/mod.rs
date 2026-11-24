@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
-use itertools::Itertools;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
-use crate::context::{CliContext, RpcContext};
+use crate::context::CliContext;
 #[allow(unused_imports)]
 use crate::prelude::*;
 use crate::util::serde::HandlerExtSerde;
@@ -59,14 +58,13 @@ rpc_toolkit::ts_export!(PackageBackupReport, namespaces = [""]);
 async fn call_remote<P: Serialize + Send + Sync>(
     args: HandlerArgs<CliContext, P>,
 ) -> Result<Value, Error> {
-    let method = args.parent_method.into_iter().chain(args.method).join(".");
     args.context
-        .call_remote::<RpcContext>(&method, to_value(&args.params)?)
+        .call_fronted(args.parent_method, args.method, &args.params)
         .await
 }
 
 fn read_password() -> Result<String, Error> {
-    crate::util::tui::read_password("BACKUP_PASSWORD", &t!("help.arg.backup-password"))
+    crate::util::tui::read_password("BACKUP_PASSWORD", &t!("backup.prompt-password"))
 }
 
 pub fn backup<C: Context>() -> ParentHandler<C> {

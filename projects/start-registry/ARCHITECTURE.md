@@ -51,18 +51,25 @@ Subcommands (same module), each available over RPC and to the `start-registry` C
 | `index`   | `mod::get_full_index` | full combined index (name, icon, packages, OS, signers)                  |
 | `info`    | `registry/info.rs`    | set/get registry info and categories                                     |
 | `os`      | `registry/os/`        | OS version index + asset (image) management                              |
-| `package` | `registry/package/`   | add/get/list packages, versions, assets; manage private-package access   |
-| `admin`   | `registry/admin.rs`   | manage admins and signers                                                |
+| `package` | `registry/package/`   | add/get/list packages, versions, assets                                  |
+| `admin`   | `registry/admin.rs`   | manage admins, signers and reader keys                                   |
 | `db`      | `registry/db.rs`      | dump/inspect the registry database; subscribe to `/index` or any subpath |
 | `metrics` | `registry/metrics.rs` | download/user metrics summaries (admin-only)                             |
 
 ### Registry index subscriptions
 
-The public `db.subscribe` RPC accepts optional `pointer`, `osVersion` and `language` parameters. The pointer
+The public `db.subscribe` RPC accepts optional `pointer`, `osVersion`, `language` and `since` parameters. The pointer
 may select `/index` or any descendant; omitting it or passing `null` selects `/index`. Without
 `rpcstream` opt-in, the response contains an initial `{ id, value }` dump and a continuation
 `guid`. Connecting to `/rpc/v2/<guid>` streams revisions relative to the selected subtree. This
 contract also applies to ordinary calls on the shared WebSocket.
+
+With `rpcstream`, the initial response is `{ epoch, id, value, revisions }`. `since: { epoch, id }`
+from an earlier response replays the revisions after `id` in `revisions`, with `value` null, when
+the view that reported it is still the one serving the request and its retained history reaches
+back that far; otherwise the response is a dump with `revisions` null. Each view is its own
+in-memory database with a random epoch, so a cursor from another view, or from one released with
+its last subscriber and rebuilt, always dumps. Clients that read only `{ id, value }` are unaffected.
 
 `language` resolves every `LocaleString` in the view with `LocaleString::localize_for`:
 the exact or same-language translation, else the owner's declared default locale
@@ -80,7 +87,10 @@ without walking the index. Root revisions also advance snapshot freshness when
 permissions outside `/index` change. Each distinct reader, `osVersion`
 compatibility and `language` combination is an `IndexView` served by a lazily
 created in-memory PatchDB mirror (`registry/mirror.rs`), shared by its
-subscribers and dropped with the last of them.
+subscribers and dropped with the last of them. A localized mirror ends its subscriptions
+when the reader-visible locale inventory changes; reconnecting resolves the requested
+language again, including newly added exact or same-language translations. Unlocalized
+mirrors continue streaming.
 
 With `rpcstream: "1.0"` on `/rpc/v2`, the same method returns the dump directly as its initiating
 result and sends subsequent `Revision` events under that request ID. Closing a stream releases
@@ -92,9 +102,10 @@ signed-DH admission; initiating messages include the client's OS version inside 
 Responses permit 64 MiB logical payloads independently of request limits; wire allowances include
 framing and ciphertext overhead.
 Package queries and registry information use the backend cache; browser sessions observe projected
-package and OS metadata through PatchDB. Subscriptions reconnect with jittered backoff and a fresh
-dump. Cached metadata remains available offline, with connection availability reported separately
-from registry configuration. Malformed saved source URLs are skipped independently without
+package and OS metadata through PatchDB. Subscriptions reconnect with jittered backoff,
+resuming from a matching saved cursor when the registry retains that view and history;
+otherwise they receive a fresh dump. Cached metadata remains available offline, with connection
+availability reported separately from registry configuration. Malformed saved source URLs are skipped independently without
 rewriting configured intent. Streaming requires signed-DH admission, `rpcstream` and a configured
 hostname covering the client's selected URL host. A legacy HTTP 200 without upgrading, or upgrade HTTP 404/405/501, selects signed HTTP
 polling every 15 minutes, using full/all-revision `package.get`, `info` and the selected `os.index`.
@@ -106,7 +117,7 @@ Both transports read filtered in-memory replicas and use bounded, 32-revision JS
 subscribers close rather than skip patches. Replicas are created lazily for each effective reader
 and wire-compatibility profile. Equivalent OS versions share a profile; unversioned callers retain
 the canonical index format. Public-only readers share the profile's public replica; admins and
-signers with private-package access use their verified request key. Every source revision rechecks
+requesters who see a private s9pk use their verified request key. Every source revision rechecks
 enrollment, admin status and package permissions before applying the version-specific projection.
 `device_info::WireCompatibility` owns these projections for ordinary RPC responses and replicas,
 including legacy icons, notes, headlines and key/signature encodings. Canonical storage remains migrated to
@@ -155,13 +166,22 @@ Package and OS indexes (`registry/package/index.rs`, `registry/os/index.rs`) hol
 
 Package and OS asset ingestion accept a default-empty `signatures` map alongside the authenticated uploader's `signature`. Each submitted signature is verified against the asset commitment and signature context before merging with existing signatures. The fresh uploader signature takes precedence over a submitted signature for the same key; merging preserves existing signatures for a matching commitment. Authoritative registries retain package signatures from keys registered in `index.signers`; ingestion, signer/key removal, and each authoritative startup enforce that rule. A `mirror-of` registry preserves its upstream's signatures, including its cached index on restart. Promotion forwards every source mirror URL and the source signature map, and adds the promoter's signature. Endorsements do not register signers, change trust proposals, or grant publishing authorization; the authenticated uploader must retain permission to publish. Deploy the updated registry before the promoting CLI: older registries ignore the additional map.
 
-`PackageInfo` flattens `PackageAccessControl` into its wire record: `private` defaults to false and
-`readers` defaults to an empty signer-ID set. The flattened policy deserializes independently of
-version metadata, including existing rows without either field. One visibility primitive admits
-public packages, admins, authorized publishers, and listed readers. Browsing endpoints, mirrors,
-and stored-icon references use it. Browsing and subscription projections redact reader lists for
-non-admins. Admin-only `package.access` commands manage the policy. Invalid resource proofs
-retain anonymous access to public icons; inaccessible private-only icons return 404.
+Each package s9pk `RegistryAsset` carries an optional `private` keystream (`KeyStreamInfo`,
+AES-256-CTR with a 128-bit counter) and `readers`, IDs from the admin-only `index.readers`
+directory of labeled keys. A null keystream means plaintext hosting and public visibility. One
+visibility primitive in `registry/package/index.rs` admits a private s9pk to admins, the package's
+authorized publishers, and its readers; versions left without s9pks and packages left without
+versions are hidden. Browsing endpoints, mirrors, and stored-icon references use it, and
+projections drop reader lists for everyone but admins and the package's publishers, and the reader
+directory for non-admins. `package.add` decrypts each URL
+with the submitted keystream before verifying it; `add-mirror` uses the stored keystream.
+`RegistryAsset` download helpers decrypt through `KeyStreamSource`. StartOS keeps keystreams in its
+private synced index and strips them from the UI-readable registry cache. `package.version.export` returns a
+version as the requester sees it, with the reader-directory entries it lists for admins and the
+package's publishers. Promotion reads it, forwards each keystream, and registers missing reader keys on the
+destination with their labels. Migration
+`m_05_s9pk_access` removes the earlier package-level policy. Invalid resource proofs retain
+anonymous access to public icons; inaccessible private-only icons return 404.
 Signed public browsing retains the verified identity without adding admin audit records.
 
 OS versions use the shared `LocaleString` for `releaseNotes`, as package metadata does:

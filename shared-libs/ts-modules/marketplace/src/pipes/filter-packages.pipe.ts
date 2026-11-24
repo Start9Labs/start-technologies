@@ -1,7 +1,7 @@
 import { Pipe, PipeTransform } from '@angular/core'
 import { T } from '@start9labs/start-core'
 
-import { MarketplacePkg } from '../types'
+import { MarketplaceListing } from '../types'
 
 @Pipe({
   name: 'filterPackages',
@@ -9,6 +9,14 @@ import { MarketplacePkg } from '../types'
 export class FilterPackagesPipe implements PipeTransform {
   transform = filterPackages
 }
+
+export const NEW_ARRIVALS = 'new-arrivals'
+
+const NEW_ARRIVAL_MS = 30 * 24 * 60 * 60 * 1000
+
+export const isNewArrival = ({ firstPublishedAt }: MarketplaceListing) =>
+  !!firstPublishedAt &&
+  Date.now() - new Date(firstPublishedAt).valueOf() < NEW_ARRIVAL_MS
 
 const EXACT = 1
 const PREFIX = 0.8
@@ -19,26 +27,26 @@ const flatten = (value: T.LocaleString) =>
   typeof value === 'string' ? value : Object.values(value).join(' ')
 
 const FIELDS = [
-  { get: (pkg: MarketplacePkg) => pkg.title, weight: 1, min: INFIX },
-  { get: (pkg: MarketplacePkg) => pkg.id, weight: 0.8, min: INFIX },
+  { get: (pkg: MarketplaceListing) => pkg.title, weight: 1, min: INFIX },
+  { get: (pkg: MarketplaceListing) => pkg.id, weight: 0.8, min: INFIX },
   {
-    get: (pkg: MarketplacePkg) => flatten(pkg.description.short),
+    get: (pkg: MarketplaceListing) => flatten(pkg.description.short),
     weight: 0.4,
     min: WORD,
   },
   {
-    get: (pkg: MarketplacePkg) => flatten(pkg.description.long),
+    get: (pkg: MarketplaceListing) => flatten(pkg.description.long ?? ''),
     weight: 0.2,
     min: WORD,
   },
 ]
 
 export function filterPackages(
-  packages: MarketplacePkg[],
+  packages: MarketplaceListing[],
   query: string | null = '',
   category: string | null = '',
   sort: string | null = '',
-): MarketplacePkg[] {
+): MarketplaceListing[] {
   const search = query?.trim().toLowerCase() || ''
 
   if (search) {
@@ -52,7 +60,11 @@ export function filterPackages(
   }
 
   return packages
-    .filter(p => category === 'all' || p.categories.includes(category!))
+    .filter(p =>
+      category === NEW_ARRIVALS
+        ? isNewArrival(p)
+        : category === 'all' || p.categories.includes(category!),
+    )
     .sort((a, b) => {
       switch (sort) {
         case 'a':
@@ -69,7 +81,7 @@ export function filterPackages(
     .map(a => ({ ...a }))
 }
 
-function score(pkg: MarketplacePkg, search: string): number {
+function score(pkg: MarketplaceListing, search: string): number {
   const words = search.split(/\s+/).map(word => best(pkg, word))
 
   if (words.includes(0)) return 0
@@ -80,7 +92,7 @@ function score(pkg: MarketplacePkg, search: string): number {
   )
 }
 
-function best(pkg: MarketplacePkg, search: string): number {
+function best(pkg: MarketplaceListing, search: string): number {
   return FIELDS.reduce((max, { get, weight, min }) => {
     const match = quality(get(pkg), search)
 

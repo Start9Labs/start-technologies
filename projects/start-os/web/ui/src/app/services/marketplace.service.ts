@@ -1,13 +1,10 @@
 import { inject, Injectable } from '@angular/core'
 import {
   AbstractMarketplaceService,
-  GetPackageRes,
   Marketplace,
   MarketplacePkg,
   StoreDataWithUrl,
   StoreIdentity,
-  packageResponse,
-  packagesResponse,
   packageSignerPolicy,
   registryStatus,
   isRegistryLoading,
@@ -19,10 +16,14 @@ import {
   sameUrl,
 } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
-import { PatchDB } from 'patch-db-client'
+import {
+  PatchDB,
+  pathFromArray,
+  Projection,
+  SubtreePatchDB,
+} from 'patch-db-client'
 import {
   combineLatest,
-  defer,
   distinctUntilChanged,
   filter,
   from,
@@ -47,6 +48,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private readonly api = inject(ApiService)
   private readonly icons = inject(PackageIconService)
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
+  private readonly index = this.patch as SubtreePatchDB<DataModel>
   private readonly exver = inject(Exver)
   private readonly storage = inject(StorageService)
 
@@ -64,7 +66,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
         .sort(([a], [b]) => defaultRank(a) - defaultRank(b))
         .flatMap(([url, name]) => {
           try {
-            const entry = findRegistryCache(cache, url)
+            const entry = findRegistryCache(cache, url)?.[1]
             return [
               {
                 ...toStoreIdentity(url, name),
@@ -82,7 +84,33 @@ export class MarketplaceService extends AbstractMarketplaceService {
   private watchRegistry$(url: string) {
     return this.registryCache$.pipe(
       map(cache => findRegistryCache(cache, url)),
-      distinctUntilChanged(),
+      distinctUntilChanged((a, b) => a?.[0] === b?.[0] && a?.[1] === b?.[1]),
+    )
+  }
+
+  private watchSelection$(registry: string, id: string) {
+    return this.watchRegistry$(registry).pipe(
+      filter((found): found is Saved => !!found && registryReady(found[1])),
+      map(([key, entry]) => ({ key, selection: entry.selections[id] })),
+      distinctUntilChanged(
+        (a, b) => a.key === b.key && a.selection === b.selection,
+      ),
+    )
+  }
+
+  /** A projection of the registry's saved packages, keyed by package id. */
+  private watchPackages$(
+    key: string,
+    projection: Projection,
+    ...path: string[]
+  ): Observable<any> {
+    return this.index.watchProjection$(
+      projection,
+      'registryIndexes',
+      key,
+      'package',
+      'packages',
+      ...path,
     )
   }
 
@@ -96,18 +124,22 @@ export class MarketplaceService extends AbstractMarketplaceService {
     ),
   )
 
-  readonly marketplace$: Observable<Marketplace> = combineLatest([
-    this.registries$,
-    this.registryCache$,
-  ]).pipe(
-    map(([registries, cache]) =>
-      Object.fromEntries(
-        registries.map(({ url }) => {
-          const entry = findRegistryCache(cache, url)
-          return [url, entry ? this.toStore(url, entry) : null]
-        }),
-      ),
+  readonly marketplace$: Observable<Marketplace> = this.registries$.pipe(
+    map(registries => registries.map(({ url }) => url)),
+    distinctUntilChanged((a, b) => a.join() === b.join()),
+    switchMap(urls =>
+      urls.length
+        ? combineLatest(
+            urls.map(url =>
+              this.watchStore$(url).pipe(
+                map(store => [url, store] as const),
+                startWith([url, null] as const),
+              ),
+            ),
+          )
+        : of([]),
     ),
+    map(entries => Object.fromEntries(entries)),
     shareReplay(1),
   )
 
@@ -115,9 +147,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
     this.currentRegistryUrl$.pipe(
       distinctUntilChanged(),
       switchMap(url =>
-        this.watchRegistry$(url).pipe(
-          filter(entry => !!entry),
-          map(entry => this.toStore(url, entry)),
+        this.watchStore$(url).pipe(
+          filter((store): store is StoreDataWithUrl => !!store),
         ),
       ),
       shareReplay(1),
@@ -135,6 +166,42 @@ export class MarketplaceService extends AbstractMarketplaceService {
     ]),
   )
 
+  /**
+   * The registry's listing: each package's selected releases without long descriptions.
+   * Nothing until those releases arrive, so an unavailable listing never appears empty.
+   */
+  private watchStore$(url: string): Observable<StoreDataWithUrl | null> {
+    const entry$ = this.watchRegistry$(url).pipe(
+      shareReplay({ bufferSize: 1, refCount: true }),
+    )
+    return entry$.pipe(
+      map(found => found && { key: found[0], include: listedPaths(found[1]) }),
+      distinctUntilChanged(
+        (a, b) =>
+          a?.key === b?.key && a?.include.join('\n') === b?.include.join('\n'),
+      ),
+      switchMap(listing => {
+        if (!listing) return of(null)
+        const packages$ = listing.include.length
+          ? this.watchPackages$(listing.key, {
+              include: [...listing.include, '/*/categories'],
+              exclude: ['/*/versions/*/description/long'],
+            })
+          : of({})
+        return packages$.pipe(
+          switchMap(packages =>
+            entry$.pipe(
+              map(found =>
+                found ? this.toStore(url, found[1], packages ?? {}) : null,
+              ),
+            ),
+          ),
+        )
+      }),
+    )
+  }
+
+  /** A release of a package, following live registry changes. */
   getPackage$(
     id: string,
     version: string | null,
@@ -143,19 +210,63 @@ export class MarketplaceService extends AbstractMarketplaceService {
   ): Observable<MarketplacePkg | null> {
     return (registryUrl ? of(registryUrl) : this.currentRegistryUrl$).pipe(
       distinctUntilChanged(),
-      switchMap(url =>
-        version
-          ? this.fetchPackage$(url, id, version, flavor)
-          : this.watchRegistry$(url).pipe(
-              filter(registryReady),
-              map(
-                entry =>
-                  this.toStore(url, entry).packages.find(
-                    pkg => pkg.id === id && pkg.flavor === flavor,
-                  ) ?? null,
-              ),
-            ),
-      ),
+      switchMap(url => this.watchRelease$(id, version, flavor, url, false)),
+    )
+  }
+
+  /** A release with every version's release notes, following live registry changes. */
+  getDetails$(
+    id: string,
+    version: string,
+    registry: string,
+  ): Observable<MarketplacePkg | null> {
+    return this.watchRelease$(id, version, null, registry, true)
+  }
+
+  private watchRelease$(
+    id: string,
+    version: string | null,
+    flavor: string | null,
+    registry: string,
+    notes: boolean,
+  ): Observable<MarketplacePkg | null> {
+    return this.watchSelection$(registry, id).pipe(
+      switchMap(({ key, selection }) => {
+        const selected =
+          version ??
+          (selection &&
+            newestReleases(this.exver, selection.best)[flavor ?? ''])
+        if (!selection || !selected || !selection.versions[selected])
+          return of(null)
+        return this.watchPackages$(
+          key,
+          {
+            include: [
+              pathFromArray(['versions', selected]),
+              '/categories',
+              ...(notes
+                ? ['/versions/*/releaseNotes', '/versions/*/defaultLocale']
+                : []),
+            ],
+          },
+          id,
+        ).pipe(
+          map((info: Partial<T.PackageInfo> | null) => {
+            const release = info?.versions?.[selected]
+            return release
+              ? toPkg(
+                  this.exver,
+                  id,
+                  selected,
+                  selection,
+                  info.categories ?? [],
+                  release,
+                  info.versions ?? {},
+                )
+              : null
+          }),
+        )
+      }),
     )
   }
 
@@ -165,8 +276,8 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   fetchInfo$(registry: string): Observable<T.RegistryInfo> {
     return this.watchRegistry$(registry).pipe(
-      filter(registryReady),
-      map(entry => this.registryInfo(entry.info)),
+      filter((found): found is Saved => !!found && registryReady(found[1])),
+      map(([, entry]) => this.registryInfo(entry.info)),
     )
   }
 
@@ -199,78 +310,39 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   private toStore(
     url: string,
-    entry: T.Public['registryCache'][string],
+    entry: T.RegistryCache,
+    packages: Record<string, Partial<T.PackageInfo>>,
   ): StoreDataWithUrl {
-    const packages = packagesResponse(entry.packages)
+    const release = (id: string, version: string) => {
+      const selection = entry.selections[id]
+      const info = packages[id]
+      const found = info?.versions?.[version]
+      return selection && found
+        ? [
+            toPkg(
+              this.exver,
+              id,
+              version,
+              selection,
+              info.categories ?? [],
+              found,
+              info.versions ?? {},
+            ),
+          ]
+        : []
+    }
+    const selections = Object.entries(entry.selections)
     return {
       url,
       info: this.registryInfo(entry.info),
       status: registryStatus(entry),
       error: entry.error,
-      packages: Object.entries(packages).flatMap(([id, pkgInfo]) =>
-        Object.keys(pkgInfo.best).flatMap(version => {
-          const pkg = this.convertRegistryPkgToMarketplacePkg(
-            id,
-            version,
-            this.exver.getFlavor(version),
-            pkgInfo,
-          )
-          return pkg ? [pkg] : []
-        }),
+      packages: selections.flatMap(([id, selection]) =>
+        selection.best.flatMap(version => release(id, version)),
       ),
-    }
-  }
-
-  fetchPackage$(
-    url: string,
-    id: string,
-    version: string | null,
-    flavor: string | null,
-    sourceVersion: string | null = null,
-  ): Observable<MarketplacePkg | null> {
-    return this.watchRegistry$(url).pipe(
-      filter(registryReady),
-      switchMap(() =>
-        defer(() =>
-          this.api.rpc.registry.package
-            .get({
-              registry: url,
-              id,
-              targetVersion: version ? `=${version}` : null,
-              sourceVersion,
-              otherVersions: 'short',
-            })
-            .then(packageResponse),
-        ),
+      updates: selections.flatMap(([id, selection]) =>
+        selection.updateTarget ? release(id, selection.updateTarget) : [],
       ),
-      map(pkgInfo =>
-        this.convertRegistryPkgToMarketplacePkg(id, version, flavor, pkgInfo),
-      ),
-    )
-  }
-
-  private convertRegistryPkgToMarketplacePkg(
-    id: string,
-    version: string | null | undefined,
-    flavor: string | null,
-    pkgInfo: GetPackageRes,
-  ): MarketplacePkg | null {
-    const ver =
-      version ||
-      Object.keys(pkgInfo.best).find(v => this.exver.getFlavor(v) === flavor) ||
-      null
-    const best = ver && pkgInfo.best[ver]
-
-    if (!best) {
-      return null
-    }
-
-    return {
-      id,
-      flavor,
-      version: ver || '',
-      ...pkgInfo,
-      ...best,
     }
   }
 
@@ -332,6 +404,88 @@ export class MarketplaceService extends AbstractMarketplaceService {
   }
 }
 
+type Selection = T.RegistryCache['selections'][string]
+type Saved = [string, T.RegistryCache]
+
+/** The index paths of the releases a listing shows. */
+function listedPaths(entry: T.RegistryCache): string[] {
+  return Object.entries(entry.selections).flatMap(([id, selection]) =>
+    listedVersions(selection).map(version =>
+      pathFromArray([id, 'versions', version]),
+    ),
+  )
+}
+
+/** The releases a listing shows: the newest of each flavor and the update target. */
+function listedVersions(selection: Selection): string[] {
+  return [
+    ...new Set([
+      ...selection.best,
+      ...(selection.updateTarget ? [selection.updateTarget] : []),
+    ]),
+  ]
+}
+
+/** The newest selected release of each flavor, keyed by flavor (`''` for none). */
+function newestReleases(
+  exver: Exver,
+  versions: readonly string[],
+): Record<string, string> {
+  const newest: Record<string, string> = {}
+  versions.forEach(version => {
+    const flavor = exver.getFlavor(version) ?? ''
+    const current = newest[flavor]
+    if (!current || exver.compareExver(version, current) === 1)
+      newest[flavor] = version
+  })
+  return newest
+}
+
+function toPkg(
+  exver: Exver,
+  id: string,
+  version: string,
+  { firstPublishedAt, versions }: Selection,
+  categories: readonly string[],
+  release: T.PackageVersionInfo,
+  releases: Record<string, Partial<T.PackageVersionInfo>>,
+): MarketplacePkg {
+  const selected = {
+    ...release,
+    s9pks: (versions[version]?.s9pks ?? []).flatMap(index =>
+      release.s9pks.slice(index, index + 1),
+    ),
+  }
+  return {
+    ...selected,
+    id,
+    version,
+    flavor: exver.getFlavor(version),
+    categories: [...categories],
+    firstPublishedAt: firstPublishedAt ?? null,
+    best: { [version]: selected },
+    otherVersions: Object.fromEntries(
+      Object.entries(versions)
+        .filter(([other]) => other !== version)
+        .map(([other, { superseded }]) => {
+          const notes = releases[other]
+          return [
+            other,
+            {
+              ...(superseded ? { superseded } : {}),
+              ...(notes?.releaseNotes
+                ? {
+                    releaseNotes: notes.releaseNotes,
+                    defaultLocale: notes.defaultLocale,
+                  }
+                : {}),
+            },
+          ]
+        }),
+    ),
+  }
+}
+
 function toStoreIdentity(url: string, name?: string | null): StoreIdentity {
   return {
     url: registryUrl(url),
@@ -339,20 +493,22 @@ function toStoreIdentity(url: string, name?: string | null): StoreIdentity {
   }
 }
 
-function registryReady(
-  entry: T.RegistryCache | undefined,
-): entry is T.RegistryCache {
-  return (
-    !!entry &&
-    !isRegistryLoading(
-      registryStatus(entry),
-      Object.keys(entry.packages).length,
-    )
+function registryReady(entry: T.RegistryCache): boolean {
+  return !isRegistryLoading(
+    registryStatus(entry),
+    Object.keys(entry.selections).length,
   )
 }
 
-function findRegistryCache(cache: DataModel['registryCache'], url: string) {
-  return Object.entries(cache).find(([saved]) => sameUrl(saved, url))?.[1]
+/** The saved key and cache entry of a registry; snapshots can predate `selections`. */
+function findRegistryCache(
+  cache: DataModel['registryCache'],
+  url: string,
+): Saved | undefined {
+  const found = Object.entries(cache).find(([saved]) => sameUrl(saved, url))
+  if (!found) return undefined
+  const [key, entry] = found
+  return [key, entry.selections ? entry : { ...entry, selections: {} }]
 }
 
 function defaultRank(url: string): number {

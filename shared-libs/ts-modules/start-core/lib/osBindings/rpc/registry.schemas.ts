@@ -129,6 +129,10 @@ export const CountEntry: z.ZodObject<{ label: z.ZodString; count: z.ZodInt }> =
 export const DataUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'DataUrl',
 })
+export const DbCursor: z.ZodObject<{ epoch: z.ZodString; id: z.ZodInt }> =
+  /* @__PURE__ */ object({ epoch: z.string(), id: z.int() }).meta({
+    id: 'DbCursor',
+  })
 export const DeviceFilter: z.ZodObject<{
   description: z.ZodString
   class: typeof literal_2
@@ -165,16 +169,6 @@ export const Dump: z.ZodObject<{ id: z.ZodInt; value: z.ZodUnknown }> =
   /* @__PURE__ */ object({ id: z.int(), value: z.unknown() }).meta({
     id: 'Dump',
   })
-export const DumpParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'DumpParams',
-})
 export const GetDownloadsParams: z.ZodObject<{
   /**
    * Filter by package ID
@@ -394,6 +388,20 @@ export const IoFormat: z.ZodEnum<{
   .meta({
     id: 'IoFormat',
   })
+
+/**
+ * An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.
+ *
+ * Ciphertext has the plaintext's length, and any byte range decrypts on its own.
+ */
+export const KeyStreamInfo: z.ZodObject<{
+  key: typeof literal_0
+  iv: typeof literal_0
+}> = /* @__PURE__ */ object({ key: literal_0, iv: literal_0 }).meta({
+  id: 'KeyStreamInfo',
+  description:
+    "An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.\n\nCiphertext has the plaintext's length, and any byte range decrypts on its own.",
+})
 export const ListVersionSignersParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'ListVersionSignersParams',
@@ -503,6 +511,20 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
     urls: z.array(z.string()),
     commitment: Commitment,
     signatures: z.record(z.string(), AnySignature),
+    /**
+     * Keystream the hosted bytes are encrypted with. Null for hosted plaintext visible to everyone.
+     */
+    private: KeyStreamInfo.nullable().optional().meta({
+      description:
+        'Keystream the hosted bytes are encrypted with. Null for hosted plaintext visible to everyone.',
+    }),
+    /**
+     * Reader keys in `FullIndex.readers` allowed to see this private asset.
+     */
+    readers: z.array(Guid).optional().meta({
+      description:
+        'Reader keys in `FullIndex.readers` allowed to see this private asset.',
+    }),
   })
   return self
 }
@@ -577,6 +599,23 @@ export const ReplaceOperation: z.ZodObject<{
 }).meta({
   id: 'ReplaceOperation',
   description: "JSON Patch 'replace' operation representation",
+})
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export const SelectorParams: z.ZodObject<{
+  include: z.ZodString
+  exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
+  depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+}> = /* @__PURE__ */ object({
+  include: z.string(),
+  exclude: z.array(z.string()).optional(),
+  depth: z.int().nullable().optional(),
+}).meta({
+  id: 'SelectorParams',
+  description:
+    'One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.',
 })
 export const SetDefaultLocaleParams: z.ZodObject<{
   defaultLocale: z.ZodNullable<z.ZodString>
@@ -692,6 +731,20 @@ export const AddPackageParams: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
     z.ZodRecord<z.ZodString, typeof AnySignature>
   >
+  /**
+   * Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.
+   */
+  private: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof KeyStreamInfo>>,
+    z.ZodNullable<typeof KeyStreamInfo>
+  >
+  /**
+   * Keys in the registry's reader directory allowed to see this private s9pk.
+   */
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
+    z.ZodArray<typeof AnyVerifyingKey>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
@@ -700,6 +753,26 @@ export const AddPackageParams: z.ZodObject<{
     z.record(z.string(), AnySignature).optional(),
     z.record(z.string(), AnySignature),
   ),
+  /**
+   * Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.
+   */
+  private: wire(
+    KeyStreamInfo.nullable().optional(),
+    KeyStreamInfo.nullable(),
+  ).meta({
+    description:
+      'Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.',
+  }),
+  /**
+   * Keys in the registry's reader directory allowed to see this private s9pk.
+   */
+  readers: wire(
+    z.array(AnyVerifyingKey).optional(),
+    z.array(AnyVerifyingKey),
+  ).meta({
+    description:
+      "Keys in the registry's reader directory allowed to see this private s9pk.",
+  }),
 }).meta({
   id: 'AddPackageParams',
 })
@@ -724,6 +797,12 @@ export const AddPackageToCategoryParams: z.ZodObject<{
   package: typeof PackageId
 }> = /* @__PURE__ */ object({ id: z.string(), package: PackageId }).meta({
   id: 'AddPackageToCategoryParams',
+})
+export const AddReaderParams: z.ZodObject<{
+  label: z.ZodString
+  key: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ label: z.string(), key: AnyVerifyingKey }).meta({
+  id: 'AddReaderParams',
 })
 export const AddSignerParams: z.ZodObject<{
   name: z.ZodString
@@ -853,6 +932,12 @@ export const DownloadsResponse: z.ZodObject<{
 }).meta({
   id: 'DownloadsResponse',
 })
+export const EditReaderParams: z.ZodObject<{
+  id: typeof Guid
+  label: z.ZodString
+}> = /* @__PURE__ */ object({ id: Guid, label: z.string() }).meta({
+  id: 'EditReaderParams',
+})
 export const EditSignerParams: z.ZodObject<{
   id: typeof Guid
   setName: z.ZodCodec<
@@ -931,9 +1016,13 @@ export const EditVersionParams: z.ZodObject<{
   description:
     'Edits an existing release; omitted fields, assets and authorized signers remain unchanged.',
 })
-export const GetPackageAccessParams: z.ZodObject<{ id: typeof PackageId }> =
-  /* @__PURE__ */ object({ id: PackageId }).meta({
-    id: 'GetPackageAccessParams',
+export const ExportPackageVersionParams: z.ZodIntersection<
+  z.ZodObject<{ id: typeof PackageId; version: typeof Version }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(object({ id: PackageId, version: Version }), ReaderParams)
+  .meta({
+    id: 'ExportPackageVersionParams',
   })
 export const GetPackageParams: z.ZodIntersection<
   z.ZodObject<{
@@ -1072,18 +1161,6 @@ export const OsVersionInfo: z.ZodObject<{
 }).meta({
   id: 'OsVersionInfo',
 })
-export const PackageAccessControl: z.ZodObject<{
-  private: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  readers: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof Guid>>,
-    z.ZodArray<typeof Guid>
-  >
-}> = /* @__PURE__ */ object({
-  private: wire(z.boolean().optional(), z.boolean()),
-  readers: wire(z.array(Guid).optional(), z.array(Guid)),
-}).meta({
-  id: 'PackageAccessControl',
-})
 
 /**
  * Inline for StartOS before 0.4.0.3 and from registries before 1.2.0.
@@ -1108,6 +1185,10 @@ export const PackageInfoShort: z.ZodObject<{
    * `PackageMetadata::default_locale`.
    */
   defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  /**
+   * A newer same-flavor revision covers this release's hardware.
+   */
+  superseded: z.ZodOptional<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   releaseNotes: LocaleString,
   /**
@@ -1116,14 +1197,14 @@ export const PackageInfoShort: z.ZodObject<{
   defaultLocale: z.string().nullable().optional().meta({
     description: '`PackageMetadata::default_locale`.',
   }),
+  /**
+   * A newer same-flavor revision covers this release's hardware.
+   */
+  superseded: z.boolean().optional().meta({
+    description: "A newer same-flavor revision covers this release's hardware.",
+  }),
 }).meta({
   id: 'PackageInfoShort',
-})
-export const PackageReaderParams: z.ZodObject<{
-  id: typeof PackageId
-  signer: typeof Guid
-}> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
-  id: 'PackageReaderParams',
 })
 
 /**
@@ -1268,6 +1349,76 @@ export const PreDownloadAlert: z.ZodObject<{
 }).meta({
   id: 'PreDownloadAlert',
 })
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export const ProjectionParams: z.ZodObject<{
+  /**
+   * Levels kept below the pointer; deeper objects and arrays become empty.
+   */
+  depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+  /**
+   * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+   * Empty keeps everything. A numeric segment matches that key or array position.
+   */
+  include: z.ZodOptional<z.ZodArray<z.ZodString>>
+  /**
+   * Subtrees removed from what `include` keeps, in the same form.
+   */
+  exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
+  /**
+   * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
+   */
+  selectors: z.ZodOptional<z.ZodArray<typeof SelectorParams>>
+}> = /* @__PURE__ */ object({
+  /**
+   * Levels kept below the pointer; deeper objects and arrays become empty.
+   */
+  depth: z.int().nullable().optional().meta({
+    description:
+      'Levels kept below the pointer; deeper objects and arrays become empty.',
+  }),
+  /**
+   * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+   * Empty keeps everything. A numeric segment matches that key or array position.
+   */
+  include: z.array(z.string()).optional().meta({
+    description:
+      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.',
+  }),
+  /**
+   * Subtrees removed from what `include` keeps, in the same form.
+   */
+  exclude: z.array(z.string()).optional().meta({
+    description:
+      'Subtrees removed from what `include` keeps, in the same form.',
+  }),
+  /**
+   * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
+   */
+  selectors: z.array(SelectorParams).optional().meta({
+    description:
+      'More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.',
+  }),
+}).meta({
+  id: 'ProjectionParams',
+  description:
+    'Narrows a dumped or subscribed subtree; omitted fields narrow nothing.',
+})
+
+/**
+ * A key allowed to read the private s9pks that list it.
+ */
+export const ReaderKey: z.ZodObject<{
+  label: z.ZodString
+  key: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ label: z.string(), key: AnyVerifyingKey }).meta({
+  id: 'ReaderKey',
+  description: 'A key allowed to read the private s9pks that list it.',
+})
 export const RemoveAdminParams: z.ZodObject<{ signer: typeof Guid }> =
   /* @__PURE__ */ object({ signer: Guid }).meta({
     id: 'RemoveAdminParams',
@@ -1314,6 +1465,10 @@ export const RemovePackageSignerParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'RemovePackageSignerParams',
 })
+export const RemoveReaderParams: z.ZodObject<{ id: typeof Guid }> =
+  /* @__PURE__ */ object({ id: Guid }).meta({
+    id: 'RemoveReaderParams',
+  })
 export const RemoveSignerParams: z.ZodObject<{ id: typeof Guid }> =
   /* @__PURE__ */ object({ id: Guid }).meta({
     id: 'RemoveSignerParams',
@@ -1327,12 +1482,6 @@ export const SetIconParams: z.ZodObject<{
   icon: z.ZodNullable<typeof DataUrl>
 }> = /* @__PURE__ */ object({ icon: DataUrl.nullable() }).meta({
   id: 'SetIconParams',
-})
-export const SetPackagePrivateParams: z.ZodObject<{
-  id: typeof PackageId
-  private: z.ZodBoolean
-}> = /* @__PURE__ */ object({ id: PackageId, private: z.boolean() }).meta({
-  id: 'SetPackagePrivateParams',
 })
 export const SetTrustSignersParams: z.ZodObject<{
   signers: z.ZodArray<typeof Guid>
@@ -1402,6 +1551,13 @@ export const SubscribeIndexParams: z.ZodIntersection<
       z.ZodOptional<z.ZodNullable<z.ZodString>>,
       z.ZodNullable<z.ZodString>
     >
+    /**
+     * The subscriber's last revision; resumes only within the epoch of the view that reported it.
+     */
+    since: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
+      z.ZodNullable<typeof DbCursor>
+    >
   }>,
   typeof ReaderParams
 > = /* @__PURE__ */ z
@@ -1427,6 +1583,13 @@ export const SubscribeIndexParams: z.ZodIntersection<
       ).meta({
         description:
           'Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.',
+      }),
+      /**
+       * The subscriber's last revision; resumes only within the epoch of the view that reported it.
+       */
+      since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
+        description:
+          "The subscriber's last revision; resumes only within the epoch of the view that reported it.",
       }),
     }),
     ReaderParams,
@@ -1486,19 +1649,28 @@ export const DependencyMetadata: z.ZodIntersection<
   .meta({
     id: 'DependencyMetadata',
   })
+export const DumpParams: z.ZodIntersection<
+  z.ZodObject<{
+    pointer: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>,
+  typeof ProjectionParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+    }),
+    ProjectionParams,
+  )
+  .meta({
+    id: 'DumpParams',
+  })
 export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
     id: 'OsVersionInfoMap',
   })
-export const PackageAccess: z.ZodObject<{
-  private: z.ZodBoolean
-  readers: z.ZodRecord<z.ZodString, typeof SignerInfo>
-}> = /* @__PURE__ */ object({
-  private: z.boolean(),
-  readers: z.record(z.string(), SignerInfo),
-}).meta({
-  id: 'PackageAccess',
-})
 export const PackageMetadata: z.ZodObject<{
   title: z.ZodString
   /**
@@ -1671,17 +1843,6 @@ export const RegistryInfo: z.ZodObject<{
 })
 
 /**
- * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
- */
-export const SubscribeResult: z.ZodUnion<
-  readonly [typeof SubscribeRes, typeof Dump]
-> = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
-  id: 'SubscribeResult',
-  description:
-    'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
-})
-
-/**
  * Database-generated patches contain only add, remove and replace operations.
  */
 export const DiffPatch: typeof Patch = /* @__PURE__ */ Patch.meta({
@@ -1732,12 +1893,23 @@ export const PackageVersionInfo: z.ZodIntersection<
   })
 export const GetPackageResponse: z.ZodObject<{
   categories: z.ZodArray<z.ZodString>
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>
   best: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   otherVersions: z.ZodOptional<
     z.ZodNullable<z.ZodRecord<z.ZodString, typeof PackageInfoShort>>
   >
 }> = /* @__PURE__ */ object({
   categories: z.array(z.string()),
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.string().nullable().optional().meta({
+    description:
+      'When this registry first published any version it still carries.',
+  }),
   best: z.record(z.string(), PackageVersionInfo),
   otherVersions: z.record(z.string(), PackageInfoShort).nullable().optional(),
 }).meta({
@@ -1745,34 +1917,80 @@ export const GetPackageResponse: z.ZodObject<{
 })
 export const GetPackageResponseFull: z.ZodObject<{
   categories: z.ZodArray<z.ZodString>
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>
   best: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   otherVersions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
 }> = /* @__PURE__ */ object({
   categories: z.array(z.string()),
+  /**
+   * When this registry first published any version it still carries.
+   */
+  firstPublishedAt: z.string().nullable().optional().meta({
+    description:
+      'When this registry first published any version it still carries.',
+  }),
   best: z.record(z.string(), PackageVersionInfo),
   otherVersions: z.record(z.string(), PackageVersionInfo),
 }).meta({
   id: 'GetPackageResponseFull',
 })
-export const PackageInfo: z.ZodIntersection<
-  z.ZodObject<{
-    authorized: z.ZodRecord<z.ZodString, z.ZodString>
-    versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
-    categories: z.ZodArray<z.ZodString>
-  }>,
-  typeof PackageAccessControl
-> = /* @__PURE__ */ z
-  .intersection(
-    object({
-      authorized: z.record(z.string(), z.string()),
-      versions: z.record(z.string(), PackageVersionInfo),
-      categories: z.array(z.string()),
-    }),
-    PackageAccessControl,
-  )
-  .meta({
-    id: 'PackageInfo',
-  })
+export const PackageInfo: z.ZodObject<{
+  authorized: z.ZodRecord<z.ZodString, z.ZodString>
+  versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
+  categories: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  authorized: z.record(z.string(), z.string()),
+  versions: z.record(z.string(), PackageVersionInfo),
+  categories: z.array(z.string()),
+}).meta({
+  id: 'PackageInfo',
+})
+
+/**
+ * A package version as the requester sees it, for promotion to another registry.
+ */
+export const PackageVersionExport: z.ZodObject<{
+  /**
+   * The s9pks the requester can see, with their keystreams. Reader ids appear for admins and
+   * the package's publishers.
+   */
+  info: typeof PackageVersionInfo
+  /**
+   * The reader directory entries the s9pks list. Null for requesters who cannot see reader
+   * lists.
+   */
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, typeof ReaderKey>>>,
+    z.ZodNullable<z.ZodRecord<z.ZodString, typeof ReaderKey>>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * The s9pks the requester can see, with their keystreams. Reader ids appear for admins and
+   * the package's publishers.
+   */
+  info: PackageVersionInfo.meta({
+    description:
+      "The s9pks the requester can see, with their keystreams. Reader ids appear for admins and\nthe package's publishers.",
+  }),
+  /**
+   * The reader directory entries the s9pks list. Null for requesters who cannot see reader
+   * lists.
+   */
+  readers: wire(
+    z.record(z.string(), ReaderKey).nullable().optional(),
+    z.record(z.string(), ReaderKey).nullable(),
+  ).meta({
+    description:
+      'The reader directory entries the s9pks list. Null for requesters who cannot see reader\nlists.',
+  }),
+}).meta({
+  id: 'PackageVersionExport',
+  description:
+    'A package version as the requester sees it, for promotion to another registry.',
+})
 export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
   /* @__PURE__ */ object({ id: z.int(), patch: DiffPatch }).meta({
     id: 'Revision',
@@ -1803,6 +2021,45 @@ export const PackageIndex: z.ZodObject<{
 }).meta({
   id: 'PackageIndex',
 })
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export const SubscribeStart: z.ZodObject<{
+  epoch: z.ZodString
+  id: z.ZodInt
+  value: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
+    z.ZodNullable<z.ZodUnknown>
+  >
+  revisions: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
+    z.ZodNullable<z.ZodArray<typeof Revision>>
+  >
+  /**
+   * Names the stream to `db.subscription.update`; absent where its projection is fixed.
+   */
+  subscription: z.ZodOptional<z.ZodNullable<typeof Guid>>
+}> = /* @__PURE__ */ object({
+  epoch: z.string(),
+  id: z.int(),
+  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
+  revisions: wire(
+    z.array(Revision).nullable().optional(),
+    z.array(Revision).nullable(),
+  ),
+  /**
+   * Names the stream to `db.subscription.update`; absent where its projection is fixed.
+   */
+  subscription: Guid.nullable().optional().meta({
+    description:
+      'Names the stream to `db.subscription.update`; absent where its projection is fixed.',
+  }),
+}).meta({
+  id: 'SubscribeStart',
+  description:
+    'A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.',
+})
 export const FullIndex: z.ZodObject<{
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1830,6 +2087,13 @@ export const FullIndex: z.ZodObject<{
     z.ZodOptional<z.ZodArray<typeof Guid>>,
     z.ZodArray<typeof Guid>
   >
+  /**
+   * Keys allowed to read the private s9pks that list them. Admin-only.
+   */
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof ReaderKey>>,
+    z.ZodRecord<z.ZodString, typeof ReaderKey>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -1851,8 +2115,29 @@ export const FullIndex: z.ZodObject<{
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
   trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
+  /**
+   * Keys allowed to read the private s9pks that list them. Admin-only.
+   */
+  readers: wire(
+    z.record(z.string(), ReaderKey).optional(),
+    z.record(z.string(), ReaderKey),
+  ).meta({
+    description:
+      'Keys allowed to read the private s9pks that list them. Admin-only.',
+  }),
 }).meta({
   id: 'FullIndex',
+})
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export const SubscribeStartResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof SubscribeStart]
+> = /* @__PURE__ */ z.union([SubscribeRes, SubscribeStart]).meta({
+  id: 'SubscribeStartResult',
+  description:
+    'Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.',
 })
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,
@@ -1882,6 +2167,57 @@ export const Api = {
           _RETURN: /* @__PURE__ */ z.record(z.string(), SignerInfo),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
+        },
+        reader: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                AddReaderParams,
+              ),
+              _RETURN: /* @__PURE__ */ Guid,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            edit: {
+              _PARAMS: /* @__PURE__ */ EditReaderParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            list: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
+              _RETURN: /* @__PURE__ */ z.record(z.string(), ReaderKey),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveReaderParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
         },
         remove: {
           _PARAMS: /* @__PURE__ */ RemoveAdminParams,
@@ -1948,7 +2284,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeIndexParams,
-          _RETURN: /* @__PURE__ */ SubscribeResult,
+          _RETURN: /* @__PURE__ */ SubscribeStartResult,
           _ITEM: /* @__PURE__ */ Revision,
           _FINAL: /* @__PURE__ */ z.null(),
         },
@@ -2318,46 +2654,6 @@ export const Api = {
     package: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
-        access: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            'add-reader': {
-              _PARAMS: /* @__PURE__ */ PackageReaderParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            get: {
-              _PARAMS: /* @__PURE__ */ z.intersection(
-                z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
-                  empty,
-                ),
-                GetPackageAccessParams,
-              ),
-              _RETURN: /* @__PURE__ */ PackageAccess,
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            'remove-reader': {
-              _PARAMS: /* @__PURE__ */ PackageReaderParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            'set-private': {
-              _PARAMS: /* @__PURE__ */ SetPackagePrivateParams,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
         add: {
           _PARAMS: /* @__PURE__ */ AddPackageParams,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -2500,6 +2796,28 @@ export const Api = {
             remove: {
               _PARAMS: /* @__PURE__ */ RemovePackageSignerParams,
               _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
+        version: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            export: {
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                ExportPackageVersionParams,
+              ),
+              _RETURN: /* @__PURE__ */ PackageVersionExport,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },

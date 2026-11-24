@@ -10,6 +10,8 @@ import type { Api, RpcParamType, RpcReturnType } from './bindings'
 export abstract class ApiService {
   abstract login(params: LoginReq): Promise<RpcReturnType<Api, 'auth.login'>>
   abstract logout(): Promise<RpcReturnType<Api, 'auth.logout'>>
+  /** Rejects while this browser's key is not enrolled, without signing out. */
+  abstract checkEnrollment(): Promise<unknown>
   abstract exec(params: ExecReq): Promise<ExecRes>
   abstract getFile(params: GetFileReq): Promise<GetFileRes>
   abstract setFile(params: SetFileReq): Promise<null>
@@ -17,6 +19,7 @@ export abstract class ApiService {
   abstract setUci(params: SetUciReq): Promise<SetUciRes>
   abstract systemInfo(timeout?: number): Promise<SystemInfoRes>
   abstract configCheck(): Promise<ConfigCheck>
+  abstract profilesWanOverlaps(): Promise<WanOverlap[]>
   abstract systemNewerVersions(): Promise<VersionInfo[]>
   /** Cancels observation, never an accepted update. A successful terminal precedes the reboot. */
   abstract systemUpdate(
@@ -206,6 +209,7 @@ export type SetUciReq = RpcParamType<Api, 'uci.set'>
 export type SetUciRes = RpcReturnType<Api, 'uci.set'>
 
 export type SystemInfoRes = RpcReturnType<Api, 'system.info'>
+export type WanOverlap = Bindings.WanOverlap
 
 export type ConfigCheck = RpcReturnType<Api, 'config.check'>
 
