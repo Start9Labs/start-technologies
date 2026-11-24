@@ -48,7 +48,7 @@ fn union(selectors: &[(&str, &[&str], Option<usize>)]) -> Projection {
 }
 
 /// A replica re-projected to the wider projection, then extended, holds its projection.
-fn assert_extends(held: &Projection, wider: &Projection, value: &Value) {
+fn assert_extends(held: &Projection, wider: &Projection, value: &OrdValue) {
     let mut replica = wider.project_root(&held.project_root(value));
     let extension = held.extension(wider, value);
     let before = replica.clone();
@@ -196,7 +196,7 @@ fn value() -> impl Strategy<Value = OrdValue> {
 
 #[test]
 fn extensions_add_exactly_what_a_wider_projection_keeps() {
-    let value = json!({
+    let value = ord_json!({
         "a": { "x": { "b": 1, "c": 2 }, "y": { "b": 3 } },
         "b": { "a": [1, 2] },
         "arr": [{ "a": 1, "b": 2 }, { "a": 3, "b": 4 }],

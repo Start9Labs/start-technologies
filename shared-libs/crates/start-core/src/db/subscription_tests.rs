@@ -172,7 +172,7 @@ fn selectors_join_the_simple_projection_with_their_own_exclusions() {
     }))
     .unwrap();
     let projection = Projection::try_from(params).unwrap();
-    let value = imbl_value::json!({
+    let value = imbl_value::ord_json!({
         "packageData": { "x": { "releaseNotes": "kept" } },
         "registryIndexes": { "r": { "package": { "packages": { "y": { "versions": {
             "1.0.0:0": { "title": "Y", "releaseNotes": "dropped" },
@@ -181,7 +181,7 @@ fn selectors_join_the_simple_projection_with_their_own_exclusions() {
     });
     assert_eq!(
         projection.project_root(&value),
-        imbl_value::json!({
+        imbl_value::ord_json!({
             "packageData": { "x": { "releaseNotes": "kept" } },
             "registryIndexes": { "r": { "package": { "packages": { "y": { "versions": {
                 "1.0.0:0": { "title": "Y" },

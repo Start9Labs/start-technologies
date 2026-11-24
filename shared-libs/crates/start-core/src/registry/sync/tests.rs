@@ -693,7 +693,7 @@ fn removal_and_os_switch_reject_in_flight_snapshots_and_prune_old_caches() {
         .as_value_mut()
         .as_object_mut()
         .unwrap()
-        .insert("registryIndexes".into(), json!({ url().as_str(): {} }));
+        .insert("registryIndexes".into(), imbl_value::ord_json!({ url().as_str(): {} }));
     let desired = subscriptions(&db.as_public().as_server_info().de().unwrap());
     reconcile(&mut db, &desired, false).unwrap();
     assert!(db.as_private().as_value().get("registryIndexes").is_none());
@@ -952,16 +952,16 @@ fn the_public_index_follows_live_replayed_and_snapshot_updates() {
             }]),
         )
     };
-    ingest(&mut db, start(1, to_value(&index()).unwrap(), None)).unwrap();
-    assert_eq!(long(&db), json!("Test"));
+    ingest(&mut db, start(1, to_ord_value(&index()).unwrap(), None)).unwrap();
+    assert_eq!(long(&db), OrdValue::from("Test"));
     ingest(&mut db, SubscriptionEvent::Revision(detail(2, "Updated"))).unwrap();
-    assert_eq!(long(&db), json!("Updated"));
+    assert_eq!(long(&db), OrdValue::from("Updated"));
     ingest(
         &mut db,
         start(3, OrdValue::Null, Some(vec![detail(3, "Replayed")])),
     )
     .unwrap();
-    assert_eq!(long(&db), json!("Replayed"));
+    assert_eq!(long(&db), OrdValue::from("Replayed"));
     publish_snapshot(
         &mut db,
         &Subscription::Index(url()),
@@ -969,7 +969,7 @@ fn the_public_index_follows_live_replayed_and_snapshot_updates() {
         &device(),
     )
     .unwrap();
-    assert_eq!(long(&db), json!("Test"));
+    assert_eq!(long(&db), OrdValue::from("Test"));
 }
 
 #[tokio::test]

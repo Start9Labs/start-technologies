@@ -231,7 +231,7 @@ impl Broadcast {
         &mut self,
         id: u64,
         projection: Projection,
-        root: &Value,
+        root: &OrdValue,
         revision: u64,
     ) -> bool {
         let Some((ptr, held)) = self.projected.remove(&id) else {
@@ -244,7 +244,7 @@ impl Broadcast {
         else {
             return false;
         };
-        let value = ptr.get(root).unwrap_or(&Value::Null);
+        let value = ptr.get(root).unwrap_or(&OrdValue::Null);
         let extension = Revision {
             id: revision,
             patch: held.extension(&projection, value),
