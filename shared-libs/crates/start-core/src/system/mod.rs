@@ -1249,95 +1249,14 @@ pub struct SmtpValue {
 
 rpc_toolkit::reflect_ts!(SmtpValue);
 rpc_toolkit::ts_export!(SmtpValue, namespaces = [""]);
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, VisitFields)]
-#[serde(rename_all = "camelCase")]
-pub struct SmtpInfo {
-    pub host: String,
-    pub port: u16,
-    pub from: String,
-    pub username: String,
-    pub password_set: bool,
-    #[serde(default)]
-    pub security: SmtpSecurity,
-}
-
-rpc_toolkit::reflect_ts!(SmtpInfo);
-rpc_toolkit::ts_export!(SmtpInfo, namespaces = [""]);
-
-impl From<&SmtpValue> for SmtpInfo {
-    fn from(smtp: &SmtpValue) -> Self {
-        Self {
-            host: smtp.host.clone(),
-            port: smtp.port,
-            from: smtp.from.clone(),
-            username: smtp.username.clone(),
-            password_set: smtp.password.is_some(),
-            security: smtp.security,
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Parser, VisitFields)]
-#[group(skip)]
-#[serde(rename_all = "camelCase")]
-pub struct SetSmtpParams {
-    #[arg(long, help = "help.arg.smtp-host")]
-    pub host: String,
-    #[arg(long, help = "help.arg.smtp-port")]
-    pub port: u16,
-    #[arg(long, help = "help.arg.smtp-from")]
-    pub from: String,
-    #[arg(long, help = "help.arg.smtp-username")]
-    pub username: String,
-    #[arg(long, help = "help.arg.smtp-password")]
-    pub password: Option<String>,
-    #[arg(long, help = "help.arg.smtp-keep-password")]
-    #[serde(default)]
-    pub keep_password: bool,
-    #[arg(long, help = "help.arg.smtp-security")]
-    #[serde(default)]
-    pub security: SmtpSecurity,
-}
-
-rpc_toolkit::reflect_ts!(SetSmtpParams);
-rpc_toolkit::ts_export!(SetSmtpParams, namespaces = [""]);
-pub async fn set_system_smtp(
-    ctx: RpcContext,
-    SetSmtpParams {
-        host,
-        port,
-        from,
-        username,
-        password,
-        keep_password,
-        security,
-    }: SetSmtpParams,
-) -> Result<(), Error> {
+pub async fn set_system_smtp(ctx: RpcContext, smtp: SmtpValue) -> Result<(), Error> {
+    let smtp = Some(smtp);
     ctx.db
         .mutate(|db| {
-            let password = match password {
-                Some(password) => Some(password),
-                None if keep_password => db
-                    .as_private()
-                    .as_smtp()
-                    .de()?
-                    .and_then(|saved| saved.password),
-                None => None,
-            };
-            let smtp = SmtpValue {
-                host,
-                port,
-                from,
-                username,
-                password,
-                security,
-            };
             db.as_public_mut()
                 .as_server_info_mut()
                 .as_smtp_mut()
-                .ser(&Some(SmtpInfo::from(&smtp)))?;
-            db.as_private_mut().as_smtp_mut().ser(&Some(smtp))
+                .ser(&smtp)
         })
         .await
         .result?;
@@ -1349,8 +1268,7 @@ pub async fn clear_system_smtp(ctx: RpcContext) -> Result<(), Error> {
             db.as_public_mut()
                 .as_server_info_mut()
                 .as_smtp_mut()
-                .ser(&None)?;
-            db.as_private_mut().as_smtp_mut().ser(&None)
+                .ser(&None)
         })
         .await
         .result?;
@@ -1395,9 +1313,8 @@ pub struct TestSmtpParams {
     pub to: String,
     #[arg(long, help = "help.arg.smtp-username")]
     pub username: String,
-    /// Omitted, uses the saved password for the same host, port and username.
     #[arg(long, help = "help.arg.smtp-password")]
-    pub password: Option<String>,
+    pub password: String,
     #[arg(long, help = "help.arg.smtp-security")]
     #[serde(default)]
     pub security: SmtpSecurity,
@@ -1406,7 +1323,7 @@ pub struct TestSmtpParams {
 rpc_toolkit::reflect_ts!(TestSmtpParams);
 rpc_toolkit::ts_export!(TestSmtpParams, namespaces = [""]);
 pub async fn test_smtp(
-    ctx: RpcContext,
+    _: RpcContext,
     TestSmtpParams {
         host,
         port,
@@ -1422,19 +1339,6 @@ pub async fn test_smtp(
     use lettre::transport::smtp::client::{Tls, TlsParameters};
     use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
-    let password = match password {
-        Some(password) => password,
-        None => ctx
-            .db
-            .peek()
-            .await
-            .as_private()
-            .as_smtp()
-            .de()?
-            .filter(|saved| saved.host == host && saved.port == port && saved.username == username)
-            .and_then(|saved| saved.password)
-            .unwrap_or_default(),
-    };
     let creds = Credentials::new(username, password);
     let message = Message::builder()
         .from(from.parse()?)
