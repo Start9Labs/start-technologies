@@ -362,21 +362,23 @@ mod tests {
         let mut fixture = to_value(&Database::init(&account, false, None, None).unwrap()).unwrap();
         let lower_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         let higher_id = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ";
-        let volume = to_value(&SharedVolume::new("Photos".into(), SharedVolumeSource::Local))
-            .unwrap();
+        let volume = to_value(&SharedVolume::new(
+            "Photos".into(),
+            SharedVolumeSource::Local,
+        ))
+        .unwrap();
         fixture["public"]["sharedVolumes"] = json!({
             higher_id.to_string(): volume.clone(),
             lower_id.to_string(): volume,
         });
         fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(3);
         assert_eq!(
-            fixture["public"]["sharedVolumes"]
+            &**fixture["public"]["sharedVolumes"]
                 .as_object()
                 .unwrap()
                 .keys()
                 .next()
-                .unwrap()
-                .as_str(),
+                .unwrap(),
             higher_id
         );
 

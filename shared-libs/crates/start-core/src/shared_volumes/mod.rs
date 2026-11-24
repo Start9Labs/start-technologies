@@ -1146,7 +1146,7 @@ mod tests {
         let retained = SharedVolumeId::new();
         recover_pending_deletions(
             &mut volumes,
-            &imbl_value::json!({
+            &imbl_value::ord_json!({
                 "retainedSharedVolumes": { retained.to_string(): "Photos" }
             }),
         )
@@ -1175,7 +1175,7 @@ mod tests {
         use crate::db::model::DatabaseModel;
         let photos = SharedVolumeId::new();
         let music = SharedVolumeId::new();
-        let mut db = DatabaseModel::from(imbl_value::json!({
+        let mut db = DatabaseModel::from(imbl_value::ord_json!({
             "public": { "sharedVolumes": {
                 photos.to_string(): to_value(&SharedVolume::new("Photos".into(), SharedVolumeSource::Local)).unwrap(),
                 music.to_string(): to_value(&SharedVolume::new("Music".into(), SharedVolumeSource::Local)).unwrap(),
