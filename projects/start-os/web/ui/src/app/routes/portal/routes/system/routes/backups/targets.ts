@@ -150,7 +150,9 @@ const TARGET_SOURCES: SourcePickerData = {
             >
               {{ statuses[target.availability] | i18n }}
               @if (target.error; as error) {
-                <tui-icon [tuiTooltip]="error" />
+                <tui-icon [tuiTooltip]="tooltip">
+                  <ng-template #tooltip>{{ error }}</ng-template>
+                </tui-icon>
               }
             </td>
             <td [attr.data-label]="'Last backup' | i18n">

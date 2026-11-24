@@ -37,6 +37,8 @@ use crate::sign::{AnySigningKey, Signer};
 mod continuation;
 #[cfg(test)]
 mod progress_tests;
+#[cfg(test)]
+mod registry_tests;
 pub use continuation::CliWebSocketContext;
 
 /// A configured target whose `.local` host is resolved on first use, so an
@@ -76,6 +78,8 @@ pub struct CliContextSeed {
     /// Selected server name before `.local` resolution changes the dial address.
     pub host_identity: Option<InternedString>,
     pub registry_url: Option<LazyUrl>,
+    /// The selected registry as a server saves it, without the RPC path or `.local` resolution.
+    pub registry_base_url: Option<Url>,
     pub registry_profiles: Option<Profiles>,
     pub registry_hostname: Vec<InternedString>,
     pub registry_listen: Option<SocketAddr>,
@@ -156,12 +160,15 @@ impl CliContext {
             .build()
             .with_kind(ErrorKind::Network)?;
 
+        let registry = resolve_target(config.registry.as_ref())?;
         Ok(CliContext(Arc::new(CliContextSeed {
             runtime: OnceCell::new(),
             base_url: url.into(),
-            registry_url: resolve_target(config.registry.as_ref())?
-                .map(|registry| registry_rpc_url(&registry).map(LazyUrl::from))
+            registry_url: registry
+                .as_ref()
+                .map(|registry| registry_rpc_url(registry).map(LazyUrl::from))
                 .transpose()?,
+            registry_base_url: registry,
             registry_profiles: config.registry,
             registry_hostname: config.registry_hostname.unwrap_or_default(),
             registry_listen: config.registry_listen,
