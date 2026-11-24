@@ -1802,7 +1802,10 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'package.force-stop': async params => {
       await pauseFor(2000)
-      const status = this.cache.value.value.packageData[params.id]?.statusInfo
+      // Eligibility uses mock-server state independently of client subscription projections.
+      const status = (
+        this.mockData('/packageData') as DataModel['packageData']
+      )[params.id]?.statusInfo
       if (!status || forceStopAt(status, Date.now()) !== params.forceStopAt) {
         throw new Error('Service is not eligible for force stop')
       }

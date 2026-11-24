@@ -1453,7 +1453,7 @@ test('StartOS mock routes keep build identity and UPS discovery and expose no re
   )
 })
 
-test('StartOS force-stop mock checks the live episode rather than its seed fixture', async () => {
+test('StartOS force-stop mock checks its live episode independently of seed and client cache', async () => {
   const oldDeadline = new Date(Date.now() - 120000).toISOString()
   const deadline = new Date(Date.now() - 60000).toISOString()
   const status = {
@@ -1480,14 +1480,18 @@ test('StartOS force-stop mock checks the live episode rather than its seed fixtu
       ['./md-sample.md', ''],
     ]),
   )
-  const cache = new BehaviorSubject({
-    value: { packageData: { service: { statusInfo: status } } },
-  })
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
-  dependencies.set(tokens.PATCH_CACHE, cache)
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
+  await client.mockRevision([
+    {
+      op: 'replace',
+      path: '/packageData/service/statusInfo',
+      value: status,
+    },
+  ])
   await assert.rejects(
     client.rpc.package.forceStop({ id: 'service', forceStopAt: oldDeadline }),
     /not eligible/,
@@ -1510,11 +1514,6 @@ test('StartOS force-stop mock checks the live episode rather than its seed fixtu
       },
     },
   ])
-  cache.next({
-    value: {
-      packageData: { service: { statusInfo: revisions[0].patch[0].value } },
-    },
-  })
   await assert.rejects(
     client.rpc.package.forceStop({ id: 'service', forceStopAt: deadline }),
     /not eligible/,
