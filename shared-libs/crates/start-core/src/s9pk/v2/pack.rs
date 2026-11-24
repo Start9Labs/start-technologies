@@ -1165,11 +1165,11 @@ mod test {
             "{schemas}"
         );
         assert!(
-            schemas.contains("\"emulateMissing\": wire(z.boolean().nullable().optional(), z.boolean().nullable())"),
+            schemas.contains("\"emulateMissing\": z.boolean().nullable().default(() => (null))"),
             "{schemas}"
         );
         assert!(
-            schemas.contains("\"emulateMissingAs\": wire(z.string().nullable().optional(), z.string().nullable())"),
+            schemas.contains("\"emulateMissingAs\": z.string().nullable().default(() => (null))"),
             "{schemas}"
         );
         assert!(
