@@ -20,7 +20,7 @@ import {
 } from '@start9labs/shared'
 import { createRpcClient, createRpcStreamClient } from '@start9labs/start-core'
 import type { RpcStreamOptions } from '@start9labs/start-core'
-import { Dump, pathFromArray } from 'patch-db-client'
+import { Dump, pathFromArray, Projection } from 'patch-db-client'
 import { catchError } from 'rxjs'
 import type { Observable } from 'rxjs'
 import type { WebSocketSubject } from 'rxjs/webSocket'
@@ -142,6 +142,7 @@ export class LiveApiService extends ApiService {
   override watchDb$(
     path: string[],
     since: DatabaseCursor | null,
+    projection: Projection | null = null,
   ): Observable<DatabaseUpdate<unknown>> {
     return databaseSubscription<unknown>(
       this.sockets,
@@ -149,6 +150,7 @@ export class LiveApiService extends ApiService {
       this.identity,
       () => since,
       pathFromArray(['public', ...path]),
+      projection,
     ).pipe(catchError(error => this.raiseError(error)))
   }
 

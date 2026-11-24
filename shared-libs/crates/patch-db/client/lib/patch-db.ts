@@ -221,18 +221,18 @@ export class PatchDB<T extends { [key: string]: any }> {
   }
 
   protected handleRevision(revision: Revision, cache: Dump<T>): void {
-    // apply operations
     revision.patch.forEach(op => {
       applyOperation(cache, op)
     })
-    // @claude fix #20: Previously, arrayFromPath(op.path) was called for every
-    // (watchedNode, patchOp) pair — O(watchedNodes × patchOps) redundant parsing.
-    // Pre-converting once outside the loop makes it O(patchOps + watchedNodes).
+    this.publishRevision(revision, cache)
+  }
+
+  /** Watchers observe complete revisions; callers must apply every operation first. */
+  protected publishRevision(revision: Revision, cache: Dump<T>): void {
     const patchArrs = revision.patch.map(op => ({
       path: op.path,
       arr: arrayFromPath(op.path),
     }))
-    // update watched nodes
     Object.entries(this.watchedNodes).forEach(([watchedPath, { pathArr }]) => {
       const match = patchArrs.find(
         ({ arr }) => startsWith(pathArr, arr) || startsWith(arr, pathArr),

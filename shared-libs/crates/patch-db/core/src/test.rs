@@ -116,6 +116,62 @@ async fn catch_up_replays_scoped_revisions_within_its_epoch() {
 }
 
 #[tokio::test]
+async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() {
+    let db = PatchDb::in_memory();
+    db.put(
+        &ROOT,
+        &ord_json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
+    )
+    .await
+    .unwrap();
+    let pkgs: JsonPointer = "/pkgs".parse().unwrap();
+    let projection =
+        patch_db::Projection::new(None, vec![], vec!["/*/icon".parse().unwrap()]).unwrap();
+    let (epoch, catchup, mut sub) = db
+        .catch_up_and_sub_projected(pkgs.clone(), projection.clone(), None)
+        .await;
+    let Catchup::Dump(dump) = catchup else {
+        panic!("expected a dump")
+    };
+    assert_eq!(dump.value, ord_json!({ "x": { "state": 1 } }));
+    assert_eq!(
+        db.dump_projected(&pkgs, &projection).await.value,
+        dump.value
+    );
+    let (_, _, mut shared) = db
+        .catch_up_and_sub_projected(pkgs.clone(), projection.clone(), None)
+        .await;
+
+    db.put(&"/pkgs/x/icon".parse::<JsonPointer>().unwrap(), &"bigger")
+        .await
+        .unwrap();
+    db.put(
+        &"/pkgs/y".parse::<JsonPointer>().unwrap(),
+        &ord_json!({ "state": 2, "icon": "big" }),
+    )
+    .await
+    .unwrap();
+    let streamed = sub.recv().await.unwrap();
+    assert_eq!(streamed.id, 3);
+    assert_eq!(shared.recv().await.unwrap().id, 3);
+    let mut value = dump.value.clone();
+    json_patch::patch(&mut value, &streamed.patch).unwrap();
+    assert_eq!(
+        value,
+        ord_json!({ "x": { "state": 1 }, "y": { "state": 2 } })
+    );
+
+    let (_, catchup, _) = db
+        .catch_up_and_sub_projected(pkgs, projection, Some((&epoch, dump.id)))
+        .await;
+    let Catchup::Replay { id, revisions } = catchup else {
+        panic!("expected a replay")
+    };
+    assert_eq!(id, 3);
+    assert_eq!(revisions.iter().map(|rev| rev.id).collect::<Vec<_>>(), [3]);
+}
+
+#[tokio::test]
 async fn json_catch_up_replays_within_its_epoch_and_streams_later_revisions() {
     let db = PatchDb::in_memory();
     db.put(

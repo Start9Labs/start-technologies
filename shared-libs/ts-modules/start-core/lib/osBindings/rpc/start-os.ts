@@ -164,7 +164,6 @@ export type DbCursorInput = z.input<typeof schemas.DbCursor>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type DnsSource = z.output<typeof schemas.DnsSource>
 export type Dump = z.output<typeof schemas.Dump>
-export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type EchoParamsInput = z.input<typeof schemas.EchoParams>
 export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
 export type EndpointParamsInput = z.input<typeof schemas.EndpointParams>
@@ -305,6 +304,11 @@ export type Percentage = z.output<typeof schemas.Percentage>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
 export type ProgressUnits = z.output<typeof schemas.ProgressUnits>
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
 export type PushKeys = z.output<typeof schemas.PushKeys>
 export type PushKeysInput = z.input<typeof schemas.PushKeys>
 export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
@@ -496,6 +500,7 @@ export type Description = z.output<typeof schemas.Description>
  * Without an override or gateway-provided resolvers, the public fallback is used.
  */
 export type DnsSettings = z.output<typeof schemas.DnsSettings>
+export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type EditGatewayParamsInput = z.input<typeof schemas.EditGatewayParams>
 export type EppInfo = z.output<typeof schemas.EppInfo>
 export type EppParamsInput = z.input<typeof schemas.EppParams>

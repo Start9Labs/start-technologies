@@ -1,4 +1,5 @@
-import type { Dump, Revision, Update } from 'patch-db-client'
+import { normalizeProjection } from 'patch-db-client'
+import type { Dump, Projection, Revision, Update } from 'patch-db-client'
 import { createRpcStreamClient } from '@start9labs/start-core'
 import type { RPC, RpcStreamClient } from '@start9labs/start-core'
 import {
@@ -38,6 +39,7 @@ export function databaseSubscription<T>(
   identity: ServerIdentityService,
   since: () => DatabaseCursor | null = () => null,
   pointer?: string,
+  projection?: Projection | null,
 ): Observable<DatabaseUpdate<T>> {
   return withAbortSignal(signal => {
     const client = createRpcStreamClient<RpcStreamClient<RPC.StartOS>>(
@@ -50,6 +52,7 @@ export function databaseSubscription<T>(
           {
             ...(cursor ? { since: cursor } : {}),
             ...(pointer ? { pointer } : {}),
+            ...normalizeProjection(projection),
           },
           { signal },
         )

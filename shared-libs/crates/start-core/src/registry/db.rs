@@ -16,8 +16,8 @@ use tracing::instrument;
 
 use crate::context::CliContext;
 pub use crate::db::{
-    ApplyWithPathParams as ApplyParams, DbCursor, DumpParams, SubscribeRes, SubscribeStart,
-    SubscribeStartResult as SubscribeIndexResult,
+    ApplyWithPathParams as ApplyParams, DbCursor, DumpParams, ProjectionParams, SubscribeRes,
+    SubscribeStart, SubscribeStartResult as SubscribeIndexResult,
 };
 use crate::prelude::*;
 use crate::registry::RegistryDatabase;
@@ -79,6 +79,9 @@ pub fn db_api<C: Context>() -> ParentHandler<C> {
 pub struct CliDumpParams {
     #[arg(long = "pointer", short = 'p', help = "help.arg.db-pointer")]
     pointer: Option<JsonPointer>,
+    #[command(flatten)]
+    #[serde(flatten)]
+    projection: ProjectionParams,
     #[arg(help = "help.arg.database-path")]
     path: Option<PathBuf>,
 }
@@ -89,17 +92,34 @@ async fn cli_dump(
         context,
         parent_method,
         method,
-        params: CliDumpParams { pointer, path },
+        params:
+            CliDumpParams {
+                pointer,
+                projection,
+                path,
+            },
         ..
     }: HandlerArgs<CliContext, CliDumpParams>,
 ) -> Result<Dump, RpcError> {
     let dump = if let Some(path) = path {
-        PatchDb::open(path).await?.dump(&ROOT).await
+        PatchDb::open(path)
+            .await?
+            .dump_projected(
+                &pointer.as_ref().map_or(ROOT, |p| p.borrowed()),
+                &projection.try_into()?,
+            )
+            .await
     } else {
         let method = parent_method.into_iter().chain(method).join(".");
         from_value::<Dump>(
             context
-                .call_remote::<RegistryContext>(&method, imbl_value::json!({ "pointer": pointer }))
+                .call_remote::<RegistryContext>(
+                    &method,
+                    to_value(&DumpParams {
+                        pointer,
+                        projection,
+                    })?,
+                )
                 .await?,
         )?
     };
@@ -107,10 +127,19 @@ async fn cli_dump(
     Ok(dump)
 }
 
-pub async fn dump(ctx: RegistryContext, DumpParams { pointer }: DumpParams) -> Result<Dump, Error> {
+pub async fn dump(
+    ctx: RegistryContext,
+    DumpParams {
+        pointer,
+        projection,
+    }: DumpParams,
+) -> Result<Dump, Error> {
     Ok(ctx
         .db
-        .dump(&pointer.as_ref().map_or(ROOT, |p| p.borrowed()))
+        .dump_projected(
+            &pointer.as_ref().map_or(ROOT, |p| p.borrowed()),
+            &projection.try_into()?,
+        )
         .await)
 }
 
