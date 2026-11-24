@@ -835,7 +835,7 @@ Display the current diagnostic error.
 
 Restart the server from diagnostic mode.
 
-### `start-cli diagnostic disk forget <GUID>`
+### `start-cli diagnostic disk forget`
 
 Forget a disk so the system no longer expects it.
 
