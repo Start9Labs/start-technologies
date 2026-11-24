@@ -1126,4 +1126,5 @@ export default {
   1331: 'Dieser Browser ist noch nicht registriert',
   1332: 'Über die Befehlszeile anmelden',
   1333: 'Diesen Browser registrieren',
+  1334: 'Hilfe erhalten',
 } satisfies i18n

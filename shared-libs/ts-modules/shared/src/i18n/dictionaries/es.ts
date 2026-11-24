@@ -1126,4 +1126,5 @@ export default {
   1331: 'Este navegador aún no está registrado',
   1332: 'Iniciar sesión desde la línea de comandos',
   1333: 'Registrar este navegador',
+  1334: 'Obtener ayuda',
 } satisfies i18n

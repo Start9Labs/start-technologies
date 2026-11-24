@@ -10,6 +10,7 @@ use tracing::instrument;
 
 use super::target::BackupTargetId;
 use crate::PackageId;
+use crate::account::AccountInfo;
 use crate::backup::os::OsBackup;
 use crate::context::setup::SetupResult;
 use crate::context::{CliContext, RpcContext, SetupContext};
@@ -137,6 +138,17 @@ fn restored_hostname(
     requested_hostname.unwrap_or_else(|| repair_hostname(backup_hostname.as_ref()))
 }
 
+fn restore_account(
+    mut account: AccountInfo,
+    password: Option<&str>,
+    recovery_password: &str,
+    hostname: Option<ServerHostname>,
+) -> Result<AccountInfo, Error> {
+    account.set_password(password.unwrap_or(recovery_password))?;
+    account.hostname = restored_hostname(account.hostname, hostname);
+    Ok(account)
+}
+
 #[instrument(skip_all)]
 pub async fn recover_full_server(
     ctx: &SetupContext,
@@ -165,16 +177,12 @@ pub async fn recover_full_server(
             .with_ctx(|_| (ErrorKind::Filesystem, os_backup_path.display().to_string()))?,
     )?;
 
-    if let Some(password) = password {
-        os_backup.account.password = argon2::hash_encoded(
-            password.as_bytes(),
-            &rand::random::<[u8; 16]>()[..],
-            &argon2::Config::rfc9106_low_mem(),
-        )
-        .with_kind(ErrorKind::PasswordHashGeneration)?;
-    }
-
-    os_backup.account.hostname = restored_hostname(os_backup.account.hostname, hostname);
+    os_backup.account = restore_account(
+        os_backup.account,
+        password.as_deref(),
+        recovery_password,
+        hostname,
+    )?;
 
     sync_kiosk(kiosk).await?;
 
@@ -304,10 +312,30 @@ async fn restore_packages<G: GenericMountGuard>(
 
 #[cfg(test)]
 mod test {
+    use std::time::SystemTime;
+
     use super::*;
 
     fn hostname(value: &str) -> ServerHostname {
         ServerHostname::new(InternedString::intern(value)).unwrap()
+    }
+
+    fn round_trip_os_backup() -> OsBackup {
+        let account = AccountInfo::new(
+            "initial-master-password",
+            SystemTime::now(),
+            Some(hostname("preserved-host")),
+        )
+        .unwrap();
+        let raw = IoFormat::Json
+            .to_vec(&OsBackup {
+                account,
+                ui: Value::Null,
+            })
+            .unwrap();
+        let os_backup: OsBackup = IoFormat::Json.from_slice(&raw).unwrap();
+        assert!(os_backup.account.password.is_empty());
+        os_backup
     }
 
     #[test]
@@ -335,6 +363,43 @@ mod test {
             )
             .as_ref(),
             "replacement-host"
+        );
+    }
+
+    #[test]
+    fn restore_keeps_backup_password_when_new_password_is_skipped() {
+        let os_backup = round_trip_os_backup();
+        let account =
+            restore_account(os_backup.account, None, "backup-recovery-password", None).unwrap();
+        let db = Database::init(&account, false, None, None).unwrap();
+        assert!(
+            crate::auth::check_password(&db.private.password, "backup-recovery-password").is_ok()
+        );
+        assert_eq!(
+            crate::auth::check_password(&db.private.password, "wrong-password")
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectPassword
+        );
+    }
+
+    #[test]
+    fn restore_uses_new_password_when_provided() {
+        let os_backup = round_trip_os_backup();
+        let account = restore_account(
+            os_backup.account,
+            Some("replacement-password"),
+            "backup-recovery-password",
+            None,
+        )
+        .unwrap();
+        let db = Database::init(&account, false, None, None).unwrap();
+        assert!(crate::auth::check_password(&db.private.password, "replacement-password").is_ok());
+        assert_eq!(
+            crate::auth::check_password(&db.private.password, "backup-recovery-password")
+                .unwrap_err()
+                .kind,
+            ErrorKind::IncorrectPassword
         );
     }
 }

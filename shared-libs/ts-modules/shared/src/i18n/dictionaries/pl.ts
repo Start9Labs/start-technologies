@@ -1126,4 +1126,5 @@ export default {
   1331: 'Ta przeglądarka nie jest jeszcze zarejestrowana',
   1332: 'Zaloguj się z wiersza poleceń',
   1333: 'Zarejestruj tę przeglądarkę',
+  1334: 'Uzyskaj pomoc',
 } satisfies i18n

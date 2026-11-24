@@ -1126,4 +1126,5 @@ export default {
   1331: "Ce navigateur n'est pas encore enregistré",
   1332: 'Se connecter depuis la ligne de commande',
   1333: 'Enregistrer ce navigateur',
+  1334: "Obtenir de l'aide",
 } satisfies i18n
