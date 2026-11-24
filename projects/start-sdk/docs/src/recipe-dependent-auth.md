@@ -7,7 +7,7 @@ A binding gated with `proxy.auth` challenges every client on every address, the 
 **On the gated service:**
 
 1. Generate an `apiKey` in `setupOnInit` whenever it is missing (`utils.getDefaultString`), and write it to `credentials.json` on a `public` volume through a `FileHelper.json` model. Declare `public` in the manifest's `volumes` and include it in `sdk.Backups.ofVolumes(...)`.
-2. Admit the key at the gate in the scheme the dependents' client sends. If the binding already takes that scheme, add the key to its `tokens` or `credentials` list. If it doesn't — browsers need Basic and an OpenAI-compatible client only sends Bearer — bind a second `MultiHost` on the same internal port with `auth: { type: 'bearer', tokens: [apiKey] }` and export a `type: 'api'` interface on it. One binding takes exactly one `ProxyAuth`.
+2. Admit the key at the gate in the scheme the dependents' client sends. If the binding already takes that scheme, add the key to its `tokens` or `credentials` list. If it doesn't — browsers need Basic and an OpenAI-compatible client only sends Bearer — bind a second `MultiHost` on the same internal port with `auth: { type: 'bearer', tokens: [apiKey] }`. Leave that host [bridge-only](service-to-service.md#exposing-a-bridge-only-port) if only dependents use it; export a `type: 'api'` interface only when off-server clients need it too. One binding takes exactly one `ProxyAuth`.
 3. Export the key-gated host id and the internal port from `startos/utils.ts`.
 4. Optionally, add an action that shows the key and rotates it. `setupInterfaces` reads the key with `.const()`, so a rotation rebinds the gate without restarting the daemon.
 

@@ -243,7 +243,7 @@ sdk.createInterface(effects, {
   id: 'unique-id', // How you find this interface under its host
   description: i18n('Description'), // Shown in UI (wrap with i18n)
   type: 'ui', // 'ui', 'api', or 'p2p'
-  masked: false, // Hide URLs with sensitive credentials?
+  masked: false,
   schemeOverride: null, // Override URL scheme (see below)
   username: null, // Auth username embedded in URL
   path: '/some/path/', // URL path
@@ -260,7 +260,7 @@ sdk.createInterface(effects, {
 | `type`                     | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                                                            |
 | `masked`                   | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. It hides the URL in the UI only: every installed service can read your exported interfaces, so never put a credential in `username`, `path` or `query`. |
 | `schemeOverride`           | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`.                                      |
-| `username`                 | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                                                         |
+| `username`                 | `string` \| `null`                                         | Username embedded in the URL (e.g., `https://username@example.com/route/`).                                                                                                                                         |
 | `path`                     | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                                                          |
 | `query`                    | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ network: 'mainnet' }`). Not for credentials — show a connection string that carries one from an action instead.                                                   |
 | `preferredLauncherAddress` | `string` \| `null` \| _omitted_                            | The URL of the address StartOS's **Open UI** control should prefer for this interface. See [Nominating an Address to Open](#nominating-an-address-to-open).                                                         |
@@ -650,7 +650,7 @@ An HTTP-proxied binding, with or without `addSsl`, reaches your container over I
 Gate an HTTP-proxied binding with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and are not forwarded. You do **not** need to build auth into the service or run a sidecar proxy to gate the addresses StartOS publishes.
 
 > [!WARNING]
-> The gate guards the proxy, not your container. Every service on the server shares one bridge, so another service can still dial your container's own IP and reach the port directly, ungated. Treat `proxy.auth` as protection from the network, not from other services: where the app holds something worth stealing (keys, funds, admin over another service), keep the app's own login on as well, and bind every port that is not proxied to `127.0.0.1` (see [Service-to-Service Networking](service-to-service.md)).
+> The gate guards the proxy, not your container. Every service on the server shares one bridge, so another service can still dial your container's own IP and reach the port directly, ungated. Treat `proxy.auth` as protection from the network, not from other services: where the app holds something worth stealing (keys, funds, admin over another service), keep the app's own login on as well. Bind listeners used only by your own daemons to loopback; ports consumed by other services or off-server clients must listen on the container's bridge addresses, including raw TCP, UDP and TLS-passthrough ports without an HTTP proxy (see [Service-to-Service Networking](service-to-service.md)).
 
 `auth` takes a `ProxyAuth`, which is one of two shapes:
 
@@ -759,7 +759,7 @@ await sdk.MultiHost.of(effects, apiHostId).bindPort(apiPort, {
 })
 ```
 
-**If it doesn't, bind a second host on the same internal port.** A binding takes exactly one `ProxyAuth`. When browsers need Basic and the dependents' clients only send Bearer — an OpenAI-compatible API is the usual case — the two can't share a host. Keep the browser interface on its host and add a key-gated `api` interface beside it, bound only once the key exists:
+**If it doesn't, bind a second host on the same internal port.** A binding takes exactly one `ProxyAuth`. When browsers need Basic and the dependents' clients only send Bearer — an OpenAI-compatible API is the usual case — the two can't share a host. Keep the browser interface on its host and bind a key-gated host beside it once the key exists. Leave it [bridge-only](service-to-service.md#exposing-a-bridge-only-port) when only dependents use it; export an `api` interface when off-server clients also need it:
 
 ```typescript
 if (apiKey) {

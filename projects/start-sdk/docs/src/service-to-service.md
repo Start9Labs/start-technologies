@@ -53,7 +53,7 @@ Three things make this correct, and each matters:
    | Dependency updated                            | **No** — its assigned port survives an update |
    | Dependency installed _after_ yours            | Once, to heal onto the now-resolvable address |
    | Dependency uninstalled                        | Once, to reconfigure to the absent state      |
-   | Dependency reinstalled, same port             | No                                            |
+   | Dependency reinstalled, same port             | Once, from the absent state                   |
    | Dependency reinstalled, new port              | Once, to heal                                 |
    | Conditional binding appears (e.g. LND unlock) | Once, then stable across lock/unlock          |
 
@@ -84,38 +84,42 @@ const addr = await sdk.host
   .const()
 ```
 
-When only your daemon needs the key and the app can read it from a file, [mount the volume into the subcontainer](recipe-mount-dependency.md) and point the app at it. When your package code needs the value — for an env var, a config file, an `Authorization` header — mount it into your own JS container and read it with a file model:
+When only your daemon needs the key and the app can read it from a file, [mount the volume into the subcontainer](recipe-mount-dependency.md) and point the app at it. When your package code needs the value — for an env var or an `Authorization` header — mount it into your own JS container and read it with a file model. Track the bridge address across `main` runs: an uninstall invalidates the mounted volume even if its old file remains readable, and a reinstall must remount the replacement volume.
 
 ```typescript
 const location = sdk.volumes.startos.subpath('llama-cpp-public')
 const credentials = FileHelper.json(`${location}/credentials.json`, z.looseObject({ apiKey: z.string().optional().catch(undefined) }))
+let mountedFor: string | null = null
 
-async function readApiKey(effects: T.Effects): Promise<string | null> {
+async function readApiKey(effects: T.Effects, bridgeAddress: string | null): Promise<string | null> {
+  const hasPublicVolume = await sdk.getServiceManifest(effects, 'llama-cpp', m => m?.volumes.includes('public') ?? false).const()
+  if (!bridgeAddress || !hasPublicVolume) {
+    mountedFor = null
+    return null
+  }
   try {
-    // Mounting again unmounts first, pulling the file out from under a .const() watcher.
-    const mounted = await fs.access(`${location}/credentials.json`).then(
-      () => true,
-      () => false,
-    )
-    if (!mounted) {
+    if (mountedFor !== bridgeAddress) {
       await fs.mkdir(location, { recursive: true })
       await sdk.mount(effects, {
         location,
         target: { packageId: 'llama-cpp', volumeId: 'public', subpath: null, readonly: true, idmap: [] },
       })
+      mountedFor = bridgeAddress
     }
     return (await credentials.read(c => c.apiKey).const(effects)) ?? null
   } catch {
-    return null // not installed, or too old to publish a key
+    return null
   }
 }
 ```
+
+Keep `mountedFor` at module scope, and call `await readApiKey(effects, addr)` in `setupMain` even when the resolved address is `null`. Reuse the mount while the address is unchanged: `sdk.mount` unmounts an existing mount first, which can invalidate an active file watcher.
 
 **When the app's client can't send the header** — upstream software that takes only a URL — run a small reverse proxy in your own package, bound to `127.0.0.1`, that adds `Authorization` and forwards to the dependency's bridge address. Point the app at the loopback address. The proxy is one more daemon in `setupMain`, configured from the resolved address and key like any other.
 
 - **Mount onto a volume you don't back up**, or the dependency's key lands in your backup.
 - **`.const()` restarts you when the dependency rotates its key**; `.once()` in an action, as above.
-- **Raise the dependency's `versionRange`** to the first release that publishes the key, so StartOS flags an older one instead of leaving you to dial a gate you can't pass.
+- **Raise the dependency's `versionRange`** to the first release that publishes the key and [guard the mount](dependencies.md#reaching-a-dependency). A reactive manifest check, as above, heals when an update adds the volume even if the bridge address stays unchanged.
 - **A missing key is absent, like a missing address**: omit it and let the health check go red. Don't send a placeholder.
 
 ## The Tor exception: always-on flags

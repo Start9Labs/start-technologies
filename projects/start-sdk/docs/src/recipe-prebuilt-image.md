@@ -8,7 +8,7 @@ This page assumes the service shape from [Set Up a Basic Service](recipe-basic-s
 
 Build the basic-service skeleton first, then apply these prebuilt-image concerns:
 
-1. **Verify the image before you pin it.** Do not guess a `org/name`. Confirm the exact repository exists, the tag you want is published, and it ships the architectures StartOS needs (`x86_64` and `aarch64` at minimum). Pin `images.<id>.source.dockerTag` to that confirmed `image:tag` and set `arch` accordingly. Pin an exact release, never `latest` or a bare major such as `17-alpine` — sidecars and every `FROM` in a `Dockerfile` included — so a rebuild can't change what ships without a change in the repo. See [Verify the image](#verify-the-image) below.
+1. **Verify the image before you pin it.** Do not guess a `org/name`. Confirm the exact repository exists, the tag you want is published, and it ships the architectures StartOS needs (`x86_64` and `aarch64` at minimum). Pin `images.<id>.source.dockerTag` to that confirmed `image:tag` and set `arch` accordingly. Pin an exact release, never `latest` or a bare major such as `17-alpine` — sidecars and every `FROM` in a `Dockerfile` included. Exact release tags can still be republished; use the manifest-list digest described below to pin the image's contents. See [Verify the image](#verify-the-image) below.
 2. **Mount _every_ path the image persists.** Inspect the image (or its docs) for all data and config paths — there is usually more than one (e.g. a config dir _and_ a downloads/data dir). Mount each one, or that data lands on the container's ephemeral filesystem and is lost on every restart. See [Mount all data paths](#mount-all-data-paths).
 3. **Expose every port the service needs — not just the web UI.** A torrent client needs its peer port; a mail server needs SMTP/IMAP; a database needs its wire port. Bind the UI in [`setupInterfaces()`](interfaces.md) and add the others via [Expose Multiple Interfaces](recipe-multi-interface.md). A constant like `peerPort` that is declared but never bound is a tell that a port was forgotten.
 4. **Run the image's entrypoint, and make it PID 1 if it has its own init system.** Use `sdk.useEntrypoint()` to keep the upstream startup behavior. An image that declares no `CMD` or `ENTRYPOINT` has none to keep: name its binary in `exec.command` instead. If the image bundles an init/supervisor — `s6-overlay` (every `linuxserver/*` image), `tini`, `dumb-init`, `supervisord` — set `runAsInit: true` on the daemon's `exec`, or the supervisor crashes because it is not PID 1. See [Images with their own init system](#images-with-their-own-init-system).
@@ -44,6 +44,8 @@ images: {
   },
 },
 ```
+
+For immutable image contents, append the registry's verified **manifest-list digest** to the release tag (`image:tag@sha256:<digest>`) in `dockerTag` and Dockerfile `FROM` references. A single architecture's manifest digest does not select the other architectures; use the multi-arch index digest and confirm the required platforms beneath it. Record the tag-and-digest bump procedure in `UPDATING.md`.
 
 ## Mount all data paths
 
