@@ -15,7 +15,7 @@ No setup protects against all four equally, and the setup that is best against o
 
 ## The Limit No Setup Removes
 
-Email between two people involves two mail providers: yours and theirs. When you write to someone on Gmail, Google receives and stores a readable copy, whatever you use on your end. Most of the people you write to use one of a few large providers, so a large share of your mail sits readable in their systems regardless of your choices.
+Email between two people involves two mail providers: yours and theirs. Unless you and the recipient use end-to-end encryption, writing to someone on Gmail gives Google a readable copy, whatever you use on your end. Most of the people you write to use one of a few large providers, so ordinary unencrypted correspondence with them sits readable in those systems regardless of where you host your own mailbox.
 
 What you control is your side: who holds **your** mailbox, your contacts and the record of everyone you correspond with.
 
@@ -24,7 +24,7 @@ What you control is your side: who holds **your** mailbox, your contacts and the
 Every message has two parts with different exposure:
 
 - **Content** — the body and attachments. Encryption can protect this.
-- **Metadata** — who sent it, to whom, when, from which IP address, and the subject line. Mail servers need most of this to deliver the message, so it stays readable to them in every setup except end-to-end encrypted mail between users of the same service, and even there the sender, recipient and timing remain visible.
+- **Metadata** — who sent it, to whom, when, from which IP address, and the subject line. End-to-end encryption still exposes routing information, including sender and recipient addresses and timing. Protection for subjects and other headers depends on the encryption format and the clients or service used.
 
 Metadata alone reveals a great deal: who you talk to, how often, and when. Treat it as no less sensitive than content.
 
@@ -41,14 +41,14 @@ Metadata alone reveals a great deal: who you talk to, how often, and when. Treat
 
 ## Comparing Setups
 
-| Setup                                            | Provider can read stored mail | Who holds your metadata               | Ties to your identity                      |
-| ------------------------------------------------ | ----------------------------- | ------------------------------------- | ------------------------------------------ |
-| Free large provider (Gmail, Outlook)             | Yes                           | The provider                          | Account details, phone number, sign-in IPs |
-| Privacy provider, its own address (Proton, Tuta) | No                            | The provider                          | Whatever you gave at signup                |
-| Your domain on a privacy provider                | No                            | The provider                          | Your domain, plus account and payment      |
-| Self-hosted on StartOS, with a relay             | Nobody but you                | You, plus the relay for mail you send | Your domain, VPS and relay accounts        |
+| Setup                                            | Provider can read stored mail        | Who holds your metadata               | Ties to your identity                      |
+| ------------------------------------------------ | ------------------------------------ | ------------------------------------- | ------------------------------------------ |
+| Free large provider (Gmail, Outlook)             | Yes                                  | The provider                          | Account details, phone number, sign-in IPs |
+| Privacy provider, its own address (Proton, Tuta) | No                                   | The provider                          | Whatever you gave at signup                |
+| Your domain on a hosted provider                 | Depends on the provider's encryption | The provider                          | Your domain, plus account and payment      |
+| Self-hosted on StartOS, with a relay             | Nobody but you                       | You, plus the relay for mail you send | Your domain, VPS and relay accounts        |
 
-Self-hosting gives the most control over stored mail: no company holds your mailbox or your full correspondence history. The relay that delivers your outgoing mail still handles every message you send, and incoming mail still arrives from other servers in readable form. Securing the server — physically and with backups you protect — becomes your job.
+Self-hosting gives the most control over stored mail: no company holds your mailbox or your full correspondence history. Unless messages use end-to-end encryption, the outgoing relay and the recipient's provider handle readable content. Incoming mail is also readable by the sender's provider and your own server. Securing the server — physically and with backups you protect — becomes your job.
 
 ## Anonymity
 

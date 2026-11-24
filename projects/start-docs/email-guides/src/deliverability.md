@@ -24,7 +24,7 @@ These are the checks a receiver runs on every message. A self-hosted mail server
 | **DMARC**             | SPF or DKIM passed for the domain in the visible From address                    | A `TXT` record at `_dmarc.<your domain>`   |
 | **TLS**               | The connection between servers is encrypted                                      | The sending and receiving servers          |
 
-When all of these pass and your mail still goes to spam, configuration is no longer the problem. Going back over your records again won't help.
+Passing these checks does not guarantee inbox placement. Reputation and message content still matter, and other configuration problems, such as malformed headers, can also trigger filtering.
 
 ## Reputation
 
@@ -62,7 +62,7 @@ Relays police their own customers — limits for new accounts, approval steps, s
 
 ### Check what the receiver saw
 
-Send a message to a Gmail address you can read, open it, and choose **Show original** from the three-dot menu. The top of the page shows **SPF**, **DKIM** and **DMARC**, each marked PASS or FAIL, and the full headers below show the IP address your mail came from. A failure there is a configuration problem you can fix. Three passes and a spam-folder landing is a reputation problem.
+Send a message to a Gmail address you can read, open it, and choose **Show original** from the three-dot menu. The top of the page shows **SPF**, **DKIM** and **DMARC**, each marked PASS or FAIL, and the full headers below show the IP address your mail came from. Investigate failures against your provider's configuration instructions. If all three pass, check reputation, content and message formatting rather than assuming authentication guarantees delivery. Google's [sender guidelines](https://support.google.com/mail/answer/81126) describe these separate requirements.
 
 ### Read the bounce
 

@@ -7,7 +7,7 @@ Get credentials for an account that can send mail — from Forward Email, Amazon
 SMTP credentials let software hand mail to a provider for delivery. You need them for:
 
 - **StartOS and its services** — Nextcloud, Vaultwarden, Gitea and others send notifications and password resets. Enter the credentials once under **System › SMTP** in StartOS, then point each service at them. See [SMTP in the StartOS docs](/start-os/smtp.html).
-- **A Stalwart relay** — Stalwart hands your outgoing mail to the provider, which delivers it from its established servers. See the relay section of [Stalwart's instructions](https://github.com/Start9Labs/stalwart-startos/blob/master/instructions.md#sending-through-a-relay-provider).
+- **A Stalwart relay** — Stalwart hands your outgoing mail to the provider, which delivers it from its established servers. The credentials must authorize every From address the server will use; a credential for one alias cannot necessarily relay mail for the whole domain. See [Using a Relay for a Whole Domain](#using-a-relay-for-a-whole-domain) and the relay section of [Stalwart's instructions](https://github.com/Start9Labs/stalwart-startos/blob/master/instructions.md#sending-through-a-relay-provider).
 - **Any other app** that sends mail, with the same values.
 
 Every provider gives you the same handful of values: a **host**, a **port** and **connection security**, a **username** and **password**, and the **From address** you're allowed to send as.
@@ -166,4 +166,6 @@ To use SendGrid you will need a SendGrid account with a verified sender: either 
 
 ## Using a Relay for a Whole Domain
 
-When a provider relays all of a domain's outgoing mail — as for a Stalwart server — add the provider to the domain's SPF record with the `include:` value it gives you, keeping a single SPF record. See [Your Own Domain](your-own-domain.md#the-records-mail-uses).
+Choose credentials that authorize all of the domain's sending addresses. Forward Email's alias password above authorizes only that alias: putting it in Stalwart's default relay route rejects other users' From addresses. Forward Email offers [domain-wide catch-all passwords](https://forwardemail.net/en/email-api#create-domain-wide-catch-all-password) for SMTP sending; follow its documentation for obtaining domain-wide credentials. Alternatively, configure separate authenticated relay routes for each sending alias. Protect domain-wide credentials as secrets that can send as anyone on the domain.
+
+Publish every DNS record the relay provider requests, including its DKIM and verification records where required. Add the provider to the domain's SPF record with the `include:` value it gives you, keeping a single SPF record. See [Your Own Domain](your-own-domain.md#the-records-mail-uses).

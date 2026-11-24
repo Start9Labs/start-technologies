@@ -36,10 +36,10 @@ A forwarding service (Forward Email's free plan, among others) receives mail at 
 
 ## Your Domain on a Hosted Provider
 
-Forward Email, Proton (custom domain), Fastmail and others host full mailboxes on your domain, which you read in their webmail or in any mail app.
+Forward Email, Proton (custom domain), Fastmail and others host full mailboxes on your domain. Client support varies: Forward Email and Fastmail support standard IMAP clients, while Proton requires its Bridge for desktop IMAP access on a paid plan, or its own mobile apps.
 
-- **Good:** an address you own, mail that arrives, no servers to run. With a privacy-focused provider, stored mail is encrypted so the provider can't read it. Switching provider later is a DNS change.
-- **Bad:** a company still holds your mailbox, however well encrypted, and handles each message in readable form as it passes through.
+- **Good:** an address you own, mail that arrives, no servers to run. Forward Email and Proton encrypt stored mail to prevent provider access; this is not a guarantee every privacy-focused host makes. Switching provider later is a DNS change.
+- **Bad:** a company still holds your mailbox. Fastmail's servers can read stored mail despite disk encryption (see its [security explanation](https://www.fastmail.help/hc/en-us/articles/1500000280221-How-Fastmail-provides-a-secure-service)). Without end-to-end encryption, providers also handle readable messages in transit.
 
 This is what we recommend for most people. See [Hosted Email on Your Domain](hosted-email.md).
 

@@ -4,7 +4,7 @@ What we suggest for individuals, families, small businesses, people who need ano
 
 ## Most People: Your Domain, Hosted
 
-**Register a domain and host it on a privacy-focused provider, read in Thunderbird.** You get an address you own, mail that arrives, stored mail the provider can't read, and nothing to maintain. If you later want to self-host, or change provider, the address comes with you.
+**Register a domain and host it on Forward Email, read in Thunderbird.** You get an address you own, mail that arrives, stored mail the provider can't read, and no mail server to maintain. If you later want to self-host, or change provider, the address comes with you.
 
 We recommend [Forward Email](https://forwardemail.net): it is open source, encrypts each mailbox with your password, and its paid plans include unlimited addresses on a domain. Proton with a custom domain is a good alternative if many of the people you write to use Proton, since mail between Proton users is end-to-end encrypted.
 

@@ -8,7 +8,7 @@ The simplest way to move mail is through Thunderbird, which can hold both accoun
 
 1. Add your old account and your new account to Thunderbird, both over IMAP.
 1. Let the old account finish downloading. In the old account's settings, under **Synchronization & Storage**, keep its messages on this computer so every folder downloads in full.
-1. Create matching folders in the new account, then select the messages in each old folder and drag them, or right-click and choose **Copy To**, into the new one.
+1. Create matching folders in the new account, then select the messages in each old folder, right-click and choose **Copy To**, and select the matching new folder. Ordinary dragging moves messages and removes them from the old account.
 1. Check the message counts in each folder match before you delete anything from the old account.
 
 Thunderbird uploads each copied message to the new server, so a mailbox of many gigabytes takes hours. Leave it running.

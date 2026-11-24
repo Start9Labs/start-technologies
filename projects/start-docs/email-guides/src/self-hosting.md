@@ -34,7 +34,7 @@ Stalwart's instructions on StartOS walk through every step: choosing the gateway
 - **Backups.** Your mail exists only on your server and in your backups. Keep a backup off the server, and test restoring it.
 - **Security.** Your server holds everyone's mail on the domain, and its mail ports face the internet. Keep StartOS and Stalwart updated, use strong passwords and two-factor sign-in in Stalwart's Account Manager, and keep the Admin Console off the public internet (Stalwart on StartOS does this by default).
 - **Spam.** Stalwart filters incoming spam itself. Expect to tune it at first.
-- **Your relay and VPS accounts.** Both are third parties in the path of your mail. The relay handles every message you send; the VPS provider sees the encrypted traffic to and from your server.
+- **Your relay and VPS accounts.** Both are third parties in the path of your mail. The relay handles every message you send. WireGuard encrypts the connection between StartOS and the VPS, not the VPS's connections to other mail servers. On that public leg, SMTP can be plaintext when the sender does not use STARTTLS; the VPS provider can read that traffic. End-to-end encryption protects message content independently of these transport connections.
 
 ## Outages at Big Providers
 
