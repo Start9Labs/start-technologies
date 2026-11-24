@@ -23,6 +23,7 @@ import {
 } from './fileAccess'
 import { hasFileMounts, refreshFileMounts } from './fileMounts'
 import { delay, ExponentialBackoff } from './delay'
+import { onLeaveUntil } from './onLeaveUntil'
 
 async function readRaw(path: string): Promise<string | null> {
   return fs.readFile(path, 'utf-8').catch(error => {
@@ -39,25 +40,6 @@ const exists = (path: string) =>
 
 const WATCH_RETRY_INITIAL_MS = 100
 const WATCH_RETRY_MAX_MS = 30_000
-
-const contextLeaveCallbacks = new WeakMap<T.Effects, Set<() => void>>()
-
-// Completed readers must release context-held callbacks.
-function onLeaveUntil(effects: T.Effects, fn: () => void): () => void {
-  const existing = contextLeaveCallbacks.get(effects)
-  const callbacks = existing ?? new Set<() => void>()
-  if (!existing) {
-    contextLeaveCallbacks.set(effects, callbacks)
-    effects.onLeaveContext(() => {
-      for (const callback of callbacks) callback()
-      callbacks.clear()
-    })
-  }
-  callbacks.add(fn)
-  return () => {
-    callbacks.delete(fn)
-  }
-}
 
 /** Starts watching at once; `fs.watch` defers until its first read. */
 function watchPath(path: string, abort: AbortSignal) {

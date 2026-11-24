@@ -10,6 +10,7 @@ import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Mounts } from '../mainFn/Mounts'
 import { FileMounts } from './fileMounts'
 import { jsonEnv } from './jsonEnv'
+import { onLeaveUntil } from './onLeaveUntil'
 import { PathQueue } from './PathQueue'
 
 export const execFile = promisify(cp.execFile)
@@ -377,51 +378,6 @@ export const SubContainer = {
 }
 
 /**
- * Live eager subcontainers grouped by the effects context that created them.
- * Any still alive when that context leaves (e.g. a subcontainer created in
- * `main` but never explicitly destroyed) is torn down via the armed
- * `onLeaveContext` hook instead of lingering until GC runs its `Drop`
- * finalizer.
- *
- * One hook is armed per distinct effects object — on the first subcontainer
- * created under it — and each subcontainer removes itself on destroy, so
- * repeated short-lived containers (`withTemp`, per-poll health checks) don't
- * accumulate registrations. Destroying via `destroy()` keeps the hold model
- * intact: a container still held by a running daemon defers teardown until
- * the daemon's own context-leave releases it.
- */
-const contextLiveSubcontainers = new WeakMap<
-  T.Effects,
-  Set<SubContainerEager<any, any>>
->()
-
-function registerForContextCleanup(
-  effects: T.Effects,
-  sub: SubContainerEager<any, any>,
-): void {
-  let live = contextLiveSubcontainers.get(effects)
-  if (!live) {
-    live = new Set()
-    contextLiveSubcontainers.set(effects, live)
-    effects.onLeaveContext(() => {
-      const remaining = contextLiveSubcontainers.get(effects)
-      if (!remaining) return
-      for (const c of [...remaining]) {
-        c.destroy().catch(e => console.error(e))
-      }
-    })
-  }
-  live.add(sub)
-}
-
-function unregisterFromContextCleanup(
-  effects: T.Effects,
-  sub: SubContainerEager<any, any>,
-): void {
-  contextLiveSubcontainers.get(effects)?.delete(sub)
-}
-
-/**
  * Want to limit what we can do in a container, so we want to launch a container with a specific image and the mounts.
  *
  * Eager subcontainer: its filesystem and leader process exist from
@@ -440,6 +396,12 @@ export class SubContainerEager<
   private destroyRequested = false
   private holdCount = 0
   private teardown: Promise<void> | null = null
+  /**
+   * Withdraws this container from its creating context's teardown. Until
+   * withdrawn, leaving that context calls {@link destroy}, which waits for
+   * outstanding holds.
+   */
+  private releaseContextCleanup = () => {}
   private readonly fileMounts = new FileMounts()
   private sharedMounts = false
   private sharedVolumeDependency = false
@@ -529,7 +491,9 @@ export class SubContainerEager<
       guid,
       identity,
     )
-    registerForContextCleanup(effects, res)
+    res.releaseContextCleanup = onLeaveUntil(effects, () => {
+      res.destroy().catch(e => console.error(e))
+    })
 
     try {
       onCreate?.(res)
@@ -737,19 +701,18 @@ export class SubContainerEager<
   }
 
   /**
-   * Detach from the creating context's `onLeaveContext` cleanup — drops this
-   * subcontainer from its context's live set so a context-leave no longer
-   * destroys it. The caller becomes responsible for calling {@link destroy}.
-   * Idempotent.
+   * Detach from the creating context's `onLeaveContext` cleanup, so a
+   * context-leave no longer destroys this subcontainer. The caller becomes
+   * responsible for calling {@link destroy}. Idempotent.
    */
   detach(): void {
-    unregisterFromContextCleanup(this.effects, this)
+    this.releaseContextCleanup()
   }
 
   private _destroyImmediate(): Promise<void> {
     return (this.teardown ??= (async () => {
       this.destroyed = true
-      unregisterFromContextCleanup(this.effects, this)
+      this.releaseContextCleanup()
       const guid = this.guid
       await this.fileMounts.close()
       await this.killLeader()
