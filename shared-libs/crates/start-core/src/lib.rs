@@ -687,10 +687,19 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             from_fn_async(dependencies::providers::preview_provider_change).no_cli(),
         )
         .subcommand(
+            "preview-provider-change",
+            from_fn_async(dependencies::providers::preview_provider_change_cli)
+                .with_display_serializable()
+                .with_about("about.preview-provider-change")
+                .no_ts(),
+        )
+        .subcommand(
             "select-dependency-provider",
             from_fn_async(dependencies::providers::select_provider)
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .no_display()
+                .with_about("about.select-dependency-provider")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "stats",

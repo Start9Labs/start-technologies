@@ -255,6 +255,27 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     let (_registry_temp, registry, _admin, reader, _) = crate::registry::tests::fixture().await;
     let secret = "secret".parse().unwrap();
     let readers = crate::registry::tests::secret_readers(&registry).await;
+    registry
+        .db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .as_idx_mut(&secret)
+                .unwrap()
+                .mutate(|package| {
+                    for version in package.versions.values_mut() {
+                        version.metadata.satisfies_packages.insert(
+                            "logical".parse().unwrap(),
+                            BTreeSet::from(["26.0.0:0".parse().unwrap()]),
+                        );
+                    }
+                    Ok::<_, Error>(())
+                })
+        })
+        .await
+        .result
+        .unwrap();
     crate::registry::tests::revoke_secret_reader(&registry).await;
     let (url, _server) = crate::registry::tests::server(registry.clone()).await;
     let url = registry_url(url.as_str()).unwrap();
@@ -330,6 +351,17 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .as_idx(&secret)
             .is_none()
     );
+    assert!(
+        select(
+            &db.peek().await,
+            &url,
+            json!({"provides":"logical", "targetVersion":">=26.0.0:0"})
+        )
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .is_empty()
+    );
     let _ = receiver.wait_for_abort().await;
     let receiver = subscribe();
     wait_for(&db, |db| {
@@ -379,7 +411,18 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         .de()
         .unwrap();
     assert!(!catalog.versions.is_empty());
+    let discovered = select(
+        &synced,
+        &url,
+        json!({"provides":"logical", "targetVersion":">=26.0.0:0"}),
+    )
+    .unwrap();
+    assert!(!discovered["secret"]["best"].as_object().unwrap().is_empty());
     for release in catalog.versions.values() {
+        assert_eq!(
+            release.info.metadata.satisfies_packages["logical"],
+            BTreeSet::from(["26.0.0:0".parse().unwrap()])
+        );
         for (_, asset) in &release.info.s9pks {
             assert!(asset.private.is_none() && asset.readers.is_empty());
         }
@@ -398,6 +441,29 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_none())
     })
     .await;
+    let revoked = db.peek().await;
+    assert!(
+        select(
+            &revoked,
+            &url,
+            json!({"provides":"logical", "targetVersion":">=26.0.0:0"})
+        )
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .is_empty()
+    );
+    assert!(
+        !revoked
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url)
+            .unwrap()
+            .de()
+            .unwrap()
+            .catalog
+            .contains_key(&secret)
+    );
     assert!(!receiver.is_finished());
     drop(receiver);
 }

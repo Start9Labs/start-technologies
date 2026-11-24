@@ -77,7 +77,7 @@ pub struct GetPackageParams {
     #[arg(long, short = 'v', help = "help.arg.target-version-range")]
     pub target_version: Option<VersionRange>,
     /// Filters releases by a dependency contract rather than their own package version.
-    #[arg(skip)]
+    #[arg(long, help = "help.arg.provides")]
     pub provides: Option<PackageId>,
     #[arg(long, help = "help.arg.source-version")]
     pub source_version: Option<VersionString>,

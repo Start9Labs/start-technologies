@@ -19,6 +19,14 @@ Choices are unlocked by default. The selected provider stays in use while compat
 
 The lock button inside the selection dialog pins the exact provider. **Select** applies both the provider and its lock setting; **Cancel** leaves them unchanged. A missing or incompatible locked provider leaves the dependency unsatisfied instead of falling back. Its cached title and icon remain visible after uninstall, and its Marketplace link shows only that package. With only one provider choice, a locked provider shows **Unlock** instead of **Switch**, including a missing pin without alternatives. An unlocked provider still shows **Switch** to open its lock settings. A missing pin with a compatible alternative also shows **Switch**. Unlocking restores automatic fallback. Choosing another provider explicitly overrides any existing lock and starts unlocked.
 
+The CLI offers the same per-service choice:
+
+```sh
+start-cli package select-dependency-provider <service-id> <dependency-id> --provider-id <provider-id> --locked
+```
+
+Omit `--locked` to select an unlocked provider. Omit `--provider-id` to clear the saved choice. To preview an update or removal, pipe provider metadata to `start-cli package preview-provider-change`: the input contains `id`, `version`, `satisfies`, and `satisfiesPackages`; `version: null` previews removal. It lists affected dependent package IDs without applying the change. `start-cli registry package get --provides <dependency-id> --target-version <range>` finds releases that claim the requested dependency contract.
+
 ## Configuring Dependencies
 
 Some dependencies need to be configured to work with the services that depend on them. When this is the case, a [task](tasks.md) will appear on the dashboard guiding you through the necessary steps. These tasks often link directly to an [action](actions.md) on the dependency, with form fields pre-filled to simplify configuration. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.

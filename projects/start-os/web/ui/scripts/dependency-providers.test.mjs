@@ -22,7 +22,8 @@ loadTypeScript(
     ['patch-db-client', 'export class PatchDB {}'],
     [
       '@start9labs/shared',
-      'export class DialogService {}; export class TaskService {}; export class i18nPipe {}; export class LocalizePipe {};',
+      'export class DialogService {}; export class TaskService {}; export class i18nPipe {}; export class LocalizePipe {};' +
+        `export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)};`,
     ],
     [
       '@taiga-ui/core',
@@ -591,7 +592,7 @@ test('cached pin icons are usable without the provider package or archive', asyn
 const { StandardActionsService } =
   await import('../src/app/services/standard-actions.service.ts')
 
-test('removal warnings query backend alias impacts and preserve the physical uninstall target', async () => {
+test('removal warnings escape titles, query backend alias impacts and preserve the physical uninstall target', async () => {
   const previews = []
   const warnings = []
   const uninstalls = []
@@ -622,7 +623,7 @@ test('removal warnings query backend alias impacts and preserve the physical uni
     },
     doUninstall: async params => uninstalls.push(params),
   }
-  const manifest = { id: 'alternate', title: 'Alternate' }
+  const manifest = { id: 'alternate', title: '<b>Alternate & Co</b>' }
   await StandardActionsService.prototype.uninstall.call(instance, manifest, {
     force: false,
     soft: true,
@@ -634,12 +635,34 @@ test('removal warnings query backend alias impacts and preserve the physical uni
     satisfiesPackages: {},
   })
   assert.equal(warnings.length, 1)
-  assert.match(warnings[0].data.content, /Services that depend on Alternate/)
+  assert.match(
+    warnings[0].data.content,
+    /Services that depend on &lt;b&gt;Alternate &amp; Co&lt;\/b&gt;/,
+  )
   assert.deepEqual(uninstalls, [])
+  await StandardActionsService.prototype.uninstall.call(instance, manifest, {
+    force: false,
+    soft: false,
+  })
+  assert.equal(
+    warnings[1].data.content.split('&lt;b&gt;Alternate &amp; Co&lt;/b&gt;')
+      .length - 1,
+    2,
+  )
+  assert.equal(warnings[1].data.content.includes('<b>Alternate'), false)
   affected = []
   await StandardActionsService.prototype.uninstall.call(instance, manifest, {
     force: false,
     soft: true,
   })
   assert.deepEqual(uninstalls, [{ id: 'alternate', force: false, soft: true }])
+  warnings.length = 0
+  uninstalls.length = 0
+  instance.tasks.runInline = async () => false
+  await StandardActionsService.prototype.uninstall.call(instance, manifest, {
+    force: false,
+    soft: true,
+  })
+  assert.deepEqual(warnings, [])
+  assert.deepEqual(uninstalls, [])
 })

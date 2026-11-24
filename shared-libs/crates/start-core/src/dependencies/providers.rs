@@ -309,14 +309,20 @@ pub async fn initialize(ctx: &RpcContext) -> Result<(), Error> {
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Deserialize, Serialize, VisitFields, clap::Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct SelectProviderParams {
+    #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
+    #[arg(help = "help.arg.dependency-id")]
     pub dependency_id: PackageId,
+    #[arg(long, help = "help.arg.provider-id")]
     pub provider_id: Option<PackageId>,
     /// Locks to this ID without fallback.
     #[serde(default)]
+    #[arg(long, help = "help.arg.lock-provider")]
     pub locked: bool,
 }
 rpc_toolkit::reflect_ts!(SelectProviderParams);
@@ -454,6 +460,29 @@ pub struct PreviewProviderChangeParams {
     pub satisfies_packages: BTreeMap<PackageId, BTreeSet<VersionString>>,
 }
 rpc_toolkit::reflect_ts!(PreviewProviderChangeParams);
+
+#[derive(Deserialize, Serialize, clap::Parser)]
+#[group(skip)]
+#[serde(transparent)]
+pub struct PreviewProviderChangeCliParams {
+    #[command(flatten)]
+    params: crate::util::serde::StdinDeserializable<PreviewProviderChangeParams>,
+}
+
+pub async fn preview_provider_change_cli(
+    rpc_toolkit::HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params:
+            PreviewProviderChangeCliParams {
+                params: crate::util::serde::StdinDeserializable(params),
+            },
+        ..
+    }: rpc_toolkit::HandlerArgs<crate::context::CliContext, PreviewProviderChangeCliParams>,
+) -> Result<Vec<PackageId>, Error> {
+    crate::context::call_fronted::<RpcContext, _>(&context, parent_method, method, &params).await
+}
 
 fn preview_change(
     mut packages: AllPackageData,

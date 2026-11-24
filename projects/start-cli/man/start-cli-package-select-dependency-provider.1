@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-package-select-dependency-provider 1  "select-dependency-provider "
+.SH NAME
+start\-cli\-package\-select\-dependency\-provider \- Select or clear a dependency provider
+.SH SYNOPSIS
+\fBstart\-cli package select\-dependency\-provider\fR [\fB\-\-provider\-id\fR] [\fB\-\-locked\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> <\fIDEPENDENCY_ID\fR>
+.SH DESCRIPTION
+Select or clear a dependency provider
+.SH OPTIONS
+.TP
+\fB\-\-provider\-id\fR \fI<PROVIDER_ID>\fR
+Physical provider package identifier; omit to clear the preference
+.TP
+\fB\-\-locked\fR
+Lock the selected provider without automatic fallback
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Package identifier
+.TP
+<\fIDEPENDENCY_ID\fR>
+Logical dependency package identifier
