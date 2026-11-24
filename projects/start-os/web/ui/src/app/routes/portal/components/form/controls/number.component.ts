@@ -35,7 +35,8 @@ import { HintPipe } from '../pipes/hint.pipe'
         (blur)="control.onTouched()"
       />
       @if (spec | hint; as hint) {
-        <tui-icon [tuiTooltip]="hint" />
+        <tui-icon [tuiTooltip]="tooltip" />
+        <ng-template #tooltip>{{ hint }}</ng-template>
       }
     </tui-textfield>
   `,

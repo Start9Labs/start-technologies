@@ -35,7 +35,8 @@ import { HintPipe } from '../pipes/hint.pipe'
         </label>
       }
       @if (spec | hint; as hint) {
-        <tui-icon [tuiTooltip]="hint" />
+        <tui-icon [tuiTooltip]="tooltip" />
+        <ng-template #tooltip>{{ hint }}</ng-template>
       }
       @if (spec.inputmode !== 'time') {
         <tui-calendar *tuiDropdown />

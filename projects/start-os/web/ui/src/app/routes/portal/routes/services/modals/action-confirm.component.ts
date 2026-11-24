@@ -11,9 +11,7 @@ import { PackageActionData } from './action-input.component'
       <img [pkgIcon]="pkgInfo.id" />
       <h4>{{ pkgInfo.title }}</h4>
     </div>
-    <div tuiNotification appearance="warning">
-      <div [innerHTML]="warning"></div>
-    </div>
+    <div tuiNotification appearance="warning">{{ warning }}</div>
     <footer class="g-buttons">
       <button tuiButton appearance="flat" (click)="context.completeWith(false)">
         {{ 'Cancel' | i18n }}

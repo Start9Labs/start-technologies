@@ -58,9 +58,7 @@ export type PackageActionData = {
       <h4>{{ pkgInfo.title }}</h4>
     </div>
     @if (error()) {
-      <div tuiNotification appearance="negative">
-        <div [innerHTML]="error()"></div>
-      </div>
+      <div tuiNotification appearance="negative">{{ error() }}</div>
     }
     @if (uploads().length) {
       @for (upload of uploads(); track upload.id) {
@@ -77,9 +75,7 @@ export type PackageActionData = {
       }
     } @else if (res(); as res) {
       @if (warning) {
-        <div tuiNotification appearance="warning">
-          <div [innerHTML]="warning"></div>
-        </div>
+        <div tuiNotification appearance="warning">{{ warning }}</div>
       }
 
       <app-form

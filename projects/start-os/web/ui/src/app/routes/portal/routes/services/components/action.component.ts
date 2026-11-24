@@ -14,7 +14,7 @@ interface ActionItem {
   template: `
     <div tuiTitle>
       <strong>{{ action().name }}</strong>
-      <div tuiSubtitle [innerHTML]="action().description"></div>
+      <div tuiSubtitle>{{ action().description }}</div>
       @if (disabled()) {
         <div tuiSubtitle class="g-warning">{{ disabled() }}</div>
       }

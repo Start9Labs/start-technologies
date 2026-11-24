@@ -12,7 +12,8 @@ import { HintPipe } from '../pipes/hint.pipe'
   template: `
     {{ spec.name }}
     @if (spec.description || spec.disabled) {
-      <tui-icon [tuiTooltip]="spec | hint" />
+      <tui-icon [tuiTooltip]="tooltip" />
+      <ng-template #tooltip>{{ spec | hint }}</ng-template>
     }
     <tui-segmented
       size="s"

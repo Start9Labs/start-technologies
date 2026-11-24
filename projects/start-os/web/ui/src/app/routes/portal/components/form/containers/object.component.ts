@@ -31,7 +31,8 @@ import { FormGroupComponent } from './group.component'
       <ng-content />
       {{ spec.name }}
       @if (spec.description) {
-        <tui-icon [tuiTooltip]="spec.description" (click.stop)="(0)" />
+        <tui-icon [tuiTooltip]="tooltip" (click.stop)="(0)" />
+        <ng-template #tooltip>{{ spec.description }}</ng-template>
       }
     </h3>
     <tui-expand class="expand" [expanded]="open">
