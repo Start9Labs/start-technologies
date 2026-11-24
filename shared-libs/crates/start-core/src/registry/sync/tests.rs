@@ -50,7 +50,7 @@ fn database() -> DatabaseModel {
     public.server_info.version = device().os.version;
     Model::from_value(json!({
         "public": public,
-        "private": {"registryIndexes": {}, "notifications": {}, "osSecurityNotifications": {},
+        "private": {"notifications": {}, "osSecurityNotifications": {},
             "push": crate::notifications::push::PushState::default()},
     }))
 }
