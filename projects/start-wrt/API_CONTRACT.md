@@ -2371,8 +2371,8 @@ struct BackupCreateRes {
     filename: String,  // "backup-<hostname>-<YYYY-MM-DD>.swbk"
 }
 // Backend: checks the password against /etc/shadow, runs
-// `sysupgrade --create-backup -`, encrypts the archive, and registers a
-// one-shot download continuation at /rest/rpc/{guid}
+// `sysupgrade --create-backup -`, strips the activity log, encrypts, and
+// registers a one-shot download continuation at /rest/rpc/{guid}
 ```
 
 An encrypted backup is one file:
@@ -2404,9 +2404,9 @@ struct BackupRestoreRes {
 // Backend: the upload continuation decrypts an encrypted backup, failing with
 // IncorrectPassword before anything changes, and takes a plain .tar.gz from an
 // earlier release as is. It validates the archive (`tar -tzf`), applies it
-// with `sysupgrade --restore-backup`, keeps the router's own system log
-// preceded by any older history the backup carried, then reboots after a
-// short delay
+// with `sysupgrade --restore-backup`, keeps the router's own activity log and
+// system log (preceded by any older system log history the backup carried),
+// then reboots after a short delay
 ```
 
 ---

@@ -242,6 +242,8 @@ cat > "${FILES_DIR}/lib/upgrade/keep.d/startwrt" << 'KEEPEOF'
 /etc/startwrt/ipv6_neighbors.json
 # The persistent system log (system.log_file) and its rotated half.
 /var/log/
+# The activity log. Config backups leave it out.
+/var/lib/startwrt/activity.db
 KEEPEOF
 
 echo "==> Staging complete."
