@@ -1,9 +1,10 @@
 import { Component } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nPipe, MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { IST, utils } from '@start9labs/start-core'
 import { tuiInjectElement } from '@taiga-ui/cdk'
 import { TuiButton, TuiIcon, TuiInput } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiTooltip } from '@taiga-ui/kit'
 
 import { Control } from './control'
@@ -70,7 +71,13 @@ import { HintPipe } from '../pipes/hint.pipe'
       ></button>
       @if (spec | hint; as hint) {
         <tui-icon [tuiTooltip]="tooltip">
-          <ng-template #tooltip>{{ hint }}</ng-template>
+          <ng-template #tooltip>
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="hint | markdown | dompurify"
+            ></div>
+          </ng-template>
         </tui-icon>
       }
     </tui-textfield>
@@ -86,6 +93,9 @@ import { HintPipe } from '../pipes/hint.pipe'
     }
   `,
   imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     FormsModule,
     TuiInput,
     TuiButton,

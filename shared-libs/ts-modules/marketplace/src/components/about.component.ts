@@ -1,7 +1,14 @@
 import { DatePipe } from '@angular/common'
 import { Component, computed, inject, input, output } from '@angular/core'
-import { CopyService, i18nPipe, LocalizePipe } from '@start9labs/shared'
+import {
+  CopyService,
+  i18nPipe,
+  LocalizePipe,
+  MarkdownPipe,
+  SafeLinksDirective,
+} from '@start9labs/shared'
 import { TuiCell, TuiIcon, TuiTitle } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { MarketplacePkgBase } from '../types'
 import { MarketplaceTrust, packageSigners } from '../trust'
@@ -73,19 +80,21 @@ import { MarketplaceVersionsComponent } from './versions.component'
     }
     <section tuiCardLarge appearance="secondary-grayscale">
       <header tuiHeader>{{ 'Description' | i18n }}</header>
-      <p class="description">
-        {{ pkg().description.long | localize: pkg().defaultLocale }}
-      </p>
+      <div
+        class="g-markdown"
+        safeLinks
+        [innerHTML]="
+          pkg().description.long
+            | localize: pkg().defaultLocale
+            | markdown
+            | dompurify
+        "
+      ></div>
     </section>
   `,
   styles: `
     :host {
       display: contents;
-    }
-
-    .description {
-      margin: 0;
-      white-space: pre-line;
     }
   `,
   imports: [
@@ -99,6 +108,9 @@ import { MarketplaceVersionsComponent } from './versions.component'
     TuiCardLarge,
     TuiHeader,
     LocalizePipe,
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
   ],
 })
 export class MarketplaceAboutComponent {

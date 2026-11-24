@@ -55,17 +55,18 @@ page, with no wrapper dialog; the extra key needs the options cast to
   than flipping. Leave `tuiDropdownDirection` unset: its default opens on whichever side has
   room, and a pinned `top` breaks when there's none.
 - **Hints**: `[tuiHint]` (template content allowed), tuned globally via `tuiHintOptionsProvider`.
-- **Package and user text is never markup.** Taiga renders string content — hint, dialog
-  `label` and content, confirm, notification, `tui-error` — through `[innerHTML]`. Text a
-  package, registry or user supplies goes in as a template or component that interpolates it:
-  `<tui-icon [tuiTooltip]="tooltip"><ng-template #tooltip>{{ spec.description }}</ng-template></tui-icon>`
-  — nested, so an `@if` around it keeps a single root and the icon its textfield slot — or a
-  confirm/toast `PolymorpheusComponent` reading `context.data`. Where only a string fits, pass
-  it through `escapeHtml`: a validation message whole, after any templating (a template such as
-  `displayAs` can carry markup of its own), and a value inside OS-authored dialog markup on its
-  own. `DialogService` escapes every `label` itself. A hint and a `pre-line` host keep `\n`
-  breaks. `[innerHTML]` is for rendered markdown (`| markdown | dompurify`) and escaped ANSI
-  logs only.
+- **Text from outside the OS never reaches Taiga as a raw string.** Taiga renders string
+  content — hint, dialog `label` and content, confirm, notification, `tui-error` — through
+  `[innerHTML]`. Text a package authors (spec descriptions, warnings, footnotes and pattern
+  descriptions, action descriptions and warnings, a long description) renders as sanitized
+  markdown, through the triple in components.md, in a template or component:
+  `<tui-icon [tuiTooltip]="tooltip"><ng-template #tooltip><div class="g-markdown" safeLinks [innerHTML]="hint | markdown | dompurify"></div></ng-template></tui-icon>`
+  — nested, so an `@if` around it keeps a single root and the icon its textfield slot. Where
+  only a string fits (`tui-error`), pass dompurified markdown and put `safeLinks` on the host.
+  A value the OS interpolates into its own message — a name, a title, a hostname, error text
+  — is plain text: interpolate it, or `escapeHtml` it inside OS-authored dialog markup, and
+  escape a templated label such as `displayAs` whole, after rendering. `DialogService`
+  escapes every `label` itself.
 - **Drawers/sheets**: `<tui-drawer *tuiPopup="open()" (click.self)="toggle(false)">` with
   URL-driven `open` state.
 - Dialogs close on route activation — `TUI_DIALOGS_CLOSE`'s default — so a dialog doesn't watch

@@ -5,6 +5,8 @@ import {
   getErrorMessage,
   i18nKey,
   i18nPipe,
+  MarkdownPipe,
+  SafeLinksDirective,
   TaskService,
 } from '@start9labs/shared'
 import { IST, T, utils } from '@start9labs/start-core'
@@ -14,6 +16,7 @@ import {
   TuiLoader,
   TuiNotification,
 } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiProgress } from '@taiga-ui/kit'
 import { injectContext } from '@taiga-ui/polymorpheus'
 import { compare, Operation } from 'fast-json-patch'
@@ -76,7 +79,13 @@ export type PackageActionData = {
       }
     } @else if (res(); as res) {
       @if (warning) {
-        <div tuiNotification appearance="warning">{{ warning }}</div>
+        <div tuiNotification appearance="warning">
+          <div
+            class="g-markdown"
+            safeLinks
+            [innerHTML]="warning | markdown | dompurify"
+          ></div>
+        </div>
       }
 
       <app-form
@@ -116,6 +125,9 @@ export type PackageActionData = {
     }
   `,
   imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     TuiNotification,
     TuiLoader,
     TuiButton,

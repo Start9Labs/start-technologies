@@ -7,8 +7,10 @@ import {
   Output,
 } from '@angular/core'
 import { ControlContainer } from '@angular/forms'
+import { MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { TuiButton, TuiIcon, TuiExpand } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiTooltip } from '@taiga-ui/kit'
 
 import { ControlDirective } from './control.directive'
@@ -32,7 +34,13 @@ import { FormGroupComponent } from './group.component'
       {{ spec.name }}
       @if (spec.description) {
         <tui-icon [tuiTooltip]="tooltip" (click.stop)="(0)">
-          <ng-template #tooltip>{{ spec.description }}</ng-template>
+          <ng-template #tooltip>
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="spec.description | markdown | dompurify"
+            ></div>
+          </ng-template>
         </tui-icon>
       }
     </h3>
@@ -87,6 +95,9 @@ import { FormGroupComponent } from './group.component'
   `,
   hostDirectives: [ControlDirective],
   imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     TuiButton,
     TuiIcon,
     TuiTooltip,

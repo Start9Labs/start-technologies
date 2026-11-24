@@ -15,20 +15,26 @@ import {
 } from '@angular/forms'
 import {
   DialogService,
-  escapeHtml,
-  i18nKey,
   i18nPipe,
+  MarkdownPipe,
+  SafeLinksDirective,
 } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { TuiAnimated } from '@taiga-ui/cdk'
 import { TuiButton, TuiError, TuiIcon, TuiInput, TuiLink } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiTooltip } from '@taiga-ui/kit'
 import { filter } from 'rxjs'
 import { FormService } from 'src/app/services/form.service'
 
 import { HintPipe } from '../pipes/hint.pipe'
 import { MustachePipe } from '../pipes/mustache.pipe'
-import { ERRORS, FormControlComponent } from './control.component'
+import {
+  ERRORS,
+  FormControlComponent,
+  WARNING,
+  WarningData,
+} from './control.component'
 import { ControlDirective } from './control.directive'
 import { FormObjectComponent } from './object.component'
 
@@ -39,7 +45,13 @@ import { FormObjectComponent } from './object.component'
       {{ spec.name }}
       @if (spec.description || spec.disabled) {
         <tui-icon [tuiTooltip]="tooltip">
-          <ng-template #tooltip>{{ spec | hint }}</ng-template>
+          <ng-template #tooltip>
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="spec | hint | markdown | dompurify"
+            ></div>
+          </ng-template>
         </tui-icon>
       }
       <button
@@ -179,6 +191,9 @@ import { FormObjectComponent } from './object.component'
   `,
   hostDirectives: [ControlDirective],
   imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     ReactiveFormsModule,
     TuiIcon,
     TuiTooltip,
@@ -219,16 +234,16 @@ export class FormArrayComponent {
 
   add() {
     if (!this.warned && this.spec.warning) {
+      const data: WarningData = {
+        content: WARNING,
+        yes: 'Ok',
+        no: 'Cancel',
+        warning: this.spec.warning,
+        immutable: false,
+      }
+
       this.dialog
-        .openConfirm({
-          label: 'Warning',
-          size: 's',
-          data: {
-            content: escapeHtml(this.spec.warning) as i18nKey,
-            yes: 'Ok',
-            no: 'Cancel',
-          },
-        })
+        .openConfirm({ label: 'Warning', size: 's', data })
         .pipe(filter(Boolean), takeUntilDestroyed(this.destroyRef))
         .subscribe(() => {
           this.addItem()

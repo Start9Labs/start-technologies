@@ -1,7 +1,9 @@
 import { Component } from '@angular/core'
 import { FormsModule } from '@angular/forms'
+import { MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { TuiIcon, TuiInput } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiTextarea, TuiTooltip } from '@taiga-ui/kit'
 
 import { Control } from './control'
@@ -33,12 +35,28 @@ import { HintPipe } from '../pipes/hint.pipe'
       ></textarea>
       @if (spec | hint; as hint) {
         <tui-icon [tuiTooltip]="tooltip">
-          <ng-template #tooltip>{{ hint }}</ng-template>
+          <ng-template #tooltip>
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="hint | markdown | dompurify"
+            ></div>
+          </ng-template>
         </tui-icon>
       }
     </tui-textfield>
   `,
-  imports: [FormsModule, TuiInput, TuiTextarea, TuiIcon, TuiTooltip, HintPipe],
+  imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
+    FormsModule,
+    TuiInput,
+    TuiTextarea,
+    TuiIcon,
+    TuiTooltip,
+    HintPipe,
+  ],
 })
 export class FormTextareaComponent extends Control<
   IST.ValueSpecTextarea,

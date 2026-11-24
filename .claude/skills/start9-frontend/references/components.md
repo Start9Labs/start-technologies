@@ -205,7 +205,7 @@ copy.
 - i18n (monorepo apps): **every** user-facing literal goes through `| i18n` (or
   `inject(i18nPipe).transform(...)` in TS); backend `LocaleString`s through `| localize`.
 - Rendered markdown is always the triple: `[innerHTML]="text | markdown | dompurify"` plus the
-  `safeLinks` directive (forces `target="_blank" rel="noreferrer"` on external links).
+  `safeLinks` directive (forces `target="_blank" rel="noopener noreferrer"` on external links).
 - Text stacks use `tuiTitle`/`tuiSubtitle` with `<b>` for the title — never custom
   heading/caption CSS: `<span tuiTitle><b>{{ title }}</b><span tuiSubtitle>{{ sub }}</span></span>`.
   A standalone `tuiTitle` leaves `tuiSubtitle` in the inherited text colour. Add

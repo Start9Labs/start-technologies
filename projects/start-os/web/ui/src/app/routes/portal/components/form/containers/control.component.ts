@@ -3,8 +3,9 @@ import { ReactiveFormsModule } from '@angular/forms'
 import {
   convertBytes,
   DialogService,
-  escapeHtml,
   i18nPipe,
+  MarkdownPipe,
+  SafeLinksDirective,
 } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { tuiAsControl, TuiControl } from '@taiga-ui/cdk'
@@ -13,6 +14,7 @@ import {
   TuiDialogContext,
   TuiError,
 } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TUI_FORMAT_ERROR, TUI_SIZE_ERROR, TuiConfirmData } from '@taiga-ui/kit'
 import {
   injectContext,
@@ -23,6 +25,7 @@ import {
 import { ControlSpec } from '../controls/control'
 import { CONTROLS } from '../controls/controls'
 import { FootnotePipe } from '../pipes/footnote.pipe'
+import { injectInlineMarkdown } from '../pipes/inline-markdown'
 import { ControlDirective } from './control.directive'
 
 export const ERRORS = [
@@ -42,9 +45,13 @@ export const ERRORS = [
   selector: 'form-control',
   template: `
     <ng-container *polymorpheusOutlet="controls[spec.type]" />
-    <tui-error [formControl]="$any(control.control)" [order]="order" />
+    <tui-error
+      safeLinks
+      [formControl]="$any(control.control)"
+      [order]="order"
+    />
     @if (spec | footnote; as footnote) {
-      <tui-error class="g-secondary" [error]="footnote" />
+      <tui-error class="g-secondary" safeLinks [error]="footnote" />
     }
   `,
   providers: [
@@ -54,6 +61,7 @@ export const ERRORS = [
       deps: [FormControlComponent],
       useFactory: (control: FormControlComponent<ControlSpec, string>) => {
         const i18n = inject(i18nPipe)
+        const markdown = injectInlineMarkdown()
         return {
           [TUI_FORMAT_ERROR]: i18n.transform('Invalid file format'),
           [TUI_SIZE_ERROR]: ({ size }: { size: number }) =>
@@ -61,13 +69,19 @@ export const ERRORS = [
           required: i18n.transform('Required'),
           pattern: (context: any) =>
             'patterns' in control.spec &&
-            escapeHtml(getText(control.spec, String(context.requiredPattern))),
+            markdown(getText(control.spec, String(context.requiredPattern))),
         }
       },
     },
   ],
   hostDirectives: [ControlDirective],
-  imports: [PolymorpheusOutlet, TuiError, ReactiveFormsModule, FootnotePipe],
+  imports: [
+    PolymorpheusOutlet,
+    TuiError,
+    ReactiveFormsModule,
+    FootnotePipe,
+    SafeLinksDirective,
+  ],
 })
 export class FormControlComponent<
   T extends ControlSpec,
@@ -116,7 +130,7 @@ export class FormControlComponent<
   }
 }
 
-type WarningData = TuiConfirmData & {
+export type WarningData = TuiConfirmData & {
   content: PolymorpheusComponent<ControlWarning>
   warning: string | null
   immutable: boolean | undefined
@@ -127,11 +141,21 @@ type WarningData = TuiConfirmData & {
     @if (context.data.warning; as warning) {
       @if (context.data.immutable) {
         <ul>
-          <li>{{ warning }}</li>
+          <li>
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="warning | markdown | dompurify"
+            ></div>
+          </li>
           <li>{{ immutable }}</li>
         </ul>
       } @else {
-        {{ warning }}
+        <div
+          class="g-markdown"
+          safeLinks
+          [innerHTML]="warning | markdown | dompurify"
+        ></div>
       }
     } @else {
       {{ immutable }}
@@ -146,6 +170,7 @@ type WarningData = TuiConfirmData & {
       margin-block-start: -0.75rem;
     }
   `,
+  imports: [MarkdownPipe, NgDompurifyPipe, SafeLinksDirective],
 })
 class ControlWarning {
   protected readonly context =
@@ -154,7 +179,7 @@ class ControlWarning {
   protected readonly immutable = `${inject(i18nPipe).transform('This value cannot be changed once set')}.`
 }
 
-const WARNING = new PolymorpheusComponent(ControlWarning)
+export const WARNING = new PolymorpheusComponent(ControlWarning)
 
 function getText(
   { patterns }: IST.ValueSpecText | IST.ValueSpecTextarea,

@@ -12,11 +12,14 @@ const boundaries = new Map([
     export class DialogService {}
     export class TaskService {}
     export class i18nPipe {}
+    export class MarkdownPipe {}
+    export class SafeLinksDirective {}
     export const getErrorMessage = error => error.message;
     export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)};
   `,
   ],
   ['@start9labs/start-core', 'export const utils = {};'],
+  ['@taiga-ui/dompurify', 'export class NgDompurifyPipe {};'],
   [
     'fast-json-patch',
     `import patch from '${import.meta.resolve('fast-json-patch')}'; export const compare = patch.compare;`,

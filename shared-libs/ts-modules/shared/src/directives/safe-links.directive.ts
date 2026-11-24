@@ -27,7 +27,7 @@ export class SafeLinksDirective {
         )
         .forEach(link => {
           link.target = '_blank'
-          link.setAttribute('rel', 'noreferrer')
+          link.setAttribute('rel', 'noopener noreferrer')
           link.classList.add('g-external-link')
         })
     })
