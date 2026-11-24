@@ -110,10 +110,10 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       ...load('shared-libs/ts-modules/shared/src/util/with-abort.ts'),
       pauseFor: async (_, signal) => signal?.throwIfAborted(),
       getErrorMessage: load(
-        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+        'shared-libs/ts-modules/shared/src/util/error-message.ts',
       ).getErrorMessage,
       isNetworkError: load(
-        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+        'shared-libs/ts-modules/shared/src/util/error-message.ts',
       ).isNetworkError,
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
@@ -662,7 +662,7 @@ test('normal stream cache failure releases an acquired iterator before exposing 
 
 test('shared transport classification accepts numeric zero, not RPC or cancellation codes', () => {
   const { isNetworkError, getErrorMessage } = harness().load(
-    'shared-libs/ts-modules/shared/src/services/error.service.ts',
+    'shared-libs/ts-modules/shared/src/util/error-message.ts',
   )
   assert.equal(isNetworkError({ code: 0 }), true)
   for (const value of [
@@ -690,7 +690,7 @@ function setupObservationHarness(status) {
   })
   overrides.set('@start9labs/shared', {
     ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
-    ...load('shared-libs/ts-modules/shared/src/services/error.service.ts'),
+    ...load('shared-libs/ts-modules/shared/src/util/error-message.ts'),
     pauseFor: load('shared-libs/ts-modules/shared/src/util/misc.util.ts')
       .pauseFor,
   })

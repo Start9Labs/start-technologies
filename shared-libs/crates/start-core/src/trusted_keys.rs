@@ -377,6 +377,13 @@ pub fn api<C: Context>() -> ParentHandler<C> {
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
+        .subcommand(
+            "remove-many",
+            from_fn_async(cli_remove_many)
+                .no_ts()
+                .no_display()
+                .with_about("about.remove-trusted-keys"),
+        )
 }
 
 #[derive(Deserialize, Serialize, clap::Parser, VisitFields)]
@@ -434,6 +441,29 @@ pub struct RemoveTrustedKeysParams {
 }
 
 rpc_toolkit::reflect_ts!(RemoveTrustedKeysParams);
+
+#[derive(Deserialize, Serialize, clap::Parser)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+pub struct CliRemoveTrustedKeysParams {
+    #[arg(required = true, help = "help.arg.trusted-key-ids")]
+    pub ids: Vec<InternedString>,
+}
+
+async fn cli_remove_many(
+    rpc_toolkit::HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params: CliRemoveTrustedKeysParams { ids },
+        ..
+    }: rpc_toolkit::HandlerArgs<CliContext, CliRemoveTrustedKeysParams>,
+) -> Result<(), Error> {
+    let ids = ids.into_iter().collect();
+    context
+        .call_fronted(parent_method, method, &RemoveTrustedKeysParams { ids })
+        .await
+}
 
 fn not_found() -> Error {
     Error::new(
@@ -533,6 +563,14 @@ async fn remove_many(ctx: RpcContext, params: RemoveTrustedKeysParams) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remove_many_cli_requires_a_key() {
+        use clap::Parser;
+        assert!(CliRemoveTrustedKeysParams::try_parse_from(["remove-many"]).is_err());
+        let params = CliRemoveTrustedKeysParams::try_parse_from(["remove-many", "a", "b"]).unwrap();
+        assert_eq!(params.ids, ["a", "b"]);
+    }
 
     #[test]
     fn cli_parses_trusted_key_commands() {

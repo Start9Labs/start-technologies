@@ -9,6 +9,7 @@ import { RouterLink } from '@angular/router'
 import {
   DialogService,
   DocsLinkDirective,
+  escapeHtml,
   i18nKey,
   i18nPipe,
   TaskService,
@@ -272,7 +273,7 @@ export default class SystemEmailComponent {
     const smtpValue = this.getSmtpValue(formValue)
     const address = this.testEmail
     const success =
-      `${this.i18n.transform('A test email has been sent to')} ${address}. <i>${this.i18n.transform('Check your spam folder and mark as not spam.')}</i>` as i18nKey
+      `${this.i18n.transform('A test email has been sent to')} ${escapeHtml(address)}. <i>${this.i18n.transform('Check your spam folder and mark as not spam.')}</i>` as i18nKey
 
     this.tasks.run(async () => {
       await this.api.rpc.server.testSmtp({

@@ -47,7 +47,7 @@ interface DeleteLocalData {
         type="button"
         appearance="primary-destructive"
         iconStart="@tui.trash-2"
-        [disabled]="typed().trim() !== context.data.name"
+        [disabled]="typed() !== context.data.name"
         (click)="context.completeWith(true)"
       >
         {{ 'Delete permanently' | i18n }}
