@@ -9559,7 +9559,10 @@
             {
               "type": "object",
               "properties": {
-                "name": { "type": "string" },
+                "name": {
+                  "type": "string",
+                  "description": "A unique single folder name; services mount a volume at a path matching it."
+                },
                 "source": { "$ref": "#/$defs/SharedVolumeSource" },
                 "grants": {
                   "type": "object",
