@@ -1173,11 +1173,12 @@ mod test {
             "{schemas}"
         );
         assert!(
-            schemas.contains("\"emulateMissing\": z.boolean()"),
+            schemas
+                .contains("\"emulateMissing\": z.boolean(), \"nvidiaContainer\": z.boolean() })"),
             "{schemas}"
         );
         assert!(
-            !schemas.contains("\"emulateMissingAs\": z.string()"),
+            !schemas.contains("\"emulateMissingAs\": z.string(),"),
             "{schemas}"
         );
     }
