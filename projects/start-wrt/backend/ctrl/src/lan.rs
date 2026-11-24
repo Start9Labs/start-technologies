@@ -4,10 +4,10 @@ use std::net::Ipv4Addr;
 use rpc_toolkit::{from_fn_async_local, ParentHandler};
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::{
-    Dhcp, DhcpHost, FirewallRedirect, FirewallRule, NetworkInterface, NetworkRoute, NetworkRule,
+    Dhcp, FirewallRedirect, FirewallRule, NetworkInterface, NetworkRoute, NetworkRule,
     ProfileDnsmasq,
 };
-use uciedit::{dump_all, parse_all, Arena, Configs};
+use uciedit::{dump_all, parse_all, Arena};
 
 use crate::invoke::Invoke;
 use crate::prelude::*;
@@ -27,23 +27,6 @@ pub const LAN_NETMASK: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
 ///
 /// The third/fourth octets (subnet + host within the block) are intentionally
 /// unconstrained — they're the user's `routerOctet` and the fixed `.1` host.
-/// The gateway to collision-test when the LAN moves from `current` to `new`.
-///
-/// On a network-block change every profile keeps its 3rd octet (see
-/// [`update_profile_ips_for_block_change`]), so testing the new 3rd octet inside
-/// the *current* block is equivalent to testing the post-move state — and it
-/// lets the guard run before any config is mutated. With no current address
-/// there is nothing to translate; test the requested address as-is.
-fn subnet_guard_ip(current: Option<Ipv4Addr>, new: Ipv4Addr) -> Ipv4Addr {
-    match current {
-        Some(old) => {
-            let (o, n) = (old.octets(), new.octets());
-            Ipv4Addr::new(o[0], o[1], n[2], n[3])
-        }
-        None => new,
-    }
-}
-
 pub(crate) fn validate_lan_block(addr: Ipv4Addr) -> Result<(), Error> {
     if addr.is_private() {
         Ok(())
@@ -193,10 +176,6 @@ pub async fn ipv4_set<C: CtrlContext>(
             ErrorKind::ParseNetAddress,
         )
     })?;
-    // Enforce the RFC 1918 block boundaries the UI exposes — fail before
-    // touching any config so a bad value can't partially apply.
-    validate_lan_block(address)?;
-
     let mut retries = 4;
     loop {
         let arena = Arena::new();
@@ -207,22 +186,7 @@ pub async fn ipv4_set<C: CtrlContext>(
         )
         .await?;
 
-        // Reject a /24 owned by another profile before touching any config — a
-        // colliding LAN subnet strands the router (same guard as
-        // profiles.create/profiles.edit; the UI can no longer produce this, but
-        // a direct RPC/CLI call can). Must run before the mutation below: the
-        // guard reads the LAN's current address to allow no-op edits.
-        let current_lan_ip = cfgs["network"]
-            .sections
-            .iter()
-            .find(|s| s.name().as_deref() == Some(LAN_INTERFACE))
-            .and_then(|s| s.get_typed::<NetworkInterface>().ok().flatten())
-            .and_then(|i| i.ipv4());
-        profiles::guard_subnet_collision(
-            &cfgs,
-            subnet_guard_ip(current_lan_ip, address),
-            Some(LAN_INTERFACE),
-        )?;
+        let before = crate::subnets::Subnets::of(&cfgs);
 
         // Update LAN interface, capturing old IP to detect network block changes
         let mut old_address: Option<Ipv4Addr> = None;
@@ -266,17 +230,8 @@ pub async fn ipv4_set<C: CtrlContext>(
             HashSet::new()
         };
 
-        // Guard: reject subnet change when DHCP static hosts exist in the old subnet
         let ip_changed = old_address.map(|old| old != address).unwrap_or(false);
-        if block_changed {
-            let old = old_address.unwrap().octets();
-            guard_dhcp_static_hosts(&cfgs, &[old[0], old[1]])?;
-        } else if ip_changed {
-            if let Some(old) = old_address {
-                let o = old.octets();
-                guard_dhcp_static_hosts(&cfgs, &[o[0], o[1], o[2]])?;
-            }
-        }
+        crate::subnets::check(&before, &cfgs)?;
 
         // Guard: check if IP change would break VPN peers
         let removed_vpns = if ip_changed {
@@ -338,7 +293,7 @@ pub async fn ipv4_set<C: CtrlContext>(
                             .filter(|i| *i != LAN_INTERFACE)
                             .cloned(),
                     );
-                    restart_network_services(address, ifaces).await;
+                    restart_network_services(ifaces).await;
                     removed_vpns.apply_post_reload().await;
                 }
                 return Ok(());
@@ -627,38 +582,6 @@ pub async fn ipv6_set<C: CtrlContext>(
     }
 }
 
-/// Guard: reject subnet changes when DHCP static hosts exist in the affected subnet.
-/// `old_prefix` is 2 bytes for a block change (first two octets) or 3 bytes for a
-/// single-profile subnet change (first three octets).
-///
-/// Note: this must run after `update_profile_ips_for_block_change` is safe because
-/// that function does not touch DHCP host sections — the old static IPs are still present.
-pub(crate) fn guard_dhcp_static_hosts(cfgs: &Configs, old_prefix: &[u8]) -> Result<(), Error> {
-    let affected: Vec<String> = cfgs["dhcp"]
-        .sections
-        .iter()
-        .filter_map(|section| section.get::<DhcpHost>().ok())
-        .filter_map(|host| {
-            let ip: Ipv4Addr = host.ip.as_deref()?.parse().ok()?;
-            let octets = ip.octets();
-            if old_prefix.iter().enumerate().all(|(i, &p)| octets[i] == p) {
-                let label = host.name.as_deref().unwrap_or(&host.mac);
-                Some(format!("{} ({})", label, ip))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if !affected.is_empty() {
-        return Err(Error::new(
-            eyre!("cannot change subnet while devices have static IP reservations: {affected:?}"),
-            ErrorKind::DhcpStaticHostsInSubnet,
-        ));
-    }
-    Ok(())
-}
-
 /// Update all profile network interface IPs and routing rules when the network
 /// block (first two octets) changes. Preserves each profile's 3rd/4th octets.
 pub fn update_profile_ips_for_block_change(
@@ -779,14 +702,38 @@ pub fn update_profile_ips_for_block_change(
     Ok(())
 }
 
-/// Reload network services after an IP change.
-/// Cycles only the specified interfaces via ifdown/ifup (instead of
-/// `network reload` which restarts ALL interfaces including WAN, causing
-/// its DHCP client to lose its lease and breaking internet).
-/// Then reloads the firewall and dnsmasq once br-lan has the new IP.
-pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<String>) {
-    // Truncated, not unlinked: an instance the reload leaves running keeps
-    // writing to the inode it opened.
+pub(crate) async fn ports_of(interfaces: &[String]) -> Vec<String> {
+    let Ok(bytes) = uciedit::read_all("/etc/config", &["network"]).await else {
+        return Vec::new();
+    };
+    let arena = Arena::new();
+    let Ok(cfgs) = bytes.parse(&arena) else {
+        return Vec::new();
+    };
+    crate::ethernet::ports_for_interfaces(&cfgs, interfaces).unwrap_or_default()
+}
+
+fn interface_targets(
+    cfgs: &uciedit::Configs,
+    interfaces: &[String],
+) -> Result<Vec<(String, Ipv4Addr)>, Error> {
+    let mut targets = Vec::new();
+    cfgs["network"].try_each(|name, iface: NetworkInterface| {
+        if name.is_some_and(|name| interfaces.iter().any(|i| i == name)) {
+            if let Some(address) = iface.ipv4() {
+                targets.push((iface.device, address));
+            }
+        }
+        Ok::<_, Error>(())
+    })?;
+    Ok(targets)
+}
+
+/// Refreshes LAN discovery and drops affected wired carrier after renumbering.
+/// The caller must exclude WAN interfaces.
+pub async fn restart_network_services(interfaces: Vec<String>) {
+    let ports = ports_of(&interfaces).await;
+    // Truncation preserves the inode an existing dnsmasq instance writes.
     for path in crate::devices::dhcp_lease_files().await {
         let _ = tokio::fs::write(&path, "").await;
     }
@@ -798,39 +745,53 @@ pub async fn restart_network_services(new_lan_ip: Ipv4Addr, interfaces: Vec<Stri
     for iface in &interfaces {
         let _ = crate::run_quiet_async(tokio::process::Command::new("ifup").arg(iface)).await;
     }
-    // Safety: wait for br-lan to have the new IP before reloading
-    // dependent services. ifup should be synchronous for static
-    // interfaces, but poll as a safety net.
-    let expected = new_lan_ip.to_string();
-    for _ in 0..30 {
-        if let Ok(out) = tokio::process::Command::new("ip")
-            .args(["-4", "-o", "addr", "show", "br-lan"])
-            .invoke(ErrorKind::Network.into())
-            .await
-        {
-            if String::from_utf8_lossy(&out).contains(&expected) {
-                break;
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let targets = async {
+        let bytes = uciedit::read_all("/etc/config", &["network"]).await?;
+        let arena = Arena::new();
+        let cfgs = bytes.parse(&arena)?;
+        interface_targets(&cfgs, &interfaces)
     }
-    // Regenerate nftables rules so masquerade/NAT covers the new subnets.
+    .await;
+    let targets = match targets {
+        Ok(targets) => targets,
+        Err(error) => {
+            tracing::warn!("cannot read renumbered interface targets: {error}");
+            Vec::new()
+        }
+    };
+    for (device, address) in targets {
+        let expected = address.to_string();
+        for _ in 0..30 {
+            if let Ok(out) = tokio::process::Command::new("ip")
+                .args(["-4", "-o", "addr", "show", "dev", &device])
+                .invoke(ErrorKind::Network.into())
+                .await
+            {
+                if String::from_utf8_lossy(&out)
+                    .split_whitespace()
+                    .any(|value| value.split('/').next() == Some(expected.as_str()))
+                {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("reload"))
             .await;
-    // Reload restarts each instance whose generated config changed. A restart
-    // unregisters dnsmasq's interface triggers until every pool is probed.
+    // Reload preserves interface triggers while changed instances restart.
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/dnsmasq").arg("reload"))
             .await;
-    // Bounce WiFi so all clients disassociate and reassociate,
-    // triggering fresh DHCP on the new subnet. Without this,
-    // clients that stay connected keep stale leases from the
-    // old network block.
+    if let Err(e) = crate::captive::ensure_captive_portal_state().await {
+        tracing::warn!("captive portal refresh failed: {e}");
+    }
     if let Err(e) = crate::wifi::reload_wifi("/etc/config", crate::wifi::WifiReload::Restart).await
     {
         tracing::warn!("WiFi restart failed: {e}");
     }
+    crate::ethernet::bounce_ports(&ports).await;
 }
 
 #[cfg(test)]
@@ -842,6 +803,33 @@ mod tests {
     use tokio::runtime::Runtime;
 
     use super::*;
+
+    #[tokio::test]
+    async fn renumbering_waits_on_each_configured_vlan_device() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            "\
+config interface 'lan'
+    option device 'br-lan.1'
+    option ipaddr '192.168.10.1'
+
+config interface 'guest'
+    option device 'br-lan.3'
+    option ipaddr '192.168.11.1'
+",
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let cfgs = parse_all(dir.path(), &arena, &["network"]).await.unwrap();
+        assert_eq!(
+            interface_targets(&cfgs, &["lan".into(), "guest".into()]).unwrap(),
+            [
+                ("br-lan.1".into(), Ipv4Addr::new(192, 168, 10, 1)),
+                ("br-lan.3".into(), Ipv4Addr::new(192, 168, 11, 1)),
+            ]
+        );
+    }
 
     #[derive(Clone)]
     struct TestContext(PathBuf);
@@ -1351,31 +1339,6 @@ config profile guest
         // Block change keeping the LAN's own 3rd octet — allowed.
         set("10.0.1.1").await.unwrap();
         assert_eq!(ipv4_get(ctx.clone()).await.unwrap().address, "10.0.1.1");
-    }
-
-    #[test]
-    fn subnet_guard_ip_translates_into_current_block() {
-        // Block change: test the new 3rd octet inside the current block.
-        assert_eq!(
-            subnet_guard_ip(
-                Some(Ipv4Addr::new(192, 168, 1, 1)),
-                Ipv4Addr::new(10, 0, 2, 1)
-            ),
-            Ipv4Addr::new(192, 168, 2, 1)
-        );
-        // Same block: passes through unchanged.
-        assert_eq!(
-            subnet_guard_ip(
-                Some(Ipv4Addr::new(192, 168, 1, 1)),
-                Ipv4Addr::new(192, 168, 5, 1)
-            ),
-            Ipv4Addr::new(192, 168, 5, 1)
-        );
-        // No current address: nothing to translate.
-        assert_eq!(
-            subnet_guard_ip(None, Ipv4Addr::new(10, 0, 2, 1)),
-            Ipv4Addr::new(10, 0, 2, 1)
-        );
     }
 
     // ── IPv6 tests ──────────────────────────────────────────────
