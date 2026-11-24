@@ -45,6 +45,7 @@ const host = (
         addSsl: null,
         secure: null,
         proxy: null,
+        networkPorts: {},
       },
       net: { assignedPort: 3478, assignedSslPort: null },
       addresses: binding,

@@ -2726,6 +2726,7 @@ PersistentKeepalive = 25`
               preferredExternalPort: 443,
               secure: { ssl: true },
               proxy: null,
+              networkPorts: {},
             },
             interfaces: {
               ui: {
@@ -2774,6 +2775,7 @@ PersistentKeepalive = 25`
               preferredExternalPort: 8332,
               secure: { ssl: false },
               proxy: null,
+              networkPorts: {},
             },
             interfaces: {
               rpc: {
@@ -2822,6 +2824,7 @@ PersistentKeepalive = 25`
               preferredExternalPort: 8333,
               secure: { ssl: false },
               proxy: null,
+              networkPorts: {},
             },
             interfaces: {
               p2p: {

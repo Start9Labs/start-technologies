@@ -541,6 +541,7 @@ export const mockPatchData: DataModel = {
               },
               secure: null,
               proxy: null,
+              networkPorts: {},
             },
             interfaces: {},
           },
@@ -1145,6 +1146,7 @@ export const mockPatchData: DataModel = {
                 },
                 secure: null,
                 proxy: null,
+                networkPorts: {},
               },
               interfaces: {
                 ui: {
@@ -1354,6 +1356,7 @@ export const mockPatchData: DataModel = {
                 preferredExternalPort: 48332,
                 secure: { ssl: false },
                 proxy: { type: 'http', addXForwardedHeaders: true, auth: null },
+                networkPorts: {},
               },
               interfaces: {
                 rpc: {
@@ -1402,6 +1405,7 @@ export const mockPatchData: DataModel = {
                 preferredExternalPort: 48333,
                 secure: { ssl: false },
                 proxy: null,
+                networkPorts: {},
               },
               interfaces: {
                 p2p: {
