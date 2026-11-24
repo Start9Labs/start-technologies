@@ -34,10 +34,9 @@ import {
   extension,
   normalizeSelector,
   pathFromArray,
-  projectOperations,
   projectRoot,
+  projectScoped,
   Selection,
-  scopeOperations,
   RemoveOperation,
   ReplaceOperation,
   Revision,
@@ -3374,9 +3373,11 @@ export class MockApiService extends ApiService implements StartupApiService {
             const revisions = this.mockWsSource$.subscribe(({ id, patch }) =>
               entry.out.next({
                 id,
-                patch: projectOperations(
-                  scopeOperations(patch, pointer),
+                patch: projectScoped(
+                  patch,
+                  pointer,
                   entry.selection,
+                  this.document.value,
                 ),
               }),
             )

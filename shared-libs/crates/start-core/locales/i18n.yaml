@@ -1177,13 +1177,6 @@ error.backup-password-mismatch:
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
 # db/mod.rs
-db.projection-array-position:
-  en_US: "Projection pattern %{pattern} addresses an array position; use * for array elements"
-  de_DE: "Projektionsmuster %{pattern} adressiert eine Array-Position; verwenden Sie * für Array-Elemente"
-  es_ES: "El patrón de proyección %{pattern} se refiere a una posición de arreglo; use * para los elementos de arreglos"
-  fr_FR: "Le motif de projection %{pattern} désigne une position de tableau ; utilisez * pour les éléments de tableau"
-  pl_PL: "Wzorzec projekcji %{pattern} wskazuje pozycję w tablicy; dla elementów tablicy użyj *"
-
 db.subscription-not-found:
   en_US: "Database subscription %{subscription} has ended or does not exist"
   de_DE: "Das Datenbankabonnement %{subscription} ist beendet oder existiert nicht"

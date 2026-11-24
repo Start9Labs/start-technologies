@@ -14,7 +14,7 @@ use json_ptr::JsonPointer;
 use serde::de::DeserializeOwned;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{Dump, Error, HasModel, ModelExt, Projection, Revision};
+use crate::{shifted_arrays, Dump, Error, HasModel, ModelExt, Projection, Revision};
 
 #[cfg(test)]
 mod tests;
@@ -94,7 +94,8 @@ pub struct Broadcast {
     /// The listener of each subscription with a changeable projection.
     projected: BTreeMap<u64, (JsonPointer, Projection)>,
     next_projected: u64,
-    history: VecDeque<Arc<Revision>>,
+    /// Each retained revision with the arrays it shifted.
+    history: VecDeque<(Arc<Revision>, Arc<[JsonPointer]>)>,
     epoch: InternedString,
 }
 impl Default for Broadcast {
@@ -147,29 +148,35 @@ impl Broadcast {
         current: u64,
     ) -> Option<Vec<Revision>> {
         if since > current
-            || since < current && self.history.front().map_or(true, |rev| rev.id > since + 1)
+            || since < current
+                && self
+                    .history
+                    .front()
+                    .map_or(true, |(rev, _)| rev.id > since + 1)
         {
             return None;
         }
-        Some(
-            self.history
-                .iter()
-                .filter(|rev| rev.id > since)
-                .map(|rev| projection.project_revision(rev.for_path(ptr)))
-                .filter(|rev| !rev.patch.is_empty())
-                .collect(),
-        )
+        self.history
+            .iter()
+            .filter(|(rev, _)| rev.id > since)
+            .map(|(rev, shifted)| projection.project_scoped(ptr, rev, shifted, None))
+            .filter(|rev| rev.as_ref().map_or(true, |rev| !rev.patch.is_empty()))
+            .collect()
     }
 
-    pub fn send(&mut self, value: &Arc<Revision>) {
+    /// Sends a revision, given the database after it, to every listener.
+    pub fn send(&mut self, value: &Arc<Revision>, after: &Value) {
         self.prune();
         while self.history.len() >= HISTORY_LEN {
             self.history.pop_front();
         }
-        self.history.push_back(value.clone());
+        let shifted: Arc<[JsonPointer]> = shifted_arrays(&value.patch, after).into();
+        self.history.push_back((value.clone(), shifted.clone()));
         self.listeners.retain(|(ptr, projection), listeners| {
             listeners.dump = None;
-            let scoped = projection.project_revision(value.for_path(ptr));
+            let Some(scoped) = projection.project_scoped(ptr, value, &shifted, Some(after)) else {
+                return true;
+            };
             if !scoped.patch.is_empty() {
                 listeners
                     .unbounded
