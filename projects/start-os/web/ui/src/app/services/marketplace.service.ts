@@ -310,7 +310,10 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
-  /** Includes superseded releases whose replacements may withdraw compatibility claims. */
+  /**
+   * Includes superseded releases whose replacements may withdraw compatibility claims.
+   * Each flavor prefers its newest installable claimant, falling back to its newest claimant.
+   */
   fetchProviders$(
     url: string,
     provides: string,
@@ -346,7 +349,13 @@ export class MarketplaceService extends AbstractMarketplaceService {
                   provides,
                 ),
               )
-              const best = newestReleases(this.exver, versions)
+              const installable = versions.filter(
+                version => selection.versions[version]?.compatible,
+              )
+              const best = {
+                ...newestReleases(this.exver, versions),
+                ...newestReleases(this.exver, installable),
+              }
               const target = selection.updateTarget
               if (target && versions.includes(target))
                 best[this.exver.getFlavor(target) ?? ''] = target

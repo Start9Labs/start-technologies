@@ -5962,6 +5962,61 @@ test('provider discovery honors a matching physical update target and retains ne
   assert.deepEqual(f.queries, [])
 })
 
+test('provider discovery prefers an installable claiming release over a newer one needing a StartOS update', async t => {
+  const url = 'https://registry.test/'
+  const entry = providerRegistryEntry()
+  const index = providerIndex()
+  index.package.packages.alternate.versions['2.0.0:0'] = {
+    title: 'Newer OS',
+    osVersion: '0.5.0',
+    satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+  }
+  entry.selections.alternate.versions['2.0.0:0'] = {
+    s9pks: [],
+    compatible: false,
+  }
+  const f = marketplaceFixture(t, { [url]: entry }, index)
+  const [selected] = await firstValueFrom(
+    f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0'),
+  )
+  assert.equal(selected.version, '1.0.0:0')
+  assert.deepEqual(f.queries, [])
+})
+
+test('provider installability preference is per flavor and follows selection changes', t => {
+  const url = 'https://registry.test/'
+  const entry = providerRegistryEntry()
+  const index = providerIndex()
+  for (const version of ['2.0.0:0', '#alternative:3.0.0:0']) {
+    index.package.packages.alternate.versions[version] = {
+      title: 'Newer OS',
+      osVersion: '0.5.0',
+      satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+    }
+    entry.selections.alternate.versions[version] = {
+      s9pks: [],
+      compatible: false,
+    }
+  }
+  const f = marketplaceFixture(t, { [url]: entry }, index)
+  const values = f.watch(f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0'))
+  const versions = () => values.at(-1).map(pkg => pkg.version)
+  assert.deepEqual(versions(), ['1.0.0:0', '#alternative:3.0.0:0'])
+
+  const unavailable = structuredClone(entry)
+  unavailable.selections.alternate.versions['1.0.0:0'].compatible = false
+  f.replace('/registryCache', { [url]: unavailable })
+  assert.deepEqual(versions(), ['2.0.0:0', '#alternative:3.0.0:0'])
+
+  const installed = structuredClone(unavailable)
+  installed.selections.alternate.versions['2.0.0:0'].compatible = true
+  f.replace('/registryCache', { [url]: installed })
+  assert.deepEqual(versions(), ['2.0.0:0', '#alternative:3.0.0:0'])
+  f.replace('/registryCache', { [url]: entry })
+  assert.deepEqual(versions(), ['1.0.0:0', '#alternative:3.0.0:0'])
+  assert.deepEqual(f.queries, [])
+})
+
 test('provider claims react without selection changes and hydrate only matching raw version keys', t => {
   const url = 'https://registry.test/'
   const entry = providerRegistryEntry()
