@@ -2,10 +2,12 @@ import { inject, Injectable, InjectionToken } from '@angular/core'
 import {
   Cursor,
   Dump,
-  Projection,
+  Selection,
+  SubtreeEvent,
   SubtreePatchDB,
   SubtreeSource,
 } from 'patch-db-client'
+import { Observable } from 'rxjs'
 import { BehaviorSubject } from 'rxjs'
 import { ApiService } from '../api/embassy-api.service'
 import { DataModel } from './data-model'
@@ -39,9 +41,13 @@ export class PatchDbSource implements SubtreeSource {
   subscribe(
     path: string[],
     since: Cursor | null,
-    projection: Projection | null,
-  ) {
-    return this.api.watchDb$(path, since, projection)
+    selection: Selection,
+  ): Observable<SubtreeEvent> {
+    return this.api.watchDb$(path, since, selection)
+  }
+
+  update(subscription: string, selection: Selection): Promise<void> {
+    return this.api.updateDbSubscription(subscription, selection)
   }
 }
 

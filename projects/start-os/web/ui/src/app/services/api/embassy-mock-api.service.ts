@@ -31,11 +31,12 @@ import {
   getValueByPointer,
   Operation,
   PatchOp,
-  normalizeProjection,
+  extension,
+  normalizeSelector,
   pathFromArray,
   projectOperations,
-  Projection,
   projectRoot,
+  Selection,
   scopeOperations,
   RemoveOperation,
   ReplaceOperation,
@@ -3320,14 +3321,24 @@ export class MockApiService extends ApiService implements StartupApiService {
     return getValueByPointer(this.document.value as any, path)
   }
 
+  private mockSubscriptionCount = 0
+  private readonly mockSubscriptions = new Map<
+    string,
+    {
+      pointer: string
+      selection: Selection
+      out: Subject<DatabaseUpdate<unknown>>
+    }
+  >()
+
   override watchDb$(
     path: string[],
     _since: DatabaseCursor | null,
-    projection: Projection | null = null,
+    selection: Selection | null = null,
   ): Observable<DatabaseUpdate<unknown>> {
     const pointer = pathFromArray(path)
     return defer(() => {
-      normalizeProjection(projection)
+      selection?.forEach(normalizeSelector)
       return (this.mockDocument ??= this.handlers['db.subscribe']!({}).then(
         result => {
           const { value } = (result as { dump: Dump<DataModel> }).dump
@@ -3346,25 +3357,62 @@ export class MockApiService extends ApiService implements StartupApiService {
         },
       ))
     }).pipe(
-      switchMap(document =>
-        this.mockWsSource$.pipe(
-          map(({ id, patch }) => ({
-            id,
-            patch: projectOperations(
-              scopeOperations(patch, pointer),
-              projection,
-            ),
-          })),
-          startWith({
-            id: document.id,
-            value: projectRoot(
-              projection,
-              getValueByPointer(document.value as any, pointer) ?? null,
-            ),
+      switchMap(
+        document =>
+          new Observable<DatabaseUpdate<unknown>>(subscriber => {
+            const subscription = `mock-${++this.mockSubscriptionCount}`
+            const entry = {
+              pointer,
+              selection: selection ?? [],
+              out: new Subject<DatabaseUpdate<unknown>>(),
+            }
+            this.mockSubscriptions.set(subscription, entry)
+            const forward = entry.out.subscribe(subscriber)
+            subscriber.next({
+              id: document.id,
+              subscription,
+              value: projectRoot(
+                entry.selection,
+                getValueByPointer(document.value as any, pointer) ?? null,
+              ),
+            })
+            const revisions = this.mockWsSource$.subscribe(({ id, patch }) =>
+              entry.out.next({
+                id,
+                patch: projectOperations(
+                  scopeOperations(patch, pointer),
+                  entry.selection,
+                ),
+              }),
+            )
+            return () => {
+              revisions.unsubscribe()
+              forward.unsubscribe()
+              this.mockSubscriptions.delete(subscription)
+            }
           }),
-        ),
       ),
     )
+  }
+
+  override async updateDbSubscription(
+    subscription: string,
+    selection: Selection,
+  ): Promise<void> {
+    selection.forEach(normalizeSelector)
+    const entry = this.mockSubscriptions.get(subscription)
+    if (!entry) throw new Error(`Database subscription ${subscription} ended`)
+    const document = this.document
+    entry.out.next({
+      id: document.id,
+      extend: true,
+      patch: extension(
+        entry.selection,
+        selection,
+        getValueByPointer(document.value as any, entry.pointer) ?? null,
+      ),
+    })
+    entry.selection = selection
   }
 
   private async mockRevision<T>(patch: Operation<T>[]): Promise<void> {
