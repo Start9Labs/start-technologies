@@ -59,7 +59,7 @@ impl IndexView {
 
     fn has_current_locales(
         &self,
-        root: &Value,
+        root: &OrdValue,
         key: Option<&AnyVerifyingKey>,
     ) -> Result<bool, Error> {
         if self.language.is_none() {
@@ -402,27 +402,27 @@ mod tests {
         for (language, before, after, expected) in [
             (
                 "de_DE",
-                json!({ "en_US": "English" }),
-                json!({ "en_US": "English", "de_DE": "Deutsch" }),
+                imbl_value::ord_json!({ "en_US": "English" }),
+                imbl_value::ord_json!({ "en_US": "English", "de_DE": "Deutsch" }),
                 "Deutsch",
             ),
             (
                 "en_GB",
-                json!({ "en_US": "US English" }),
-                json!({ "en_US": "US English", "en_GB": "GB English" }),
+                imbl_value::ord_json!({ "en_US": "US English" }),
+                imbl_value::ord_json!({ "en_US": "US English", "en_GB": "GB English" }),
                 "GB English",
             ),
             (
                 "de_DE",
-                json!({ "en_US": "English", "de_DE": "Deutsch" }),
-                json!({ "en_US": "English" }),
+                imbl_value::ord_json!({ "en_US": "English", "de_DE": "Deutsch" }),
+                imbl_value::ord_json!({ "en_US": "English" }),
                 "English",
             ),
         ] {
             let main = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::in_memory());
             main.put(
                 &JsonPointer::<&str>::default(),
-                &json!({
+                &imbl_value::ord_json!({
                     "admins": [],
                     "index": {
                         "description": before,
@@ -490,7 +490,7 @@ mod tests {
                     .dump(&"/index/description".parse::<JsonPointer>().unwrap())
                     .await
                     .value,
-                json!(expected)
+                imbl_value::ord_json!(expected)
             );
         }
     }

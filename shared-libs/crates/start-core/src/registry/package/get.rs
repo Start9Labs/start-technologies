@@ -1185,7 +1185,7 @@ mod tests {
             [{ "arch": null, "ram": null, "device": [] }, to_value(&generic.s9pks[0].1).unwrap()],
             [{ "arch": ["x86_64"], "ram": null, "device": [] }, to_value(&native.s9pks[0].1).unwrap()],
         ]);
-        let mut index: Model<PackageIndex> = json!({
+        let mut index: Model<PackageIndex> = imbl_value::ord_json!({
             "categories": {},
             "packages": { "demo": {
                 "authorized": {}, "categories": [],

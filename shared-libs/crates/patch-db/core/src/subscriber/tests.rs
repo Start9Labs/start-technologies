@@ -57,7 +57,7 @@ fn idle_mutable_subscriptions_reclaim_senders_and_old_projection_entries() {
         let projection =
             crate::Projection::new(None, vec![format!("/next{i}").parse().unwrap()], vec![])
                 .unwrap();
-        assert!(broadcast.reproject(live.id, projection, &json!({}), 0));
+        assert!(broadcast.reproject(live.id, projection, &ord_json!({}), 0));
         assert!(live.receiver.try_recv().is_ok());
         assert_eq!(broadcast.listeners.len(), 1);
         assert_eq!(broadcast.projected.len(), 1);
