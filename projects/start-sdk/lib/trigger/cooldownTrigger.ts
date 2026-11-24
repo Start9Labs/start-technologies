@@ -1,5 +1,5 @@
 import { Trigger } from '.'
-import { delay } from './delay'
+import { delay } from '../util/delay'
 
 /**
  * A trigger that polls at a fixed interval.

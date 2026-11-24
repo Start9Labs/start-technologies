@@ -15,12 +15,24 @@ use crate::prelude::*;
 use crate::ssl::ROUTER_HOSTNAME;
 
 const CAPTIVE_CONF_NAME: &str = "captive-portal.conf";
-const CAPTIVE_CONTENT: &str = "\
-    address=/#/192.168.0.1\n\
-    address=/#/::\n\
-    dhcp-option=114,http://192.168.0.1/\n";
+const CAPTIVE_LOCK_PATH: &str = "/var/lock/startwrt-captive.lock";
 
-/// Mirrors the presence of the dnsmasq drop-in.
+fn captive_content(lan: std::net::Ipv4Addr) -> String {
+    format!("address=/#/{lan}\naddress=/#/::\ndhcp-option=114,http://{lan}/\n")
+}
+
+/// The LAN's address, else the factory default.
+async fn lan_address() -> std::net::Ipv4Addr {
+    let lan = async {
+        let bytes = uciedit::read_all("/etc/config", &["network"]).await.ok()?;
+        let arena = uciedit::Arena::new();
+        let cfgs = bytes.parse(&arena).ok()?;
+        crate::profiles::get_lan_ip(&cfgs)
+    };
+    lan.await.unwrap_or(std::net::Ipv4Addr::new(192, 168, 0, 1))
+}
+
+/// Caches configured DNS hijacking, independently of dnsmasq process availability.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub fn is_active() -> bool {
@@ -49,11 +61,12 @@ table inet startwrt_captive
 delete table inet startwrt_captive
 ";
 
-/// The dnsmasq instance serving the LAN and its conf-dir. Neither is a fixed
-/// path: OpenWrt names both after the UCI section, e.g.
-/// `/tmp/dnsmasq.cfg01411c.d/`.
+/// Includes the configured LAN instance while its process is restarting.
 fn find_dnsmasq_conf_dir() -> Result<(String, String), Error> {
-    lan_instance(crate::devices::dnsmasq_instance_option("conf-dir")).ok_or_else(|| {
+    lan_instance(crate::devices::generated_dnsmasq_instance_option(
+        "conf-dir",
+    ))
+    .ok_or_else(|| {
         Error::new(
             eyre!("no dnsmasq conf-dir found in /var/etc/dnsmasq.conf.*"),
             ErrorKind::NotFound,
@@ -72,20 +85,30 @@ fn lan_instance(mut instances: Vec<(String, String)>) -> Option<(String, String)
     instances.into_iter().next()
 }
 
-/// Check if the captive portal DNS hijack is currently active.
+fn active_instances(instances: Vec<(String, String)>) -> Vec<(String, String)> {
+    instances
+        .into_iter()
+        .filter(|(_, dir)| Path::new(dir).join(CAPTIVE_CONF_NAME).exists())
+        .collect()
+}
+
+/// Includes a drop-in left on the previous LAN-serving instance.
 pub fn is_captive_portal_active() -> bool {
-    find_dnsmasq_conf_dir()
-        .map(|(_, dir)| Path::new(&dir).join(CAPTIVE_CONF_NAME).exists())
-        .unwrap_or(false)
+    !active_instances(crate::devices::generated_dnsmasq_instance_option(
+        "conf-dir",
+    ))
+    .is_empty()
 }
 
 pub async fn enable_captive_portal() -> Result<(), Error> {
+    let _lock = startos::util::FileLock::new(CAPTIVE_LOCK_PATH, true).await?;
     apply_ruleset(BLOCK_RULESET).await?;
     enable_dns_hijack().await
 }
 
 /// Unblocks forwarding even when restoring DNS fails.
 pub async fn disable_captive_portal() -> Result<(), Error> {
+    let _lock = startos::util::FileLock::new(CAPTIVE_LOCK_PATH, true).await?;
     let unblocked = apply_ruleset(UNBLOCK_RULESET).await;
     disable_dns_hijack().await?;
     unblocked
@@ -100,22 +123,30 @@ async fn enable_dns_hijack() -> Result<(), Error> {
             .map_err(|e| Error::new(eyre!("failed to create {dir}: {e}"), ErrorKind::Filesystem))?;
     }
 
-    fs::write(&conf, CAPTIVE_CONTENT).map_err(|e| {
-        Error::new(
-            eyre!("failed to write {}: {e}", conf.display()),
-            ErrorKind::Filesystem,
-        )
-    })?;
+    let content = captive_content(lan_address().await);
+    let changed = fs::read_to_string(&conf).ok().as_deref() != Some(content.as_str());
+    if changed {
+        fs::write(&conf, content).map_err(|e| {
+            Error::new(
+                eyre!("failed to write {}: {e}", conf.display()),
+                ErrorKind::Filesystem,
+            )
+        })?;
+    }
     ACTIVE.store(true, Ordering::Relaxed);
 
-    restart_dnsmasq(&instance).await
+    if changed {
+        restart_dnsmasq(&instance).await?;
+    }
+    Ok(())
 }
 
 async fn disable_dns_hijack() -> Result<(), Error> {
-    let (instance, dir) = find_dnsmasq_conf_dir()?;
-    let conf = Path::new(&dir).join(CAPTIVE_CONF_NAME);
-
-    if conf.exists() {
+    let active = active_instances(crate::devices::generated_dnsmasq_instance_option(
+        "conf-dir",
+    ));
+    for (_, dir) in &active {
+        let conf = Path::new(dir).join(CAPTIVE_CONF_NAME);
         fs::remove_file(&conf).map_err(|e| {
             Error::new(
                 eyre!("failed to remove {}: {e}", conf.display()),
@@ -124,8 +155,10 @@ async fn disable_dns_hijack() -> Result<(), Error> {
         })?;
     }
     ACTIVE.store(false, Ordering::Relaxed);
-
-    restart_dnsmasq(&instance).await
+    for (instance, _) in active {
+        restart_dnsmasq(&instance).await?;
+    }
+    Ok(())
 }
 
 /// Check if the admin (root) password has been set in /etc/shadow.
@@ -149,13 +182,9 @@ pub(crate) fn root_password_set(shadow: &str) -> bool {
         .is_some_and(|parts| !matches!(parts[1], "" | "*" | "!" | "x"))
 }
 
-/// Evaluate current state and enable/disable captive portal accordingly.
-///
-/// - If no admin password is set → enable captive portal
-/// - If admin password is set → disable captive portal
-///
-/// This is an async wrapper for use from the daemon's boot sequence.
+/// Reconciles LAN discovery with initialization, serialized with password-completion cleanup.
 pub async fn ensure_captive_portal_state() -> Result<(), Error> {
+    let _lock = startos::util::FileLock::new(CAPTIVE_LOCK_PATH, true).await?;
     let password_set = is_admin_password_set()?;
     let active = is_captive_portal_active();
 
@@ -171,8 +200,8 @@ pub async fn ensure_captive_portal_state() -> Result<(), Error> {
         apply_ruleset(BLOCK_RULESET).await?;
         if !active {
             tracing::info!("no admin password set, enabling captive portal");
-            enable_dns_hijack().await?;
         }
+        enable_dns_hijack().await?;
     }
 
     Ok(())
@@ -269,9 +298,47 @@ async fn restart_dnsmasq(instance: &str) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_portal_points_at_the_lan() {
+        assert_eq!(
+            super::captive_content(std::net::Ipv4Addr::new(192, 168, 10, 1)),
+            "address=/#/192.168.10.1\naddress=/#/::\ndhcp-option=114,http://192.168.10.1/\n"
+        );
+    }
+
     use axum::body::Body;
 
     use super::*;
+
+    #[test]
+    fn dropins_remain_discoverable_when_the_lan_instance_changes() {
+        let legacy = tempfile::tempdir().unwrap();
+        let current = tempfile::tempdir().unwrap();
+        let instances = vec![
+            ("cfg01411c".into(), legacy.path().to_str().unwrap().into()),
+            ("dns_lan".into(), current.path().to_str().unwrap().into()),
+        ];
+        let legacy_conf = legacy.path().join(CAPTIVE_CONF_NAME);
+        let current_conf = current.path().join(CAPTIVE_CONF_NAME);
+        fs::write(
+            &legacy_conf,
+            captive_content("192.168.0.1".parse().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(lan_instance(instances.clone()).unwrap().0, "dns_lan");
+        assert_eq!(active_instances(instances.clone())[0].0, "cfg01411c");
+
+        fs::write(
+            &current_conf,
+            captive_content("192.168.10.1".parse().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(active_instances(instances.clone()).len(), 2);
+        fs::remove_file(legacy_conf).unwrap();
+        assert_eq!(active_instances(instances.clone())[0].0, "dns_lan");
+        fs::remove_file(current_conf).unwrap();
+        assert!(active_instances(instances).is_empty());
+    }
 
     fn request(uri: &str, host: Option<&str>) -> Request {
         let mut req = Request::builder().uri(uri).body(Body::empty()).unwrap();

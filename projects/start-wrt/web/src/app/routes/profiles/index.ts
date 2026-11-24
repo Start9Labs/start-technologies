@@ -9,6 +9,7 @@ import {
   TuiDropdown,
   TuiHint,
   TuiLink,
+  TuiNotification,
   TuiNotificationService,
   TuiTitle,
 } from '@taiga-ui/core'
@@ -21,8 +22,10 @@ import {
   ApiService,
   ScheduleWindow,
   SecurityProfile,
+  WanOverlap,
 } from 'src/app/services/api/api.service'
 import { ConnectionService } from 'src/app/services/connection.service'
+import { WanOverlapsService } from 'src/app/services/wan-overlaps.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
 import { confirmVpnExposedPort } from 'src/app/services/vpn-exposed-port'
@@ -42,6 +45,19 @@ import { ProfilesService } from './service'
         </button>
       </aside>
     </header>
+    @for (overlap of wanOverlaps.overlaps(); track overlap.interface) {
+      <div tuiNotification appearance="warning">
+        <div tuiTitle>
+          {{ describe(overlap) }}
+          <div tuiSubtitle>
+            {{
+              'The router may lose upstream or Internet access. A more-specific WAN network can also block devices from this dashboard. Change its subnet to one outside that network.'
+                | i18n
+            }}
+          </div>
+        </div>
+      </div>
+    }
     <table tuiTable class="g-table" [tuiSkeleton]="!service.data()">
       <thead>
         <tr>
@@ -131,6 +147,10 @@ import { ProfilesService } from './service'
       max-width: 60rem;
     }
 
+    [tuiNotification] {
+      margin-block-end: 1rem;
+    }
+
     td:first-child {
       font-weight: bold;
     }
@@ -152,6 +172,7 @@ import { ProfilesService } from './service'
     TuiDropdown,
     TuiHint,
     TuiLink,
+    TuiNotification,
     RouterLink,
     i18nPipe,
   ],
@@ -165,6 +186,14 @@ class Profiles {
   private readonly alerts = inject(TuiNotificationService)
   private readonly window = inject(WA_WINDOW)
   private readonly i18n = inject(i18nPipe)
+  protected readonly wanOverlaps = inject(WanOverlapsService)
+
+  protected describe({ profile, wanNetwork }: WanOverlap): string {
+    return fill(
+      this.i18n.transform('{profile} overlaps the upstream network {network}'),
+      { profile, network: wanNetwork },
+    )
+  }
 
   private readonly lanSubnet = computed(() => {
     const profiles = this.service.data()
