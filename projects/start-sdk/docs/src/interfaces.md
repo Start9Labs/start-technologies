@@ -232,7 +232,7 @@ HTTP proxying and TLS termination are separate: `proxy` describes HTTP handling,
 
 Both HTTP-proxied legs connect to the container from StartOS, rather than preserving the client's TCP source address. With forwarded-header generation enabled, applications identify the client through `X-Forwarded-For`.
 
-The HTTP proxy strips client-supplied `X-Forwarded-*` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
+The HTTP proxy strips client-supplied `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `True-Client-IP` and `CF-Connecting-IP` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
 
 An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
 
@@ -689,7 +689,7 @@ const apiOrigin = await apiMulti.bindPort(apiPort, {
 | `tokens` (bearer)     | `Array<string>`                 | Accepted bearer tokens. Any match passes.                                                                                                                            |
 | `realm`               | `string` \| `null`              | Realm advertised in the 401 `WWW-Authenticate` challenge. Defaults to `"StartOS"`. Use a stable realm across bindings that share credentials so browsers reuse them. |
 
-The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled.
+The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled. A gated WebSocket or other upgrade request whose `Origin` differs from the connection's scheme, host or effective port gets `403 Forbidden`, so a page on another site cannot reuse the browser's cached credentials; a request without `Origin` passes. Omitted ports mean `80` for plaintext connections and `443` for TLS connections, independently of forwarded-header generation.
 
 **The gate covers every address the binding publishes, including its plaintext [bridge address](./service-to-service.md#the-host-bridge).** A service that depends on you is challenged like any other client, so if one must reach a gated binding, give it a credential — see [Admitting dependent services](#admitting-dependent-services).
 

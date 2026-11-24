@@ -4,7 +4,7 @@ use std::process::Output;
 use tokio::process::Command;
 
 use crate::prelude::*;
-use crate::util::io::{maybe_open_file, open_file, read_secret_file, write_file_private_atomic};
+use crate::util::io::{maybe_open_file, write_file_private_atomic};
 use crate::util::{GeneralBoxedGuard, Invoke, new_guid};
 
 pub const DKMS_MOK_KEY: &str = "/var/lib/dkms/mok.key";
@@ -45,24 +45,6 @@ pub async fn sign_unsigned_modules(root: &Path) -> Result<(), Error> {
         .invoke(ErrorKind::OpenSsl)
         .await?;
     Ok(())
-}
-
-/// The start9 user's password hash without shadow lock markers.
-async fn start9_shadow_hash(root: &Path) -> Result<Option<zeroize::Zeroizing<String>>, Error> {
-    let bytes = read_secret_file(open_file(root.join("etc/shadow")).await?).await?;
-    let shadow = std::str::from_utf8(&bytes).with_kind(ErrorKind::ParseSysInfo)?;
-    for line in shadow.lines() {
-        if let Some(("start9", rest)) = line.split_once(':') {
-            if let Some((hash, _)) = rest.split_once(':') {
-                let hash = hash.trim_start_matches("!");
-                if hash.starts_with('$') {
-                    return Ok(Some(zeroize::Zeroizing::new(hash.to_owned())));
-                }
-                return Ok(None);
-            }
-        }
-    }
-    Ok(None)
 }
 
 #[derive(
@@ -162,6 +144,7 @@ pub async fn request_enrollment(certificates: &[PathBuf], hash: &str) -> Result<
 /// Stages DKMS enrollment using the start9 user's password.
 /// The root holds both the certificate and `etc/shadow`.
 /// FDE-owned authentication remains unchanged. Returns request submission, not enrollment.
+/// Unset or locked credentials leave enrollment unchanged.
 pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
     let mok_pub = &root.join(DKMS_MOK_PUB.trim_start_matches('/'));
     tracing::info!("enroll_mok: checking EFI and mok_pub={}", mok_pub.display());
@@ -183,7 +166,7 @@ pub async fn enroll_mok(root: &Path) -> Result<bool, Error> {
         return Ok(false);
     }
 
-    let Some(hash) = start9_shadow_hash(root).await? else {
+    let Some(hash) = crate::auth::start9_password_hash(root).await? else {
         tracing::info!("enroll_mok: start9 user password not set, skipping");
         return Ok(false);
     };

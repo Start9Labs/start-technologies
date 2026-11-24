@@ -278,6 +278,33 @@ pub async fn write_shadow(password: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The start9 user's crypt(3) hash in `<root>/etc/shadow`. `None` when the user is absent or locked.
+pub(crate) async fn start9_password_hash(
+    root: &Path,
+) -> Result<Option<zeroize::Zeroizing<String>>, Error> {
+    let bytes = crate::util::io::read_secret_file(
+        crate::util::io::open_file(root.join("etc/shadow")).await?,
+    )
+    .await?;
+    let shadow = std::str::from_utf8(&bytes).with_kind(ErrorKind::ParseSysInfo)?;
+    Ok(shadow
+        .lines()
+        .find_map(|line| line.strip_prefix("start9:"))
+        .and_then(|rest| rest.split(':').next())
+        .filter(|hash| hash.starts_with('$'))
+        .map(|hash| zeroize::Zeroizing::new(hash.to_owned())))
+}
+
+/// Accepts SHA-512 crypt hashes, the format [`write_shadow`] writes.
+pub(crate) fn check_shadow_password(hash: &str, password: &str) -> Result<(), Error> {
+    sha_crypt::sha512_check(password, hash).map_err(|_| {
+        Error::new(
+            eyre!("{}", t!("auth.password-incorrect")),
+            ErrorKind::IncorrectPassword,
+        )
+    })
+}
+
 #[derive(Clone, Serialize, Deserialize, VisitVariants)]
 #[serde(untagged)]
 pub enum PasswordType {
@@ -1177,6 +1204,41 @@ mod password_snapshot_tests {
                     .unwrap_err()
                     .kind,
                 ErrorKind::IncorrectPassword
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::*;
+    use crate::util::io::{TmpDir, write_file_atomic};
+
+    #[tokio::test]
+    async fn start9_password_hash_ignores_locked_and_unset_passwords() {
+        for (field, expected) in [
+            ("$6$salt$hash", Some("$6$salt$hash")),
+            ("!$y$j9T$factory", None),
+            ("!$6$salt$hash", None),
+            ("!", None),
+            ("*", None),
+            ("", None),
+        ] {
+            let root = TmpDir::new().await.unwrap();
+            write_file_atomic(
+                root.join("etc/shadow"),
+                format!("start9x:$6$other:1::::::\nstart9:{field}:19000:0:99999:7:::\n"),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                start9_password_hash(&root)
+                    .await
+                    .unwrap()
+                    .as_ref()
+                    .map(|hash| hash.as_str()),
+                expected,
+                "{field:?}",
             );
         }
     }

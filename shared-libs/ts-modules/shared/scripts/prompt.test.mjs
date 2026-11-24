@@ -39,6 +39,23 @@ registerHooks({
 })
 const { PromptModal } = await import(componentUrl.href)
 
+for (const [required, expected] of [
+  [undefined, []],
+  [true, []],
+  [false, ['']],
+]) {
+  test(`empty prompt requires explicit optionality (required=${required})`, () => {
+    const values = []
+    const result = new Subject()
+    result.subscribe(value => values.push(value))
+    const prompt = Object.create(PromptModal.prototype)
+    prompt.context = { data: { useMask: true, required }, $implicit: result }
+    prompt.submit('')
+    assert.deepEqual(values, expected)
+    result.complete()
+  })
+}
+
 for (const [useMask, raw, expected] of [
   [true, '  secret  ', '  secret  '],
   [true, '   ', '   '],

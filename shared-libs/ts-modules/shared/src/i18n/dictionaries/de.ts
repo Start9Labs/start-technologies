@@ -1129,4 +1129,5 @@ export default {
   1334: 'Hilfe erhalten',
   1335: 'Zuletzt synchronisiert',
   1336: 'gerade eben',
+  1337: 'Geben Sie Ihr Master-Passwort ein, um fortzufahren.',
 } satisfies i18n

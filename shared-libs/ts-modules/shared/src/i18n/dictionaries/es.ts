@@ -1129,4 +1129,5 @@ export default {
   1334: 'Obtener ayuda',
   1335: 'Última sincronización',
   1336: 'justo ahora',
+  1337: 'Introduzca su contraseña maestra para continuar.',
 } satisfies i18n

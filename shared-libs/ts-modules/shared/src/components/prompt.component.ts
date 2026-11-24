@@ -79,7 +79,7 @@ export class PromptModal {
 
   submit(value: string) {
     if (!this.options.useMask) value = value.trim()
-    if (value || !this.options.required) {
+    if (value || this.options.required === false) {
       const { pattern, patternError } = this.options
       if (pattern && !new RegExp(pattern).test(value)) {
         this.error = patternError || 'Invalid input'
@@ -100,6 +100,7 @@ export interface PromptOptions {
   buttonText?: i18nKey
   placeholder?: i18nKey
   required?: boolean
+  /** Masked input preserves leading and trailing whitespace. */
   useMask?: boolean
   initialValue?: string | null
   pattern?: string

@@ -69,7 +69,7 @@ async fn progress_preserves_local_credential_precedence_session_reuse_and_termin
     assert!(
         context
             .stream_rpc::<FullProgress, bool>(
-                context.rpc_url().unwrap(),
+                context.base_url.get().unwrap(),
                 HeaderMap::new(),
                 "progress",
                 json!({})
@@ -82,7 +82,7 @@ async fn progress_preserves_local_credential_precedence_session_reuse_and_termin
     headers.insert(AUTHORIZATION, "Bearer local-credential".parse().unwrap());
     let response = context
         .stream_rpc::<FullProgress, bool>(
-            context.rpc_url().unwrap(),
+            context.base_url.get().unwrap(),
             headers.clone(),
             "progress",
             json!({}),
@@ -92,7 +92,7 @@ async fn progress_preserves_local_credential_precedence_session_reuse_and_termin
     assert!(with_cli_progress(response.items, "Test").await.unwrap());
     let response = context
         .stream_rpc::<FullProgress, bool>(
-            context.rpc_url().unwrap(),
+            context.base_url.get().unwrap(),
             headers,
             "progress",
             json!({}),

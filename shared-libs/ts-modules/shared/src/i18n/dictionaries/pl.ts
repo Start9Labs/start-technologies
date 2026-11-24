@@ -1129,4 +1129,5 @@ export default {
   1334: 'Uzyskaj pomoc',
   1335: 'Ostatnia synchronizacja',
   1336: 'przed chwilą',
+  1337: 'Wprowadź hasło główne, aby kontynuować.',
 } satisfies i18n

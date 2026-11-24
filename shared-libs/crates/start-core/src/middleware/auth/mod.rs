@@ -8,6 +8,8 @@ use crate::context::RpcContext;
 use crate::db::model::Database;
 use crate::middleware::auth::bearer::BearerAuth;
 use crate::middleware::auth::local::{LocalAuth, LocalAuthContext};
+use crate::middleware::auth::password::ShadowPasswordAuth;
+use crate::middleware::auth::session::SessionContext;
 use crate::middleware::auth::signature::{
     LoginMetadata, SignatureAuth, SignatureAuthorizationContext,
 };
@@ -17,6 +19,7 @@ use crate::util::serde::const_true;
 pub mod bearer;
 pub mod local;
 pub(crate) mod login_rate_limit;
+pub mod password;
 pub mod session;
 pub mod signature;
 
@@ -46,6 +49,7 @@ pub struct Auth<C: Context> {
     local: Option<DynMiddleware<C>>,
     bearer: Option<DynMiddleware<C>>,
     signature: Option<DynMiddleware<C>>,
+    password: Option<DynMiddleware<C>>,
 }
 impl<C: Context> Clone for Auth<C> {
     fn clone(&self) -> Self {
@@ -53,6 +57,7 @@ impl<C: Context> Clone for Auth<C> {
             local: self.local.clone(),
             bearer: self.bearer.clone(),
             signature: self.signature.clone(),
+            password: self.password.clone(),
         }
     }
 }
@@ -62,6 +67,7 @@ impl<C: Context> Auth<C> {
             local: None,
             bearer: None,
             signature: None,
+            password: None,
         }
     }
 
@@ -70,6 +76,7 @@ impl<C: Context> Auth<C> {
             .iter_mut()
             .chain(self.bearer.iter_mut())
             .chain(self.signature.iter_mut())
+            .chain(self.password.iter_mut())
     }
 }
 impl<C: LocalAuthContext> Auth<C> {
@@ -81,6 +88,12 @@ impl<C: LocalAuthContext> Auth<C> {
 impl<C: SignatureAuthorizationContext> Auth<C> {
     pub fn with_signature_auth(mut self) -> Self {
         self.signature = Some(DynMiddleware::new(SignatureAuth::new()));
+        self
+    }
+}
+impl<C: SessionContext + Context> Auth<C> {
+    pub fn with_shadow_password_auth(mut self) -> Self {
+        self.password = Some(DynMiddleware::new(ShadowPasswordAuth::new()));
         self
     }
 }
@@ -143,11 +156,22 @@ impl<C: Context> Middleware<C> for Auth<C> {
         }
         if let Some(signature) = &mut self.signature {
             match signature
-                .process_rpc_request(context, metadata, request)
+                .process_rpc_request(context, metadata.clone(), request)
                 .await
             {
                 Ok(()) => authorized = true,
                 Err(e) => err = Some(e),
+            }
+        }
+        if !authorized {
+            if let Some(password) = &mut self.password {
+                match password
+                    .process_rpc_request(context, metadata, request)
+                    .await
+                {
+                    Ok(()) => authorized = true,
+                    Err(e) => err = Some(e),
+                }
             }
         }
         match err {
