@@ -1,6 +1,7 @@
 import { DatabaseCursor, DatabaseUpdate } from '@start9labs/shared'
 import type { RPC, RpcStreamClient } from '@start9labs/start-core'
 import { Observable } from 'rxjs'
+import type { Projection } from 'patch-db-client'
 import { ApiClient, Params, WebsocketConfig } from './api.types'
 
 export type FileUploadOptions = {
@@ -16,10 +17,11 @@ export abstract class ApiService {
   /** Waits for initiating PatchDB fences; database observation belongs to watchDb$. */
   abstract readonly streams: Omit<RpcStreamClient<RPC.StartOS>, 'db'>
 
-  /** Streams the public database subtree at `path`, resuming after `since` when it can. */
+  /** Streams the projected public database subtree at `path`, resuming after `since` when it can. */
   abstract watchDb$(
     path: string[],
     since: DatabaseCursor | null,
+    projection?: Projection | null,
   ): Observable<DatabaseUpdate<unknown>>
 
   abstract uploadFile(

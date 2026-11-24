@@ -55,7 +55,7 @@ async fn stream_start_dumps_without_a_cursor_and_replays_with_one() {
     )
     .await
     .unwrap();
-    let (start, _) = subscribe_start(&db, PUBLIC.clone(), None).await;
+    let (start, _) = subscribe_start(&db, PUBLIC.clone(), Default::default(), None).await;
     assert_eq!(
         serde_json::to_value(&start).unwrap(),
         serde_json::json!({
@@ -75,7 +75,8 @@ async fn stream_start_dumps_without_a_cursor_and_replays_with_one() {
         epoch: start.epoch.clone(),
         id: start.id,
     };
-    let (resumed, _) = subscribe_start(&db, PUBLIC.clone(), Some(&cursor)).await;
+    let (resumed, _) =
+        subscribe_start(&db, PUBLIC.clone(), Default::default(), Some(&cursor)).await;
     assert_eq!(
         serde_json::to_value(&resumed).unwrap(),
         serde_json::json!({
@@ -88,4 +89,74 @@ async fn stream_start_dumps_without_a_cursor_and_replays_with_one() {
             }],
         })
     );
+}
+
+#[tokio::test]
+async fn projected_stream_start_dumps_and_replays_only_the_projection() {
+    let db = PatchDb::in_memory();
+    db.put(
+        &ROOT,
+        &serde_json::json!({
+            "public": { "packageData": { "x": { "state": 1, "icon": "big" } } },
+        }),
+    )
+    .await
+    .unwrap();
+    let params: SubscribeParams = serde_json::from_value(serde_json::json!({
+        "pointer": "/public/packageData",
+        "exclude": ["/*/icon"],
+    }))
+    .unwrap();
+    let pointer = params.pointer.unwrap();
+    let (start, _) = subscribe_start(
+        &db,
+        pointer.clone(),
+        params.projection.clone().try_into().unwrap(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        start.value,
+        Some(imbl_value::json!({ "x": { "state": 1 } }))
+    );
+    db.put(
+        &"/public/packageData/x/icon".parse::<JsonPointer>().unwrap(),
+        &"bigger",
+    )
+    .await
+    .unwrap();
+    db.put(
+        &"/public/packageData/x/state"
+            .parse::<JsonPointer>()
+            .unwrap(),
+        &2,
+    )
+    .await
+    .unwrap();
+    let cursor = DbCursor {
+        epoch: start.epoch.clone(),
+        id: start.id,
+    };
+    let (resumed, _) = subscribe_start(
+        &db,
+        pointer,
+        params.projection.try_into().unwrap(),
+        Some(&cursor),
+    )
+    .await;
+    assert_eq!(
+        serde_json::to_value(&resumed.revisions).unwrap(),
+        serde_json::json!([{
+            "id": 3,
+            "patch": [{ "op": "replace", "path": "/x/state", "value": 2 }],
+        }])
+    );
+}
+
+#[test]
+fn projection_params_reject_array_positions() {
+    let params: ProjectionParams =
+        serde_json::from_value(serde_json::json!({ "include": ["/arr/1"] })).unwrap();
+    let error = Projection::try_from(params).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidRequest);
 }

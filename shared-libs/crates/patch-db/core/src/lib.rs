@@ -6,6 +6,7 @@ use thiserror::Error;
 
 mod model;
 mod patch;
+mod projection;
 mod store;
 mod subscriber;
 
@@ -20,6 +21,7 @@ pub use json_ptr;
 pub use model::{DestructureMut, HasModel, Model, ModelExt, Pointer};
 pub use patch::{Catchup, DiffPatch, Dump, JsonCatchup, Revision};
 pub use patch_db_macro::HasModel;
+pub use projection::{is_positional, Projection, Reach};
 pub use store::{MutateResult, PatchDb, Store, TypedPatchDb};
 pub use subscriber::{DbWatch, JsonSubscriber, Subscriber, TypedDbWatch};
 use tokio::sync::TryLockError;
@@ -48,6 +50,8 @@ pub enum Error {
     Subscriber(#[from] tokio::sync::mpsc::error::TryRecvError),
     #[error("Node Does Not Exist: {0}")]
     NodeDoesNotExist(JsonPointer),
+    #[error("Projection Pattern Addresses An Array Position: {0}")]
+    PositionalPattern(JsonPointer),
     #[error("Provided Function Panicked! {0}")]
     Panic(String),
     #[error("Would Block")]

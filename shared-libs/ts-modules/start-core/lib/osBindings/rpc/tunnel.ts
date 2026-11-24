@@ -142,7 +142,6 @@ export type DnsModeInput = z.input<typeof schemas.DnsMode>
  */
 export type DnsRecordEntry = z.output<typeof schemas.DnsRecordEntry>
 export type Dump = z.output<typeof schemas.Dump>
-export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 
 /**
  * Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
@@ -168,6 +167,11 @@ export type LogoutParamsInput = z.input<typeof schemas.LogoutParams>
  * JSON Patch 'move' operation representation
  */
 export type MoveOperation = z.output<typeof schemas.MoveOperation>
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
 export type RemoveDeviceParamsInput = z.input<typeof schemas.RemoveDeviceParams>
 export type RemoveDnsRecordParamsInput = z.input<
   typeof schemas.RemoveDnsRecordParams
@@ -235,6 +239,7 @@ export type ApplyWithPathParamsInput = z.input<
  * Enrolled sign-ins indexed by canonical DER64 SPKI.
  */
 export type AuthKeys = z.output<typeof schemas.AuthKeys>
+export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 
 /**

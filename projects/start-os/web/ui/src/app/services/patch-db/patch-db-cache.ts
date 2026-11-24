@@ -1,6 +1,12 @@
 import { inject, Service, signal } from '@angular/core'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { arrayFromPath, Cursor, Dump, pathFromArray } from 'patch-db-client'
+import {
+  arrayFromPath,
+  Cursor,
+  Dump,
+  parseSubscriptionKey,
+  pathFromArray,
+} from 'patch-db-client'
 import { DataModel } from './data-model'
 
 const VALUES = 'values'
@@ -75,7 +81,7 @@ export class PatchDbCache {
           ? Object.keys(value).map(key => [pathFromArray([key]), root] as const)
           : []),
         ...Object.entries(cursors),
-      ].filter(([pointer]) => persisted(pointer)),
+      ].filter(([key]) => persisted(key)),
     )
     const previous = this.saved
     this.saved = { id, roots, value: { ...value } }
@@ -163,9 +169,10 @@ function sameCursor(stored: Snapshot | undefined, saved: Snapshot): boolean {
   )
 }
 
-function persisted(pointer: string): boolean {
-  const [key] = arrayFromPath(pointer)
-  return key !== undefined && !UNPERSISTED.includes(key)
+/** Whether a subscription key's cursor is stored, from the root its pointer lies under. */
+function persisted(key: string): boolean {
+  const [root] = arrayFromPath(parseSubscriptionKey(key).pointer)
+  return root !== undefined && !UNPERSISTED.includes(root)
 }
 
 function toEntries(value: DataModel): Map<string, unknown> {

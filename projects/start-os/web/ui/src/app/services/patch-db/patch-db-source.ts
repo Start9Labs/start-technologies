@@ -1,5 +1,11 @@
 import { inject, Injectable, InjectionToken } from '@angular/core'
-import { Cursor, Dump, SubtreePatchDB, SubtreeSource } from 'patch-db-client'
+import {
+  Cursor,
+  Dump,
+  Projection,
+  SubtreePatchDB,
+  SubtreeSource,
+} from 'patch-db-client'
 import { BehaviorSubject } from 'rxjs'
 import { ApiService } from '../api/embassy-api.service'
 import { DataModel } from './data-model'
@@ -30,8 +36,12 @@ export const ALWAYS_WATCHED: readonly (keyof DataModel)[][] = [
 export class PatchDbSource implements SubtreeSource {
   private readonly api = inject(ApiService)
 
-  subscribe(path: string[], since: Cursor | null) {
-    return this.api.watchDb$(path, since)
+  subscribe(
+    path: string[],
+    since: Cursor | null,
+    projection: Projection | null,
+  ) {
+    return this.api.watchDb$(path, since, projection)
   }
 }
 
