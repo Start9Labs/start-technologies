@@ -22,6 +22,7 @@ import {
   withUpdateDeadline,
 } from './fileAccess'
 import { hasFileMounts, refreshFileMounts } from './fileMounts'
+import { delay, ExponentialBackoff } from './delay'
 
 async function readRaw(path: string): Promise<string | null> {
   return fs.readFile(path, 'utf-8').catch(error => {
@@ -38,20 +39,6 @@ const exists = (path: string) =>
 
 const WATCH_RETRY_INITIAL_MS = 100
 const WATCH_RETRY_MAX_MS = 30_000
-
-function sleep(ms: number, abort: AbortSignal): Promise<void> {
-  if (abort.aborted) return Promise.resolve()
-  return new Promise<void>(resolve => {
-    const wake = () => {
-      clearTimeout(timer)
-      abort.removeEventListener('abort', wake)
-      resolve()
-    }
-    const timer = setTimeout(wake, ms)
-    timer.unref?.()
-    abort.addEventListener('abort', wake)
-  })
-}
 
 const contextLeaveCallbacks = new WeakMap<T.Effects, Set<() => void>>()
 
@@ -388,7 +375,10 @@ class FileHelperImpl<A> implements FileHelper<A> {
         abort.addEventListener('abort', onAbort, { once: true })
         releaseLeave = onLeaveUntil(this.effects, onAbort)
         const signal = signalCtrl.signal
-        let retryDelayMs = WATCH_RETRY_INITIAL_MS
+        const retry = new ExponentialBackoff(
+          WATCH_RETRY_INITIAL_MS,
+          WATCH_RETRY_MAX_MS,
+        )
         try {
           while (this.effects.isInContext && !signal.aborted) {
             let failed = false
@@ -411,12 +401,8 @@ class FileHelperImpl<A> implements FileHelper<A> {
               yield null
               await onCreated(filePath, signal).catch(onWatchError)
             }
-            if (failed) {
-              await sleep(retryDelayMs, signal)
-              retryDelayMs = Math.min(retryDelayMs * 2, WATCH_RETRY_MAX_MS)
-            } else {
-              retryDelayMs = WATCH_RETRY_INITIAL_MS
-            }
+            if (failed) await delay(retry.next(), signal)
+            else retry.reset()
           }
         } finally {
           releaseLeave()

@@ -2,6 +2,7 @@ import * as T from '@start9labs/start-core/types'
 import { asError } from '@start9labs/start-core/util/asError'
 import { logErrorOnce } from '@start9labs/start-core/util/logErrorOnce'
 import { Drop } from '../util'
+import { delay } from '../util/delay'
 import { SubContainer } from '../util/SubContainer'
 import { CommandController } from './CommandController'
 import { DaemonCommandType } from './Daemons'
@@ -14,8 +15,8 @@ const MAX_TIMEOUT_MS = 30000
  * A managed long-running process wrapper around {@link CommandController}.
  *
  * When started, the daemon automatically restarts its underlying command on
- * failure with exponential backoff (up to 30 seconds). While the daemon is
- * running, it holds a use-token (`subcontainer.hold()`) on its SubContainer
+ * failure, waiting one second longer after each failure (up to 30 seconds).
+ * While the daemon is running, it holds a use-token (`subcontainer.hold()`) on its SubContainer
  * so the container is not destroyed out from under it. There are two ways to
  * bring it down: {@link stop} releases the hold but leaves the SubContainer
  * intact so a later {@link start} can resume in it (a restartable pause);
@@ -178,15 +179,7 @@ export class Daemon<
           if (!signal.aborted) logErrorOnce(e)
         }
         if (signal.aborted) break
-        await new Promise<void>(resolve => {
-          const wake = () => {
-            clearTimeout(timer)
-            signal.removeEventListener('abort', wake)
-            resolve()
-          }
-          const timer = setTimeout(wake, timeoutCounter)
-          signal.addEventListener('abort', wake)
-        })
+        await delay(timeoutCounter, signal)
         timeoutCounter += TIMEOUT_INCREMENT_MS
         timeoutCounter = Math.min(MAX_TIMEOUT_MS, timeoutCounter)
       }
