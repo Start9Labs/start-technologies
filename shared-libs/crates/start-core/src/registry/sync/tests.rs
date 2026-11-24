@@ -693,7 +693,10 @@ fn removal_and_os_switch_reject_in_flight_snapshots_and_prune_old_caches() {
         .as_value_mut()
         .as_object_mut()
         .unwrap()
-        .insert("registryIndexes".into(), imbl_value::ord_json!({ url().as_str(): {} }));
+        .insert(
+            "registryIndexes".into(),
+            imbl_value::ord_json!({ url().as_str(): {} }),
+        );
     let desired = subscriptions(&db.as_public().as_server_info().de().unwrap());
     reconcile(&mut db, &desired, false).unwrap();
     assert!(db.as_private().as_value().get("registryIndexes").is_none());

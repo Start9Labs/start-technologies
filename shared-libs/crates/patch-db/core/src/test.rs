@@ -205,13 +205,19 @@ async fn reprojection_sends_what_it_adds_before_later_revisions() {
     };
     assert_eq!(extension.id, 2);
     json_patch::patch(&mut replica, &extension.patch).unwrap();
-    assert_eq!(replica, ord_json!({ "x": { "state": 1, "icon": "bigger" } }));
+    assert_eq!(
+        replica,
+        ord_json!({ "x": { "state": 1, "icon": "bigger" } })
+    );
     let Update::Revision(revision) = sub.receiver.recv().await.unwrap() else {
         panic!("expected a revision")
     };
     assert_eq!(revision.id, 3);
     json_patch::patch(&mut replica, &revision.patch).unwrap();
-    assert_eq!(replica, ord_json!({ "x": { "state": 1, "icon": "biggest" } }));
+    assert_eq!(
+        replica,
+        ord_json!({ "x": { "state": 1, "icon": "biggest" } })
+    );
 
     assert!(db.reproject(sub.id, states).await);
     let Update::Extend(narrowed) = sub.receiver.recv().await.unwrap() else {
