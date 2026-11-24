@@ -290,7 +290,9 @@ pub async fn stop(ctx: RpcContext, ControlParams { id }: ControlParams) -> Resul
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct ForceStopParams {
+    #[arg(help = "help.arg.package-id")]
     pub id: PackageId,
+    #[arg(help = "help.arg.force-stop-at")]
     pub force_stop_at: chrono::DateTime<chrono::Utc>,
 }
 

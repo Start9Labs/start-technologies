@@ -5540,6 +5540,13 @@ help.arg.force-stderr-tty:
   fr_FR: "Forcer stderr à être traité comme un TTY"
   pl_PL: "Wymuś traktowanie stderr jako TTY"
 
+help.arg.force-stop-at:
+  en_US: "Server-issued forceStopAt from service status, in RFC3339 format; stale deadlines are rejected"
+  de_DE: "Vom Server gesetztes forceStopAt aus dem Dienststatus im RFC3339-Format; veraltete Fristen werden abgelehnt"
+  es_ES: "forceStopAt emitido por el servidor en el estado del servicio, en formato RFC3339; se rechazan los plazos obsoletos"
+  fr_FR: "forceStopAt fourni par le serveur dans l’état du service, au format RFC3339 ; les échéances périmées sont rejetées"
+  pl_PL: "forceStopAt nadany przez serwer w stanie usługi, w formacie RFC3339; nieaktualne terminy są odrzucane"
+
 help.arg.force-tty:
   en_US: "Force TTY mode for I/O"
   de_DE: "TTY-Modus für E/A erzwingen"
@@ -8217,6 +8224,13 @@ about.flash-startos:
   es_ES: "Flashear StartOS a una unidad"
   fr_FR: "Flasher StartOS sur un lecteur"
   pl_PL: "Flashuj StartOS na dysk"
+
+about.force-stop-service:
+  en_US: "Force stop a stalled service; may cause data loss"
+  de_DE: "Einen festhängenden Dienst zwangsweise stoppen; kann Datenverlust verursachen"
+  es_ES: "Forzar la detención de un servicio bloqueado; puede causar pérdida de datos"
+  fr_FR: "Forcer l’arrêt d’un service bloqué ; peut entraîner une perte de données"
+  pl_PL: "Wymuś zatrzymanie zablokowanej usługi; może spowodować utratę danych"
 
 about.forget-disconnected-gateway:
   en_US: "Forget a disconnected gateway"

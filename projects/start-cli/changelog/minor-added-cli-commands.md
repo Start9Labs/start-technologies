@@ -9,3 +9,4 @@ release-notes: false
   - browser push subscriptions: `notification push list`, `unsubscribe` and `test`
   - `net dns status`, `net gateway edit` and `server trusted-keys remove-many`
 - `package exec` runs a command in a service container and prints its output.
+- `package force-stop` stops a stalled service using its current stop-episode deadline; it can cause data loss and does not prompt for confirmation.

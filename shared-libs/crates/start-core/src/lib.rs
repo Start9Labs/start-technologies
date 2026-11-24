@@ -670,7 +670,9 @@ pub fn package<C: Context>() -> ParentHandler<C> {
             "force-stop",
             from_fn_async(control::force_stop)
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .no_display()
+                .with_about("about.force-stop-service")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "restart",

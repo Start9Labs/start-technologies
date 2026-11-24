@@ -203,6 +203,8 @@ After clicking **Stop**, allow the service time to finish writing its data. If i
 
 To change when the button appears, set `force-stop-delay-seconds` in `/media/startos/config/config.yaml` and restart the server. The value is a nonnegative number of seconds; `0` makes force stop available as soon as shutdown begins.
 
+From the command line, use `start-cli package force-stop <ID> <FORCE_STOP_AT>` with the current `forceStopAt` timestamp from `/public/packageData/<ID>/statusInfo` in the database. The server rejects early or stale deadlines. The CLI does not prompt for confirmation.
+
 ## Can I give someone access to my server but not to some of its services?
 
 No. StartOS has one administrator, protected by the master password, and no other accounts, roles or per-service permissions. Anyone who signs in to the web interface or `start-cli`, or connects over [SSH](ssh.md) with the master password or a key added under **System > SSH**, has full control of the server and every service on it: they can start, stop, configure, update and uninstall any service, run its actions, read its logs and restore it from a backup. Over SSH they also have `sudo`, which reaches every service's data and code. Because they can change how a service runs, they could also alter it to capture what you enter into it. Give administrative access only to someone you would trust with every service on the server.

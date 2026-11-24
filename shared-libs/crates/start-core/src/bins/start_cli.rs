@@ -113,6 +113,41 @@ fn log_level_requires_one_of_the_named_levels() {
 }
 
 #[test]
+fn force_stop_cli_requires_valid_episode_deadline() {
+    use clap::FromArgMatches;
+
+    let deadline = "2026-10-10T12:00:30.123456Z";
+    let matches = app()
+        .into_command()
+        .try_get_matches_from(["start-cli", "package", "force-stop", "demo", deadline])
+        .unwrap();
+    let params = crate::control::ForceStopParams::from_arg_matches(
+        matches
+            .subcommand_matches("package")
+            .unwrap()
+            .subcommand_matches("force-stop")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(params).unwrap(),
+        serde_json::json!({"id": "demo", "forceStopAt": deadline})
+    );
+    for args in [vec![], vec!["demo"], vec!["demo", "not-a-deadline"]] {
+        assert!(
+            app()
+                .into_command()
+                .try_get_matches_from(
+                    ["start-cli", "package", "force-stop"]
+                        .into_iter()
+                        .chain(args)
+                )
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn diagnostic_update_accepts_trust_without_an_ignored_registry_argument() {
     let matches = app()
         .into_command()
