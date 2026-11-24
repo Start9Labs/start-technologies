@@ -20,15 +20,15 @@ export const ActionId: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
 })
 export const ActionResultV0: z.ZodObject<{
   message: z.ZodString
-  value: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  value: z.ZodDefault<z.ZodNullable<z.ZodString>>
   copyable: z.ZodBoolean
   qr: z.ZodBoolean
 }> = /* @__PURE__ */ object({
   message: z.string(),
-  value: wire(z.string().nullable().optional(), z.string().nullable()),
+  value: z
+    .string()
+    .nullable()
+    .default(() => null),
   copyable: z.boolean(),
   qr: z.boolean(),
 }).meta({
@@ -139,25 +139,23 @@ export const CapabilityVerdict: z.ZodObject<{
   /**
    * `None` = never probed.
    */
-  supported: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-    z.ZodNullable<z.ZodBoolean>
-  >
-  at: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  supported: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
+  at: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * `None` = never probed.
    */
-  supported: wire(
-    z.boolean().nullable().optional(),
-    z.boolean().nullable(),
-  ).meta({
-    description: '`None` = never probed.',
-  }),
-  at: wire(z.string().nullable().optional(), z.string().nullable()),
+  supported: z
+    .boolean()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: '`None` = never probed.',
+    }),
+  at: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'CapabilityVerdict',
 })
@@ -202,15 +200,15 @@ export const Cifs: z.ZodObject<{
   hostname: z.ZodString
   path: z.ZodString
   username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   hostname: z.string(),
   path: z.string(),
   username: z.string(),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'Cifs',
 })
@@ -218,27 +216,27 @@ export const CifsAddParams: z.ZodObject<{
   hostname: z.ZodString
   path: z.ZodString
   username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   hostname: z.string(),
   path: z.string(),
   username: z.string(),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'CifsAddParams',
 })
 export const ConnectRegistryParams: z.ZodObject<{
   url: z.ZodString
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   url: z.string(),
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'ConnectRegistryParams',
 })
@@ -346,12 +344,12 @@ export const Dump: z.ZodObject<{ id: z.ZodInt; value: z.ZodUnknown }> =
     id: 'Dump',
   })
 export const DumpParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  pointer: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+  pointer: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'DumpParams',
 })
@@ -401,13 +399,13 @@ export const ExecResult: z.ZodObject<{
 })
 export const FormatDiskParams: z.ZodObject<{
   disk: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  label: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   disk: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  label: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'FormatDiskParams',
 })
@@ -449,10 +447,10 @@ export const GatewayType: z.ZodEnum<{
 })
 export const GenerateCertificateParams: z.ZodObject<{
   hostnames: z.ZodArray<z.ZodString>
-  ed25519: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  ed25519: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   hostnames: z.array(z.string()),
-  ed25519: wire(z.boolean().optional(), z.boolean()),
+  ed25519: z.boolean().default(() => false),
 }).meta({
   id: 'GenerateCertificateParams',
 })
@@ -488,15 +486,11 @@ export const GpgPublicKeyExport: z.ZodObject<{
   /**
    * Self-certified claims indexed by the signing key's canonical DER encoding.
    */
-  identities: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
-    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
-  >
+  identities: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>
   /**
    * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
    */
-  keyFingerprints: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+  keyFingerprints: z.ZodDefault<
     z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
   >
 }> = /* @__PURE__ */ object({
@@ -523,23 +517,23 @@ export const GpgPublicKeyExport: z.ZodObject<{
   /**
    * Self-certified claims indexed by the signing key's canonical DER encoding.
    */
-  identities: wire(
-    z.record(z.string(), z.array(z.string())).optional(),
-    z.record(z.string(), z.array(z.string())),
-  ).meta({
-    description:
-      "Self-certified claims indexed by the signing key's canonical DER encoding.",
-  }),
+  identities: z
+    .record(z.string(), z.array(z.string()))
+    .default(() => ({}))
+    .meta({
+      description:
+        "Self-certified claims indexed by the signing key's canonical DER encoding.",
+    }),
   /**
    * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
    */
-  keyFingerprints: wire(
-    z.record(z.string(), z.array(z.string())).optional(),
-    z.record(z.string(), z.array(z.string())),
-  ).meta({
-    description:
-      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
-  }),
+  keyFingerprints: z
+    .record(z.string(), z.array(z.string()))
+    .default(() => ({}))
+    .meta({
+      description:
+        "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+    }),
 }).meta({
   id: 'GpgPublicKeyExport',
   description:
@@ -584,28 +578,25 @@ export const IoFormat: z.ZodEnum<{
   })
 export const KeyboardOptions: z.ZodObject<{
   layout: z.ZodString
-  keymap: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  model: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  variant: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  options: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
+  keymap: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  model: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  variant: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  options: z.ZodDefault<z.ZodArray<z.ZodString>>
 }> = /* @__PURE__ */ object({
   layout: z.string(),
-  keymap: wire(z.string().nullable().optional(), z.string().nullable()),
-  model: wire(z.string().nullable().optional(), z.string().nullable()),
-  variant: wire(z.string().nullable().optional(), z.string().nullable()),
-  options: wire(z.array(z.string()).optional(), z.array(z.string())),
+  keymap: z
+    .string()
+    .nullable()
+    .default(() => null),
+  model: z
+    .string()
+    .nullable()
+    .default(() => null),
+  variant: z
+    .string()
+    .nullable()
+    .default(() => null),
+  options: z.array(z.string()).default(() => []),
 }).meta({
   id: 'KeyboardOptions',
 })
@@ -613,17 +604,17 @@ export const ListKeysParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'ListKeysParams',
 })
 export const ListNotificationParams: z.ZodObject<{
-  before: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  limit: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  before: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+  limit: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
-  before: wire(z.int().nullable().optional(), z.int().nullable()),
-  limit: wire(z.int().nullable().optional(), z.int().nullable()),
+  before: z
+    .int()
+    .nullable()
+    .default(() => null),
+  limit: z
+    .int()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'ListNotificationParams',
 })
@@ -670,40 +661,40 @@ export const LogoutParams: typeof empty = /* @__PURE__ */ empty.meta({
   id: 'LogoutParams',
 })
 export const LshwDisplay: z.ZodObject<{
-  product: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  vendor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  product: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  vendor: z.ZodDefault<z.ZodNullable<z.ZodString>>
   capabilities: z.ZodArray<z.ZodString>
-  driver: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  driver: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  product: wire(z.string().nullable().optional(), z.string().nullable()),
-  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  product: z
+    .string()
+    .nullable()
+    .default(() => null),
+  vendor: z
+    .string()
+    .nullable()
+    .default(() => null),
   capabilities: z.array(z.string()),
-  driver: wire(z.string().nullable().optional(), z.string().nullable()),
+  driver: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'LshwDisplay',
 })
 export const LshwProcessor: z.ZodObject<{
-  product: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  vendor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  product: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  vendor: z.ZodDefault<z.ZodNullable<z.ZodString>>
   capabilities: z.ZodArray<z.ZodString>
 }> = /* @__PURE__ */ object({
-  product: wire(z.string().nullable().optional(), z.string().nullable()),
-  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
+  product: z
+    .string()
+    .nullable()
+    .default(() => null),
+  vendor: z
+    .string()
+    .nullable()
+    .default(() => null),
   capabilities: z.array(z.string()),
 }).meta({
   id: 'LshwProcessor',
@@ -779,17 +770,17 @@ export const NamedProgress: z.ZodObject<{
   id: 'NamedProgress',
 })
 export const NetInfo: z.ZodObject<{
-  assignedPort: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  assignedSslPort: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  assignedPort: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+  assignedSslPort: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
-  assignedPort: wire(z.int().nullable().optional(), z.int().nullable()),
-  assignedSslPort: wire(z.int().nullable().optional(), z.int().nullable()),
+  assignedPort: z
+    .int()
+    .nullable()
+    .default(() => null),
+  assignedSslPort: z
+    .int()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'NetInfo',
 })
@@ -819,53 +810,54 @@ export const NotificationLevel: z.ZodEnum<{
 export const NutDevice: z.ZodObject<{
   driver: z.ZodString
   port: z.ZodString
-  vendorId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  productId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  serial: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  bus: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  vendorId: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  productId: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  serial: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  bus: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Pins devices without a serial number to the selected USB port.
    */
-  busPort: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  vendor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  product: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  busPort: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  vendor: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  product: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   driver: z.string(),
   port: z.string(),
-  vendorId: wire(z.string().nullable().optional(), z.string().nullable()),
-  productId: wire(z.string().nullable().optional(), z.string().nullable()),
-  serial: wire(z.string().nullable().optional(), z.string().nullable()),
-  bus: wire(z.string().nullable().optional(), z.string().nullable()),
+  vendorId: z
+    .string()
+    .nullable()
+    .default(() => null),
+  productId: z
+    .string()
+    .nullable()
+    .default(() => null),
+  serial: z
+    .string()
+    .nullable()
+    .default(() => null),
+  bus: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Pins devices without a serial number to the selected USB port.
    */
-  busPort: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Pins devices without a serial number to the selected USB port.',
-  }),
-  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
-  product: wire(z.string().nullable().optional(), z.string().nullable()),
+  busPort: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Pins devices without a serial number to the selected USB port.',
+    }),
+  vendor: z
+    .string()
+    .nullable()
+    .default(() => null),
+  product: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'NutDevice',
   description:
@@ -891,17 +883,14 @@ export const NutRemoteUps: z.ZodObject<{
 export const NutStatus: z.ZodObject<{
   target: z.ZodString
   variables: z.ZodRecord<z.ZodString, z.ZodString>
-  monitoringError: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  monitoringError: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   target: z.string(),
   variables: z.record(z.string(), z.string()),
-  monitoringError: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ),
+  monitoringError: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'NutStatus',
   description: 'Current variables reported by the configured UPS.',
@@ -911,28 +900,25 @@ export const NutStatus: z.ZodObject<{
  * An absent update preserves DNS intent; null servers select gateway DNS.
  */
 export const OutboundDnsUpdate: z.ZodObject<{
-  servers: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
+  servers: z.ZodDefault<z.ZodNullable<z.ZodArray<z.ZodString>>>
 }> = /* @__PURE__ */ object({
-  servers: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ),
+  servers: z
+    .array(z.string())
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'OutboundDnsUpdate',
   description:
     'An absent update preserves DNS intent; null servers select gateway DNS.',
 })
 export const PackageBackupReport: z.ZodObject<{
-  error: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  error: z.ZodDefault<z.ZodNullable<z.ZodString>>
   duration_ms: z.ZodInt
 }> = /* @__PURE__ */ object({
-  error: wire(z.string().nullable().optional(), z.string().nullable()),
+  error: z
+    .string()
+    .nullable()
+    .default(() => null),
   duration_ms: z.int(),
 }).meta({
   id: 'PackageBackupReport',
@@ -983,17 +969,17 @@ export const QueryDnsParams: z.ZodObject<{ fqdn: z.ZodString }> =
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export const QueryDnsRes: z.ZodObject<{
-  ipv4: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ipv6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ipv4: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ipv6: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  ipv4: wire(z.string().nullable().optional(), z.string().nullable()),
-  ipv6: wire(z.string().nullable().optional(), z.string().nullable()),
+  ipv4: z
+    .string()
+    .nullable()
+    .default(() => null),
+  ipv6: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'QueryDnsRes',
   description:
@@ -1002,11 +988,11 @@ export const QueryDnsRes: z.ZodObject<{
 export const ReassignPortParams: z.ZodObject<{
   internalPort: z.ZodInt
   externalPort: z.ZodInt
-  ssl: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  ssl: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   internalPort: z.int(),
   externalPort: z.int(),
-  ssl: wire(z.boolean().optional(), z.boolean()),
+  ssl: z.boolean().default(() => false),
 }).meta({
   id: 'ReassignPortParams',
 })
@@ -1105,13 +1091,13 @@ export const Security: z.ZodObject<{ ssl: z.ZodBoolean }> =
   })
 export const ServerBackupReport: z.ZodObject<{
   attempted: z.ZodBoolean
-  error: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  error: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   attempted: z.boolean(),
-  error: wire(z.string().nullable().optional(), z.string().nullable()),
+  error: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'ServerBackupReport',
 })
@@ -1134,28 +1120,29 @@ export const Session: z.ZodObject<{
    * A friendly name for the key, if one was assigned at enrollment (e.g.
    * tunnel device keys). UI-enrolled keys are unnamed.
    */
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   loggedIn: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
   lastActive: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
-  userAgent: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  userAgent: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * A friendly name for the key, if one was assigned at enrollment (e.g.
    * tunnel device keys). UI-enrolled keys are unnamed.
    */
-  name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
-  }),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
+    }),
   loggedIn: wire(z.string().optional(), z.string()),
   lastActive: wire(z.string().optional(), z.string()),
-  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'Session',
 })
@@ -1222,23 +1209,23 @@ export const SharedVolumeBackupInfo: z.ZodObject<{
   id: 'SharedVolumeBackupInfo',
 })
 export const SharedVolumeDrive: z.ZodObject<{
-  vendor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  model: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  vendor: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  model: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  label: z.ZodDefault<z.ZodNullable<z.ZodString>>
   capacity: z.ZodInt
 }> = /* @__PURE__ */ object({
-  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
-  model: wire(z.string().nullable().optional(), z.string().nullable()),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  vendor: z
+    .string()
+    .nullable()
+    .default(() => null),
+  model: z
+    .string()
+    .nullable()
+    .default(() => null),
+  label: z
+    .string()
+    .nullable()
+    .default(() => null),
   capacity: z.int(),
 }).meta({
   id: 'SharedVolumeDrive',
@@ -1262,7 +1249,7 @@ export const ShutdownParams: z.ZodObject<{
    * `--nowait`. The wait can't outlive the webserver teardown that follows
    * container shutdown, so the connection drops once services are stopped.
    */
-  wait: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  wait: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   /**
    * Block until graceful teardown completes (default over the CLI; the
@@ -1270,10 +1257,13 @@ export const ShutdownParams: z.ZodObject<{
    * `--nowait`. The wait can't outlive the webserver teardown that follows
    * container shutdown, so the connection drops once services are stopped.
    */
-  wait: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
-  }),
+  wait: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+    }),
 }).meta({
   id: 'ShutdownParams',
 })
@@ -1321,17 +1311,14 @@ export const Ssid: z.ZodString = /* @__PURE__ */ z.string().meta({
 export const TermSize: z.ZodObject<{
   rows: z.ZodInt
   cols: z.ZodInt
-  pixels: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodTuple<[z.ZodInt, z.ZodInt], null>>>,
-    z.ZodNullable<z.ZodTuple<[z.ZodInt, z.ZodInt], null>>
-  >
+  pixels: z.ZodDefault<z.ZodNullable<z.ZodTuple<[z.ZodInt, z.ZodInt], null>>>
 }> = /* @__PURE__ */ object({
   rows: z.int(),
   cols: z.int(),
-  pixels: wire(
-    z.tuple([z.int(), z.int()]).nullable().optional(),
-    z.tuple([z.int(), z.int()]).nullable(),
-  ),
+  pixels: z
+    .tuple([z.int(), z.int()])
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'TermSize',
 })
@@ -1541,31 +1528,19 @@ export const ActionResultValue: z.ZodUnion<
         /**
          * (optional) Whether or not to include a copy to clipboard icon to copy the value
          */
-        copyable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
+        copyable: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
         /**
          * (optional) Whether or not to also display the value as a QR code
          */
-        qr: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
+        qr: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
         /**
          * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
          */
-        masked: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
+        masked: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
         /**
          * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
          */
-        launchable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
+        launchable: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
       }>
     >,
     z.ZodIntersection<
@@ -1578,31 +1553,19 @@ export const ActionResultValue: z.ZodUnion<
         /**
          * (optional) Whether or not to include a copy to clipboard icon to copy the value
          */
-        copyable: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
+        copyable: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
         /**
          * (optional) Whether or not to also display the value as a QR code
          */
-        qr: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
+        qr: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
         /**
          * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
          */
-        masked: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-          z.ZodNullable<z.ZodBoolean>
-        >
+        masked: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
         /**
          * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
          */
-        filename: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
+        filename: z.ZodDefault<z.ZodNullable<z.ZodString>>
       }>
     >,
     z.ZodIntersection<
@@ -1650,43 +1613,47 @@ export const ActionResultValue: z.ZodUnion<
         /**
          * (optional) Whether or not to include a copy to clipboard icon to copy the value
          */
-        copyable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
-        }),
+        copyable: z
+          .boolean()
+          .nullable()
+          .default(() => null)
+          .meta({
+            description:
+              '(optional) Whether or not to include a copy to clipboard icon to copy the value',
+          }),
         /**
          * (optional) Whether or not to also display the value as a QR code
          */
-        qr: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to also display the value as a QR code',
-        }),
+        qr: z
+          .boolean()
+          .nullable()
+          .default(() => null)
+          .meta({
+            description:
+              '(optional) Whether or not to also display the value as a QR code',
+          }),
         /**
          * (optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information
          */
-        masked: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information',
-        }),
+        masked: z
+          .boolean()
+          .nullable()
+          .default(() => null)
+          .meta({
+            description:
+              '(optional) Whether or not to mask the value using ●●●●●●●, which is useful for password or other sensitive information',
+          }),
         /**
          * (optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL
          */
-        launchable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL',
-        }),
+        launchable: z
+          .boolean()
+          .nullable()
+          .default(() => null)
+          .meta({
+            description:
+              '(optional) Whether or not to include an open in new tab icon to launch the value, which must be an http(s) URL',
+          }),
       }),
     ),
     z.intersection(
@@ -1702,43 +1669,47 @@ export const ActionResultValue: z.ZodUnion<
         /**
          * (optional) Whether or not to include a copy to clipboard icon to copy the value
          */
-        copyable: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to include a copy to clipboard icon to copy the value',
-        }),
+        copyable: z
+          .boolean()
+          .nullable()
+          .default(() => null)
+          .meta({
+            description:
+              '(optional) Whether or not to include a copy to clipboard icon to copy the value',
+          }),
         /**
          * (optional) Whether or not to also display the value as a QR code
          */
-        qr: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to also display the value as a QR code',
-        }),
+        qr: z
+          .boolean()
+          .nullable()
+          .default(() => null)
+          .meta({
+            description:
+              '(optional) Whether or not to also display the value as a QR code',
+          }),
         /**
          * (optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information
          */
-        masked: wire(
-          z.boolean().nullable().optional(),
-          z.boolean().nullable(),
-        ).meta({
-          description:
-            '(optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information',
-        }),
+        masked: z
+          .boolean()
+          .nullable()
+          .default(() => null)
+          .meta({
+            description:
+              '(optional) Whether or not to blur the value until the user reveals it, which is useful for a private key or other sensitive information',
+          }),
         /**
          * (optional) Also offer the value as a download under this file name, such as "diagnostics.txt"
          */
-        filename: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ).meta({
-          description:
-            '(optional) Also offer the value as a download under this file name, such as "diagnostics.txt"',
-        }),
+        filename: z
+          .string()
+          .nullable()
+          .default(() => null)
+          .meta({
+            description:
+              '(optional) Also offer the value as a download under this file name, such as "diagnostics.txt"',
+          }),
       }),
     ),
     z.intersection(
@@ -1761,18 +1732,18 @@ export const ActionResultValue: z.ZodUnion<
   })
 export const AddKeyParams: z.ZodObject<{
   key: typeof AnyVerifyingKey
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  userAgent: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  userAgent: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   key: AnyVerifyingKey,
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  userAgent: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'AddKeyParams',
 })
@@ -1799,15 +1770,12 @@ export const AddPrivateDomainParams: z.ZodObject<{
 })
 export const AddPublicDomainParams: z.ZodObject<{
   fqdn: z.ZodString
-  acme: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AcmeProvider>>,
-    z.ZodNullable<typeof AcmeProvider>
-  >
+  acme: z.ZodDefault<z.ZodNullable<typeof AcmeProvider>>
   gateway: typeof GatewayId
   internalPort: z.ZodInt
 }> = /* @__PURE__ */ object({
   fqdn: z.string(),
-  acme: wire(AcmeProvider.nullable().optional(), AcmeProvider.nullable()),
+  acme: AcmeProvider.nullable().default(() => null),
   gateway: GatewayId,
   internalPort: z.int(),
 }).meta({
@@ -1825,10 +1793,7 @@ export const AddTrustedKeyParams: z.ZodObject<{
   /**
    * Grants this permission to every imported key, including existing keys.
    */
-  trustFor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof TrustContext>>,
-    z.ZodNullable<typeof TrustContext>
-  >
+  trustFor: z.ZodDefault<z.ZodNullable<typeof TrustContext>>
 }> = /* @__PURE__ */ object({
   /**
    * Blank names each GPG key after its identity.
@@ -1845,54 +1810,50 @@ export const AddTrustedKeyParams: z.ZodObject<{
   /**
    * Grants this permission to every imported key, including existing keys.
    */
-  trustFor: wire(
-    TrustContext.nullable().optional(),
-    TrustContext.nullable(),
-  ).meta({
-    description:
-      'Grants this permission to every imported key, including existing keys.',
-  }),
+  trustFor: TrustContext.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Grants this permission to every imported key, including existing keys.',
+    }),
 }).meta({
   id: 'AddTrustedKeyParams',
 })
 export const AddTunnelParams: z.ZodObject<{
   name: z.ZodString
   config: z.ZodString
-  type: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GatewayType>>,
-    z.ZodNullable<typeof GatewayType>
-  >
+  type: z.ZodDefault<z.ZodNullable<typeof GatewayType>>
   setAsDefaultOutbound: z.ZodBoolean
 }> = /* @__PURE__ */ object({
   name: z.string(),
   config: z.string(),
-  type: wire(GatewayType.nullable().optional(), GatewayType.nullable()),
+  type: GatewayType.nullable().default(() => null),
   setAsDefaultOutbound: z.boolean(),
 }).meta({
   id: 'AddTunnelParams',
 })
 export const AddressInfo: z.ZodObject<{
-  username: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  username: z.ZodDefault<z.ZodNullable<z.ZodString>>
   hostId: typeof HostId
   internalPort: z.ZodInt
-  scheme: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sslScheme: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  scheme: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  sslScheme: z.ZodDefault<z.ZodNullable<z.ZodString>>
   suffix: z.ZodString
 }> = /* @__PURE__ */ object({
-  username: wire(z.string().nullable().optional(), z.string().nullable()),
+  username: z
+    .string()
+    .nullable()
+    .default(() => null),
   hostId: HostId,
   internalPort: z.int(),
-  scheme: wire(z.string().nullable().optional(), z.string().nullable()),
-  sslScheme: wire(z.string().nullable().optional(), z.string().nullable()),
+  scheme: z
+    .string()
+    .nullable()
+    .default(() => null),
+  sslScheme: z
+    .string()
+    .nullable()
+    .default(() => null),
   suffix: z.string(),
 }).meta({
   id: 'AddressInfo',
@@ -1916,26 +1877,11 @@ export const AttachParams: z.ZodObject<{
   command: z.ZodArray<z.ZodString>
   tty: z.ZodBoolean
   stderrTty: z.ZodBoolean
-  ptySize: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof TermSize>>,
-    z.ZodNullable<typeof TermSize>
-  >
-  subcontainer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  imageId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ImageId>>,
-    z.ZodNullable<typeof ImageId>
-  >
-  user: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ptySize: z.ZodDefault<z.ZodNullable<typeof TermSize>>
+  subcontainer: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  imageId: z.ZodDefault<z.ZodNullable<typeof ImageId>>
+  user: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: PackageId,
   /**
@@ -1947,11 +1893,20 @@ export const AttachParams: z.ZodObject<{
   }),
   tty: z.boolean(),
   stderrTty: z.boolean(),
-  ptySize: wire(TermSize.nullable().optional(), TermSize.nullable()),
-  subcontainer: wire(z.string().nullable().optional(), z.string().nullable()),
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  imageId: wire(ImageId.nullable().optional(), ImageId.nullable()),
-  user: wire(z.string().nullable().optional(), z.string().nullable()),
+  ptySize: TermSize.nullable().default(() => null),
+  subcontainer: z
+    .string()
+    .nullable()
+    .default(() => null),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  imageId: ImageId.nullable().default(() => null),
+  user: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'AttachParams',
 })
@@ -1985,17 +1940,11 @@ export const CheckChallengeParams: z.ZodObject<{
  * went unprobed.
  */
 export const CheckChallengeRes: z.ZodObject<{
-  port: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof CheckPortRes>>,
-    z.ZodNullable<typeof CheckPortRes>
-  >
-  portV6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof CheckPortV6Res>>,
-    z.ZodNullable<typeof CheckPortV6Res>
-  >
+  port: z.ZodDefault<z.ZodNullable<typeof CheckPortRes>>
+  portV6: z.ZodDefault<z.ZodNullable<typeof CheckPortV6Res>>
 }> = /* @__PURE__ */ object({
-  port: wire(CheckPortRes.nullable().optional(), CheckPortRes.nullable()),
-  portV6: wire(CheckPortV6Res.nullable().optional(), CheckPortV6Res.nullable()),
+  port: CheckPortRes.nullable().default(() => null),
+  portV6: CheckPortV6Res.nullable().default(() => null),
 }).meta({
   id: 'CheckChallengeRes',
   description:
@@ -2022,27 +1971,27 @@ export const CifsUpdateParams: z.ZodObject<{
   hostname: z.ZodString
   path: z.ZodString
   username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: BackupTargetId,
   hostname: z.string(),
   path: z.string(),
   username: z.string(),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'CifsUpdateParams',
 })
 export const ClearTaskParams: z.ZodObject<{
   packageId: typeof PackageId
   replayId: typeof ReplayId
-  force: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  force: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   packageId: PackageId,
   replayId: ReplayId,
-  force: wire(z.boolean().optional(), z.boolean()),
+  force: z.boolean().default(() => false),
 }).meta({
   id: 'ClearTaskParams',
 })
@@ -2051,15 +2000,12 @@ export const ControlParams: z.ZodObject<{ id: typeof PackageId }> =
     id: 'ControlParams',
   })
 export const CreateParams: z.ZodObject<{
-  package: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageId>>,
-    z.ZodNullable<typeof PackageId>
-  >
+  package: z.ZodDefault<z.ZodNullable<typeof PackageId>>
   level: typeof NotificationLevel
   title: z.ZodString
   message: z.ZodString
 }> = /* @__PURE__ */ object({
-  package: wire(PackageId.nullable().optional(), PackageId.nullable()),
+  package: PackageId.nullable().default(() => null),
   level: NotificationLevel,
   title: z.string(),
   message: z.string(),
@@ -2105,17 +2051,14 @@ export const DeleteLegacyParams: z.ZodObject<{
  * Without an override or gateway-provided resolvers, the public fallback is used.
  */
 export const DnsSettings: z.ZodObject<{
-  staticServers: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
+  staticServers: z.ZodDefault<z.ZodNullable<z.ZodArray<z.ZodString>>>
   servers: z.ZodArray<z.ZodString>
   source: typeof DnsSource
 }> = /* @__PURE__ */ object({
-  staticServers: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ),
+  staticServers: z
+    .array(z.string())
+    .nullable()
+    .default(() => null),
   servers: z.array(z.string()),
   source: DnsSource,
 }).meta({
@@ -2125,44 +2068,30 @@ export const DnsSettings: z.ZodObject<{
 })
 export const EditGatewayParams: z.ZodObject<{
   id: typeof GatewayId
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  dns: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof OutboundDnsUpdate>>,
-    z.ZodNullable<typeof OutboundDnsUpdate>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  dns: z.ZodDefault<z.ZodNullable<typeof OutboundDnsUpdate>>
 }> = /* @__PURE__ */ object({
   id: GatewayId,
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  dns: wire(
-    OutboundDnsUpdate.nullable().optional(),
-    OutboundDnsUpdate.nullable(),
-  ),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  dns: OutboundDnsUpdate.nullable().default(() => null),
 }).meta({
   id: 'EditGatewayParams',
 })
 export const EppInfo: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Epp>>,
-    z.ZodNullable<typeof Epp>
-  >
+  current: z.ZodDefault<z.ZodNullable<typeof Epp>>
   available: z.ZodArray<typeof Epp>
 }> = /* @__PURE__ */ object({
-  current: wire(Epp.nullable().optional(), Epp.nullable()),
+  current: Epp.nullable().default(() => null),
   available: z.array(Epp),
 }).meta({
   id: 'EppInfo',
 })
 export const EppParams: z.ZodObject<{
-  set: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Epp>>,
-    z.ZodNullable<typeof Epp>
-  >
-}> = /* @__PURE__ */ object({
-  set: wire(Epp.nullable().optional(), Epp.nullable()),
-}).meta({
+  set: z.ZodDefault<z.ZodNullable<typeof Epp>>
+}> = /* @__PURE__ */ object({ set: Epp.nullable().default(() => null) }).meta({
   id: 'EppParams',
 })
 export const ExecParams: z.ZodObject<{
@@ -2174,45 +2103,27 @@ export const ExecParams: z.ZodObject<{
   /**
    * Written to the command's standard input, which is otherwise empty.
    */
-  stdin: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  stdin: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Seconds before the command is terminated. Defaults to 120.
    */
-  timeoutSecs: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  timeoutSecs: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   /**
    * Part of the subcontainer's ID. Overrides `name` and `imageId`.
    */
-  subcontainer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  subcontainer: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
    */
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Part of the subcontainer's image ID, case-insensitive.
    */
-  imageId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ImageId>>,
-    z.ZodNullable<typeof ImageId>
-  >
+  imageId: z.ZodDefault<z.ZodNullable<typeof ImageId>>
   /**
    * Defaults to the image's user, else root.
    */
-  user: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  user: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: PackageId,
   /**
@@ -2225,45 +2136,64 @@ export const ExecParams: z.ZodObject<{
   /**
    * Written to the command's standard input, which is otherwise empty.
    */
-  stdin: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "Written to the command's standard input, which is otherwise empty.",
-  }),
+  stdin: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Written to the command's standard input, which is otherwise empty.",
+    }),
   /**
    * Seconds before the command is terminated. Defaults to 120.
    */
-  timeoutSecs: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description: 'Seconds before the command is terminated. Defaults to 120.',
-  }),
+  timeoutSecs: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Seconds before the command is terminated. Defaults to 120.',
+    }),
   /**
    * Part of the subcontainer's ID. Overrides `name` and `imageId`.
    */
-  subcontainer: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description:
-      "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
-  }),
+  subcontainer: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
+    }),
   /**
    * Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
    */
-  name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
-  }),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
+    }),
   /**
    * Part of the subcontainer's image ID, case-insensitive.
    */
-  imageId: wire(ImageId.nullable().optional(), ImageId.nullable()).meta({
-    description: "Part of the subcontainer's image ID, case-insensitive.",
-  }),
+  imageId: ImageId.nullable()
+    .default(() => null)
+    .meta({
+      description: "Part of the subcontainer's image ID, case-insensitive.",
+    }),
   /**
    * Defaults to the image's user, else root.
    */
-  user: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: "Defaults to the image's user, else root.",
-  }),
+  user: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: "Defaults to the image's user, else root.",
+    }),
 }).meta({
   id: 'ExecParams',
 })
@@ -2332,24 +2262,18 @@ export const GetActionInputParams: z.ZodObject<{
   id: 'GetActionInputParams',
 })
 export const GovernorInfo: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Governor>>,
-    z.ZodNullable<typeof Governor>
-  >
+  current: z.ZodDefault<z.ZodNullable<typeof Governor>>
   available: z.ZodArray<typeof Governor>
 }> = /* @__PURE__ */ object({
-  current: wire(Governor.nullable().optional(), Governor.nullable()),
+  current: Governor.nullable().default(() => null),
   available: z.array(Governor),
 }).meta({
   id: 'GovernorInfo',
 })
 export const GovernorParams: z.ZodObject<{
-  set: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Governor>>,
-    z.ZodNullable<typeof Governor>
-  >
+  set: z.ZodDefault<z.ZodNullable<typeof Governor>>
 }> = /* @__PURE__ */ object({
-  set: wire(Governor.nullable().optional(), Governor.nullable()),
+  set: Governor.nullable().default(() => null),
 }).meta({
   id: 'GovernorParams',
 })
@@ -2379,10 +2303,7 @@ export const HostnameMetadata: z.ZodUnion<
       z.ZodObject<{ kind: z.ZodLiteral<'plugin'> }>,
       z.ZodObject<{
         packageId: typeof PackageId
-        removeAction: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<typeof ActionId>>,
-          z.ZodNullable<typeof ActionId>
-        >
+        removeAction: z.ZodDefault<z.ZodNullable<typeof ActionId>>
         overflowActions: z.ZodArray<typeof ActionId>
         info: z.ZodCodec<z.ZodOptional<z.ZodUnknown>, z.ZodUnknown>
       }>
@@ -2414,7 +2335,7 @@ export const HostnameMetadata: z.ZodUnion<
       object({ kind: z.literal('plugin') }),
       object({
         packageId: PackageId,
-        removeAction: wire(ActionId.nullable().optional(), ActionId.nullable()),
+        removeAction: ActionId.nullable().default(() => null),
         overflowActions: z.array(ActionId),
         info: wire(z.unknown().optional(), z.unknown()),
       }),
@@ -2450,58 +2371,54 @@ export const InstalledVersionParams: z.ZodObject<{ id: typeof PackageId }> =
 export const IpInfo: z.ZodObject<{
   name: z.ZodString
   scopeId: z.ZodInt
-  deviceType: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof NetworkInterfaceType>>,
-    z.ZodNullable<typeof NetworkInterfaceType>
-  >
+  deviceType: z.ZodDefault<z.ZodNullable<typeof NetworkInterfaceType>>
   subnets: z.ZodArray<z.ZodString>
   lanIp: z.ZodArray<z.ZodString>
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  wanIp: z.ZodDefault<z.ZodNullable<z.ZodString>>
   ntpServers: z.ZodArray<z.ZodString>
   dnsServers: z.ZodArray<z.ZodString>
   /**
    * Lowest IPv4 default-route metric in `main`, or `None` when absent.
    */
-  defaultRouteV4: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  defaultRouteV4: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   /**
    * Lowest IPv6 default-route metric in `main`, or `None` when absent.
    */
-  defaultRouteV6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  defaultRouteV6: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   scopeId: z.int(),
-  deviceType: wire(
-    NetworkInterfaceType.nullable().optional(),
-    NetworkInterfaceType.nullable(),
-  ),
+  deviceType: NetworkInterfaceType.nullable().default(() => null),
   subnets: z.array(z.string()),
   lanIp: z.array(z.string()),
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()),
+  wanIp: z
+    .string()
+    .nullable()
+    .default(() => null),
   ntpServers: z.array(z.string()),
   dnsServers: z.array(z.string()),
   /**
    * Lowest IPv4 default-route metric in `main`, or `None` when absent.
    */
-  defaultRouteV4: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Lowest IPv4 default-route metric in `main`, or `None` when absent.',
-  }),
+  defaultRouteV4: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Lowest IPv4 default-route metric in `main`, or `None` when absent.',
+    }),
   /**
    * Lowest IPv6 default-route metric in `main`, or `None` when absent.
    */
-  defaultRouteV6: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Lowest IPv6 default-route metric in `main`, or `None` when absent.',
-  }),
+  defaultRouteV6: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Lowest IPv6 default-route metric in `main`, or `None` when absent.',
+    }),
 }).meta({
   id: 'IpInfo',
 })
@@ -2519,43 +2436,42 @@ export const LegacyAlpnInfo: z.ZodUnion<
     id: 'LegacyAlpnInfo',
   })
 export const LogFollowResponse: z.ZodObject<{
-  startCursor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  startCursor: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Present for ordinary replies; typed observations use same-ID events.
    */
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
-  >
+  guid: z.ZodDefault<z.ZodNullable<typeof Guid>>
 }> = /* @__PURE__ */ object({
-  startCursor: wire(z.string().nullable().optional(), z.string().nullable()),
+  startCursor: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Present for ordinary replies; typed observations use same-ID events.
    */
-  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
-    description:
-      'Present for ordinary replies; typed observations use same-ID events.',
-  }),
+  guid: Guid.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Present for ordinary replies; typed observations use same-ID events.',
+    }),
 }).meta({
   id: 'LogFollowResponse',
 })
 export const LogResponse: z.ZodObject<{
   entries: z.ZodArray<typeof LogEntry>
-  startCursor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  endCursor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  startCursor: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  endCursor: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   entries: z.array(LogEntry),
-  startCursor: wire(z.string().nullable().optional(), z.string().nullable()),
-  endCursor: wire(z.string().nullable().optional(), z.string().nullable()),
+  startCursor: z
+    .string()
+    .nullable()
+    .default(() => null),
+  endCursor: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'LogResponse',
 })
@@ -2571,7 +2487,7 @@ export const LoginParams: z.ZodObject<{
    * Enroll in memory only, never persisted (kiosk mode, which re-enrolls
    * on every browser restart and would otherwise accumulate keys).
    */
-  ephemeral: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  ephemeral: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   password: z.string(),
   /**
@@ -2587,10 +2503,13 @@ export const LoginParams: z.ZodObject<{
    * Enroll in memory only, never persisted (kiosk mode, which re-enrolls
    * on every browser restart and would otherwise accumulate keys).
    */
-  ephemeral: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).',
-  }),
+  ephemeral: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).',
+    }),
 }).meta({
   id: 'LoginParams',
 })
@@ -2642,12 +2561,9 @@ export const MetricsDisk: z.ZodObject<{
   id: 'MetricsDisk',
 })
 export const MetricsGeneral: z.ZodObject<{
-  temperature: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Celsius>>,
-    z.ZodNullable<typeof Celsius>
-  >
+  temperature: z.ZodDefault<z.ZodNullable<typeof Celsius>>
 }> = /* @__PURE__ */ object({
-  temperature: wire(Celsius.nullable().optional(), Celsius.nullable()),
+  temperature: Celsius.nullable().default(() => null),
 }).meta({
   id: 'MetricsGeneral',
 })
@@ -2672,25 +2588,22 @@ export const MetricsMemory: z.ZodObject<{
 })
 export const MountParams: z.ZodObject<{
   targetId: typeof BackupTargetId
-  serverId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  serverId: z.ZodDefault<z.ZodNullable<z.ZodString>>
   password: z.ZodString
   allowPartial: z.ZodBoolean
 }> = /* @__PURE__ */ object({
   targetId: BackupTargetId,
-  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+  serverId: z
+    .string()
+    .nullable()
+    .default(() => null),
   password: z.string(),
   allowPartial: z.boolean(),
 }).meta({
   id: 'MountParams',
 })
 export const Notification: z.ZodObject<{
-  packageId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PackageId>>,
-    z.ZodNullable<typeof PackageId>
-  >
+  packageId: z.ZodDefault<z.ZodNullable<typeof PackageId>>
   createdAt: z.ZodString
   code: z.ZodInt
   level: typeof NotificationLevel
@@ -2699,7 +2612,7 @@ export const Notification: z.ZodObject<{
   data: z.ZodUnknown
   seen: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  packageId: wire(PackageId.nullable().optional(), PackageId.nullable()),
+  packageId: PackageId.nullable().default(() => null),
   createdAt: z.string(),
   code: z.int(),
   level: NotificationLevel,
@@ -2725,15 +2638,9 @@ export const NutSettings: z.ZodUnion<
       }>,
       z.ZodObject<{
         device: typeof NutDevice
-        listenAll: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-        remoteUsername: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
-        remotePassword: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
+        listenAll: z.ZodDefault<z.ZodBoolean>
+        remoteUsername: z.ZodDefault<z.ZodNullable<z.ZodString>>
+        remotePassword: z.ZodDefault<z.ZodNullable<z.ZodString>>
       }>
     >,
     z.ZodIntersection<
@@ -2766,15 +2673,15 @@ export const NutSettings: z.ZodUnion<
       }),
       object({
         device: NutDevice,
-        listenAll: wire(z.boolean().optional(), z.boolean()),
-        remoteUsername: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ),
-        remotePassword: wire(
-          z.string().nullable().optional(),
-          z.string().nullable(),
-        ),
+        listenAll: z.boolean().default(() => false),
+        remoteUsername: z
+          .string()
+          .nullable()
+          .default(() => null),
+        remotePassword: z
+          .string()
+          .nullable()
+          .default(() => null),
       }),
     ),
     z.intersection(
@@ -2804,15 +2711,15 @@ export const OsInfo: z.ZodObject<{
   version: typeof Version
   compat: z.ZodString
   platform: z.ZodString
-  language: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  language: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   version: Version,
   compat: z.string(),
   platform: z.string(),
-  language: wire(z.string().nullable().optional(), z.string().nullable()),
+  language: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'OsInfo',
 })
@@ -3008,20 +2915,14 @@ export const ProxyAuth: z.ZodUnion<
       z.ZodObject<{ type: z.ZodLiteral<'bearer'> }>,
       z.ZodObject<{
         tokens: z.ZodArray<z.ZodString>
-        realm: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
+        realm: z.ZodDefault<z.ZodNullable<z.ZodString>>
       }>
     >,
     z.ZodIntersection<
       z.ZodObject<{ type: z.ZodLiteral<'basic'> }>,
       z.ZodObject<{
         credentials: z.ZodArray<typeof BasicCredential>
-        realm: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<z.ZodString>>,
-          z.ZodNullable<z.ZodString>
-        >
+        realm: z.ZodDefault<z.ZodNullable<z.ZodString>>
       }>
     >,
   ]
@@ -3031,14 +2932,20 @@ export const ProxyAuth: z.ZodUnion<
       object({ type: z.literal('bearer') }),
       object({
         tokens: z.array(z.string()),
-        realm: wire(z.string().nullable().optional(), z.string().nullable()),
+        realm: z
+          .string()
+          .nullable()
+          .default(() => null),
       }),
     ),
     z.intersection(
       object({ type: z.literal('basic') }),
       object({
         credentials: z.array(BasicCredential),
-        realm: wire(z.string().nullable().optional(), z.string().nullable()),
+        realm: z
+          .string()
+          .nullable()
+          .default(() => null),
       }),
     ),
   ])
@@ -3049,13 +2956,10 @@ export const ProxyAuth: z.ZodUnion<
   })
 export const PublicDomainConfig: z.ZodObject<{
   gateway: typeof GatewayId
-  acme: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AcmeProvider>>,
-    z.ZodNullable<typeof AcmeProvider>
-  >
+  acme: z.ZodDefault<z.ZodNullable<typeof AcmeProvider>>
 }> = /* @__PURE__ */ object({
   gateway: GatewayId,
-  acme: wire(AcmeProvider.nullable().optional(), AcmeProvider.nullable()),
+  acme: AcmeProvider.nullable().default(() => null),
 }).meta({
   id: 'PublicDomainConfig',
 })
@@ -3082,17 +2986,14 @@ export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
     id: 'RebuildParams',
   })
 export const RegistryIdentity: z.ZodObject<{
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  icon: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
-    z.ZodNullable<typeof DataUrl>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  icon: z.ZodDefault<z.ZodNullable<typeof DataUrl>>
 }> = /* @__PURE__ */ object({
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  icon: DataUrl.nullable().default(() => null),
 }).meta({
   id: 'RegistryIdentity',
 })
@@ -3139,15 +3040,15 @@ export const RestorePackageParams: z.ZodObject<{
   targetId: typeof BackupTargetId
   password: z.ZodString
   ids: z.ZodArray<typeof PackageId>
-  serverId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  serverId: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   targetId: BackupTargetId,
   password: z.string(),
   ids: z.array(PackageId),
-  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+  serverId: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'RestorePackageParams',
 })
@@ -3155,15 +3056,15 @@ export const RestoreVolumeParams: z.ZodObject<{
   targetId: typeof BackupTargetId
   password: z.ZodString
   ids: z.ZodArray<typeof SharedVolumeId>
-  serverId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  serverId: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   targetId: BackupTargetId,
   password: z.string(),
   ids: z.array(SharedVolumeId),
-  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
+  serverId: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'RestoreVolumeParams',
 })
@@ -3178,20 +3079,17 @@ export const RestoreVolumeResult: z.ZodObject<{
 })
 export const RunActionParams: z.ZodObject<{
   packageId: typeof PackageId
-  eventId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
-  >
+  eventId: z.ZodDefault<z.ZodNullable<typeof Guid>>
   actionId: typeof ActionId
-  input: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
-    z.ZodNullable<z.ZodUnknown>
-  >
+  input: z.ZodDefault<z.ZodNullable<z.ZodUnknown>>
 }> = /* @__PURE__ */ object({
   packageId: PackageId,
-  eventId: wire(Guid.nullable().optional(), Guid.nullable()),
+  eventId: Guid.nullable().default(() => null),
   actionId: ActionId,
-  input: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
+  input: z
+    .unknown()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'RunActionParams',
 })
@@ -3207,32 +3105,23 @@ export const ServiceStats: z.ZodObject<{
   id: 'ServiceStats',
 })
 export const SetDefaultOutboundParams: z.ZodObject<{
-  gateway: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GatewayId>>,
-    z.ZodNullable<typeof GatewayId>
-  >
-  dns: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof OutboundDnsUpdate>>,
-    z.ZodNullable<typeof OutboundDnsUpdate>
-  >
+  gateway: z.ZodDefault<z.ZodNullable<typeof GatewayId>>
+  dns: z.ZodDefault<z.ZodNullable<typeof OutboundDnsUpdate>>
 }> = /* @__PURE__ */ object({
-  gateway: wire(GatewayId.nullable().optional(), GatewayId.nullable()),
-  dns: wire(
-    OutboundDnsUpdate.nullable().optional(),
-    OutboundDnsUpdate.nullable(),
-  ),
+  gateway: GatewayId.nullable().default(() => null),
+  dns: OutboundDnsUpdate.nullable().default(() => null),
 }).meta({
   id: 'SetDefaultOutboundParams',
 })
 export const SetGatewaySecureParams: z.ZodObject<{
   gateway: typeof GatewayId
-  secure: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-    z.ZodNullable<z.ZodBoolean>
-  >
+  secure: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
 }> = /* @__PURE__ */ object({
   gateway: GatewayId,
-  secure: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+  secure: z
+    .boolean()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'SetGatewaySecureParams',
 })
@@ -3258,53 +3147,35 @@ export const SetLogLevelParams: z.ZodObject<{
 })
 export const SetOutboundGatewayParams: z.ZodObject<{
   package: typeof PackageId
-  gateway: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GatewayId>>,
-    z.ZodNullable<typeof GatewayId>
-  >
-  dns: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof OutboundDnsUpdate>>,
-    z.ZodNullable<typeof OutboundDnsUpdate>
-  >
+  gateway: z.ZodDefault<z.ZodNullable<typeof GatewayId>>
+  dns: z.ZodDefault<z.ZodNullable<typeof OutboundDnsUpdate>>
 }> = /* @__PURE__ */ object({
   package: PackageId,
-  gateway: wire(GatewayId.nullable().optional(), GatewayId.nullable()),
-  dns: wire(
-    OutboundDnsUpdate.nullable().optional(),
-    OutboundDnsUpdate.nullable(),
-  ),
+  gateway: GatewayId.nullable().default(() => null),
+  dns: OutboundDnsUpdate.nullable().default(() => null),
 }).meta({
   id: 'SetOutboundGatewayParams',
 })
 export const SetSharedVolumeGrantParams: z.ZodObject<{
   id: typeof SharedVolumeId
   packageId: typeof PackageId
-  grant: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof SharedVolumeGrant>>,
-    z.ZodNullable<typeof SharedVolumeGrant>
-  >
+  grant: z.ZodDefault<z.ZodNullable<typeof SharedVolumeGrant>>
 }> = /* @__PURE__ */ object({
   id: SharedVolumeId,
   packageId: PackageId,
-  grant: wire(
-    SharedVolumeGrant.nullable().optional(),
-    SharedVolumeGrant.nullable(),
-  ),
+  grant: SharedVolumeGrant.nullable().default(() => null),
 }).meta({
   id: 'SetSharedVolumeGrantParams',
 })
 export const SetStaticDnsParams: z.ZodObject<{
   gateway: typeof GatewayId
-  servers: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
+  servers: z.ZodDefault<z.ZodNullable<z.ZodArray<z.ZodString>>>
 }> = /* @__PURE__ */ object({
   gateway: GatewayId,
-  servers: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ),
+  servers: z
+    .array(z.string())
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'SetStaticDnsParams',
 })
@@ -3356,10 +3227,7 @@ export const SharedVolumeSource: z.ZodUnion<
         /**
          * The drive as reported when the source was created, for display.
          */
-        drive: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<typeof SharedVolumeDrive>>,
-          z.ZodNullable<typeof SharedVolumeDrive>
-        >
+        drive: z.ZodDefault<z.ZodNullable<typeof SharedVolumeDrive>>
       }>
     >,
     z.ZodIntersection<
@@ -3367,7 +3235,7 @@ export const SharedVolumeSource: z.ZodUnion<
       z.ZodObject<{
         hostname: z.ZodString
         path: z.ZodString
-        username: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+        username: z.ZodDefault<z.ZodString>
       }>
     >,
   ]
@@ -3389,13 +3257,12 @@ export const SharedVolumeSource: z.ZodUnion<
         /**
          * The drive as reported when the source was created, for display.
          */
-        drive: wire(
-          SharedVolumeDrive.nullable().optional(),
-          SharedVolumeDrive.nullable(),
-        ).meta({
-          description:
-            'The drive as reported when the source was created, for display.',
-        }),
+        drive: SharedVolumeDrive.nullable()
+          .default(() => null)
+          .meta({
+            description:
+              'The drive as reported when the source was created, for display.',
+          }),
       }),
     ),
     z.intersection(
@@ -3403,7 +3270,7 @@ export const SharedVolumeSource: z.ZodUnion<
       object({
         hostname: z.string(),
         path: z.string(),
-        username: wire(z.string().optional(), z.string()),
+        username: z.string().default(() => ''),
       }),
     ),
   ])
@@ -3415,19 +3282,18 @@ export const SideloadResponse: z.ZodObject<{
   /**
    * Legacy progress continuation, absent for rpcstream observers.
    */
-  progress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
-  >
+  progress: z.ZodDefault<z.ZodNullable<typeof Guid>>
 }> = /* @__PURE__ */ object({
   upload: Guid,
   /**
    * Legacy progress continuation, absent for rpcstream observers.
    */
-  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
-    description:
-      'Legacy progress continuation, absent for rpcstream observers.',
-  }),
+  progress: Guid.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Legacy progress continuation, absent for rpcstream observers.',
+    }),
 }).meta({
   id: 'SideloadResponse',
 })
@@ -3522,26 +3388,25 @@ export const StartOsRecoveryInfo: z.ZodObject<{
     "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material.",
 })
 export const SubscribeParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  pointer: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * The subscriber's last revision; resumes only within the epoch that reported it.
    */
-  since: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
-    z.ZodNullable<typeof DbCursor>
-  >
+  since: z.ZodDefault<z.ZodNullable<typeof DbCursor>>
 }> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+  pointer: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * The subscriber's last revision; resumes only within the epoch that reported it.
    */
-  since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
-    description:
-      "The subscriber's last revision; resumes only within the epoch that reported it.",
-  }),
+  since: DbCursor.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "The subscriber's last revision; resumes only within the epoch that reported it.",
+    }),
 }).meta({
   id: 'SubscribeParams',
 })
@@ -3582,26 +3447,20 @@ export const TransportWire: z.ZodUnion<
     id: 'TransportWire',
   })
 export const UmountParams: z.ZodObject<{
-  targetId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof BackupTargetId>>,
-    z.ZodNullable<typeof BackupTargetId>
-  >
+  targetId: z.ZodDefault<z.ZodNullable<typeof BackupTargetId>>
 }> = /* @__PURE__ */ object({
-  targetId: wire(
-    BackupTargetId.nullable().optional(),
-    BackupTargetId.nullable(),
-  ),
+  targetId: BackupTargetId.nullable().default(() => null),
 }).meta({
   id: 'UmountParams',
 })
 export const UninstallParams: z.ZodObject<{
   id: typeof PackageId
-  soft: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  force: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  soft: z.ZodDefault<z.ZodBoolean>
+  force: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   id: PackageId,
-  soft: wire(z.boolean().optional(), z.boolean()),
-  force: wire(z.boolean().optional(), z.boolean()),
+  soft: z.boolean().default(() => false),
+  force: z.boolean().default(() => false),
 }).meta({
   id: 'UninstallParams',
 })
@@ -3618,10 +3477,7 @@ export const UpdateCifsSharedVolumeParams: z.ZodObject<{
   /**
    * Omitted keeps the stored password; empty clears it.
    */
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: SharedVolumeId,
   hostname: z.string(),
@@ -3630,9 +3486,13 @@ export const UpdateCifsSharedVolumeParams: z.ZodObject<{
   /**
    * Omitted keeps the stored password; empty clears it.
    */
-  password: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Omitted keeps the stored password; empty clears it.',
-  }),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Omitted keeps the stored password; empty clears it.',
+    }),
 }).meta({
   id: 'UpdateCifsSharedVolumeParams',
 })
@@ -3644,10 +3504,7 @@ export const UpdateCifsTargetParams: z.ZodObject<{
   /**
    * Omitted keeps the stored password; empty clears it.
    */
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: BackupTargetId,
   hostname: z.string(),
@@ -3656,33 +3513,36 @@ export const UpdateCifsTargetParams: z.ZodObject<{
   /**
    * Omitted keeps the stored password; empty clears it.
    */
-  password: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Omitted keeps the stored password; empty clears it.',
-  }),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Omitted keeps the stored password; empty clears it.',
+    }),
 }).meta({
   id: 'UpdateCifsTargetParams',
 })
 export const UpdateSystemRes: z.ZodObject<{
-  target: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  target: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Legacy progress continuation, absent for rpcstream observers.
    */
-  progress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
-  >
+  progress: z.ZodDefault<z.ZodNullable<typeof Guid>>
 }> = /* @__PURE__ */ object({
-  target: wire(z.string().nullable().optional(), z.string().nullable()),
+  target: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Legacy progress continuation, absent for rpcstream observers.
    */
-  progress: wire(Guid.nullable().optional(), Guid.nullable()).meta({
-    description:
-      'Legacy progress continuation, absent for rpcstream observers.',
-  }),
+  progress: Guid.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Legacy progress continuation, absent for rpcstream observers.',
+    }),
 }).meta({
   id: 'UpdateSystemRes',
 })
@@ -3720,10 +3580,7 @@ export const ActionResultMember: z.ZodIntersection<
     /**
      * (optional) A description of the value, such as an explaining why it exists or how to use it
      */
-    description: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    description: z.ZodDefault<z.ZodNullable<z.ZodString>>
   }>,
   typeof ActionResultValue
 > = /* @__PURE__ */ z
@@ -3739,13 +3596,14 @@ export const ActionResultMember: z.ZodIntersection<
       /**
        * (optional) A description of the value, such as an explaining why it exists or how to use it
        */
-      description: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ).meta({
-        description:
-          '(optional) A description of the value, such as an explaining why it exists or how to use it',
-      }),
+      description: z
+        .string()
+        .nullable()
+        .default(() => null)
+        .meta({
+          description:
+            '(optional) A description of the value, such as an explaining why it exists or how to use it',
+        }),
     }),
     ActionResultValue,
   )
@@ -3760,17 +3618,11 @@ export const ActionResultV1: z.ZodObject<{
   /**
    * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
    */
-  message: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  message: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * (optional) Structured data to present inside the modal
    */
-  result: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ActionResultValue>>,
-    z.ZodNullable<typeof ActionResultValue>
-  >
+  result: z.ZodDefault<z.ZodNullable<typeof ActionResultValue>>
 }> = /* @__PURE__ */ object({
   /**
    * Primary text to display as the header of the response modal. e.g. "Success!", "Name Updated", or "Service Information", whatever makes sense
@@ -3782,104 +3634,88 @@ export const ActionResultV1: z.ZodObject<{
   /**
    * (optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.
    */
-  message: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      '(optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.',
-  }),
+  message: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        '(optional) A general message for the user, just under the title. Rendered as Markdown, with a single line break kept as a line break.',
+    }),
   /**
    * (optional) Structured data to present inside the modal
    */
-  result: wire(
-    ActionResultValue.nullable().optional(),
-    ActionResultValue.nullable(),
-  ).meta({
-    description: '(optional) Structured data to present inside the modal',
-  }),
+  result: ActionResultValue.nullable()
+    .default(() => null)
+    .meta({
+      description: '(optional) Structured data to present inside the modal',
+    }),
 }).meta({
   id: 'ActionResultV1',
 })
 export const AddPublicDomainRes: z.ZodObject<{
   dns: typeof QueryDnsRes
   port: typeof CheckPortRes
-  portV6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof CheckPortV6Res>>,
-    z.ZodNullable<typeof CheckPortV6Res>
-  >
+  portV6: z.ZodDefault<z.ZodNullable<typeof CheckPortV6Res>>
   /**
    * The authority's own reachability requirement, where the domain has one.
    */
-  challenge: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof CheckChallengeRes>>,
-    z.ZodNullable<typeof CheckChallengeRes>
-  >
+  challenge: z.ZodDefault<z.ZodNullable<typeof CheckChallengeRes>>
 }> = /* @__PURE__ */ object({
   dns: QueryDnsRes,
   port: CheckPortRes,
-  portV6: wire(CheckPortV6Res.nullable().optional(), CheckPortV6Res.nullable()),
+  portV6: CheckPortV6Res.nullable().default(() => null),
   /**
    * The authority's own reachability requirement, where the domain has one.
    */
-  challenge: wire(
-    CheckChallengeRes.nullable().optional(),
-    CheckChallengeRes.nullable(),
-  ).meta({
-    description:
-      "The authority's own reachability requirement, where the domain has one.",
-  }),
+  challenge: CheckChallengeRes.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "The authority's own reachability requirement, where the domain has one.",
+    }),
 }).meta({
   id: 'AddPublicDomainRes',
 })
 export const BackupInfo: z.ZodObject<{
   version: z.ZodString
-  timestamp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  timestamp: z.ZodDefault<z.ZodNullable<z.ZodString>>
   packageBackups: z.ZodRecord<z.ZodString, typeof PackageBackupInfo>
-  sharedVolumeBackups: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SharedVolumeBackupInfo>>,
+  sharedVolumeBackups: z.ZodDefault<
     z.ZodRecord<z.ZodString, typeof SharedVolumeBackupInfo>
   >
 }> = /* @__PURE__ */ object({
   version: z.string(),
-  timestamp: wire(z.string().nullable().optional(), z.string().nullable()),
+  timestamp: z
+    .string()
+    .nullable()
+    .default(() => null),
   packageBackups: z.record(z.string(), PackageBackupInfo),
-  sharedVolumeBackups: wire(
-    z.record(z.string(), SharedVolumeBackupInfo).optional(),
-    z.record(z.string(), SharedVolumeBackupInfo),
-  ),
+  sharedVolumeBackups: z
+    .record(z.string(), SharedVolumeBackupInfo)
+    .default(() => ({})),
 }).meta({
   id: 'BackupInfo',
 })
 export const BackupParams: z.ZodObject<{
   targetId: typeof BackupTargetId
-  oldPassword: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
-    z.ZodNullable<typeof PasswordType>
-  >
-  packageIds: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof PackageId>>>,
-    z.ZodNullable<z.ZodArray<typeof PackageId>>
-  >
-  sharedVolumeIds: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof SharedVolumeId>>>,
+  oldPassword: z.ZodDefault<z.ZodNullable<typeof PasswordType>>
+  packageIds: z.ZodDefault<z.ZodNullable<z.ZodArray<typeof PackageId>>>
+  sharedVolumeIds: z.ZodDefault<
     z.ZodNullable<z.ZodArray<typeof SharedVolumeId>>
   >
   password: typeof PasswordType
 }> = /* @__PURE__ */ object({
   targetId: BackupTargetId,
-  oldPassword: wire(
-    PasswordType.nullable().optional(),
-    PasswordType.nullable(),
-  ),
-  packageIds: wire(
-    z.array(PackageId).nullable().optional(),
-    z.array(PackageId).nullable(),
-  ),
-  sharedVolumeIds: wire(
-    z.array(SharedVolumeId).nullable().optional(),
-    z.array(SharedVolumeId).nullable(),
-  ),
+  oldPassword: PasswordType.nullable().default(() => null),
+  packageIds: z
+    .array(PackageId)
+    .nullable()
+    .default(() => null),
+  sharedVolumeIds: z
+    .array(SharedVolumeId)
+    .nullable()
+    .default(() => null),
   password: PasswordType,
 }).meta({
   id: 'BackupParams',
@@ -3887,17 +3723,13 @@ export const BackupParams: z.ZodObject<{
 export const BackupReport: z.ZodObject<{
   server: typeof ServerBackupReport
   packages: z.ZodRecord<z.ZodString, typeof PackageBackupReport>
-  sharedVolumes: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof VolumeBackupReport>>,
+  sharedVolumes: z.ZodDefault<
     z.ZodRecord<z.ZodString, typeof VolumeBackupReport>
   >
 }> = /* @__PURE__ */ object({
   server: ServerBackupReport,
   packages: z.record(z.string(), PackageBackupReport),
-  sharedVolumes: wire(
-    z.record(z.string(), VolumeBackupReport).optional(),
-    z.record(z.string(), VolumeBackupReport),
-  ),
+  sharedVolumes: z.record(z.string(), VolumeBackupReport).default(() => ({})),
 }).meta({
   id: 'BackupReport',
 })
@@ -3909,11 +3741,8 @@ export const BackupTarget: z.ZodIntersection<
   z.ZodObject<{
     name: z.ZodString
     source: typeof SharedVolumeSource
-    startOs: z.ZodCodec<
-      z.ZodOptional<z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>>,
-      z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>
-    >
-    legacyBackup: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    startOs: z.ZodDefault<z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>>
+    legacyBackup: z.ZodDefault<z.ZodBoolean>
   }>,
   typeof SharedVolumeInspection
 > = /* @__PURE__ */ z
@@ -3921,11 +3750,8 @@ export const BackupTarget: z.ZodIntersection<
     object({
       name: z.string(),
       source: SharedVolumeSource,
-      startOs: wire(
-        z.record(z.string(), StartOsRecoveryInfo).optional(),
-        z.record(z.string(), StartOsRecoveryInfo),
-      ),
-      legacyBackup: wire(z.boolean().optional(), z.boolean()),
+      startOs: z.record(z.string(), StartOsRecoveryInfo).default(() => ({})),
+      legacyBackup: z.boolean().default(() => false),
     }),
     SharedVolumeInspection,
   )
@@ -3968,40 +3794,28 @@ export const CreateSharedVolumeParams: z.ZodObject<{
 export const HardwareInfo: z.ZodObject<{
   arch: z.ZodString
   ram: z.ZodInt
-  devices: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof LshwDevice>>>,
-    z.ZodNullable<z.ZodArray<typeof LshwDevice>>
-  >
+  devices: z.ZodDefault<z.ZodNullable<z.ZodArray<typeof LshwDevice>>>
 }> = /* @__PURE__ */ object({
   arch: z.string(),
   ram: z.int(),
-  devices: wire(
-    z.array(LshwDevice).nullable().optional(),
-    z.array(LshwDevice).nullable(),
-  ),
+  devices: z
+    .array(LshwDevice)
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'HardwareInfo',
 })
 export const HostAddress: z.ZodObject<{
   address: z.ZodString
-  public: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PublicDomainConfig>>,
-    z.ZodNullable<typeof PublicDomainConfig>
-  >
-  private: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof GatewayId>>>,
-    z.ZodNullable<z.ZodArray<typeof GatewayId>>
-  >
+  public: z.ZodDefault<z.ZodNullable<typeof PublicDomainConfig>>
+  private: z.ZodDefault<z.ZodNullable<z.ZodArray<typeof GatewayId>>>
 }> = /* @__PURE__ */ object({
   address: z.string(),
-  public: wire(
-    PublicDomainConfig.nullable().optional(),
-    PublicDomainConfig.nullable(),
-  ),
-  private: wire(
-    z.array(GatewayId).nullable().optional(),
-    z.array(GatewayId).nullable(),
-  ),
+  public: PublicDomainConfig.nullable().default(() => null),
+  private: z
+    .array(GatewayId)
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'HostAddress',
 })
@@ -4009,47 +3823,44 @@ export const HostnameInfo: z.ZodObject<{
   ssl: z.ZodBoolean
   public: z.ZodBoolean
   hostname: z.ZodString
-  port: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  port: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   metadata: typeof HostnameMetadata
 }> = /* @__PURE__ */ object({
   ssl: z.boolean(),
   public: z.boolean(),
   hostname: z.string(),
-  port: wire(z.int().nullable().optional(), z.int().nullable()),
+  port: z
+    .int()
+    .nullable()
+    .default(() => null),
   metadata: HostnameMetadata,
 }).meta({
   id: 'HostnameInfo',
 })
 export const InstallParams: z.ZodObject<{
-  acceptSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
-    z.ZodNullable<typeof AcceptSigners>
-  >
+  acceptSigners: z.ZodDefault<z.ZodNullable<typeof AcceptSigners>>
   registry: z.ZodString
   id: typeof PackageId
   version: typeof Version
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  trust: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  acceptSigners: wire(
-    AcceptSigners.nullable().optional(),
-    AcceptSigners.nullable(),
-  ),
+  acceptSigners: AcceptSigners.nullable().default(() => null),
   registry: z.string(),
   id: PackageId,
   version: Version,
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
+  trust: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Accepts an untrusted signer without skipping signature or integrity verification.',
+    }),
 }).meta({
   id: 'InstallParams',
 })
@@ -4058,13 +3869,13 @@ export const InstallParams: z.ZodObject<{
  * Enrolled keys, including ephemeral ones, and the caller's own.
  */
 export const KeyList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  current: z.ZodDefault<z.ZodNullable<z.ZodString>>
   keys: typeof AuthKeys
 }> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  current: z
+    .string()
+    .nullable()
+    .default(() => null),
   keys: AuthKeys,
 }).meta({
   id: 'KeyList',
@@ -4190,31 +4001,30 @@ export const NutConfig: z.ZodObject<{
   /**
    * Whether StartOS should run NUT monitoring.
    */
-  enabled: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  enabled: z.ZodDefault<z.ZodBoolean>
   /**
    * Retained server or client settings, including while monitoring is disabled.
    */
-  settings: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof NutSettings>>,
-    z.ZodNullable<typeof NutSettings>
-  >
+  settings: z.ZodDefault<z.ZodNullable<typeof NutSettings>>
 }> = /* @__PURE__ */ object({
   /**
    * Whether StartOS should run NUT monitoring.
    */
-  enabled: wire(z.boolean().optional(), z.boolean()).meta({
-    description: 'Whether StartOS should run NUT monitoring.',
-  }),
+  enabled: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description: 'Whether StartOS should run NUT monitoring.',
+    }),
   /**
    * Retained server or client settings, including while monitoring is disabled.
    */
-  settings: wire(
-    NutSettings.nullable().optional(),
-    NutSettings.nullable(),
-  ).meta({
-    description:
-      'Retained server or client settings, including while monitoring is disabled.',
-  }),
+  settings: NutSettings.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Retained server or client settings, including while monitoring is disabled.',
+    }),
 }).meta({
   id: 'NutConfig',
   description: 'Stored NUT configuration and its independent enabled state.',
@@ -4235,14 +4045,8 @@ export const Progress: z.ZodUnion<
     z.ZodBoolean,
     z.ZodObject<{
       done: z.ZodInt
-      total: z.ZodCodec<
-        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-        z.ZodNullable<z.ZodInt>
-      >
-      units: z.ZodCodec<
-        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
-        z.ZodNullable<typeof ProgressUnits>
-      >
+      total: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+      units: z.ZodDefault<z.ZodNullable<typeof ProgressUnits>>
     }>,
     typeof FullProgress,
   ]
@@ -4252,11 +4056,11 @@ export const Progress: z.ZodUnion<
     z.boolean(),
     object({
       done: z.int(),
-      total: wire(z.int().nullable().optional(), z.int().nullable()),
-      units: wire(
-        ProgressUnits.nullable().optional(),
-        ProgressUnits.nullable(),
-      ),
+      total: z
+        .int()
+        .nullable()
+        .default(() => null),
+      units: ProgressUnits.nullable().default(() => null),
     }),
     FullProgress.meta({
       description:
@@ -4273,14 +4077,11 @@ export const ProxyOptions: z.ZodIntersection<
      * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
      * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
      */
-    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    addXForwardedHeaders: z.ZodDefault<z.ZodBoolean>
     /**
      * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
      */
-    auth: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
-      z.ZodNullable<typeof ProxyAuth>
-    >
+    auth: z.ZodDefault<z.ZodNullable<typeof ProxyAuth>>
   }>
 > = /* @__PURE__ */ z
   .intersection(
@@ -4290,32 +4091,31 @@ export const ProxyOptions: z.ZodIntersection<
        * Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
        * Client-supplied `X-Forwarded-*` headers are stripped on both legs.
        */
-      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()).meta({
-        description:
-          'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
-      }),
+      addXForwardedHeaders: z
+        .boolean()
+        .default(() => false)
+        .meta({
+          description:
+            'Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.',
+        }),
       /**
        * Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.
        */
-      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()).meta({
-        description:
-          'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
-      }),
+      auth: ProxyAuth.nullable()
+        .default(() => null)
+        .meta({
+          description:
+            'Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.',
+        }),
     }),
   )
   .meta({
     id: 'ProxyOptions',
   })
 export const ResetPasswordParams: z.ZodObject<{
-  newPassword: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
-    z.ZodNullable<typeof PasswordType>
-  >
+  newPassword: z.ZodDefault<z.ZodNullable<typeof PasswordType>>
 }> = /* @__PURE__ */ object({
-  newPassword: wire(
-    PasswordType.nullable().optional(),
-    PasswordType.nullable(),
-  ),
+  newPassword: PasswordType.nullable().default(() => null),
 }).meta({
   id: 'ResetPasswordParams',
 })
@@ -4329,10 +4129,7 @@ export const ServiceInterface: z.ZodObject<{
   /**
    * The interface address Open UI should prefer.
    */
-  preferredLauncherAddress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  preferredLauncherAddress: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: ServiceInterfaceId,
   name: z.string(),
@@ -4343,12 +4140,13 @@ export const ServiceInterface: z.ZodObject<{
   /**
    * The interface address Open UI should prefer.
    */
-  preferredLauncherAddress: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description: 'The interface address Open UI should prefer.',
-  }),
+  preferredLauncherAddress: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'The interface address Open UI should prefer.',
+    }),
 }).meta({
   id: 'ServiceInterface',
 })
@@ -4372,42 +4170,36 @@ export const SharedVolume: z.ZodIntersection<
     id: 'SharedVolume',
   })
 export const SideloadParams: z.ZodObject<{
-  acceptSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
-    z.ZodNullable<typeof AcceptSigners>
-  >
+  acceptSigners: z.ZodDefault<z.ZodNullable<typeof AcceptSigners>>
   /**
    * DER64 supplemental signatures for the uploaded archive.
    */
-  signatures: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
-    z.ZodRecord<z.ZodString, typeof AnySignature>
-  >
+  signatures: z.ZodDefault<z.ZodRecord<z.ZodString, typeof AnySignature>>
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  trust: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
-  acceptSigners: wire(
-    AcceptSigners.nullable().optional(),
-    AcceptSigners.nullable(),
-  ),
+  acceptSigners: AcceptSigners.nullable().default(() => null),
   /**
    * DER64 supplemental signatures for the uploaded archive.
    */
-  signatures: wire(
-    z.record(z.string(), AnySignature).optional(),
-    z.record(z.string(), AnySignature),
-  ).meta({
-    description: 'DER64 supplemental signatures for the uploaded archive.',
-  }),
+  signatures: z
+    .record(z.string(), AnySignature)
+    .default(() => ({}))
+    .meta({
+      description: 'DER64 supplemental signatures for the uploaded archive.',
+    }),
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
+  trust: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Accepts an untrusted signer without skipping signature or integrity verification.',
+    }),
 }).meta({
   id: 'SideloadParams',
 })
@@ -4437,25 +4229,16 @@ export const TrustedKey: z.ZodObject<{
   /**
    * Registry identity recorded when this key was first imported.
    */
-  originRegistry: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof RegistryIdentity>>,
-    z.ZodNullable<typeof RegistryIdentity>
-  >
+  originRegistry: z.ZodDefault<z.ZodNullable<typeof RegistryIdentity>>
   publicKey: typeof AnyVerifyingKey
   /**
    * Original GPG exports; signing trust is determined by `public_key`.
    */
-  gpgExports: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
-    z.ZodArray<typeof GpgPublicKeyExport>
-  >
+  gpgExports: z.ZodDefault<z.ZodArray<typeof GpgPublicKeyExport>>
   /**
    * Contact details registries publish for the key's signer.
    */
-  contact: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof ContactInfo>>,
-    z.ZodArray<typeof ContactInfo>
-  >
+  contact: z.ZodDefault<z.ZodArray<typeof ContactInfo>>
   addedAt: z.ZodString
   /**
    * False while a connected registry offers the key.
@@ -4475,29 +4258,32 @@ export const TrustedKey: z.ZodObject<{
   /**
    * Registry identity recorded when this key was first imported.
    */
-  originRegistry: wire(
-    RegistryIdentity.nullable().optional(),
-    RegistryIdentity.nullable(),
-  ).meta({
-    description: 'Registry identity recorded when this key was first imported.',
-  }),
+  originRegistry: RegistryIdentity.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Registry identity recorded when this key was first imported.',
+    }),
   publicKey: AnyVerifyingKey,
   /**
    * Original GPG exports; signing trust is determined by `public_key`.
    */
-  gpgExports: wire(
-    z.array(GpgPublicKeyExport).optional(),
-    z.array(GpgPublicKeyExport),
-  ).meta({
-    description:
-      'Original GPG exports; signing trust is determined by `public_key`.',
-  }),
+  gpgExports: z
+    .array(GpgPublicKeyExport)
+    .default(() => [])
+    .meta({
+      description:
+        'Original GPG exports; signing trust is determined by `public_key`.',
+    }),
   /**
    * Contact details registries publish for the key's signer.
    */
-  contact: wire(z.array(ContactInfo).optional(), z.array(ContactInfo)).meta({
-    description: "Contact details registries publish for the key's signer.",
-  }),
+  contact: z
+    .array(ContactInfo)
+    .default(() => [])
+    .meta({
+      description: "Contact details registries publish for the key's signer.",
+    }),
   addedAt: z.string(),
   /**
    * False while a connected registry offers the key.
@@ -4517,82 +4303,82 @@ export const UpdateSystemParams: z.ZodObject<{
    * Fetches once from this registry instead of using the selected update registry's
    * synchronized releases.
    */
-  registry: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  registry: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Additional signer requirements checked before starting the update.
    */
-  acceptSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
-    z.ZodNullable<typeof AcceptSigners>
-  >
+  acceptSigners: z.ZodDefault<z.ZodNullable<typeof AcceptSigners>>
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
-  trust: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  targetVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  trust: z.ZodDefault<z.ZodBoolean>
+  targetVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Requests a legacy progress GUID; rpcstream observes completion independently.
    */
-  progress: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  progress: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   /**
    * Fetches once from this registry instead of using the selected update registry's
    * synchronized releases.
    */
-  registry: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "Fetches once from this registry instead of using the selected update registry's\nsynchronized releases.",
-  }),
+  registry: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Fetches once from this registry instead of using the selected update registry's\nsynchronized releases.",
+    }),
   /**
    * Additional signer requirements checked before starting the update.
    */
-  acceptSigners: wire(
-    AcceptSigners.nullable().optional(),
-    AcceptSigners.nullable(),
-  ).meta({
-    description:
-      'Additional signer requirements checked before starting the update.',
-  }),
+  acceptSigners: AcceptSigners.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Additional signer requirements checked before starting the update.',
+    }),
   /**
    * Accepts an untrusted signer without skipping signature or integrity verification.
    */
-  trust: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts an untrusted signer without skipping signature or integrity verification.',
-  }),
-  targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
+  trust: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Accepts an untrusted signer without skipping signature or integrity verification.',
+    }),
+  targetVersion: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Requests a legacy progress GUID; rpcstream observes completion independently.
    */
-  progress: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Requests a legacy progress GUID; rpcstream observes completion independently.',
-  }),
+  progress: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Requests a legacy progress GUID; rpcstream observes completion independently.',
+    }),
 }).meta({
   id: 'UpdateSystemParams',
 })
 export const WifiListInfo: z.ZodObject<{
   ssids: z.ZodRecord<z.ZodString, typeof SignalStrength>
-  connected: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Ssid>>,
-    z.ZodNullable<typeof Ssid>
-  >
-  country: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  connected: z.ZodDefault<z.ZodNullable<typeof Ssid>>
+  country: z.ZodDefault<z.ZodNullable<z.ZodString>>
   ethernet: z.ZodBoolean
   availableWifi: z.ZodArray<typeof WifiListOut>
 }> = /* @__PURE__ */ object({
   ssids: z.record(z.string(), SignalStrength),
-  connected: wire(Ssid.nullable().optional(), Ssid.nullable()),
-  country: wire(z.string().nullable().optional(), z.string().nullable()),
+  connected: Ssid.nullable().default(() => null),
+  country: z
+    .string()
+    .nullable()
+    .default(() => null),
   ethernet: z.boolean(),
   availableWifi: z.array(WifiListOut),
 }).meta({
@@ -4714,25 +4500,28 @@ export const BackupRun: z.ZodObject<{
 export const BindingSetAddressEnabledParams: z.ZodObject<{
   internalPort: z.ZodInt
   address: typeof HostnameInfo
-  enabled: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-    z.ZodNullable<z.ZodBoolean>
-  >
+  enabled: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
   /**
    * Accepts readable and alterable plaintext traffic, including passwords.
    */
-  allowInsecure: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  allowInsecure: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   internalPort: z.int(),
   address: HostnameInfo,
-  enabled: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+  enabled: z
+    .boolean()
+    .nullable()
+    .default(() => null),
   /**
    * Accepts readable and alterable plaintext traffic, including passwords.
    */
-  allowInsecure: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Accepts readable and alterable plaintext traffic, including passwords.',
-  }),
+  allowInsecure: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Accepts readable and alterable plaintext traffic, including passwords.',
+    }),
 }).meta({
   id: 'BindingSetAddressEnabledParams',
 })
@@ -4764,34 +4553,24 @@ export const DerivedAddressInfo: z.ZodObject<{
    * stays the single source of truth for WAN reachability (P2P address
    * selection, upstream pinholes). A GUA not in this set is LAN-only.
    */
-  guaWan: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
+  guaWan: z.ZodDefault<z.ZodArray<z.ZodString>>
   /**
    * User override: enable these private IPs regardless of their mDNS address.
    */
-  lanEnabled: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>>,
+  lanEnabled: z.ZodDefault<
     z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt], null>>
   >
   /**
    * Plaintext private addresses requiring consent, keyed by hostname, port and gateway.
    */
-  insecure: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
-    >,
+  insecure: z.ZodDefault<
     z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
   >
   /**
    * Persisted consent; ordinary address changes must not grant insecure access.
    * Address removal retains consent; explicit disabling or gateway removal revokes it.
    */
-  insecureEnabled: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
-    >,
+  insecureEnabled: z.ZodDefault<
     z.ZodArray<z.ZodTuple<[z.ZodString, z.ZodInt, typeof GatewayId], null>>
   >
   /**
@@ -4801,10 +4580,7 @@ export const DerivedAddressInfo: z.ZodObject<{
   /**
    * Effective address selections shared by network enforcement and clients.
    */
-  effective: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof HostnameInfo>>,
-    z.ZodArray<typeof HostnameInfo>
-  >
+  effective: z.ZodDefault<z.ZodArray<typeof HostnameInfo>>
 }> = /* @__PURE__ */ object({
   /**
    * User override: enable these addresses (only for public IP & port)
@@ -4828,41 +4604,44 @@ export const DerivedAddressInfo: z.ZodObject<{
    * stays the single source of truth for WAN reachability (P2P address
    * selection, upstream pinholes). A GUA not in this set is LAN-only.
    */
-  guaWan: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
-    description:
-      'User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.',
-  }),
+  guaWan: z
+    .array(z.string())
+    .default(() => [])
+    .meta({
+      description:
+        'User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.',
+    }),
   /**
    * User override: enable these private IPs regardless of their mDNS address.
    */
-  lanEnabled: wire(
-    z.array(z.tuple([z.string(), z.int()])).optional(),
-    z.array(z.tuple([z.string(), z.int()])),
-  ).meta({
-    description:
-      'User override: enable these private IPs regardless of their mDNS address.',
-  }),
+  lanEnabled: z
+    .array(z.tuple([z.string(), z.int()]))
+    .default(() => [])
+    .meta({
+      description:
+        'User override: enable these private IPs regardless of their mDNS address.',
+    }),
   /**
    * Plaintext private addresses requiring consent, keyed by hostname, port and gateway.
    */
-  insecure: wire(
-    z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
-    z.array(z.tuple([z.string(), z.int(), GatewayId])),
-  ).meta({
-    description:
-      'Plaintext private addresses requiring consent, keyed by hostname, port and gateway.',
-  }),
+  insecure: z
+    .array(z.tuple([z.string(), z.int(), GatewayId]))
+    .default(() => [])
+    .meta({
+      description:
+        'Plaintext private addresses requiring consent, keyed by hostname, port and gateway.',
+    }),
   /**
    * Persisted consent; ordinary address changes must not grant insecure access.
    * Address removal retains consent; explicit disabling or gateway removal revokes it.
    */
-  insecureEnabled: wire(
-    z.array(z.tuple([z.string(), z.int(), GatewayId])).optional(),
-    z.array(z.tuple([z.string(), z.int(), GatewayId])),
-  ).meta({
-    description:
-      'Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.',
-  }),
+  insecureEnabled: z
+    .array(z.tuple([z.string(), z.int(), GatewayId]))
+    .default(() => [])
+    .meta({
+      description:
+        'Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.',
+    }),
   /**
    * COMPUTED: NetServiceData::update — all possible addresses for this binding
    */
@@ -4873,24 +4652,22 @@ export const DerivedAddressInfo: z.ZodObject<{
   /**
    * Effective address selections shared by network enforcement and clients.
    */
-  effective: wire(z.array(HostnameInfo).optional(), z.array(HostnameInfo)).meta(
-    {
+  effective: z
+    .array(HostnameInfo)
+    .default(() => [])
+    .meta({
       description:
         'Effective address selections shared by network enforcement and clients.',
-    },
-  ),
+    }),
 }).meta({
   id: 'DerivedAddressInfo',
 })
 export const DeviceInfo: z.ZodObject<{
   os: typeof OsInfo
-  hardware: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof HardwareInfo>>,
-    z.ZodNullable<typeof HardwareInfo>
-  >
+  hardware: z.ZodDefault<z.ZodNullable<typeof HardwareInfo>>
 }> = /* @__PURE__ */ object({
   os: OsInfo,
-  hardware: wire(HardwareInfo.nullable().optional(), HardwareInfo.nullable()),
+  hardware: HardwareInfo.nullable().default(() => null),
 }).meta({
   id: 'DeviceInfo',
 })
@@ -4907,19 +4684,18 @@ export const MetricsFollowResponse: z.ZodObject<{
   /**
    * Present for ordinary replies; typed observations use same-ID events.
    */
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
-  >
+  guid: z.ZodDefault<z.ZodNullable<typeof Guid>>
   metrics: typeof Metrics
 }> = /* @__PURE__ */ object({
   /**
    * Present for ordinary replies; typed observations use same-ID events.
    */
-  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
-    description:
-      'Present for ordinary replies; typed observations use same-ID events.',
-  }),
+  guid: Guid.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Present for ordinary replies; typed observations use same-ID events.',
+    }),
   metrics: Metrics,
 }).meta({
   id: 'MetricsFollowResponse',
@@ -4959,10 +4735,7 @@ export const DnsStatus: z.ZodObject<{
   /**
    * Present only before stored network policy takes authority.
    */
-  gateway: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof NetworkGatewayInfo>>,
-    z.ZodNullable<typeof NetworkGatewayInfo>
-  >
+  gateway: z.ZodDefault<z.ZodNullable<typeof NetworkGatewayInfo>>
 }> = /* @__PURE__ */ object({
   /**
    * True until stored network policy takes authority.
@@ -4973,30 +4746,26 @@ export const DnsStatus: z.ZodObject<{
   /**
    * Present only before stored network policy takes authority.
    */
-  gateway: wire(
-    NetworkGatewayInfo.nullable().optional(),
-    NetworkGatewayInfo.nullable(),
-  ).meta({
-    description: 'Present only before stored network policy takes authority.',
-  }),
+  gateway: NetworkGatewayInfo.nullable()
+    .default(() => null)
+    .meta({
+      description: 'Present only before stored network policy takes authority.',
+    }),
 }).meta({
   id: 'DnsStatus',
   description: 'Active DNS authority and its bootstrap gateway.',
 })
 export const LegacyProxySslOptions: z.ZodIntersection<
   z.ZodObject<{
-    addXForwardedHeaders: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-    auth: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof ProxyAuth>>,
-      z.ZodNullable<typeof ProxyAuth>
-    >
+    addXForwardedHeaders: z.ZodDefault<z.ZodBoolean>
+    auth: z.ZodDefault<z.ZodNullable<typeof ProxyAuth>>
   }>,
   typeof AddSslOptions
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      addXForwardedHeaders: wire(z.boolean().optional(), z.boolean()),
-      auth: wire(ProxyAuth.nullable().optional(), ProxyAuth.nullable()),
+      addXForwardedHeaders: z.boolean().default(() => false),
+      auth: ProxyAuth.nullable().default(() => null),
     }),
     AddSslOptions,
   )
@@ -5010,35 +4779,17 @@ export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
 export const CompatibleBindOptions: z.ZodObject<{
   transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
   preferredExternalPort: z.ZodInt
-  addSsl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof LegacyProxySslOptions>>,
-    z.ZodNullable<typeof LegacyProxySslOptions>
-  >
-  secure: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Security>>,
-    z.ZodNullable<typeof Security>
-  >
-  proxy: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof ProxyOptions>>,
-    z.ZodNullable<typeof ProxyOptions>
-  >
-  networkPorts: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodInt>>,
-    z.ZodRecord<z.ZodString, z.ZodInt>
-  >
+  addSsl: z.ZodDefault<z.ZodNullable<typeof LegacyProxySslOptions>>
+  secure: z.ZodDefault<z.ZodNullable<typeof Security>>
+  proxy: z.ZodDefault<z.ZodNullable<typeof ProxyOptions>>
+  networkPorts: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodInt>>
 }> = /* @__PURE__ */ object({
   transport: wire(Transport.optional(), Transport),
   preferredExternalPort: z.int(),
-  addSsl: wire(
-    LegacyProxySslOptions.nullable().optional(),
-    LegacyProxySslOptions.nullable(),
-  ),
-  secure: wire(Security.nullable().optional(), Security.nullable()),
-  proxy: wire(ProxyOptions.nullable().optional(), ProxyOptions.nullable()),
-  networkPorts: wire(
-    z.record(z.string(), z.int()).optional(),
-    z.record(z.string(), z.int()),
-  ),
+  addSsl: LegacyProxySslOptions.nullable().default(() => null),
+  secure: Security.nullable().default(() => null),
+  proxy: ProxyOptions.nullable().default(() => null),
+  networkPorts: z.record(z.string(), z.int()).default(() => ({})),
 }).meta({
   id: 'CompatibleBindOptions',
 })
@@ -5049,22 +4800,19 @@ export const CompatibleBindOptions: z.ZodObject<{
 export const SubscribeStart: z.ZodObject<{
   epoch: z.ZodString
   id: z.ZodInt
-  value: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
-    z.ZodNullable<z.ZodUnknown>
-  >
-  revisions: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
-    z.ZodNullable<z.ZodArray<typeof Revision>>
-  >
+  value: z.ZodDefault<z.ZodNullable<z.ZodUnknown>>
+  revisions: z.ZodDefault<z.ZodNullable<z.ZodArray<typeof Revision>>>
 }> = /* @__PURE__ */ object({
   epoch: z.string(),
   id: z.int(),
-  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
-  revisions: wire(
-    z.array(Revision).nullable().optional(),
-    z.array(Revision).nullable(),
-  ),
+  value: z
+    .unknown()
+    .nullable()
+    .default(() => null),
+  revisions: z
+    .array(Revision)
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'SubscribeStart',
   description:
@@ -5149,10 +4897,7 @@ export const BindInfo: z.ZodObject<{
    * binding (host + internal port) may back several interfaces (e.g. a `ui`
    * and an `api` on the same port), so this is keyed by interface id.
    */
-  interfaces: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
-    z.ZodRecord<z.ZodString, typeof ServiceInterface>
-  >
+  interfaces: z.ZodDefault<z.ZodRecord<z.ZodString, typeof ServiceInterface>>
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
   options: BindOptions,
@@ -5163,13 +4908,13 @@ export const BindInfo: z.ZodObject<{
    * binding (host + internal port) may back several interfaces (e.g. a `ui`
    * and an `api` on the same port), so this is keyed by interface id.
    */
-  interfaces: wire(
-    z.record(z.string(), ServiceInterface).optional(),
-    z.record(z.string(), ServiceInterface),
-  ).meta({
-    description:
-      'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
-  }),
+  interfaces: z
+    .record(z.string(), ServiceInterface)
+    .default(() => ({}))
+    .meta({
+      description:
+        'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
+    }),
 }).meta({
   id: 'BindInfo',
 })
@@ -5201,12 +4946,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 ListKeysParams,
@@ -5247,12 +4987,7 @@ export const Api = {
             create: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 CreateTokenParams,
@@ -5264,12 +4999,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5303,12 +5033,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 HistoryParams,
@@ -5366,12 +5091,7 @@ export const Api = {
             find: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5383,12 +5103,7 @@ export const Api = {
             info: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 InfoParams,
@@ -5400,12 +5115,7 @@ export const Api = {
             inspect: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 TargetParams,
@@ -5417,12 +5127,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5497,12 +5202,7 @@ export const Api = {
             ui: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 UiParams,
@@ -5549,12 +5249,7 @@ export const Api = {
         format: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             FormatDiskParams,
@@ -5610,12 +5305,7 @@ export const Api = {
             'check-challenge': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 CheckChallengeParams,
@@ -5644,12 +5334,7 @@ export const Api = {
             'dump-table': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5664,12 +5349,7 @@ export const Api = {
             query: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 QueryDnsParams,
@@ -5687,12 +5367,7 @@ export const Api = {
             status: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5709,12 +5384,7 @@ export const Api = {
             'dump-table': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5731,12 +5401,7 @@ export const Api = {
             'check-dns': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 CheckDnsParams,
@@ -5748,12 +5413,7 @@ export const Api = {
             'check-port': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 CheckPortParams,
@@ -5765,12 +5425,7 @@ export const Api = {
             'check-port-v6': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 CheckPortParams,
@@ -5794,12 +5449,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5843,12 +5493,7 @@ export const Api = {
             'generate-certificate': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 GenerateCertificateParams,
@@ -5894,12 +5539,7 @@ export const Api = {
             'dump-table': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5914,12 +5554,7 @@ export const Api = {
             'list-passthrough': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -5950,12 +5585,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ListNotificationParams,
@@ -5994,12 +5624,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -6057,12 +5682,7 @@ export const Api = {
             'get-input': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 GetActionInputParams,
@@ -6074,12 +5694,7 @@ export const Api = {
             run: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 RunActionParams,
@@ -6116,12 +5731,7 @@ export const Api = {
         exec: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ExecParams,
@@ -6205,10 +5815,7 @@ export const Api = {
                     z.intersection(
                       z.intersection(
                         object({
-                          format: wire(
-                            IoFormat.nullable().optional(),
-                            IoFormat.nullable(),
-                          ),
+                          format: IoFormat.nullable().default(() => null),
                         }),
                         empty,
                       ),
@@ -6233,10 +5840,7 @@ export const Api = {
                     z.intersection(
                       z.intersection(
                         object({
-                          format: wire(
-                            IoFormat.nullable().optional(),
-                            IoFormat.nullable(),
-                          ),
+                          format: IoFormat.nullable().default(() => null),
                         }),
                         empty,
                       ),
@@ -6302,12 +5906,7 @@ export const Api = {
         'installed-version': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             InstalledVersionParams,
@@ -6319,12 +5918,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -6336,27 +5930,22 @@ export const Api = {
         logs: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             object({
-              limit: wire(z.int().nullable().optional(), z.int().nullable()),
-              cursor: wire(
-                z.string().nullable().optional(),
-                z.string().nullable(),
-              ),
-              boot: wire(
-                z
-                  .union([
-                    z.number().int().min(-2147483648).max(2147483647),
-                    z.string(),
-                  ])
-                  .nullable()
-                  .optional(),
-                z
-                  .union([
-                    z.number().int().min(-2147483648).max(2147483647),
-                    z.string(),
-                  ])
-                  .nullable(),
-              ),
-              before: wire(z.boolean().optional(), z.boolean()),
+              limit: z
+                .int()
+                .nullable()
+                .default(() => null),
+              cursor: z
+                .string()
+                .nullable()
+                .default(() => null),
+              boot: z
+                .union([
+                  z.number().int().min(-2147483648).max(2147483647),
+                  z.string(),
+                ])
+                .nullable()
+                .default(() => null),
+              before: z.boolean().default(() => false),
             }),
             PackageIdParams,
           ),
@@ -6367,30 +5956,22 @@ export const Api = {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 object({
-                  limit: wire(
-                    z.int().nullable().optional(),
-                    z.int().nullable(),
-                  ),
-                  cursor: wire(
-                    z.string().nullable().optional(),
-                    z.string().nullable(),
-                  ),
-                  boot: wire(
-                    z
-                      .union([
-                        z.number().int().min(-2147483648).max(2147483647),
-                        z.string(),
-                      ])
-                      .nullable()
-                      .optional(),
-                    z
-                      .union([
-                        z.number().int().min(-2147483648).max(2147483647),
-                        z.string(),
-                      ])
-                      .nullable(),
-                  ),
-                  before: wire(z.boolean().optional(), z.boolean()),
+                  limit: z
+                    .int()
+                    .nullable()
+                    .default(() => null),
+                  cursor: z
+                    .string()
+                    .nullable()
+                    .default(() => null),
+                  boot: z
+                    .union([
+                      z.number().int().min(-2147483648).max(2147483647),
+                      z.string(),
+                    ])
+                    .nullable()
+                    .default(() => null),
+                  before: z.boolean().default(() => false),
                 }),
                 PackageIdParams,
               ),
@@ -6433,12 +6014,7 @@ export const Api = {
         stats: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -6481,9 +6057,7 @@ export const Api = {
         },
         'device-info': {
           _PARAMS: /* @__PURE__ */ z.intersection(
-            object({
-              format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
-            }),
+            object({ format: IoFormat.nullable().default(() => null) }),
             empty,
           ),
           _RETURN: /* @__PURE__ */ DeviceInfo,
@@ -6494,12 +6068,7 @@ export const Api = {
         epp: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             EppParams,
@@ -6522,12 +6091,7 @@ export const Api = {
         governor: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             GovernorParams,
@@ -6585,10 +6149,7 @@ export const Api = {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(
                       object({
-                        format: wire(
-                          IoFormat.nullable().optional(),
-                          IoFormat.nullable(),
-                        ),
+                        format: IoFormat.nullable().default(() => null),
                       }),
                       empty,
                     ),
@@ -6607,10 +6168,7 @@ export const Api = {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(
                       object({
-                        format: wire(
-                          IoFormat.nullable().optional(),
-                          IoFormat.nullable(),
-                        ),
+                        format: IoFormat.nullable().default(() => null),
                       }),
                       empty,
                     ),
@@ -6651,27 +6209,22 @@ export const Api = {
         'kernel-logs': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             object({
-              limit: wire(z.int().nullable().optional(), z.int().nullable()),
-              cursor: wire(
-                z.string().nullable().optional(),
-                z.string().nullable(),
-              ),
-              boot: wire(
-                z
-                  .union([
-                    z.number().int().min(-2147483648).max(2147483647),
-                    z.string(),
-                  ])
-                  .nullable()
-                  .optional(),
-                z
-                  .union([
-                    z.number().int().min(-2147483648).max(2147483647),
-                    z.string(),
-                  ])
-                  .nullable(),
-              ),
-              before: wire(z.boolean().optional(), z.boolean()),
+              limit: z
+                .int()
+                .nullable()
+                .default(() => null),
+              cursor: z
+                .string()
+                .nullable()
+                .default(() => null),
+              boot: z
+                .union([
+                  z.number().int().min(-2147483648).max(2147483647),
+                  z.string(),
+                ])
+                .nullable()
+                .default(() => null),
+              before: z.boolean().default(() => false),
             }),
             empty,
           ),
@@ -6682,30 +6235,22 @@ export const Api = {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 object({
-                  limit: wire(
-                    z.int().nullable().optional(),
-                    z.int().nullable(),
-                  ),
-                  cursor: wire(
-                    z.string().nullable().optional(),
-                    z.string().nullable(),
-                  ),
-                  boot: wire(
-                    z
-                      .union([
-                        z.number().int().min(-2147483648).max(2147483647),
-                        z.string(),
-                      ])
-                      .nullable()
-                      .optional(),
-                    z
-                      .union([
-                        z.number().int().min(-2147483648).max(2147483647),
-                        z.string(),
-                      ])
-                      .nullable(),
-                  ),
-                  before: wire(z.boolean().optional(), z.boolean()),
+                  limit: z
+                    .int()
+                    .nullable()
+                    .default(() => null),
+                  cursor: z
+                    .string()
+                    .nullable()
+                    .default(() => null),
+                  boot: z
+                    .union([
+                      z.number().int().min(-2147483648).max(2147483647),
+                      z.string(),
+                    ])
+                    .nullable()
+                    .default(() => null),
+                  before: z.boolean().default(() => false),
                 }),
                 empty,
               ),
@@ -6718,27 +6263,22 @@ export const Api = {
         logs: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             object({
-              limit: wire(z.int().nullable().optional(), z.int().nullable()),
-              cursor: wire(
-                z.string().nullable().optional(),
-                z.string().nullable(),
-              ),
-              boot: wire(
-                z
-                  .union([
-                    z.number().int().min(-2147483648).max(2147483647),
-                    z.string(),
-                  ])
-                  .nullable()
-                  .optional(),
-                z
-                  .union([
-                    z.number().int().min(-2147483648).max(2147483647),
-                    z.string(),
-                  ])
-                  .nullable(),
-              ),
-              before: wire(z.boolean().optional(), z.boolean()),
+              limit: z
+                .int()
+                .nullable()
+                .default(() => null),
+              cursor: z
+                .string()
+                .nullable()
+                .default(() => null),
+              boot: z
+                .union([
+                  z.number().int().min(-2147483648).max(2147483647),
+                  z.string(),
+                ])
+                .nullable()
+                .default(() => null),
+              before: z.boolean().default(() => false),
             }),
             empty,
           ),
@@ -6749,30 +6289,22 @@ export const Api = {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 object({
-                  limit: wire(
-                    z.int().nullable().optional(),
-                    z.int().nullable(),
-                  ),
-                  cursor: wire(
-                    z.string().nullable().optional(),
-                    z.string().nullable(),
-                  ),
-                  boot: wire(
-                    z
-                      .union([
-                        z.number().int().min(-2147483648).max(2147483647),
-                        z.string(),
-                      ])
-                      .nullable()
-                      .optional(),
-                    z
-                      .union([
-                        z.number().int().min(-2147483648).max(2147483647),
-                        z.string(),
-                      ])
-                      .nullable(),
-                  ),
-                  before: wire(z.boolean().optional(), z.boolean()),
+                  limit: z
+                    .int()
+                    .nullable()
+                    .default(() => null),
+                  cursor: z
+                    .string()
+                    .nullable()
+                    .default(() => null),
+                  boot: z
+                    .union([
+                      z.number().int().min(-2147483648).max(2147483647),
+                      z.string(),
+                    ])
+                    .nullable()
+                    .default(() => null),
+                  before: z.boolean().default(() => false),
                 }),
                 empty,
               ),
@@ -6784,9 +6316,7 @@ export const Api = {
         },
         metrics: {
           _PARAMS: /* @__PURE__ */ z.intersection(
-            object({
-              format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
-            }),
+            object({ format: IoFormat.nullable().default(() => null) }),
             empty,
           ),
           _RETURN: /* @__PURE__ */ Metrics,
@@ -6796,12 +6326,7 @@ export const Api = {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 MetricsFollowParams,
@@ -6815,12 +6340,7 @@ export const Api = {
         'nut-list-ups': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ListNutUpsParams,
@@ -6832,12 +6352,7 @@ export const Api = {
         'nut-scan': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -6849,12 +6364,7 @@ export const Api = {
         'nut-status': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -6875,12 +6385,7 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 ConnectRegistryParams,
@@ -6892,12 +6397,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -6918,12 +6418,7 @@ export const Api = {
             remove: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 TrustedRegistryParams,
@@ -6935,12 +6430,7 @@ export const Api = {
             'set-os': {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 TrustedRegistryParams,
@@ -7014,12 +6504,7 @@ export const Api = {
         time: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -7031,12 +6516,7 @@ export const Api = {
         'trust-ca': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             TrustCaParams,
@@ -7051,12 +6531,7 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 AddTrustedKeyParams,
@@ -7068,12 +6543,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -7135,12 +6605,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -7176,12 +6641,7 @@ export const Api = {
         inspect: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SharedVolumeParams,
@@ -7193,12 +6653,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -7248,12 +6703,7 @@ export const Api = {
             get: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -7284,12 +6734,7 @@ export const Api = {
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
