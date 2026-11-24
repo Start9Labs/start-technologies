@@ -730,3 +730,61 @@ fn bundlers_drop_schemas_a_consumer_never_imports() {
     let empty = common::bundle(&bindings, "export const nothing = 1\n");
     assert!(!empty.contains("z."), "{}", empty);
 }
+
+#[derive(Serialize, Deserialize, visit_rs::VisitFields)]
+struct FieldDefaults {
+    #[serde(default)]
+    ports: BTreeMap<String, u16>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    count: u32,
+    #[serde(default)]
+    name: String,
+    maybe: Option<String>,
+}
+reflect_ts!(FieldDefaults);
+
+fn seven() -> u32 {
+    7
+}
+
+#[derive(Serialize, Deserialize, Default, visit_rs::VisitFields)]
+struct DefaultedInner {
+    value: u32,
+}
+reflect_ts!(DefaultedInner);
+
+#[derive(Serialize, Deserialize, visit_rs::VisitFields)]
+struct UnknownDefaults {
+    #[serde(default = "seven")]
+    path: u32,
+    #[serde(default)]
+    custom: DefaultedInner,
+}
+reflect_ts!(UnknownDefaults);
+
+#[test]
+fn decoding_fills_the_defaults_serde_fills() {
+    let filled =
+        serde_json::to_value(serde_json::from_str::<FieldDefaults>("{}").unwrap()).unwrap();
+    common::evaluate(
+        &module::<FieldDefaults>(),
+        &format!(
+            "const assert = require('node:assert/strict');\n\
+             assert.deepEqual(schemas.TestType.parse({{}}), {filled});\n\
+             const first = schemas.TestType.parse({{}});\n\
+             first.ports.mutated = 1;\n\
+             assert.deepEqual(schemas.TestType.parse({{}}).ports, {{}});"
+        ),
+    );
+    let unknown = module::<UnknownDefaults>();
+    assert!(unknown
+        .schemas
+        .contains("\"path\": wire(z.int().optional(), z.int())"));
+    assert!(unknown
+        .schemas
+        .contains("\"custom\": wire(DefaultedInner.optional(), DefaultedInner)"));
+}
