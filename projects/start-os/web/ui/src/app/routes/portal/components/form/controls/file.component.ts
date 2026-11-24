@@ -1,8 +1,9 @@
 import { Component } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nPipe, MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { TuiButton, TuiIcon } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiChip, TuiFileLike, TuiFiles, TuiTooltip } from '@taiga-ui/kit'
 
 import { Control } from './control'
@@ -27,7 +28,15 @@ import { Control } from './control'
               <span>*</span>
             }
             @if (spec.description) {
-              <tui-icon [tuiTooltip]="spec.description" />
+              <tui-icon [tuiTooltip]="tooltip">
+                <ng-template #tooltip>
+                  <div
+                    class="g-markdown"
+                    safeLinks
+                    [innerHTML]="spec.description | markdown | dompurify"
+                  ></div>
+                </ng-template>
+              </tui-icon>
             }
           </div>
           @if (value) {
@@ -104,6 +113,9 @@ import { Control } from './control'
     }
   `,
   imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     FormsModule,
     TuiFiles,
     TuiIcon,

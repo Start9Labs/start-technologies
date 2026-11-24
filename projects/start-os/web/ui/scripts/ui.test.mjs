@@ -52,7 +52,8 @@ boundary(
     `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
-    `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};`,
+    `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};` +
+    `export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)};`,
 )
 boundary(
   '@taiga-ui/core',
@@ -2777,7 +2778,7 @@ test('partial restore retry excludes submitted services and successful new volum
   assert.deepEqual(f.routes, [['/system/volumes']])
 })
 
-test('multiple volume restore errors have HTML line breaks', async t => {
+test('multiple volume restore errors are separate lines', async t => {
   const f = volumeFixture(t)
   const model = f.make(BackupsRecoverComponent)
   model.selected.set(
@@ -2788,7 +2789,7 @@ test('multiple volume restore errors have HTML line breaks', async t => {
     errors: { [volumeA]: 'first failure', [volumeB]: 'second failure' },
   })
   await model.restore()
-  assert.equal(f.errors[0], 'Music: second failure<br />Photos: first failure')
+  assert.equal(f.errors[0], 'Music: second failure\nPhotos: first failure')
   assert.equal(model.selected().size, 2)
 })
 

@@ -11,6 +11,7 @@ import {
 import { PROMPT, PromptOptions } from '../components/prompt.component'
 import { i18nPipe } from '../i18n/i18n.pipe'
 import { i18nKey } from '../i18n/i18n.providers'
+import { escapeHtml } from '../util/escape-html'
 
 @Service()
 export class DialogService {
@@ -26,7 +27,7 @@ export class DialogService {
     const { message, label, placeholder, buttonText } = options.data
 
     return this.dialogs.open<T>(PROMPT, {
-      label: this.i18n.transform(options.label),
+      label: this.label(options.label),
       data: {
         ...options.data,
         message: this.i18n.transform(message),
@@ -51,7 +52,7 @@ export class DialogService {
 
     return this.dialogs.open<boolean>(TUI_CONFIRM, {
       ...options,
-      label: this.i18n.transform(options.label),
+      label: this.label(options.label),
       data: {
         ...(options.data || {}),
         content: isI18n(content) ? this.i18n.transform(content) : content,
@@ -69,7 +70,7 @@ export class DialogService {
   ) {
     return this.dialogs.open<T>(this.i18n.transform(message), {
       ...options,
-      label: this.i18n.transform(options.label),
+      label: this.label(options.label),
     })
   }
 
@@ -81,8 +82,11 @@ export class DialogService {
   ) {
     return this.dialogs.open<T>(component, {
       ...options,
-      label: this.i18n.transform(options.label),
+      label: this.label(options.label),
     })
+  }
+  private label(key: i18nKey | undefined) {
+    return escapeHtml(this.i18n.transform(key) || '')
   }
 }
 

@@ -12,7 +12,7 @@ import { tuiIsNumber } from '@taiga-ui/cdk'
         {{ 'The following modifications were made' | i18n }}:
         <ul>
           @for (d of diff; track d) {
-            <li [innerHTML]="d"></li>
+            <li>{{ d }}</li>
           }
         </ul>
       </div>
@@ -50,7 +50,7 @@ export class TaskInfoComponent implements OnInit {
       path.pop()
     }
 
-    return path.join(' &rarr; ')
+    return path.join(' → ')
   }
 
   private getMessage(operation: Operation): string {
