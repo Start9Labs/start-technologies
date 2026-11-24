@@ -1210,8 +1210,6 @@ export type SetOutboundGatewayParams = z.output<
 export type SetOutboundGatewayParamsInput = z.input<
   typeof schemas.SetOutboundGatewayParams
 >
-export type SetSmtpParams = z.output<typeof schemas.SetSmtpParams>
-export type SetSmtpParamsInput = z.input<typeof schemas.SetSmtpParams>
 export type SetStaticDnsParams = z.output<typeof schemas.SetStaticDnsParams>
 export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
 export type SetupResult = z.output<typeof schemas.SetupResult>
@@ -1238,8 +1236,6 @@ export type SignPackageParams = z.output<typeof schemas.SignPackageParams>
 export type SignPackageParamsInput = z.input<typeof schemas.SignPackageParams>
 export type SignerInfo = z.output<typeof schemas.SignerInfo>
 export type SignerInfoInput = z.input<typeof schemas.SignerInfo>
-export type SmtpInfo = z.output<typeof schemas.SmtpInfo>
-export type SmtpInfoInput = z.input<typeof schemas.SmtpInfo>
 export type SmtpValue = z.output<typeof schemas.SmtpValue>
 export type SmtpValueInput = z.input<typeof schemas.SmtpValue>
 export type SshAddParams = z.output<typeof schemas.SshAddParams>

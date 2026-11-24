@@ -1102,8 +1102,6 @@ export default {
   1308: 'Dieser Browser ist noch nicht registriert',
   1309: 'Über die Befehlszeile anmelden',
   1310: 'Diesen Browser registrieren',
-  1311: 'Ein Passwort ist gespeichert. Lassen Sie „Passwort“ leer, um es beizubehalten.',
-  1312: 'Gespeichertes Passwort entfernen',
-  1313: 'Zuletzt synchronisiert',
-  1314: 'gerade eben',
+  1311: 'Zuletzt synchronisiert',
+  1312: 'gerade eben',
 } satisfies i18n
