@@ -4,7 +4,14 @@ import '@angular/compiler'
 import { FormControl } from '@angular/forms'
 import { loadTypeScript } from './typescript-loader.mjs'
 
-loadTypeScript(new Map())
+loadTypeScript(
+  new Map([
+    [
+      '@start9labs/shared',
+      `export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)}`,
+    ],
+  ]),
+)
 const { datetimeMax, textLengthInRange, listUnique } =
   await import('src/app/services/form.service')
 
@@ -26,6 +33,31 @@ test('maximum text length reports a grammatical error message', () => {
   assert.equal(validate(new FormControl('abc')), null)
 })
 
+test('duplicate-entry messages escape template markup and raw displayAs substitutions', () => {
+  for (const displayAs of [
+    '<b>{{name}}</b>',
+    '<b>{{{name}}}</b>',
+    '<b>{{&name}}</b>',
+  ]) {
+    const validate = listUnique({
+      spec: {
+        type: 'object',
+        displayAs,
+        uniqueBy: 'name',
+        spec: { name: { type: 'text', name: 'Registry Name' } },
+      },
+    })
+    const result = validate(
+      new FormControl([{ name: 'x < y &amp;' }, { name: 'x < y &amp;' }]),
+    )
+    const label = '&lt;b&gt;x &lt; y &amp;amp;&lt;/b&gt;'
+    assert.equal(
+      result.listNotUnique,
+      `"${label}" and "${label}" are not unique. Must be unique by: Registry Name`,
+    )
+  }
+})
+
 test('duplicate-entry messages HTML-escape displayAs labels', () => {
   const validate = listUnique({
     spec: {
@@ -44,7 +76,7 @@ test('duplicate-entry messages HTML-escape displayAs labels', () => {
     ),
     {
       listNotUnique:
-        '"&lt;img src&#x3D;x&gt; DrBoneZ&#39;s &amp; Friends" and "&lt;img src&#x3D;x&gt; DrBoneZ&#39;s &amp; Friends" are not unique. Must be unique by: Registry Name',
+        '"&lt;img src=x&gt; DrBoneZ&#39;s &amp; Friends" and "&lt;img src=x&gt; DrBoneZ&#39;s &amp; Friends" are not unique. Must be unique by: Registry Name',
     },
   )
   assert.equal(

@@ -1102,8 +1102,9 @@ export default {
   1308: "Ce navigateur n'est pas encore enregistré",
   1309: 'Se connecter depuis la ligne de commande',
   1310: 'Enregistrer ce navigateur',
-  1311: 'Fourni par',
-  1312: 'Sélectionner un fournisseur de dépendance',
-  1313: 'Verrouiller le fournisseur',
-  1314: 'Déverrouiller le fournisseur',
+  1311: "Obtenir de l'aide",
+  1312: 'Fourni par',
+  1313: 'Sélectionner un fournisseur de dépendance',
+  1314: 'Verrouiller le fournisseur',
+  1315: 'Déverrouiller le fournisseur',
 } satisfies i18n

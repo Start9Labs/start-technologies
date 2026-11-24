@@ -1102,8 +1102,9 @@ export default {
   1308: 'Ta przeglądarka nie jest jeszcze zarejestrowana',
   1309: 'Zaloguj się z wiersza poleceń',
   1310: 'Zarejestruj tę przeglądarkę',
-  1311: 'Dostarczane przez',
-  1312: 'Wybierz dostawcę zależności',
-  1313: 'Przypnij dostawcę',
-  1314: 'Odepnij dostawcę',
+  1311: 'Uzyskaj pomoc',
+  1312: 'Dostarczane przez',
+  1313: 'Wybierz dostawcę zależności',
+  1314: 'Przypnij dostawcę',
+  1315: 'Odepnij dostawcę',
 } satisfies i18n

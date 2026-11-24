@@ -229,7 +229,7 @@ Then: what is deliberately excluded and why (a cache or an index that rebuilds i
 
 ### Limitations and Differences
 
-A numbered list of what does not work, works differently, or is unavailable compared to upstream — including unsupported dependencies and deliberately disabled features.
+A numbered list of what does not work, works differently, or is unavailable compared to upstream — including unsupported dependencies and deliberately disabled features. A gap the SDK can close is a defect to fix, not a limitation to list: an unset self-URL, a missing interface, an unhandled credential.
 
 ### Quick Reference for AI Consumers
 

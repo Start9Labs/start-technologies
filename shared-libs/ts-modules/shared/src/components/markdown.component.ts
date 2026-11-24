@@ -6,17 +6,12 @@ import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { catchError, ignoreElements, Observable, of, share } from 'rxjs'
 import { SafeLinksDirective } from '../directives/safe-links.directive'
 import { MarkdownPipe } from '../pipes/markdown.pipe'
-import { getErrorMessage } from '../services/error.service'
+import { getErrorMessage } from '../util/error-message'
 
 @Component({
   template: `
     @if (error()) {
-      <div
-        tuiNotification
-        appearance="negative"
-        safeLinks
-        [innerHTML]="error()"
-      ></div>
+      <div tuiNotification appearance="negative">{{ error() }}</div>
     }
 
     @if (content(); as result) {

@@ -522,12 +522,7 @@ pub async fn cli_install(
             package: QueryPackageParams { id, version },
             trust,
         } => {
-            let registry = ctx
-                .registry_url
-                .as_ref()
-                .or_not_found("--registry")?
-                .get()?
-                .clone();
+            let registry = ctx.registry_base_url.clone().or_not_found("--registry")?;
             let source_version: Option<VersionString> = from_value(
                 ctx.call_remote::<RpcContext>("package.installed-version", json!({ "id": &id }))
                     .await?,

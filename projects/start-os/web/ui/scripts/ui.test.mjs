@@ -52,7 +52,8 @@ boundary(
     `export { sameUrl, registryUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
-    `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};`,
+    `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};` +
+    `export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)};`,
 )
 boundary(
   '@taiga-ui/core',
@@ -488,14 +489,17 @@ function fixture(t, cachedVersion, providers = []) {
       ])
     },
     restartFor(reason) {
+      this.statusInfo('restart', reason)
+    },
+    statusInfo(field, value) {
       source.next([
         {
           id: ++revision,
           patch: [
             {
               op: 'replace',
-              path: '/serverInfo/statusInfo/restart',
-              value: reason,
+              path: `/serverInfo/statusInfo/${field}`,
+              value,
             },
           ],
         },
@@ -1276,6 +1280,20 @@ test('a downloaded update is no longer offered and blocks another update until r
   assert.equal(f.shown.at(-1), false)
   assert.equal(await firstValueFrom(f.os.updateDisabled$), true)
 })
+
+for (const field of ['restarting', 'shuttingDown']) {
+  test(`the restart reason is withheld while ${field}`, async t => {
+    const f = fixture(t, '0.4.0.2')
+    await f.load()
+    const reasons = []
+    const sub = f.os.restartReason$.subscribe(value => reasons.push(value))
+    t.after(() => sub.unsubscribe())
+    f.restartFor('update')
+    assert.equal(reasons.at(-1), 'update')
+    f.statusInfo(field, true)
+    assert.equal(reasons.at(-1), null)
+  })
+}
 
 test('a refreshed same-version listing clears availability when its image matches the running build', async t => {
   const f = fixture(t, '0.4.0.2')
@@ -2763,7 +2781,7 @@ test('partial restore retry excludes submitted services and successful new volum
   assert.deepEqual(f.routes, [['/system/volumes']])
 })
 
-test('multiple volume restore errors have HTML line breaks', async t => {
+test('multiple volume restore errors are separate lines', async t => {
   const f = volumeFixture(t)
   const model = f.make(BackupsRecoverComponent)
   model.selected.set(
@@ -2774,7 +2792,7 @@ test('multiple volume restore errors have HTML line breaks', async t => {
     errors: { [volumeA]: 'first failure', [volumeB]: 'second failure' },
   })
   await model.restore()
-  assert.equal(f.errors[0], 'Music: second failure<br />Photos: first failure')
+  assert.equal(f.errors[0], 'Music: second failure\nPhotos: first failure')
   assert.equal(model.selected().size, 2)
 })
 

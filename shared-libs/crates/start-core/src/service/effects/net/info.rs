@@ -13,11 +13,15 @@ use crate::service::rpc::CallbackId;
 use crate::util::Invoke;
 use crate::{GatewayId, PackageId};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct GetContainerIpParams {
+    #[arg(long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
 
+    #[arg(skip)]
     callback: Option<CallbackId>,
 }
 
@@ -70,9 +74,12 @@ pub async fn get_container_ip(
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct GetOutboundGatewayParams {
+    #[arg(skip)]
     callback: Option<CallbackId>,
 }
 

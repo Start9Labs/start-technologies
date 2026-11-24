@@ -190,8 +190,8 @@ async fn inner_main() -> Result<(), Error> {
         if let Err(e) = crate::init::restore_wifi_if_needed().await {
             tracing::error!("WiFi auto-restore failed: {e}");
         }
-        if let Err(e) = crate::wifi::heal_channel_widths("/etc/config").await {
-            tracing::error!("WiFi channel width repair failed: {e}");
+        if let Err(e) = crate::wifi::heal_channels("/etc/config").await {
+            tracing::error!("WiFi channel repair failed: {e}");
         }
 
         // netifd raises the radios at boot whatever the blackout schedule says.

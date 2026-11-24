@@ -1921,8 +1921,8 @@ export const AttachParams: z.ZodObject<{
     z.ZodNullable<typeof TermSize>
   >
   subcontainer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
   >
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1948,7 +1948,7 @@ export const AttachParams: z.ZodObject<{
   tty: z.boolean(),
   stderrTty: z.boolean(),
   ptySize: wire(TermSize.nullable().optional(), TermSize.nullable()),
-  subcontainer: wire(Guid.nullable().optional(), Guid.nullable()),
+  subcontainer: wire(z.string().nullable().optional(), z.string().nullable()),
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   imageId: wire(ImageId.nullable().optional(), ImageId.nullable()),
   user: wire(z.string().nullable().optional(), z.string().nullable()),
@@ -2189,8 +2189,8 @@ export const ExecParams: z.ZodObject<{
    * Part of the subcontainer's ID. Overrides `name` and `imageId`.
    */
   subcontainer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
+    z.ZodOptional<z.ZodNullable<z.ZodString>>,
+    z.ZodNullable<z.ZodString>
   >
   /**
    * Part of the subcontainer's name, case-insensitive. Overrides `imageId`.
@@ -2238,7 +2238,10 @@ export const ExecParams: z.ZodObject<{
   /**
    * Part of the subcontainer's ID. Overrides `name` and `imageId`.
    */
-  subcontainer: wire(Guid.nullable().optional(), Guid.nullable()).meta({
+  subcontainer: wire(
+    z.string().nullable().optional(),
+    z.string().nullable(),
+  ).meta({
     description:
       "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
   }),
@@ -4398,6 +4401,25 @@ export const ServiceInterface: z.ZodObject<{
 }).meta({
   id: 'ServiceInterface',
 })
+export const SharedVolume: z.ZodIntersection<
+  z.ZodObject<{
+    name: z.ZodString
+    source: typeof SharedVolumeSource
+    grants: z.ZodRecord<z.ZodString, typeof SharedVolumeGrant>
+  }>,
+  typeof SharedVolumeInspection
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      name: z.string(),
+      source: SharedVolumeSource,
+      grants: z.record(z.string(), SharedVolumeGrant),
+    }),
+    SharedVolumeInspection,
+  )
+  .meta({
+    id: 'SharedVolume',
+  })
 export const SideloadParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
@@ -5364,7 +5386,18 @@ export const Api = {
               _FINAL: /* @__PURE__ */ z.null(),
             },
             find: {
-              _PARAMS: /* @__PURE__ */ empty,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
               _RETURN: /* @__PURE__ */ z.array(BackupTargetId),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -5387,7 +5420,18 @@ export const Api = {
               _FINAL: /* @__PURE__ */ z.null(),
             },
             inspect: {
-              _PARAMS: /* @__PURE__ */ TargetParams,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                TargetParams,
+              ),
               _RETURN: /* @__PURE__ */ SharedVolumeInspection,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -5663,7 +5707,18 @@ export const Api = {
               _FINAL: /* @__PURE__ */ z.null(),
             },
             status: {
-              _PARAMS: /* @__PURE__ */ empty,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
               _RETURN: /* @__PURE__ */ DnsStatus,
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -5959,7 +6014,18 @@ export const Api = {
               _FINAL: /* @__PURE__ */ z.null(),
             },
             list: {
-              _PARAMS: /* @__PURE__ */ empty,
+              _PARAMS: /* @__PURE__ */ z.intersection(
+                z.intersection(
+                  object({
+                    format: wire(
+                      IoFormat.nullable().optional(),
+                      IoFormat.nullable(),
+                    ),
+                  }),
+                  empty,
+                ),
+                empty,
+              ),
               _RETURN: /* @__PURE__ */ z.array(PushSubscription),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
@@ -6070,7 +6136,18 @@ export const Api = {
           _FINAL: /* @__PURE__ */ z.null(),
         },
         exec: {
-          _PARAMS: /* @__PURE__ */ ExecParams,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            ExecParams,
+          ),
           _RETURN: /* @__PURE__ */ ExecResult,
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
@@ -6770,19 +6847,52 @@ export const Api = {
           },
         },
         'nut-list-ups': {
-          _PARAMS: /* @__PURE__ */ ListNutUpsParams,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            ListNutUpsParams,
+          ),
           _RETURN: /* @__PURE__ */ z.array(NutRemoteUps),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
         'nut-scan': {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
           _RETURN: /* @__PURE__ */ z.array(NutDevice),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
         'nut-status': {
-          _PARAMS: /* @__PURE__ */ empty,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
           _RETURN: /* @__PURE__ */ NutStatus,
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
@@ -7098,8 +7208,36 @@ export const Api = {
           _FINAL: /* @__PURE__ */ z.null(),
         },
         inspect: {
-          _PARAMS: /* @__PURE__ */ SharedVolumeParams,
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            SharedVolumeParams,
+          ),
           _RETURN: /* @__PURE__ */ SharedVolumeInspection,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        list: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({
+                format: wire(
+                  IoFormat.nullable().optional(),
+                  IoFormat.nullable(),
+                ),
+              }),
+              empty,
+            ),
+            empty,
+          ),
+          _RETURN: /* @__PURE__ */ z.record(z.string(), SharedVolume),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },

@@ -27,6 +27,8 @@ use crate::registry::package::get::{
     select_releases,
 };
 use crate::registry::package::index::PackageIndex;
+use crate::s9pk::merkle_archive::source::encrypted::KeyStreamInfo;
+use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::trusted_keys::connection::{
     connected_registry_urls, is_connected, refresh_registry, registry_url, same_registry,
 };
@@ -606,6 +608,9 @@ fn publish_snapshot(
             )?;
             for (id, package) in &mut catalog {
                 package.update_target = targets.remove(id);
+                for release in package.versions.values_mut() {
+                    release.info.strip_access();
+                }
             }
             refresh_registry(db, url, &info)?;
             db.as_private_mut()
@@ -674,6 +679,25 @@ fn unreachable(registry: &Url, error: Option<&str>) -> Error {
         ),
         ErrorKind::Network,
     )
+}
+
+/// The keystream of a synchronized s9pk hosted at the URL.
+pub(crate) fn synced_keystream(
+    db: &DatabaseModel,
+    url: &Url,
+    commitment: &MerkleArchiveCommitment,
+) -> Result<Option<KeyStreamInfo>, Error> {
+    for (_, index) in db.as_private().as_registry_indexes().as_entries()? {
+        if let Some(asset) = index
+            .as_package()
+            .s9pks_with(commitment)?
+            .into_iter()
+            .find(|asset| asset.urls.contains(url))
+        {
+            return Ok(asset.private);
+        }
+    }
+    Ok(None)
 }
 
 /// Selects packages from a saved registry's synchronized index.

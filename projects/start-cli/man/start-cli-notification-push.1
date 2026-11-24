@@ -1,0 +1,23 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-notification-push 1  "push "
+.SH NAME
+start\-cli\-notification\-push \- Commands for managing browser push notification subscriptions
+.SH SYNOPSIS
+\fBstart\-cli notification push\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Commands for managing browser push notification subscriptions
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-notification\-push\-list(1)
+List browser push notification subscriptions
+.TP
+start\-cli\-notification\-push\-test(1)
+Send a test notification to a push subscription
+.TP
+start\-cli\-notification\-push\-unsubscribe(1)
+Remove a browser push notification subscription

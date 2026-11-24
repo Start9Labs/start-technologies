@@ -150,9 +150,12 @@ pub async fn clear_bindings(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct RetireHostParams {
+    #[arg(help = "help.arg.host-id")]
     pub id: HostId,
 }
 
@@ -173,10 +176,14 @@ pub async fn retire_host(
         .await
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct RetireBindingParams {
+    #[arg(help = "help.arg.host-id")]
     pub id: HostId,
+    #[arg(help = "help.arg.internal-port")]
     pub internal_port: u16,
 }
 
@@ -196,11 +203,16 @@ pub async fn retire_binding(
         .await
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct GetServicePortForwardParams {
+    #[arg(long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
+    #[arg(help = "help.arg.host-id")]
     host_id: HostId,
+    #[arg(help = "help.arg.internal-port")]
     internal_port: u16,
 }
 

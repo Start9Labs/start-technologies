@@ -2,11 +2,22 @@
 .el .ds Aq '
 .TH start-container-plugin-url 1  "url " 
 .SH NAME
-start\-container\-plugin\-url
+start\-container\-plugin\-url \- Commands for the URL plugin
 .SH SYNOPSIS
-\fBstart\-container plugin url\fR [\fB\-h\fR|\fB\-\-help\fR] 
+\fBstart\-container plugin url\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
+Commands for the URL plugin
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
+.SH SUBCOMMANDS
+.TP
+start\-container\-plugin\-url\-clear\-urls(1)
+Remove URLs this plugin exported (JSON parameters on stdin)
+.TP
+start\-container\-plugin\-url\-export\-url(1)
+Export a URL to a host (JSON parameters on stdin)
+.TP
+start\-container\-plugin\-url\-register(1)
+Register this service as a URL plugin (JSON parameters on stdin)
