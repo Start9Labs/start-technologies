@@ -489,7 +489,11 @@ impl TSVisitor {
                     }
                     let fills = plan.field.type_default
                         || (field.option && plan.field.option_default && !plan.field.optional);
-                    let default = if fills { field.default } else { None };
+                    let default = if plan.target.is_none() && fills {
+                        field.default
+                    } else {
+                        None
+                    };
                     let expr = self.optionality(field.expr, in_opt, out_opt, default);
                     properties.push(Property {
                         recursive,

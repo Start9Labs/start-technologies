@@ -766,6 +766,37 @@ struct UnknownDefaults {
 }
 reflect_ts!(UnknownDefaults);
 
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum NullableWireValue {
+    Text(String),
+    Null,
+}
+
+#[derive(Serialize, Deserialize, visit_rs::VisitFields)]
+struct RequiredNullableWire {
+    #[visit(opaque, wire = "Option<String>", type_attributes(visit::wire))]
+    value: NullableWireValue,
+}
+reflect_ts!(RequiredNullableWire);
+
+#[test]
+fn option_wire_override_does_not_supply_a_storage_default() {
+    assert!(serde_json::from_str::<RequiredNullableWire>("{}").is_err());
+    let filled = serde_json::to_value(
+        serde_json::from_str::<RequiredNullableWire>(r#"{"value":null}"#).unwrap(),
+    )
+    .unwrap();
+    common::evaluate(
+        &module::<RequiredNullableWire>(),
+        &format!(
+            "const assert = require('node:assert/strict');\n\
+             assert.equal(schemas.TestType.safeParse({{}}).success, false);\n\
+             assert.deepEqual(schemas.TestType.parse({{ value: null }}), {filled});"
+        ),
+    );
+}
+
 #[test]
 fn decoding_fills_the_defaults_serde_fills() {
     let filled =
