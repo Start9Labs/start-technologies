@@ -1104,7 +1104,9 @@ export const ENGLISH: Record<string, number> = {
   'Sign in from the command line': 1309,
   'Enroll this browser': 1310,
   'Get help': 1311,
-  'Force stop': 1312,
-  'Force stopping': 1313,
-  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1314,
+  'Last synced': 1312,
+  'just now': 1313,
+  'Force stop': 1314,
+  'Force stopping': 1315,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1316,
 }

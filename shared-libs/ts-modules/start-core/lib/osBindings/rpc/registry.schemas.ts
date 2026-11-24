@@ -129,6 +129,10 @@ export const CountEntry: z.ZodObject<{ label: z.ZodString; count: z.ZodInt }> =
 export const DataUrl: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'DataUrl',
 })
+export const DbCursor: z.ZodObject<{ epoch: z.ZodString; id: z.ZodInt }> =
+  /* @__PURE__ */ object({ epoch: z.string(), id: z.int() }).meta({
+    id: 'DbCursor',
+  })
 export const DeviceFilter: z.ZodObject<{
   description: z.ZodString
   class: typeof literal_2
@@ -165,16 +169,6 @@ export const Dump: z.ZodObject<{ id: z.ZodInt; value: z.ZodUnknown }> =
   /* @__PURE__ */ object({ id: z.int(), value: z.unknown() }).meta({
     id: 'Dump',
   })
-export const DumpParams: z.ZodObject<{
-  pointer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-}> = /* @__PURE__ */ object({
-  pointer: wire(z.string().nullable().optional(), z.string().nullable()),
-}).meta({
-  id: 'DumpParams',
-})
 export const GetDownloadsParams: z.ZodObject<{
   /**
    * Filter by package ID
@@ -605,6 +599,23 @@ export const ReplaceOperation: z.ZodObject<{
 }).meta({
   id: 'ReplaceOperation',
   description: "JSON Patch 'replace' operation representation",
+})
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export const SelectorParams: z.ZodObject<{
+  include: z.ZodString
+  exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
+  depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+}> = /* @__PURE__ */ object({
+  include: z.string(),
+  exclude: z.array(z.string()).optional(),
+  depth: z.int().nullable().optional(),
+}).meta({
+  id: 'SelectorParams',
+  description:
+    'One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.',
 })
 export const SetDefaultLocaleParams: z.ZodObject<{
   defaultLocale: z.ZodNullable<z.ZodString>
@@ -1174,6 +1185,10 @@ export const PackageInfoShort: z.ZodObject<{
    * `PackageMetadata::default_locale`.
    */
   defaultLocale: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  /**
+   * A newer same-flavor revision covers this release's hardware.
+   */
+  superseded: z.ZodOptional<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   releaseNotes: LocaleString,
   /**
@@ -1181,6 +1196,12 @@ export const PackageInfoShort: z.ZodObject<{
    */
   defaultLocale: z.string().nullable().optional().meta({
     description: '`PackageMetadata::default_locale`.',
+  }),
+  /**
+   * A newer same-flavor revision covers this release's hardware.
+   */
+  superseded: z.boolean().optional().meta({
+    description: "A newer same-flavor revision covers this release's hardware.",
   }),
 }).meta({
   id: 'PackageInfoShort',
@@ -1330,6 +1351,65 @@ export const PreDownloadAlert: z.ZodObject<{
 })
 
 /**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export const ProjectionParams: z.ZodObject<{
+  /**
+   * Levels kept below the pointer; deeper objects and arrays become empty.
+   */
+  depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+  /**
+   * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+   * Empty keeps everything. A numeric segment matches that key or array position.
+   */
+  include: z.ZodOptional<z.ZodArray<z.ZodString>>
+  /**
+   * Subtrees removed from what `include` keeps, in the same form.
+   */
+  exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
+  /**
+   * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
+   */
+  selectors: z.ZodOptional<z.ZodArray<typeof SelectorParams>>
+}> = /* @__PURE__ */ object({
+  /**
+   * Levels kept below the pointer; deeper objects and arrays become empty.
+   */
+  depth: z.int().nullable().optional().meta({
+    description:
+      'Levels kept below the pointer; deeper objects and arrays become empty.',
+  }),
+  /**
+   * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+   * Empty keeps everything. A numeric segment matches that key or array position.
+   */
+  include: z.array(z.string()).optional().meta({
+    description:
+      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.',
+  }),
+  /**
+   * Subtrees removed from what `include` keeps, in the same form.
+   */
+  exclude: z.array(z.string()).optional().meta({
+    description:
+      'Subtrees removed from what `include` keeps, in the same form.',
+  }),
+  /**
+   * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
+   */
+  selectors: z.array(SelectorParams).optional().meta({
+    description:
+      'More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.',
+  }),
+}).meta({
+  id: 'ProjectionParams',
+  description:
+    'Narrows a dumped or subscribed subtree; omitted fields narrow nothing.',
+})
+
+/**
  * A key allowed to read the private s9pks that list it.
  */
 export const ReaderKey: z.ZodObject<{
@@ -1471,6 +1551,13 @@ export const SubscribeIndexParams: z.ZodIntersection<
       z.ZodOptional<z.ZodNullable<z.ZodString>>,
       z.ZodNullable<z.ZodString>
     >
+    /**
+     * The subscriber's last revision; resumes only within the epoch of the view that reported it.
+     */
+    since: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
+      z.ZodNullable<typeof DbCursor>
+    >
   }>,
   typeof ReaderParams
 > = /* @__PURE__ */ z
@@ -1496,6 +1583,13 @@ export const SubscribeIndexParams: z.ZodIntersection<
       ).meta({
         description:
           'Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.',
+      }),
+      /**
+       * The subscriber's last revision; resumes only within the epoch of the view that reported it.
+       */
+      since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
+        description:
+          "The subscriber's last revision; resumes only within the epoch of the view that reported it.",
       }),
     }),
     ReaderParams,
@@ -1554,6 +1648,24 @@ export const DependencyMetadata: z.ZodIntersection<
   )
   .meta({
     id: 'DependencyMetadata',
+  })
+export const DumpParams: z.ZodIntersection<
+  z.ZodObject<{
+    pointer: z.ZodCodec<
+      z.ZodOptional<z.ZodNullable<z.ZodString>>,
+      z.ZodNullable<z.ZodString>
+    >
+  }>,
+  typeof ProjectionParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+    }),
+    ProjectionParams,
+  )
+  .meta({
+    id: 'DumpParams',
   })
 export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
@@ -1728,17 +1840,6 @@ export const RegistryInfo: z.ZodObject<{
   }),
 }).meta({
   id: 'RegistryInfo',
-})
-
-/**
- * Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
- */
-export const SubscribeResult: z.ZodUnion<
-  readonly [typeof SubscribeRes, typeof Dump]
-> = /* @__PURE__ */ z.union([SubscribeRes, Dump]).meta({
-  id: 'SubscribeResult',
-  description:
-    'Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.',
 })
 
 /**
@@ -1920,6 +2021,45 @@ export const PackageIndex: z.ZodObject<{
 }).meta({
   id: 'PackageIndex',
 })
+
+/**
+ * A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.
+ */
+export const SubscribeStart: z.ZodObject<{
+  epoch: z.ZodString
+  id: z.ZodInt
+  value: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
+    z.ZodNullable<z.ZodUnknown>
+  >
+  revisions: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
+    z.ZodNullable<z.ZodArray<typeof Revision>>
+  >
+  /**
+   * Names the stream to `db.subscription.update`; absent where its projection is fixed.
+   */
+  subscription: z.ZodOptional<z.ZodNullable<typeof Guid>>
+}> = /* @__PURE__ */ object({
+  epoch: z.string(),
+  id: z.int(),
+  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
+  revisions: wire(
+    z.array(Revision).nullable().optional(),
+    z.array(Revision).nullable(),
+  ),
+  /**
+   * Names the stream to `db.subscription.update`; absent where its projection is fixed.
+   */
+  subscription: Guid.nullable().optional().meta({
+    description:
+      'Names the stream to `db.subscription.update`; absent where its projection is fixed.',
+  }),
+}).meta({
+  id: 'SubscribeStart',
+  description:
+    'A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.',
+})
 export const FullIndex: z.ZodObject<{
   name: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<z.ZodString>>,
@@ -1987,6 +2127,17 @@ export const FullIndex: z.ZodObject<{
   }),
 }).meta({
   id: 'FullIndex',
+})
+
+/**
+ * Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.
+ */
+export const SubscribeStartResult: z.ZodUnion<
+  readonly [typeof SubscribeRes, typeof SubscribeStart]
+> = /* @__PURE__ */ z.union([SubscribeRes, SubscribeStart]).meta({
+  id: 'SubscribeStartResult',
+  description:
+    'Opted-in rpcstream requests receive the stream start directly; other callers receive a GUID.',
 })
 export const Api = {
   _PARAMS: /* @__PURE__ */ empty,
@@ -2133,7 +2284,7 @@ export const Api = {
         },
         subscribe: {
           _PARAMS: /* @__PURE__ */ SubscribeIndexParams,
-          _RETURN: /* @__PURE__ */ SubscribeResult,
+          _RETURN: /* @__PURE__ */ SubscribeStartResult,
           _ITEM: /* @__PURE__ */ Revision,
           _FINAL: /* @__PURE__ */ z.null(),
         },

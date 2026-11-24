@@ -110,6 +110,7 @@ test('captures output and completes when exit precedes the stdin callback', asyn
 
 test('health checks can terminate while fast commands finish', async () => {
   const { sub } = subject('fast', () => fakeChild())
+  let execs!: Promise<unknown>
   let entered!: () => void
   const started = new Promise<void>(resolve => {
     entered = resolve
@@ -124,10 +125,11 @@ test('health checks can terminate while fast commands finish', async () => {
         yield
       },
       fn: async () => {
-        entered()
-        await Promise.all(
+        execs = Promise.all(
           Array.from({ length: 36 }, () => sub.exec(['true'], { timeout: 25 })),
         )
+        entered()
+        await execs
         return { result: 'success', message: 'All folders found' }
       },
     },
@@ -136,6 +138,8 @@ test('health checks can terminate while fast commands finish', async () => {
   await health.updateStatus()
   await started
   await bounded(health.term())
+  // Unsettled commands would spawn the next test's mocked child.
+  await bounded(execs)
 })
 
 test('the deadline covers a stdin callback that never arrives', async () => {

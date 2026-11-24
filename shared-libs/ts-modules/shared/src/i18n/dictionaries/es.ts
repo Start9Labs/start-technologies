@@ -1103,7 +1103,9 @@ export default {
   1309: 'Iniciar sesión desde la línea de comandos',
   1310: 'Registrar este navegador',
   1311: 'Obtener ayuda',
-  1312: 'Forzar detención',
-  1313: 'Forzando detención',
-  1314: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
+  1312: 'Última sincronización',
+  1313: 'justo ahora',
+  1314: 'Forzar detención',
+  1315: 'Forzando detención',
+  1316: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

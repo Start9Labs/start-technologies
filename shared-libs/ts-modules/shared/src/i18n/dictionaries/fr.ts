@@ -1103,7 +1103,9 @@ export default {
   1309: 'Se connecter depuis la ligne de commande',
   1310: 'Enregistrer ce navigateur',
   1311: "Obtenir de l'aide",
-  1312: 'Forcer l’arrêt',
-  1313: 'Arrêt forcé en cours',
-  1314: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
+  1312: 'Dernière synchronisation',
+  1313: "à l'instant",
+  1314: 'Forcer l’arrêt',
+  1315: 'Arrêt forcé en cours',
+  1316: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
 } satisfies i18n
