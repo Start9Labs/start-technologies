@@ -213,6 +213,103 @@ test('releasing every watch resumes an empty replica with NOTHING, not universal
   assert.deepEqual(info.values, [])
 })
 
+for (const { name, patch, expected } of [
+  {
+    name: 'insertion',
+    patch: [{ op: 'add', path: '/arr/0', value: 'x' }],
+    expected: [null, 'a', null, null],
+  },
+  {
+    name: 'removal',
+    patch: [{ op: 'remove', path: '/arr/0' }],
+    expected: [null, 'c'],
+  },
+]) {
+  test(`narrowing preserves a selected array position through an in-flight ${name}`, t => {
+    const f = fixture(t)
+    const whole = f.watch('arr')
+    const second = f.watch('arr', 1)
+    f.db.start()
+    f.start(f.calls[0], 3, { arr: ['a', 'b', 'c'] })
+    whole.subscription.unsubscribe()
+    t.mock.timers.tick(5000)
+    assert.deepEqual(f.updates.at(-1).selection, [{ include: '/arr/1' }])
+    assert.deepEqual(f.cache.value.value, { arr: [null, 'b', null] })
+    f.revision(f.calls[0], 4, patch)
+    t.mock.timers.tick(250)
+    assert.deepEqual(f.cache.value.value, { arr: expected })
+    assert.equal(second.values.at(-1), expected[1])
+    f.extend(f.calls[0], 4)
+    assert.deepEqual(f.cache.value.value, { arr: expected })
+    assert.equal(f.cache.value.id, 4)
+    f.revision(f.calls[0], 5, [
+      { op: 'replace', path: '/arr/1', value: 'next' },
+    ])
+    t.mock.timers.tick(250)
+    assert.equal(second.values.at(-1), 'next')
+  })
+}
+
+test('failure before narrowing confirmation resumes the correctly shifted array', t => {
+  const f = fixture(t)
+  const whole = f.watch('arr')
+  const second = f.watch('arr', 1)
+  f.db.start()
+  f.start(f.calls[0], 3, { arr: ['a', 'b', 'c'] })
+  whole.subscription.unsubscribe()
+  t.mock.timers.tick(5000)
+  f.revision(f.calls[0], 4, [{ op: 'add', path: '/arr/0', value: 'x' }])
+  f.calls[0].events.error(new Error('closed before confirmation'))
+  assert.deepEqual(f.cache.value.value, { arr: [null, 'a', null, null] })
+  assert.equal(second.values.at(-1), 'a')
+  f.db.start()
+  assert.deepEqual(f.calls[1].since, { epoch: 'boot', id: 4 })
+  assert.deepEqual(f.calls[1].selection, [{ include: '/arr/1' }])
+  f.calls[1].events.next({
+    epoch: 'boot',
+    id: 4,
+    subscription: 'again',
+    revisions: [],
+  })
+  f.revision(f.calls[1], 5, [
+    { op: 'replace', path: '/arr', value: [null, 'later', null] },
+  ])
+  t.mock.timers.tick(250)
+  assert.deepEqual(f.cache.value.value, { arr: [null, 'later', null] })
+  assert.equal(second.values.at(-1), 'later')
+})
+
+test('a watch acquired while flushing revisions cannot start a second selection update', t => {
+  const f = fixture(t)
+  let requested = false
+  let third
+  const first = f.db.watch$('a').subscribe(value => {
+    if (value.n !== 1 || requested) return
+    requested = true
+    third = f.watch('c')
+  })
+  t.after(() => first.unsubscribe())
+  f.db.start()
+  f.start(f.calls[0], 3, { a: { n: 0 } })
+  f.revision(f.calls[0], 4, [{ op: 'replace', path: '/a/n', value: 1 }])
+  const second = f.watch('b')
+  assert.equal(f.updates.length, 1)
+  assert.deepEqual(f.updates[0].selection, [
+    { include: '/a' },
+    { include: '/b' },
+    { include: '/c' },
+  ])
+  assert.deepEqual(second.values, [])
+  assert.deepEqual(third.values, [])
+  f.extend(f.calls[0], 4, [
+    { op: 'add', path: '/b', value: 2 },
+    { op: 'add', path: '/c', value: 3 },
+  ])
+  assert.deepEqual(second.values, [2])
+  assert.deepEqual(third.values, [3])
+  assert.equal(f.updates.length, 1)
+})
+
 test('selection changes wait for the previous extension', t => {
   const f = fixture(t)
   f.watch('serverInfo')

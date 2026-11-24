@@ -197,7 +197,7 @@ watch$(...path) → BehaviorSubject per unique path → Observable to consumer
 
 ### `SubtreePatchDB<T>`
 
-One stream carries the union of reference-counted watches, with a five-second release delay and 250ms batching. Selection changes prune the browser replica immediately and request an ordered server extension. Confirmed coverage retains provable subsets of the previous selection; no coverage is `NOTHING`, while `[]` means the whole subtree. New watches wait for coverage confirmation. Failure resumes the confirmed selection from its single epoch/revision cursor rather than replaying discarded fields.
+One stream carries the union of reference-counted watches, with a five-second release delay and 250ms batching. Selection changes prune the browser replica immediately and request an ordered server extension. Until that extension arrives, revisions apply to a retained pre-change replica before projecting into the browser replica; selected array positions stay correct through in-flight insertions and removals. Watches acquired synchronously during a revision flush join the next serialized selection update. Confirmed coverage retains provable subsets of the previous selection; no coverage is `NOTHING`, while `[]` means the whole subtree. New watches wait for coverage confirmation. Failure resumes the confirmed selection from its single epoch/revision cursor rather than replaying discarded fields.
 
 `Projection::extension` computes fields newly required by a selection against the current store value. `PatchDb::reproject` changes the listener and sends the extension under the store lock, before later revisions. The TypeScript projection module mirrors selector unions and extension semantics.
 
