@@ -64,7 +64,7 @@ async fn actual_cli_reuses_connections_after_application_errors_and_scopes_heade
         assert_eq!(result.is_err(), method == "registry.missing-method");
     }
     assert_eq!(upgrades.load(Ordering::SeqCst), 1);
-    let ws = super::RpcSessionUpgrader::url(url).unwrap();
+    let ws = RpcSessionUpgrader::url(url).unwrap();
     let mut headers = HeaderMap::new();
     headers.insert("x-instance", "other".parse().unwrap());
     ctx.rpc_client
@@ -95,19 +95,19 @@ async fn actual_cli_reuses_connections_after_application_errors_and_scopes_heade
 }
 
 #[test]
-fn rpc_endpoint_replacement_retains_prefix_query_and_ipv6() {
-    for (source, expected) in [
+fn session_endpoint_retains_prefix_query_and_ipv6() {
+    for (base, expected) in [
         (
-            "https://registry.test/prefix/rpc/v0?keep=value",
+            "https://registry.test/prefix?keep=value",
             "wss://registry.test/prefix/rpc/v2?keep=value",
         ),
         (
-            "http://[2001:db8::1]:5959/rpc/v1",
+            "http://[2001:db8::1]:5959/",
             "ws://[2001:db8::1]:5959/rpc/v2",
         ),
     ] {
         assert_eq!(
-            super::websocket_url(source.parse().unwrap())
+            RpcSessionUpgrader::url(base.parse().unwrap())
                 .unwrap()
                 .as_str(),
             expected
@@ -143,7 +143,7 @@ fn http_rpc_urls_share_versioned_prefix_and_query_normalization() {
             "https://registry.test/prefix/rpc/v1?keep=value"
         );
         assert_eq!(
-            super::RpcSessionUpgrader::url(url).unwrap().as_str(),
+            RpcSessionUpgrader::url(url).unwrap().as_str(),
             "wss://registry.test/prefix/rpc/v2?keep=value"
         );
     }
@@ -409,7 +409,7 @@ async fn diagnostic_recovery_without_a_persistent_key_is_encrypted_and_advertise
     let (peer, mut socket) = super::connect(
         &reqwest::Client::new(),
         &signer,
-        super::RpcSessionUpgrader::url(url.clone()).unwrap(),
+        RpcSessionUpgrader::url(url.clone()).unwrap(),
         "127.0.0.1",
         crate::sign::session::Target::Rpc,
         HeaderMap::new(),

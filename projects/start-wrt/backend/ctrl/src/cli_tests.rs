@@ -58,7 +58,7 @@ async fn configured_root_ca_applies_to_http_and_websocket_clients() {
     acceptor.set_certificate(&cert).unwrap();
     let acceptor = acceptor.build();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let host: Url = format!("https://{}/rpc/v1", listener.local_addr().unwrap())
+    let host: Url = format!("https://{}", listener.local_addr().unwrap())
         .parse()
         .unwrap();
     let server = tokio::task::spawn_blocking(move || {
@@ -116,7 +116,7 @@ async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() 
     let temp = tempfile::tempdir().unwrap();
     let (url, server, _task, http_calls, upgrades) = crate::rpc::tests::server().await;
     let ctx = client(
-        url.join("rpc/v1").unwrap(),
+        url.clone(),
         temp.path().join("identity.pem"),
     );
     let signer: Signer = AnySigningKey::generate().into();
@@ -151,7 +151,7 @@ async fn absent_identity_uses_unenrolled_admission_but_malformed_identity_never_
     let temp = tempfile::tempdir().unwrap();
     let (url, server, _task, http_calls, upgrades) = crate::rpc::tests::server().await;
     let path = temp.path().join("identity.pem");
-    let ctx = client(url.join("rpc/v1").unwrap(), path.clone());
+    let ctx = client(url.clone(), path.clone());
     assert_eq!(
         ctx.signing_key().unwrap_err().kind,
         startos::ErrorKind::Uninitialized
@@ -192,7 +192,7 @@ async fn absent_identity_uses_unenrolled_admission_but_malformed_identity_never_
 async fn refused_admission_never_retries_plaintext_rpc() {
     let temp = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let host = format!("http://{}/rpc/v1", listener.local_addr().unwrap())
+    let host = format!("http://{}", listener.local_addr().unwrap())
         .parse()
         .unwrap();
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -241,7 +241,7 @@ async fn built_wrt_cli_uses_encrypted_admission_without_stdout_changes() {
         .args([
             "startwrt-cli",
             "--host",
-            url.join("rpc/v1").unwrap().as_str(),
+            url.as_str(),
             "auth",
             "session",
             "list",
