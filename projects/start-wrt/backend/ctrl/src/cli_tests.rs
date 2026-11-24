@@ -115,10 +115,7 @@ async fn configured_root_ca_applies_to_http_and_websocket_clients() {
 async fn keyed_cli_uses_production_encrypted_admission_and_live_authorization() {
     let temp = tempfile::tempdir().unwrap();
     let (url, server, _task, http_calls, upgrades) = crate::rpc::tests::server().await;
-    let ctx = client(
-        url.clone(),
-        temp.path().join("identity.pem"),
-    );
+    let ctx = client(url.clone(), temp.path().join("identity.pem"));
     let signer: Signer = AnySigningKey::generate().into();
     ctx.id_key.set(signer.clone()).unwrap();
     let key = crate::rpc::tests::enroll(&server, &signer).await;
