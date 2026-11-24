@@ -914,37 +914,9 @@ export const Api = {
     },
     diagnostic: {
       _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: {
-        disk: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            forget: {
-              _PARAMS: /* @__PURE__ */ empty,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            repair: {
-              _PARAMS: /* @__PURE__ */ empty,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-      },
+      _CHILDREN: { disk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} } },
     },
-    disk: {
-      _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: {
-        repair: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ z.null(),
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
-      },
-    },
+    disk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),

@@ -1105,8 +1105,9 @@ export default {
   1311: "Obtenir de l'aide",
   1312: 'Dernière synchronisation',
   1313: "à l'instant",
-  1314: 'Fourni par',
-  1315: 'Sélectionner un fournisseur de dépendance',
-  1316: 'Verrouiller le fournisseur',
-  1317: 'Déverrouiller le fournisseur',
+  1314: 'Saisissez votre mot de passe principal pour continuer.',
+  1315: 'Fourni par',
+  1316: 'Sélectionner un fournisseur de dépendance',
+  1317: 'Verrouiller le fournisseur',
+  1318: 'Déverrouiller le fournisseur',
 } satisfies i18n

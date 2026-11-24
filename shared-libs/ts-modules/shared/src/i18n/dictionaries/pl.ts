@@ -1105,8 +1105,9 @@ export default {
   1311: 'Uzyskaj pomoc',
   1312: 'Ostatnia synchronizacja',
   1313: 'przed chwilą',
-  1314: 'Dostarczane przez',
-  1315: 'Wybierz dostawcę zależności',
-  1316: 'Przypnij dostawcę',
-  1317: 'Odepnij dostawcę',
+  1314: 'Wprowadź hasło główne, aby kontynuować.',
+  1315: 'Dostarczane przez',
+  1316: 'Wybierz dostawcę zależności',
+  1317: 'Przypnij dostawcę',
+  1318: 'Odepnij dostawcę',
 } satisfies i18n

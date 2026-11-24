@@ -1105,8 +1105,9 @@ export default {
   1311: 'Hilfe erhalten',
   1312: 'Zuletzt synchronisiert',
   1313: 'gerade eben',
-  1314: 'Bereitgestellt von',
-  1315: 'Abhängigkeitsanbieter auswählen',
-  1316: 'Anbieter fixieren',
-  1317: 'Fixierung aufheben',
+  1314: 'Geben Sie Ihr Master-Passwort ein, um fortzufahren.',
+  1315: 'Bereitgestellt von',
+  1316: 'Abhängigkeitsanbieter auswählen',
+  1317: 'Anbieter fixieren',
+  1318: 'Fixierung aufheben',
 } satisfies i18n

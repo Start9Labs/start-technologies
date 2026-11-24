@@ -1106,8 +1106,9 @@ export const ENGLISH: Record<string, number> = {
   'Get help': 1311,
   'Last synced': 1312,
   'just now': 1313,
-  'Provided by': 1314,
-  'Select a dependency provider': 1315,
-  'Lock provider': 1316,
-  'Unlock provider': 1317,
+  'Enter your master password to continue.': 1314,
+  'Provided by': 1315,
+  'Select a dependency provider': 1316,
+  'Lock provider': 1317,
+  'Unlock provider': 1318,
 }

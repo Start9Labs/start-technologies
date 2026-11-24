@@ -1105,8 +1105,9 @@ export default {
   1311: 'Obtener ayuda',
   1312: 'Última sincronización',
   1313: 'justo ahora',
-  1314: 'Proporcionado por',
-  1315: 'Selecciona un proveedor de dependencias',
-  1316: 'Fijar proveedor',
-  1317: 'Desfijar proveedor',
+  1314: 'Introduzca su contraseña maestra para continuar.',
+  1315: 'Proporcionado por',
+  1316: 'Selecciona un proveedor de dependencias',
+  1317: 'Fijar proveedor',
+  1318: 'Desfijar proveedor',
 } satisfies i18n

@@ -4624,6 +4624,22 @@ middleware.auth.unauthorized:
   fr_FR: "NON AUTORISÉ"
   pl_PL: "BRAK AUTORYZACJI"
 
+# diagnostic.rs
+diagnostic.prompt-server-password:
+  en_US: "Server password: "
+  de_DE: "Serverpasswort: "
+  es_ES: "Contraseña del servidor: "
+  fr_FR: "Mot de passe du serveur : "
+  pl_PL: "Hasło serwera: "
+
+# middleware/auth/password.rs
+middleware.auth.password-required:
+  en_US: "The server password is required."
+  de_DE: "Das Serverpasswort ist erforderlich."
+  es_ES: "Se requiere la contraseña del servidor."
+  fr_FR: "Le mot de passe du serveur est requis."
+  pl_PL: "Wymagane jest hasło serwera."
+
 # middleware/auth/session.rs
 middleware.auth.rate-limited-login:
   en_US: "Please limit login attempts to 3 per 20 seconds."
@@ -4891,12 +4907,26 @@ shared-volumes.invalid-path:
   fr_FR: "Les chemins des volumes doivent rester dans leur répertoire autorisé"
   pl_PL: "Ścieżki woluminów muszą pozostawać w dozwolonym katalogu"
 
+shared-volumes.name-not-folder:
+  en_US: "A volume name must work as a folder name: no / and not . or .."
+  de_DE: "Ein Volume-Name muss als Ordnername taugen: kein / und nicht . oder .."
+  es_ES: "El nombre del volumen debe servir como nombre de carpeta: sin / y distinto de . o .."
+  fr_FR: "Le nom du volume doit pouvoir servir de nom de dossier : sans / et différent de . ou .."
+  pl_PL: "Nazwa woluminu musi nadawać się na nazwę folderu: bez / i inna niż . lub .."
+
 shared-volumes.name-required:
   en_US: "Enter a volume name"
   de_DE: "Einen Namen für das Volume eingeben"
   es_ES: "Introduce un nombre para el volumen"
   fr_FR: "Saisissez un nom de volume"
   pl_PL: "Podaj nazwę woluminu"
+
+shared-volumes.name-taken:
+  en_US: "Another volume is already named %{name}"
+  de_DE: "Ein anderes Volume heißt bereits %{name}"
+  es_ES: "Ya existe otro volumen llamado %{name}"
+  fr_FR: "Un autre volume s'appelle déjà %{name}"
+  pl_PL: "Inny wolumin ma już nazwę %{name}"
 
 shared-volumes.not-cifs:
   en_US: "Only CIFS share volumes can change their connection details"
