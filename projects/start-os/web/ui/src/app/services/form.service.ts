@@ -315,7 +315,9 @@ export function datetimeMin(min: string): ValidatorFn {
     const date = new Date(value.length === 5 ? `2000-01-01T${value}` : value)
     const minDate = new Date(min.length === 5 ? `2000-01-01T${min}` : min)
 
-    return date < minDate ? { datetimeMin: `Minimum is ${min}` } : null
+    return date < minDate
+      ? { datetimeMin: `Minimum is ${Mustache.escape(min)}` }
+      : null
   }
 }
 
@@ -326,7 +328,9 @@ export function datetimeMax(max: string): ValidatorFn {
     const date = new Date(value.length === 5 ? `2000-01-01T${value}` : value)
     const maxDate = new Date(max.length === 5 ? `2000-01-01T${max}` : max)
 
-    return date > maxDate ? { datetimeMax: `Maximum is ${max}` } : null
+    return date > maxDate
+      ? { datetimeMax: `Maximum is ${Mustache.escape(max)}` }
+      : null
   }
 }
 
@@ -489,9 +493,11 @@ function uniqueByMessage(
   if (!uniqueBy) {
     return ''
   } else if (typeof uniqueBy === 'string') {
-    return configSpec[uniqueBy]
-      ? (configSpec[uniqueBy] as IST.ValueSpecObject).name
-      : uniqueBy
+    return Mustache.escape(
+      configSpec[uniqueBy]
+        ? (configSpec[uniqueBy] as IST.ValueSpecObject).name
+        : uniqueBy,
+    )
   } else if ('any' in uniqueBy) {
     joinFunc = ' OR '
     for (let subSpec of uniqueBy.any) {

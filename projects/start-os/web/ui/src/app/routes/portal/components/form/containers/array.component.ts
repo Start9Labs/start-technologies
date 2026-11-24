@@ -13,7 +13,12 @@ import {
   FormsModule,
   ReactiveFormsModule,
 } from '@angular/forms'
-import { DialogService, i18nKey, i18nPipe } from '@start9labs/shared'
+import {
+  DialogService,
+  escapeHtml,
+  i18nKey,
+  i18nPipe,
+} from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { TuiAnimated } from '@taiga-ui/cdk'
 import { TuiButton, TuiError, TuiIcon, TuiInput, TuiLink } from '@taiga-ui/core'
@@ -218,7 +223,7 @@ export class FormArrayComponent {
           label: 'Warning',
           size: 's',
           data: {
-            content: this.spec.warning as i18nKey,
+            content: escapeHtml(this.spec.warning) as i18nKey,
             yes: 'Ok',
             no: 'Cancel',
           },

@@ -96,7 +96,8 @@ import { DELETE_LOCAL } from './delete-local'
             >
               {{ statuses[volume.availability] | i18n }}
               @if (volume.error; as error) {
-                <tui-icon [tuiTooltip]="error" />
+                <tui-icon [tuiTooltip]="tooltip" />
+                <ng-template #tooltip>{{ error }}</ng-template>
               }
             </td>
             <td [attr.data-label]="'Free' | i18n">

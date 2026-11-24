@@ -13,6 +13,7 @@ const boundaries = new Map([
     export class TaskService {}
     export class i18nPipe {}
     export const getErrorMessage = error => error.message;
+    export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)};
   `,
   ],
   ['@start9labs/start-core', 'export const utils = {};'],

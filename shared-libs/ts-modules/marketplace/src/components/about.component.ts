@@ -73,14 +73,19 @@ import { MarketplaceVersionsComponent } from './versions.component'
     }
     <section tuiCardLarge appearance="secondary-grayscale">
       <header tuiHeader>{{ 'Description' | i18n }}</header>
-      <div
-        [innerHTML]="pkg().description.long | localize: pkg().defaultLocale"
-      ></div>
+      <p class="description">
+        {{ pkg().description.long | localize: pkg().defaultLocale }}
+      </p>
     </section>
   `,
   styles: `
     :host {
       display: contents;
+    }
+
+    .description {
+      margin: 0;
+      white-space: pre-line;
     }
   `,
   imports: [

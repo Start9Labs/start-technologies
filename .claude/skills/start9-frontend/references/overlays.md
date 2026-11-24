@@ -55,12 +55,15 @@ page, with no wrapper dialog; the extra key needs the options cast to
   than flipping. Leave `tuiDropdownDirection` unset: its default opens on whichever side has
   room, and a pinned `top` breaks when there's none.
 - **Hints**: `[tuiHint]` (template content allowed), tuned globally via `tuiHintOptionsProvider`.
-  Taiga renders a string hint (like a string confirm, notification or `tui-error`) through
-  `[innerHTML]`, so text a package or user supplies goes in as a template that interpolates
-  it, never as the string: `<tui-icon [tuiTooltip]="tooltip" />` beside
-  `<ng-template #tooltip>{{ spec.description }}</ng-template>`. The hint keeps `\n` line breaks
-  (`white-space: pre-line`) either way. The same holds for any `[innerHTML]` binding: it is for
-  rendered markdown only.
+- **Package and user text is never markup.** Taiga renders string content — hint, dialog
+  `label` and content, confirm, notification, `tui-error` — through `[innerHTML]`. Text a
+  package, registry or user supplies goes in as a template or component that interpolates it:
+  `<tui-icon [tuiTooltip]="tooltip" />` beside
+  `<ng-template #tooltip>{{ spec.description }}</ng-template>`, or a confirm/toast
+  `PolymorpheusComponent` reading `context.data`. Where only a string fits (a validation
+  message, a value inside OS-authored dialog markup), pass it through `escapeHtml`;
+  `DialogService` escapes every `label` itself. A hint and a `pre-line` host keep `\n` breaks.
+  `[innerHTML]` is for rendered markdown (`| markdown | dompurify`) and escaped ANSI logs only.
 - **Drawers/sheets**: `<tui-drawer *tuiPopup="open()" (click.self)="toggle(false)">` with
   URL-driven `open` state.
 - Dialogs close on route activation — `TUI_DIALOGS_CLOSE`'s default — so a dialog doesn't watch

@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Show the help text, warnings and errors a service supplies in its action forms and action list as plain text, never as formatted markup.
+- Show text that services, registries and users supply — help text, warnings, validation messages, service descriptions, dialog titles and error messages — as plain text, never as formatted markup. Line breaks in a service's description and in error messages are kept.
