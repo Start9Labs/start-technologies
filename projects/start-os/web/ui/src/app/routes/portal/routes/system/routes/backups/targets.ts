@@ -19,7 +19,7 @@ import { SourcePickerData } from 'src/app/routes/portal/routes/system/routes/vol
 import {
   VOLUME_STATUSES,
   VOLUME_TYPES,
-  volumeName,
+  targetName,
   volumePath,
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
@@ -33,6 +33,7 @@ import { BackupTargetManage } from './manage'
 import { byEntryName } from 'src/app/utils/by-entry-name'
 
 const TARGET_SOURCES: SourcePickerData = {
+  cifsNamedByHost: true,
   intro:
     'A backup target is where StartOS stores encrypted backups of this server, its services and its shared volumes.',
   docs: '/start-os/backups.html#backup-targets',
@@ -154,7 +155,9 @@ const TARGET_SOURCES: SourcePickerData = {
             >
               {{ statuses[target.availability] | i18n }}
               @if (target.error; as error) {
-                <tui-icon [tuiTooltip]="error" />
+                <tui-icon [tuiTooltip]="tooltip">
+                  <ng-template #tooltip>{{ error }}</ng-template>
+                </tui-icon>
               }
             </td>
             <td [attr.data-label]="'Last backup' | i18n">
@@ -311,7 +314,7 @@ export default class BackupTargets {
   protected readonly service = inject(BackupService)
   protected readonly types = VOLUME_TYPES
   protected readonly statuses = VOLUME_STATUSES
-  protected readonly name = volumeName
+  protected readonly name = targetName
   protected readonly path = volumePath
 
   constructor() {

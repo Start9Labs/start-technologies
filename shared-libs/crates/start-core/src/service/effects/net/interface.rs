@@ -261,12 +261,17 @@ fn interface_ptr(
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct GetServiceInterfaceParams {
+    #[arg(long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
+    #[arg(help = "help.arg.service-interface-id")]
     service_interface_id: ServiceInterfaceId,
 
+    #[arg(skip)]
     callback: Option<CallbackId>,
 }
 
@@ -335,11 +340,15 @@ pub async fn get_service_interface(
     Ok(res)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct ListServiceInterfacesParams {
+    #[arg(long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
 
+    #[arg(skip)]
     callback: Option<CallbackId>,
 }
 

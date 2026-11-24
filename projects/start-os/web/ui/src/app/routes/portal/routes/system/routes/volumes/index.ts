@@ -24,13 +24,7 @@ import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { TitleDirective } from 'src/app/services/title.service'
 import { AddSourceService } from './add'
 import { VolumeManage } from './manage'
-import {
-  isStale,
-  VOLUME_STATUSES,
-  VOLUME_TYPES,
-  volumeName,
-  volumePath,
-} from './types'
+import { isStale, VOLUME_STATUSES, VOLUME_TYPES, volumePath } from './types'
 import { VOLUME_SOURCES } from './source-picker'
 
 import { DELETE_LOCAL } from './delete-local'
@@ -81,7 +75,7 @@ import { byEntryName } from 'src/app/utils/by-entry-name'
           @let id = entry.key;
           @let volume = entry.value;
           <tr>
-            <td>{{ name(volume) }}</td>
+            <td>{{ volume.name }}</td>
             <td>
               <tui-icon
                 [icon]="types[volume.source.kind].icon"
@@ -97,7 +91,9 @@ import { byEntryName } from 'src/app/utils/by-entry-name'
             >
               {{ statuses[volume.availability] | i18n }}
               @if (volume.error; as error) {
-                <tui-icon [tuiTooltip]="error" />
+                <tui-icon [tuiTooltip]="tooltip">
+                  <ng-template #tooltip>{{ error }}</ng-template>
+                </tui-icon>
               }
             </td>
             <td [attr.data-label]="'Free' | i18n">
@@ -214,7 +210,6 @@ export default class Volumes {
 
   protected readonly volumes = toSignal(this.volumes$, { initialValue: {} })
   protected readonly types = VOLUME_TYPES
-  protected readonly name = volumeName
   protected readonly path = volumePath
   protected readonly statuses = VOLUME_STATUSES
 

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use exver::VersionRange;
 use imbl_value::json;
@@ -56,6 +56,7 @@ impl VersionT for Version {
                 }
             }
         });
+        suffix_duplicate_shared_volume_names(db);
         Ok(Value::Null)
     }
     async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
@@ -195,6 +196,35 @@ fn group_enabled_plain_domains(addresses: &mut Value) {
     }
     if let Ok(value) = to_value(&info) {
         *addresses = value;
+    }
+}
+
+/// Gives every shared volume a valid folder name, suffixing repeats to keep names unique.
+fn suffix_duplicate_shared_volume_names(db: &mut Value) {
+    let Some(volumes) = db
+        .get_mut("public")
+        .and_then(|public| public.get_mut("sharedVolumes"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let mut taken: BTreeSet<String> = volumes
+        .values()
+        .filter_map(|volume| volume["name"].as_str().map(str::to_owned))
+        .collect();
+    let mut seen = BTreeSet::new();
+    for (_, volume) in volumes.iter_mut() {
+        let Some(name) = volume["name"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        let valid = crate::shared_volumes::folder_name(&name);
+        if valid == name && seen.insert(name.clone()) {
+            continue;
+        }
+        let unused = crate::shared_volumes::unused_name(&valid, |name| taken.contains(name));
+        taken.insert(unused.clone());
+        seen.insert(unused.clone());
+        volume["name"] = json!(unused);
     }
 }
 
@@ -370,6 +400,100 @@ mod tests {
         );
         Version.pre_init(&db).await.unwrap();
         assert_eq!(Value::from(db.dump(&ROOT).await.value), migrated);
+    }
+
+    #[tokio::test]
+    async fn legacy_duplicate_volume_names_follow_sorted_ids_on_upgrade() {
+        use crate::db::model::Database;
+        use crate::shared_volumes::{SharedVolume, SharedVolumeSource};
+
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
+        let mut fixture = to_value(&Database::init(&account, false, None, None).unwrap()).unwrap();
+        let lower_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let higher_id = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ";
+        let volume = to_value(&SharedVolume::new(
+            "Photos".into(),
+            SharedVolumeSource::Local,
+        ))
+        .unwrap();
+        fixture["public"]["sharedVolumes"] = json!({
+            higher_id.to_string(): volume.clone(),
+            lower_id.to_string(): volume,
+        });
+        fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(3);
+        assert_eq!(
+            &**fixture["public"]["sharedVolumes"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .next()
+                .unwrap(),
+            higher_id
+        );
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy.cbor");
+        let mut encoded = Vec::new();
+        serde_cbor::ser::into_writer(&0u64, &mut encoded).unwrap();
+        serde_cbor::ser::into_writer(&fixture, &mut encoded).unwrap();
+        std::fs::write(&path, encoded).unwrap();
+
+        let db = PatchDb::open(&path).await.unwrap();
+        Version.pre_init(&db).await.unwrap();
+        let migrated = db.dump(&ROOT).await.value;
+        assert_eq!(
+            migrated["public"]["sharedVolumes"][lower_id]["name"].as_str(),
+            Some("Photos")
+        );
+        assert_eq!(
+            migrated["public"]["sharedVolumes"][higher_id]["name"].as_str(),
+            Some("Photos (2)")
+        );
+        Version.pre_init(&db).await.unwrap();
+        assert_eq!(db.dump(&ROOT).await.value, migrated);
+        db.close().await;
+
+        let reopened = PatchDb::open(&path).await.unwrap();
+        assert_eq!(reopened.dump(&ROOT).await.value, migrated);
+        reopened.close().await;
+    }
+
+    #[test]
+    fn repeated_shared_volume_names_gain_unused_suffixes() {
+        let volume = |name: &str| json!({"name": name, "source": {"kind": "local"}, "grants": {}});
+        let mut db = json!({"public": {"sharedVolumes": {
+            "A": volume("Photos"),
+            "B": volume("Photos"),
+            "C": volume("Photos (2)"),
+            "D": volume("Music"),
+            "E": volume("Photos"),
+            "F": volume("media/photos"),
+            "G": volume(".."),
+        }}});
+        suffix_duplicate_shared_volume_names(&mut db);
+        let names: Vec<_> = db["public"]["sharedVolumes"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|volume| volume["name"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Photos",
+                "Photos (3)",
+                "Photos (2)",
+                "Music",
+                "Photos (4)",
+                "media-photos",
+                "Volume"
+            ]
+        );
+        let migrated = db.clone();
+        suffix_duplicate_shared_volume_names(&mut db);
+        assert_eq!(db, migrated);
     }
 
     fn row(hostname: &str, public: bool, metadata: Value) -> Value {

@@ -45,6 +45,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::DisableFlowOffloading,
     Migration::TurnOffRemoteAccess,
     Migration::SplitAutomaticForwardTransports,
+    Migration::RankWanBehindProfiles,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +86,8 @@ enum Migration {
     /// Earlier releases defaulted Remote Access to When behind NAT, stored as `default`.
     TurnOffRemoteAccess,
     SplitAutomaticForwardTransports,
+    /// Earlier images left the WAN's routes at metric 0, tied with every profile's.
+    RankWanBehindProfiles,
 }
 
 impl Migration {
@@ -111,6 +114,7 @@ impl Migration {
                     .await
                     .map(|_| ())
             }
+            Migration::RankWanBehindProfiles => rank_wan_behind_profiles(root).await,
         }
     }
 
@@ -150,6 +154,9 @@ impl Migration {
                 "turn off Remote Access if it was still set to When behind NAT"
             }
             Migration::SplitAutomaticForwardTransports => "track automatic TCP and UDP mappings independently",
+            Migration::RankWanBehindProfiles => {
+                "keep devices able to reach the router when a profile shares the upstream network"
+            }
         }
     }
 }
@@ -534,6 +541,29 @@ async fn pppoe_wan_ipv6(root: &Path) -> Result<(), Error> {
         if let Some(mut wan) = section.get_typed::<NetworkInterface>()? {
             if wan.proto == InterfaceProto::PPPOE && wan.ipv6.is_none() {
                 wan.ipv6 = Some("1".to_string());
+                section.set(&wan)?;
+                changed = true;
+            }
+        }
+        break;
+    }
+    if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn rank_wan_behind_profiles(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["network"]).await?;
+    let mut changed = false;
+    for section in &mut cfgs["network"].sections {
+        if section.name().as_deref() != Some(WAN_INTERFACE) {
+            continue;
+        }
+        if let Some(mut wan) = section.get_typed::<NetworkInterface>()? {
+            if wan.metric.is_none() {
+                wan.metric = Some(crate::wan::WAN_ROUTE_METRIC);
                 section.set(&wan)?;
                 changed = true;
             }
@@ -1050,6 +1080,24 @@ config forwarding
             run(dir.path()).await.unwrap();
             assert_eq!(wan_ipv6(&dir).as_deref(), expected, "{network}");
             assert_eq!(record(&dir), current());
+        }
+    }
+
+    #[tokio::test]
+    async fn wan_ranks_behind_profiles_unless_its_metric_is_set() {
+        const WAN: &str = "config interface 'wan'\n\toption device 'eth1'\n\toption proto 'dhcp'\n";
+        for (network, expected) in [
+            (WAN.to_string(), "\toption metric '10'\n"),
+            (
+                format!("{WAN}\toption metric '5'\n"),
+                "\toption metric '5'\n",
+            ),
+        ] {
+            let dir = router(None, true);
+            write(&dir, "etc/config/network", &network);
+            rank_wan_behind_profiles(dir.path()).await.unwrap();
+            rank_wan_behind_profiles(dir.path()).await.unwrap();
+            assert_eq!(read(&dir, "etc/config/network"), format!("{WAN}{expected}"));
         }
     }
 

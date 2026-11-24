@@ -17,15 +17,24 @@ pub fn action_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand("export", from_fn_async(export_action).no_cli())
         .subcommand(
+            "export",
+            from_fn_async(super::forward_stdin)
+                .no_ts()
+                .no_display()
+                .with_about("about.container-action-export"),
+        )
+        .subcommand(
             "clear",
             from_fn_async(clear_actions)
                 .no_display()
+                .with_about("about.container-action-clear")
                 .with_call_remote::<ContainerCliContext>(),
         )
         .subcommand(
             "get-input",
             from_fn_async(get_action_input)
                 .with_display_serializable()
+                .with_about("about.container-action-get-input")
                 .with_call_remote::<ContainerCliContext>(),
         )
         .subcommand(
@@ -33,13 +42,22 @@ pub fn action_api<C: Context>() -> ParentHandler<C> {
             from_fn_async(run_action)
                 .with_display_serializable()
                 .with_custom_display_fn(|args, res| display_action_result(args.params, res))
+                .with_about("about.container-action-run")
                 .with_call_remote::<ContainerCliContext>(),
         )
         .subcommand("create-task", from_fn_async(create_task).no_cli())
         .subcommand(
+            "create-task",
+            from_fn_async(super::forward_stdin)
+                .no_ts()
+                .no_display()
+                .with_about("about.container-action-create-task"),
+        )
+        .subcommand(
             "clear-tasks",
             from_fn_async(clear_tasks)
                 .no_display()
+                .with_about("about.container-action-clear-tasks")
                 .with_call_remote::<ContainerCliContext>(),
         )
 }

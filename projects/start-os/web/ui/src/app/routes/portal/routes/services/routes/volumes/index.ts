@@ -17,11 +17,7 @@ import { switchMap } from 'rxjs'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getCurrentManifest } from 'src/app/utils/get-package-data'
 import { VolumeGrant } from '../../../system/routes/volumes/grant'
-import {
-  VOLUME_TYPES,
-  volumeName,
-  volumePath,
-} from '../../../system/routes/volumes/types'
+import { VOLUME_TYPES, volumePath } from '../../../system/routes/volumes/types'
 import { byEntryName } from 'src/app/utils/by-entry-name'
 
 @Component({
@@ -49,7 +45,7 @@ import { byEntryName } from 'src/app/utils/by-entry-name'
       @for (entry of volumeList; track entry.key) {
         <div tuiCell>
           <span tuiTitle>
-            {{ name(entry.value) }}
+            {{ entry.value.name }}
             <span tuiSubtitle class="location">
               <tui-icon
                 [icon]="types[entry.value.source.kind].icon"
@@ -62,7 +58,7 @@ import { byEntryName } from 'src/app/utils/by-entry-name'
           <volume-grant
             [volumeId]="entry.key"
             [packageId]="pkgId()"
-            [label]="name(entry.value)"
+            [label]="entry.value.name"
             [grant]="entry.value.grants[pkgId()]"
             [disabled]="!enabled()"
           />
@@ -117,7 +113,6 @@ export default class ServiceVolumes {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
   protected readonly types = VOLUME_TYPES
-  protected readonly name = volumeName
   protected readonly path = volumePath
 
   public readonly pkgId = input.required<string>()

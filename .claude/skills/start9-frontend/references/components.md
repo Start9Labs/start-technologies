@@ -158,6 +158,11 @@ readonly error = linkedSignal<string, i18nKey | null>({
 })
 ```
 
+- A query that drives a fetch debounces as a signal, `q = debounced(this.query, 300)` from
+  `@angular/core`, read as `q.value()` in a `resource`'s `params` or an `effect`; the page
+  it resets is `linkedSignal({ source: () => this.q.value(), computation: () => 0 })`. A
+  `(input.debounce~300ms)` handler that sets the query by hand is the rewrite target.
+
 - `effect()` is for **genuine external side effects** (syncing backend-stored theme/language to
   `TUI_DARK_MODE`, imperative DOM), never for deriving state — that's `computed`/`linkedSignal`.
 
@@ -205,7 +210,8 @@ copy.
 - i18n (monorepo apps): **every** user-facing literal goes through `| i18n` (or
   `inject(i18nPipe).transform(...)` in TS); backend `LocaleString`s through `| localize`.
 - Rendered markdown is always the triple: `[innerHTML]="text | markdown | dompurify"` plus the
-  `safeLinks` directive (forces `target="_blank" rel="noreferrer"` on external links).
+  `safeLinks` directive (forces `target="_blank" rel="noopener noreferrer"` on cross-origin links
+  and stops link clicks from bubbling to enclosing controls).
 - Text stacks use `tuiTitle`/`tuiSubtitle` with `<b>` for the title — never custom
   heading/caption CSS: `<span tuiTitle><b>{{ title }}</b><span tuiSubtitle>{{ sub }}</span></span>`.
   A standalone `tuiTitle` leaves `tuiSubtitle` in the inherited text colour. Add

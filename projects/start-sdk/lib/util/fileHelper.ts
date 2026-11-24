@@ -22,6 +22,8 @@ import {
   withUpdateDeadline,
 } from './fileAccess'
 import { hasFileMounts, refreshFileMounts } from './fileMounts'
+import { delay, ExponentialBackoff } from './delay'
+import { onLeaveUntil } from './onLeaveUntil'
 
 async function readRaw(path: string): Promise<string | null> {
   return fs.readFile(path, 'utf-8').catch(error => {
@@ -35,6 +37,9 @@ const exists = (path: string) =>
     () => true,
     () => false,
   )
+
+const WATCH_RETRY_INITIAL_MS = 100
+const WATCH_RETRY_MAX_MS = 30_000
 
 /** Starts watching at once; `fs.watch` defers until its first read. */
 function watchPath(path: string, abort: AbortSignal) {
@@ -342,23 +347,50 @@ class FileHelperImpl<A> implements FileHelper<A> {
       protected async *produceRaw(
         abort: AbortSignal,
       ): AsyncGenerator<A | null, void> {
-        while (this.effects.isInContext && !abort.aborted) {
-          if (await exists(filePath)) {
-            const watch = watchPath(filePath, abort)
-            try {
-              yield await doRead()
-              await watch.first.catch(e => {
-                if (!abort.aborted) console.error(asError(e))
-              })
-            } finally {
-              watch.stop()
+        if (!this.effects.isInContext || abort.aborted) return
+        const signalCtrl = new AbortController()
+        let releaseLeave = () => {}
+        const onAbort = () => {
+          releaseLeave()
+          signalCtrl.abort()
+        }
+        abort.addEventListener('abort', onAbort, { once: true })
+        releaseLeave = onLeaveUntil(this.effects, onAbort)
+        const signal = signalCtrl.signal
+        const retry = new ExponentialBackoff(
+          WATCH_RETRY_INITIAL_MS,
+          WATCH_RETRY_MAX_MS,
+        )
+        try {
+          while (this.effects.isInContext && !signal.aborted) {
+            let failed = false
+            const onWatchError = (e: unknown) => {
+              if (signal.aborted) return
+              failed = true
+              console.error(asError(e))
             }
-          } else {
-            yield null
-            await onCreated(filePath, abort).catch(e => {
-              if (!abort.aborted) console.error(asError(e))
-            })
+            const present = await exists(filePath)
+            if (signal.aborted) break
+            if (present) {
+              const watch = watchPath(filePath, signal)
+              try {
+                yield await doRead()
+                await watch.first.catch(onWatchError)
+              } finally {
+                watch.stop()
+              }
+            } else {
+              yield null
+              await onCreated(filePath, signal).catch(onWatchError)
+            }
+            // A waiting reader never holds the event loop.
+            if (failed) await delay(retry.next(), { signal, ref: false })
+            else retry.reset()
           }
+        } finally {
+          releaseLeave()
+          abort.removeEventListener('abort', onAbort)
+          signalCtrl.abort()
         }
       }
 

@@ -95,6 +95,7 @@ pub(crate) use v0_4_1_2::retired_alpha_keys;
 pub type Current = v0_4_3::Version; // VERSION_BUMP
 
 impl Current {
+    /// Starts migrations from key-sorted objects, including legacy database files.
     #[instrument(skip(self, db))]
     pub async fn pre_init(self, db: &PatchDb) -> Result<(), Error> {
         let mut dump = Value::from(db.dump(&ROOT).await.value);
