@@ -39,6 +39,7 @@ const host = (
   bindings: {
     3478: {
       enabled: true,
+      proxyChains: [],
       options: {
         transport: ['tcp', 'udp'],
         preferredExternalPort: 3478,

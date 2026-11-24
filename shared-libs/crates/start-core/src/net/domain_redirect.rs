@@ -248,6 +248,7 @@ mod test {
             interfaces: [(iface.id.clone(), iface)]
                 .into_iter()
                 .collect::<BTreeMap<_, _>>(),
+            proxy_chains: Vec::new(),
         }
     }
 

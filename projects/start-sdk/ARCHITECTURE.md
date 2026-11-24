@@ -83,19 +83,19 @@ The bridge between TypeScript service code and the StartOS runtime. Every runtim
 
 Effects are organized by subsystem:
 
-| Subsystem        | Methods                                                                                                            | Purpose                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
-| **Action**       | `export`, `clear`, `getInput`, `run`, `createTask`, `clearTasks`                                                   | Register and invoke user actions    |
-| **Control**      | `restart`, `shutdown`, `getStatus`, `setMainStatus`                                                                | Service lifecycle control           |
-| **Files**        | `prepareUpload`, `prepareDownload`                                                                                 | Prepare volume file transfers       |
-| **Dependency**   | `setDependencies`, `getDependencies`, `checkDependencies`, `mount`, `getInstalledPackages`, `getServiceManifest`   | Inter-service dependency management |
-| **Health**       | `setHealth`                                                                                                        | Report health check results         |
-| **Subcontainer** | `createFs`, `destroyFs`                                                                                            | Container filesystem management     |
-| **Networking**   | `bind`, `getServicePortForward`, `clearBindings`, `getHostInfo`, `getContainerIp`, `getOsIp`, `getOutboundGateway` | Port binding and network info       |
-| **Interfaces**   | `exportServiceInterface`, `getServiceInterface`, `listServiceInterfaces`, `clearServiceInterfaces`                 | Service endpoint management         |
-| **Plugin**       | `plugin.url.register`, `plugin.url.exportUrl`, `plugin.url.clearUrls`                                              | Plugin system hooks                 |
-| **SSL**          | `getSslCertificate`, `getSslKey`                                                                                   | TLS certificate management          |
-| **System**       | `getSystemSmtp`, `setDataVersion`, `getDataVersion`                                                                | System-wide configuration           |
+| Subsystem        | Methods                                                                                                                                  | Purpose                             |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| **Action**       | `export`, `clear`, `getInput`, `run`, `createTask`, `clearTasks`                                                                         | Register and invoke user actions    |
+| **Control**      | `restart`, `shutdown`, `getStatus`, `setMainStatus`                                                                                      | Service lifecycle control           |
+| **Files**        | `prepareUpload`, `prepareDownload`                                                                                                       | Prepare volume file transfers       |
+| **Dependency**   | `setDependencies`, `getDependencies`, `checkDependencies`, `mount`, `getInstalledPackages`, `getServiceManifest`                         | Inter-service dependency management |
+| **Health**       | `setHealth`                                                                                                                              | Report health check results         |
+| **Subcontainer** | `createFs`, `destroyFs`                                                                                                                  | Container filesystem management     |
+| **Networking**   | `bind`, `getServicePortForward`, `clearBindings`, `getHostInfo`, `getContainerIp`, `getOsIp`, `getOutboundGateway`                       | Port binding and network info       |
+| **Interfaces**   | `exportServiceInterface`, `getServiceInterface`, `listServiceInterfaces`, `clearServiceInterfaces`                                       | Service endpoint management         |
+| **Plugin**       | `plugin.url.register`, `plugin.url.exportUrl`, `plugin.url.clearUrls`, `plugin.httpProxy.setProfiles`, `plugin.httpProxy.getAttachments` | Plugin system hooks                 |
+| **SSL**          | `getSslCertificate`, `getSslKey`                                                                                                         | TLS certificate management          |
+| **System**       | `getSystemSmtp`, `setDataVersion`, `getDataVersion`                                                                                      | System-wide configuration           |
 
 Effects also support reactive callbacks: many methods accept an optional `callback` parameter that the runtime invokes when the underlying value changes, enabling the reactive subscription patterns (`const()`, `watch()`, etc.).
 
@@ -151,6 +151,8 @@ Network interface declaration and port binding:
 - `Host.ts` — `MultiHost` class for binding ports and exporting interfaces. A single MultiHost can bind a port and export multiple interfaces (e.g. a primary UI and admin UI on the same port with different paths)
 - `ServiceInterfaceBuilder.ts` — Builder for constructing `ServiceInterface` objects with name, type, description, scheme overrides, username, path, and query params
 - `setupExportedUrls.ts` — URL plugin support for exporting URLs to other services
+
+`StartSdk.plugin.httpProxy` is gated by `http-proxy-v0`. Providers publish their complete profile list through effects. `GetHttpProxyAttachments` extends the existing `Watchable` primitive; its callback uses the runtime's `CallbackHolder` and the backend's DB-watched callbacks. Binding × gateway intent belongs to StartOS, while profile settings and listener readiness belong to the provider. Attachments distinguish gateway kind/ID; endpoint identity excludes chain order and Public only. Socket mounts are supplied by the host for outer containers and subcontainers.
 
 ### Initialization (`shared-libs/ts-modules/start-core/lib/inits/`)
 
@@ -226,7 +228,7 @@ The `.build()` method returns an object containing the entire SDK surface area, 
 | **Forms**        | `InputSpec.of`, `Value`, `Variants`, `List`                                                                                         | Form input builders                               |
 | **Triggers**     | `trigger.defaultTrigger`, `.cooldownTrigger`, `.statusTrigger`, `.onceTrigger`                                                      | Health check polling strategies                   |
 | **Reactive**     | `getContainerIp`, `getStatus`, `getSystemSmtp`, `getOutboundGateway`, `getSslCertificate`, `getServiceManifest`                     | Subscription-based data access                    |
-| **Plugins**      | `plugin.url.register`, `plugin.url.exportUrl`                                                                                       | Plugin system (gated by manifest `plugins` field) |
+| **Plugins**      | `plugin.url.register`, `plugin.url.exportUrl`, `plugin.httpProxy.setProfiles`, `plugin.httpProxy.getAttachments`                    | Plugin system (gated by manifest `plugins` field) |
 | **Effects**      | `restart`, `shutdown`, `setHealth`, `mount`, `clearBindings`, ...                                                                   | Direct effect wrappers                            |
 | **Utilities**    | `nullIfEmpty`, `useEntrypoint`, `patterns`, `setDataVersion`, `getDataVersion`                                                      | Misc helpers                                      |
 

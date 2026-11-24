@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub enum PluginId {
     UrlV0,
+    HttpProxyV0,
 }
 
 rpc_toolkit::reflect_ts!(PluginId);

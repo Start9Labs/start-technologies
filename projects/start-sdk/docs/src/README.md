@@ -119,6 +119,7 @@ Intent-driven guides for common packaging objectives. These are the primary entr
 - [Main](./main.md) - Configure daemons, health checks, and the service lifecycle
 - [Initialization](./init.md) - Run code when your service initializes
 - [Interfaces](./interfaces.md) - Expose network interfaces to users
+- [HTTP Proxy Plugins](./http-proxy-plugins.md) - Publish profiles and process attached HTTP traffic
 - [Service-to-Service Networking](./service-to-service.md) - Reach another service at runtime
 - [Outbound Network Access](./outbound-networking.md) - Reach the internet from your service
 - [Actions](./actions.md) - Define user-facing buttons and scripts

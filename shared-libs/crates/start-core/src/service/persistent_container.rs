@@ -3,9 +3,8 @@ use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use futures::FutureExt;
 use futures::future::ready;
-use futures::{Future, FutureExt};
-use imbl::{Vector, vector};
 use imbl_value::InternedString;
 use rpc_toolkit::{Empty, Server, ShutdownHandle};
 use serde::de::DeserializeOwned;
@@ -16,7 +15,7 @@ use tracing::instrument;
 use crate::context::RpcContext;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::loop_dev::LoopDev;
-use crate::disk::mount::filesystem::overlayfs::OverlayGuard;
+use crate::disk::mount::filesystem::overlayfs::AnchoredOverlayGuard;
 use crate::disk::mount::filesystem::{MountType, ReadOnly};
 use crate::disk::mount::guard::{GenericMountGuard, MountGuard};
 use crate::lxc::{BASE_IDMAP, HOST_RPC_SERVER_SOCKET, LxcConfig, LxcContainer, service_filesystem};
@@ -87,10 +86,24 @@ impl ServiceState {
     }
 }
 
+/// Owns a package image's filesystem and optional proxy socket subtree.
 pub struct Subcontainer {
     pub(super) name: InternedString,
     pub(super) image_id: ImageId,
-    pub(super) overlay: OverlayGuard<Arc<MountGuard>>,
+    pub(super) proxy_mounts: Option<crate::net::http_proxy::HttpProxyMounts>,
+    pub(super) overlay: AnchoredOverlayGuard<Arc<MountGuard>>,
+}
+
+impl Subcontainer {
+    /// The caller must finish shared-volume cleanup first.
+    pub(super) async fn unmount(self) -> Result<(), Error> {
+        let mut errors = ErrorCollection::new();
+        if let Some(mounts) = self.proxy_mounts {
+            errors.handle(mounts.unmount().await);
+        }
+        errors.handle(self.overlay.unmount().await);
+        errors.into_result()
+    }
 }
 
 /// Service filesystem and JavaScript runtime resources.
@@ -102,6 +115,7 @@ pub struct PersistentContainer {
     js_mount: MountGuard,
     volumes: BTreeMap<VolumeId, MountGuard>,
     assets: Vec<MountGuard>,
+    proxy_mounts: Option<crate::net::http_proxy::HttpProxyMounts>,
     pub(super) images: BTreeMap<ImageId, Arc<MountGuard>>,
     pub(super) subcontainers: Arc<Mutex<BTreeMap<Guid, Subcontainer>>>,
     pub(crate) shared_volumes: Arc<Mutex<crate::shared_volumes::mounts::SharedVolumeMounts>>,
@@ -129,9 +143,7 @@ impl PersistentContainer {
             .callbacks
             .get_container_ip(&container.s9pk.as_manifest().id)
         {
-            callbacks
-                .call(vector![Value::String(Arc::new(ip.to_string()))])
-                .await?;
+            callbacks.call().await?;
         }
         Ok(container)
     }
@@ -171,6 +183,21 @@ impl PersistentContainer {
             ctx.shared_volume_access
                 .register(&s9pk.as_manifest().id, &shared_volumes);
         }
+        let proxy_mounts = if s9pk
+            .as_manifest()
+            .metadata
+            .plugins
+            .contains(&crate::service::effects::plugin::PluginId::HttpProxyV0)
+        {
+            Some(
+                ctx.net_controller
+                    .http_proxy
+                    .mount_provider(&s9pk.as_manifest().id, lxc_container.rootfs_dir())
+                    .await?,
+            )
+        } else {
+            None
+        };
         let rpc_client = lxc_container.connect_rpc(Some(RPC_CONNECT_TIMEOUT)).await?;
         let js_mount = MountGuard::mount(
             &LoopDev::from(
@@ -313,10 +340,10 @@ impl PersistentContainer {
             lxc_container: OnceCell::new_with(Some(lxc_container)),
             rpc_client,
             rpc_server: watch::channel(None).0,
-            // procedures: Default::default(),
             js_mount,
             volumes,
             assets,
+            proxy_mounts,
             images,
             subcontainers: Arc::new(Mutex::new(BTreeMap::new())),
             shared_volumes,
@@ -455,6 +482,7 @@ impl PersistentContainer {
         let js_mount = self.js_mount.take();
         let volumes = std::mem::take(&mut self.volumes);
         let assets = std::mem::take(&mut self.assets);
+        let proxy_mounts = std::mem::take(&mut self.proxy_mounts);
         let images = std::mem::take(&mut self.images);
         let subcontainers = self.subcontainers.clone();
         let shared_volumes = self.shared_volumes.clone();
@@ -487,7 +515,10 @@ impl PersistentContainer {
                 errs.handle(assets.unmount(true).await);
             }
             for (_, overlay) in std::mem::take(&mut *subcontainers.lock().await) {
-                errs.handle(overlay.overlay.unmount(true).await);
+                errs.handle(overlay.unmount().await);
+            }
+            if let Some(mounts) = proxy_mounts {
+                errs.handle(mounts.unmount().await);
             }
             for (_, images) in images {
                 errs.handle(images.unmount().await);
@@ -565,10 +596,10 @@ impl PersistentContainer {
     }
 
     #[instrument(skip_all)]
-    pub async fn callback(&self, handle: CallbackHandle, args: Vector<Value>) -> Result<(), Error> {
+    pub async fn callback(&self, handle: CallbackHandle) -> Result<(), Error> {
         let mut params = None;
         self.state.send_if_modified(|s| {
-            params = handle.params(&mut s.callbacks, args);
+            params = handle.params(&mut s.callbacks);
             params.is_some()
         });
         if let Some(params) = params {

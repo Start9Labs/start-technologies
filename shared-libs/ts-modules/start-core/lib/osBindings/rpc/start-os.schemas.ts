@@ -2430,6 +2430,52 @@ export const HostnameMetadata: z.ZodUnion<
   .meta({
     id: 'HostnameMetadata',
   })
+
+/**
+ * The ingress gateway, independent of chain order and public-only applicability.
+ */
+export const HttpProxyGateway: z.ZodUnion<
+  readonly [
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'network'> }>,
+      z.ZodObject<{ gatewayId: typeof GatewayId }>
+    >,
+    z.ZodIntersection<
+      z.ZodObject<{ kind: z.ZodLiteral<'url-plugin'> }>,
+      z.ZodObject<{ packageId: typeof PackageId }>
+    >,
+  ]
+> = /* @__PURE__ */ z
+  .union([
+    z.intersection(
+      object({ kind: z.literal('network') }),
+      object({ gatewayId: GatewayId }),
+    ),
+    z.intersection(
+      object({ kind: z.literal('url-plugin') }),
+      object({ packageId: PackageId }),
+    ),
+  ])
+  .meta({
+    id: 'HttpProxyGateway',
+    description:
+      'The ingress gateway, independent of chain order and public-only applicability.',
+  })
+
+/**
+ * A provider/profile pair occurring once in a gateway's ordered chain.
+ */
+export const HttpProxyStage: z.ZodObject<{
+  packageId: typeof PackageId
+  profileId: z.ZodString
+}> = /* @__PURE__ */ object({
+  packageId: PackageId,
+  profileId: z.string(),
+}).meta({
+  id: 'HttpProxyStage',
+  description:
+    "A provider/profile pair occurring once in a gateway's ordered chain.",
+})
 export const InfoParams: z.ZodObject<{
   targetId: typeof BackupTargetId
   serverId: z.ZodString
@@ -4083,6 +4129,31 @@ export const HostnameInfo: z.ZodObject<{
 }).meta({
   id: 'HostnameInfo',
 })
+
+/**
+ * Operator intent for one binding × gateway. Missing policies have empty chains.
+ */
+export const HttpProxyChain: z.ZodObject<{
+  gateway: typeof HttpProxyGateway
+  chain: z.ZodArray<typeof HttpProxyStage>
+  /**
+   * Bypasses private clients. URL-plugin gateways require false.
+   */
+  publicOnly: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  gateway: HttpProxyGateway,
+  chain: z.array(HttpProxyStage),
+  /**
+   * Bypasses private clients. URL-plugin gateways require false.
+   */
+  publicOnly: wire(z.boolean().optional(), z.boolean()).meta({
+    description: 'Bypasses private clients. URL-plugin gateways require false.',
+  }),
+}).meta({
+  id: 'HttpProxyChain',
+  description:
+    'Operator intent for one binding × gateway. Missing policies have empty chains.',
+})
 export const InstallParams: z.ZodObject<{
   acceptSigners: z.ZodCodec<
     z.ZodOptional<z.ZodNullable<typeof AcceptSigners>>,
@@ -4414,6 +4485,9 @@ export const ServiceInterface: z.ZodObject<{
 })
 export const SharedVolume: z.ZodIntersection<
   z.ZodObject<{
+    /**
+     * A unique single folder name; services mount a volume at a path matching it.
+     */
     name: z.ZodString
     source: typeof SharedVolumeSource
     grants: z.ZodRecord<z.ZodString, typeof SharedVolumeGrant>
@@ -4422,7 +4496,13 @@ export const SharedVolume: z.ZodIntersection<
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      name: z.string(),
+      /**
+       * A unique single folder name; services mount a volume at a path matching it.
+       */
+      name: z.string().meta({
+        description:
+          'A unique single folder name; services mount a volume at a path matching it.',
+      }),
       source: SharedVolumeSource,
       grants: z.record(z.string(), SharedVolumeGrant),
     }),
@@ -5051,6 +5131,21 @@ export const NetworkGatewayInfo: z.ZodObject<{
 )
 
 /**
+ * Replaces one gateway's chain without changing the binding's other gateways.
+ */
+export const SetHttpProxyChainParams: z.ZodObject<{
+  internalPort: z.ZodInt
+  policy: typeof HttpProxyChain
+}> = /* @__PURE__ */ object({
+  internalPort: z.int(),
+  policy: HttpProxyChain,
+}).meta({
+  id: 'SetHttpProxyChainParams',
+  description:
+    "Replaces one gateway's chain without changing the binding's other gateways.",
+})
+
+/**
  * Parameters for replacing the stored NUT configuration.
  */
 export const SetNutParams: z.ZodObject<{ config: typeof NutConfig }> =
@@ -5272,6 +5367,10 @@ export const BindInfo: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof ServiceInterface>>,
     z.ZodRecord<z.ZodString, typeof ServiceInterface>
   >
+  proxyChains: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof HttpProxyChain>>,
+    z.ZodArray<typeof HttpProxyChain>
+  >
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
   options: BindOptions,
@@ -5289,6 +5388,10 @@ export const BindInfo: z.ZodObject<{
     description:
       'Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.',
   }),
+  proxyChains: wire(
+    z.array(HttpProxyChain).optional(),
+    z.array(HttpProxyChain),
+  ),
 }).meta({
   id: 'BindInfo',
 })
@@ -6404,6 +6507,15 @@ export const Api = {
                   _ITEM: /* @__PURE__ */ z.never(),
                   _FINAL: /* @__PURE__ */ z.null(),
                 },
+                'set-http-proxy-chain': {
+                  _PARAMS: /* @__PURE__ */ z.intersection(
+                    z.intersection(RequiresPackageId, RequiresHostId),
+                    SetHttpProxyChainParams,
+                  ),
+                  _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
+                },
                 'set-range-address-enabled': {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(RequiresPackageId, RequiresHostId),
@@ -6764,6 +6876,12 @@ export const Api = {
                 },
                 'set-gua-wan': {
                   _PARAMS: /* @__PURE__ */ BindingSetGuaWanParams,
+                  _RETURN: /* @__PURE__ */ z.null(),
+                  _ITEM: /* @__PURE__ */ z.never(),
+                  _FINAL: /* @__PURE__ */ z.null(),
+                },
+                'set-http-proxy-chain': {
+                  _PARAMS: /* @__PURE__ */ SetHttpProxyChainParams,
                   _RETURN: /* @__PURE__ */ z.null(),
                   _ITEM: /* @__PURE__ */ z.never(),
                   _FINAL: /* @__PURE__ */ z.null(),

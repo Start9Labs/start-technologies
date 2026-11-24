@@ -34,6 +34,10 @@ in the same build checkout before Cargo.
   The runner also executes the conversion worker lifecycle cases with the controlled `testdata/backup-conversion` subprocess fixture on PATH. The ignored `real_helper_converts_the_frozen_backup_through_the_background_worker` case instead requires the built real `startos-backup-fs` on PATH.
   Native SquashFS interoperability tests require `mksquashfs` and `unsquashfs`; backup filesystem
   tests require `btrfs-progs`; manifest tests require Node.
+  The ignored `provider_mounts_isolate_continuations_in_outer_and_subcontainer_roots` test calls
+  the production socket-mount helper in minimal chroots. Run it on Linux as root in a private
+  mount namespace with UID/GID 100000 mapped, Node.js, and util-linux; select it with
+  `cargo test -p start-core provider_mounts_isolate_continuations --features=test -- --ignored`.
 - `make start-core-format` — format the shared Rust crates with the pinned nightly container (`make start-core-format-check` checks formatting). Set `FMT_NATIVE=1` only when that nightly is installed locally.
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.
 

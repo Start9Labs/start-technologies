@@ -2662,6 +2662,7 @@ PersistentKeepalive = 25`
         bindings: {
           443: {
             enabled: true,
+            proxyChains: [],
             net: {
               assignedPort: null,
               assignedSslPort: 443,
@@ -2756,6 +2757,7 @@ PersistentKeepalive = 25`
         bindings: {
           8332: {
             enabled: true,
+            proxyChains: [],
             net: {
               assignedPort: 8332,
               assignedSslPort: null,
@@ -2804,6 +2806,7 @@ PersistentKeepalive = 25`
         bindings: {
           8333: {
             enabled: true,
+            proxyChains: [],
             net: {
               assignedPort: 8333,
               assignedSslPort: null,
@@ -2854,7 +2857,7 @@ PersistentKeepalive = 25`
     outboundDns: null,
     registry: 'https://registry.start9.com/',
     developerKey: 'developer-key',
-    plugin: { url: null },
+    plugin: { url: null, httpProxy: null },
     tasks: {
       'bitcoind-config': {
         task: {
@@ -2910,7 +2913,7 @@ PersistentKeepalive = 25`
     outboundDns: null,
     registry: 'https://registry.start9.com/',
     developerKey: 'developer-key',
-    plugin: { url: null },
+    plugin: { url: null, httpProxy: null },
     tasks: {},
   }
 
@@ -2968,7 +2971,7 @@ PersistentKeepalive = 25`
     outboundDns: null,
     registry: 'https://registry.start9.com/',
     developerKey: 'developer-key',
-    plugin: { url: null },
+    plugin: { url: null, httpProxy: null },
     tasks: {
       config: {
         active: true,

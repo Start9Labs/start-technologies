@@ -48,6 +48,7 @@ fn target(addr: SocketAddr) -> ProxyTarget {
         addr,
         addr_v6: None,
         proxy: None,
+        http_chain: None,
         connect_ssl: None,
         alpn: None,
         passthrough: false,
@@ -290,7 +291,7 @@ async fn malformed_http_from_clients_and_services_is_trace_only() {
                     }
                     let (logs, dispatch) = capture_logs_with_filter(filter);
                     target
-                        .relay(Box::pin(from), Box::pin(to), None, None, ssl)
+                        .relay(Box::pin(from), Box::pin(to), None, None, ssl, None)
                         .with_subscriber(dispatch)
                         .await;
                     let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();

@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use clap::Parser;
 use futures::future::join_all;
-use imbl::{OrdMap, Vector, vector};
+use imbl::OrdMap;
 use imbl_value::InternedString;
 use patch_db::TypedDbWatch;
 use serde::{Deserialize, Serialize};
@@ -26,34 +26,16 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::SyncMutex;
 use crate::{GatewayId, HostId, PackageId, ServiceInterfaceId};
 
-/// Abstraction for callbacks that are triggered by patchdb subscriptions.
-///
-/// Handles the subscribe-wait-fire-remove pattern: when a callback is first
-/// registered for a key, a patchdb subscription is spawned. When the subscription
-/// fires, all handlers are consumed and invoked, then the subscription stops.
-/// A new subscription is created if a handler is registered again.
+/// Invalidates getter subscriptions after their first relevant database change.
 pub struct DbWatchedCallbacks<K: Ord> {
     label: &'static str,
-    arguments: fn(Value) -> Result<Vector<Value>, Error>,
     inner: SyncMutex<BTreeMap<K, (NonDetachingJoinHandle<()>, Vec<CallbackHandler>)>>,
 }
 
 impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
     pub fn new(label: &'static str) -> Self {
-        Self::with_arguments(label, |value| Ok(vector![value]))
-    }
-
-    pub fn invalidation(label: &'static str) -> Self {
-        Self::with_arguments(label, |_| Ok(vector![]))
-    }
-
-    fn with_arguments(
-        label: &'static str,
-        arguments: fn(Value) -> Result<Vector<Value>, Error>,
-    ) -> Self {
         Self {
             label,
-            arguments,
             inner: SyncMutex::new(BTreeMap::new()),
         }
     }
@@ -92,9 +74,7 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                                 if let Some(cbs) =
                                     this.remove(&k).and_then(CallbackHandlers::detach_watcher)
                                 {
-                                    if let Err(e) =
-                                        async { cbs.call((this.arguments)(value)?).await }.await
-                                    {
+                                    if let Err(e) = cbs.call().await {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
                                     }
@@ -125,68 +105,6 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn host_callback_arguments_use_the_service_projection() {
-        use crate::net::forward::AvailablePorts;
-        use crate::net::host::binding::{BindInfo, BindOptions};
-        use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
-
-        let mut binding = BindInfo::new(
-            &mut AvailablePorts::new(),
-            BindOptions {
-                transport: Default::default(),
-                preferred_external_port: 8080,
-                add_ssl: None,
-                secure: None,
-                proxy: None,
-            },
-            false,
-        )
-        .unwrap();
-        binding.addresses.available.insert(HostnameInfo {
-            hostname: "192.0.2.10".into(),
-            port: Some(8080),
-            ssl: false,
-            public: false,
-            metadata: HostnameMetadata::Ipv4 {
-                gateway: "eth0".parse().unwrap(),
-            },
-        });
-        binding
-            .addresses
-            .insecure
-            .insert(("192.0.2.10".into(), 8080, "eth0".parse().unwrap()));
-        let mut host = Host::default();
-        host.bindings.insert(80, binding);
-        let callbacks = ServiceCallbacks::default();
-        let arguments = callbacks.get_host_info.arguments;
-        let values = arguments(imbl_value::to_value(&host).unwrap()).unwrap();
-        assert_eq!(values.len(), 1);
-        let projected: Host = imbl_value::from_value(values[0].clone()).unwrap();
-        assert!(projected.bindings[&80].addresses.available.is_empty());
-        assert_eq!(arguments(Value::Null).unwrap(), vector![Value::Null]);
-    }
-
-    #[test]
-    fn invalidation_callbacks_do_not_disclose_the_watched_value() {
-        let callbacks = DbWatchedCallbacks::<()>::invalidation("volumes");
-        assert!(
-            (callbacks.arguments)(Value::from("private catalog"))
-                .unwrap()
-                .is_empty()
-        );
-        let callbacks = DbWatchedCallbacks::<()>::new("existing reader");
-        assert_eq!(
-            (callbacks.arguments)(Value::from("value")).unwrap(),
-            vector![Value::from("value")]
-        );
-    }
-}
-
 pub struct ServiceCallbacks {
     inner: SyncMutex<ServiceCallbackMap>,
     get_host_info: Arc<DbWatchedCallbacks<(PackageId, HostId)>>,
@@ -195,6 +113,7 @@ pub struct ServiceCallbacks {
     list_service_interfaces: Arc<DbWatchedCallbacks<PackageId>>,
     get_system_smtp: Arc<DbWatchedCallbacks<()>>,
     get_service_manifest: Arc<DbWatchedCallbacks<PackageId>>,
+    get_http_proxy_attachments: Arc<DbWatchedCallbacks<PackageId>>,
     get_shared_volumes: Arc<DbWatchedCallbacks<PackageId>>,
 }
 
@@ -202,15 +121,16 @@ impl Default for ServiceCallbacks {
     fn default() -> Self {
         Self {
             inner: SyncMutex::new(ServiceCallbackMap::default()),
-            get_host_info: Arc::new(DbWatchedCallbacks::with_arguments("host info", |value| {
-                Ok(vector![super::net::host::project_host_info(value)?])
-            })),
+            get_host_info: Arc::new(DbWatchedCallbacks::new("host info")),
             get_status: Arc::new(DbWatchedCallbacks::new("get_status")),
             get_service_interface: Arc::new(DbWatchedCallbacks::new("get_service_interface")),
             list_service_interfaces: Arc::new(DbWatchedCallbacks::new("list_service_interfaces")),
             get_system_smtp: Arc::new(DbWatchedCallbacks::new("get_system_smtp")),
             get_service_manifest: Arc::new(DbWatchedCallbacks::new("get_service_manifest")),
-            get_shared_volumes: Arc::new(DbWatchedCallbacks::invalidation("get_shared_volumes")),
+            get_http_proxy_attachments: Arc::new(DbWatchedCallbacks::new(
+                "get_http_proxy_attachments",
+            )),
+            get_shared_volumes: Arc::new(DbWatchedCallbacks::new("get_shared_volumes")),
         }
     }
 }
@@ -247,6 +167,7 @@ impl ServiceCallbacks {
         self.list_service_interfaces.gc();
         self.get_system_smtp.gc();
         self.get_service_manifest.gc();
+        self.get_http_proxy_attachments.gc();
         self.get_shared_volumes.gc();
     }
 
@@ -326,7 +247,7 @@ impl ServiceCallbacks {
                                         .remove(&(hostnames, cert, algorithm))
                                         .and_then(CallbackHandlers::detach_watcher)
                                 }) {
-                                    cbs.call(vector![]).await?;
+                                    cbs.call().await?;
                                 }
                                 Ok::<_, Error>(())
                             }
@@ -414,7 +335,7 @@ impl ServiceCallbacks {
                                     .remove(&key)
                                     .and_then(CallbackHandlers::detach_watcher)
                             }) {
-                                if let Err(e) = cbs.call(vector![]).await {
+                                if let Err(e) = cbs.call().await {
                                     tracing::error!("Error in outbound gateway callback: {e}");
                                     tracing::debug!("{e:?}");
                                 }
@@ -427,6 +348,16 @@ impl ServiceCallbacks {
                 .1
                 .push(handler);
         })
+    }
+
+    pub(super) fn add_get_http_proxy_attachments(
+        &self,
+        package_id: PackageId,
+        watch: TypedDbWatch<crate::db::model::public::Public>,
+        handler: CallbackHandler,
+    ) {
+        self.get_http_proxy_attachments
+            .add(package_id, watch, handler);
     }
 
     pub(super) fn add_get_shared_volumes<T: Send + 'static>(
@@ -443,7 +374,7 @@ impl ServiceCallbacks {
     pub(crate) async fn invalidate_shared_volumes(&self, package: &PackageId) -> Result<(), Error> {
         if let Some((watcher, handlers)) = self.get_shared_volumes.remove(package) {
             drop(watcher);
-            CallbackHandlers(handlers).call(vector![]).await?;
+            CallbackHandlers(handlers).call().await?;
         }
         Ok(())
     }
@@ -469,10 +400,10 @@ impl CallbackHandler {
             seed: Arc::downgrade(&service.seed),
         }
     }
-    pub async fn call(mut self, args: Vector<Value>) -> Result<(), Error> {
+    pub async fn call(mut self) -> Result<(), Error> {
         if let Some(seed) = self.seed.upgrade() {
             seed.persistent_container
-                .callback(self.handle.take(), args)
+                .callback(self.handle.take())
                 .await?;
         }
         Ok(())
@@ -498,9 +429,9 @@ impl CallbackHandlers {
         Some(Self(handlers)).filter(|cbs| !cbs.0.is_empty())
     }
 
-    pub async fn call(self, args: Vector<Value>) -> Result<(), Error> {
+    pub async fn call(self) -> Result<(), Error> {
         let mut err = ErrorCollection::new();
-        for res in join_all(self.0.into_iter().map(|cb| cb.call(args.clone()))).await {
+        for res in join_all(self.0.into_iter().map(|cb| cb.call())).await {
             err.handle(res);
         }
         err.into_result()

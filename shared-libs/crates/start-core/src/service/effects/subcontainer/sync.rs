@@ -1,4 +1,4 @@
-use std::ffi::{OsStr, OsString, c_int};
+use std::ffi::{OsString, c_int};
 use std::fs::File;
 use std::io::{BufRead, BufReader, IsTerminal, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
@@ -17,84 +17,182 @@ use tokio::sync::oneshot;
 use crate::CAP_1_KiB;
 use crate::service::effects::ContainerCliContext;
 use crate::service::effects::prelude::*;
+use crate::util::directory::{descriptor_path, open_at_nofollow};
 use crate::util::env::{parse_assignment, parse_json_env};
 use crate::util::io::TermSize;
+
+#[cfg(test)]
+#[path = "proc_cleanup_tests.rs"]
+mod proc_cleanup_tests;
 
 const FWD_SIGNALS: &[c_int] = &[
     SIGABRT, SIGALRM, SIGCONT, SIGHUP, SIGINT, SIGIO, SIGPIPE, SIGPROF, SIGQUIT, SIGTERM, SIGTRAP,
     SIGTSTP, SIGTTIN, SIGTTOU, SIGURG, SIGUSR1, SIGUSR2, SIGVTALRM,
 ];
 
-pub fn kill_init(procfs: &Path, chroot: &Path) -> Result<(), Error> {
-    if chroot.join("proc/1").exists() {
-        let ns_id = procfs::process::Process::new_with_root(chroot.join("proc/1"))
-            .with_ctx(|_| (ErrorKind::Filesystem, "open subcontainer procfs"))?
-            .namespaces()
-            .with_ctx(|_| (ErrorKind::Filesystem, "read subcontainer pid 1 ns"))?
-            .0
-            .get(OsStr::new("pid"))
-            .or_not_found("pid namespace")?
-            .identifier;
-        for proc in procfs::process::all_processes_with_root(procfs)
-            .with_ctx(|_| (ErrorKind::Filesystem, "open procfs"))?
-        {
-            let proc = proc.with_ctx(|_| (ErrorKind::Filesystem, "read single process details"))?;
-            let pid = proc.pid();
-            if proc
-                .namespaces()
-                .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("read pid {} ns", pid)))?
-                .0
-                .get(OsStr::new("pid"))
-                .map_or(false, |ns| ns.identifier == ns_id)
-            {
-                let pids = proc.read::<_, NSPid>("status").with_ctx(|_| {
-                    (
-                        ErrorKind::Filesystem,
-                        lazy_format!("read pid {} NSpid", pid),
+/// Reads kernel procfs only and signals the selected namespace init through a pidfd.
+pub fn kill_init(chroot: &File) -> Result<(), Error> {
+    let Some(mount) = proc_mount(chroot)? else {
+        return Ok(());
+    };
+    kill_proc_init(mount)
+}
+
+fn kill_proc_init(mount: File) -> Result<(), Error> {
+    if let Some(namespace) = pid_namespace_at(&mount, 1)? {
+        let caller_proc = kernel_proc_mount(File::open("/proc")?)?.or_not_found("kernel procfs")?;
+        for process in procfs::process::all_processes().with_kind(ErrorKind::Filesystem)? {
+            let Some(process) = process_if_alive(process)? else {
+                continue;
+            };
+            let pidfd = match open_pidfd(Pid::from_raw(process.pid())) {
+                Err(error) if error.raw_os_error() == Some(libc::ESRCH) => continue,
+                result => result.with_kind(ErrorKind::Filesystem)?,
+            };
+            if pid_namespace_at(&caller_proc, process.pid())? != Some(namespace) {
+                continue;
+            }
+            let Some(status) = process_if_alive(process.status())? else {
+                continue;
+            };
+            if status.nspid.as_ref().and_then(|ids| ids.last()) == Some(&1) {
+                let result = unsafe {
+                    libc::syscall(
+                        libc::SYS_pidfd_send_signal,
+                        pidfd.as_raw_fd(),
+                        libc::SIGKILL,
+                        std::ptr::null::<libc::siginfo_t>(),
+                        0,
                     )
-                })?;
-                if pids.0.len() == 2 && pids.0[1] == 1 {
-                    match nix::sys::signal::kill(
-                        Pid::from_raw(pid),
-                        Some(nix::sys::signal::SIGKILL),
-                    ) {
-                        Err(Errno::ESRCH) => Ok(()),
-                        a => a,
+                };
+                if result < 0 {
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() != Some(libc::ESRCH) {
+                        return Err(Error::new(error, ErrorKind::Filesystem));
                     }
-                    .with_ctx(|_| {
-                        (
-                            ErrorKind::Filesystem,
-                            lazy_format!(
-                                "kill pid {} (determined to be pid 1 in subcontainer)",
-                                pid
-                            ),
-                        )
-                    })?;
                 }
+                break;
             }
         }
-        nix::mount::umount(&chroot.join("proc"))
-            .with_ctx(|_| (ErrorKind::Filesystem, "unmounting subcontainer procfs"))?;
+    }
+    detach_proc(mount)
+}
+
+// Namespace identity must come from this procfs mount, not replacement submounts.
+fn pid_namespace_at(procfs: &File, pid: libc::pid_t) -> Result<Option<u64>, Error> {
+    use nix::fcntl::{OFlag, OpenHow, ResolveFlag, openat2, readlinkat};
+
+    let how = OpenHow::new()
+        .flags(OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC)
+        .resolve(
+            ResolveFlag::RESOLVE_BENEATH
+                | ResolveFlag::RESOLVE_NO_SYMLINKS
+                | ResolveFlag::RESOLVE_NO_XDEV,
+        );
+    let link = match openat2(procfs, format!("{pid}/ns/pid").as_str(), how) {
+        Err(nix::errno::Errno::ENOENT | nix::errno::Errno::ESRCH) => return Ok(None),
+        result => result.with_kind(ErrorKind::Filesystem)?,
+    };
+    let target = match readlinkat(&link, "") {
+        Err(nix::errno::Errno::ENOENT | nix::errno::Errno::ESRCH) => return Ok(None),
+        result => result.with_kind(ErrorKind::Filesystem)?,
+    };
+    let id = target
+        .to_str()
+        .and_then(|target| {
+            target
+                .strip_prefix("pid:[")?
+                .strip_suffix(']')?
+                .parse::<u64>()
+                .ok()
+        })
+        .ok_or_else(|| {
+            Error::new(
+                eyre!("Invalid kernel PID namespace link"),
+                ErrorKind::Filesystem,
+            )
+        })?;
+    Ok(Some(id))
+}
+
+fn process_if_alive<T>(value: procfs::ProcResult<T>) -> Result<Option<T>, Error> {
+    match value {
+        Ok(value) => Ok(Some(value)),
+        Err(procfs::ProcError::NotFound(_)) => Ok(None),
+        Err(procfs::ProcError::Io(error, _))
+            if matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(Error::new(error, ErrorKind::Filesystem)),
+    }
+}
+
+fn proc_mount(chroot: &File) -> Result<Option<File>, Error> {
+    let mount = match open_at_nofollow(chroot, c"proc", libc::O_RDONLY | libc::O_DIRECTORY, 0) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        result => result.with_kind(ErrorKind::Filesystem)?,
+    };
+    kernel_proc_mount(mount)
+}
+
+fn container_proc_mount(chroot: &Path) -> Result<Option<File>, Error> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mount = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
+        .open(chroot.join("proc"))
+    {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(None);
+        }
+        result => result.with_kind(ErrorKind::Filesystem)?,
+    };
+    kernel_proc_mount(mount)
+}
+
+fn kernel_proc_mount(mount: File) -> Result<Option<File>, Error> {
+    let mut stat = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    if unsafe { libc::fstatfs(mount.as_raw_fd(), stat.as_mut_ptr()) } < 0 {
+        return Err(Error::new(
+            std::io::Error::last_os_error(),
+            ErrorKind::Filesystem,
+        ));
+    }
+    if unsafe { stat.assume_init() }.f_type as u64 == libc::PROC_SUPER_MAGIC as u64 {
+        Ok(Some(mount))
+    } else {
+        Ok(None)
+    }
+}
+
+fn detach_proc(mount: File) -> Result<(), Error> {
+    let path = std::ffi::CString::new(
+        descriptor_path(mount.as_fd())
+            .as_os_str()
+            .as_encoded_bytes(),
+    )
+    .unwrap();
+    if unsafe { libc::umount2(path.as_ptr(), libc::MNT_DETACH) } < 0 {
+        return Err(Error::new(
+            std::io::Error::last_os_error(),
+            ErrorKind::Filesystem,
+        ));
     }
     Ok(())
 }
 
-struct NSPid(Vec<i32>);
-impl procfs::FromBufRead for NSPid {
-    fn from_buf_read<R: std::io::BufRead>(r: R) -> procfs::ProcResult<Self> {
-        for line in r.lines() {
-            let line = line?;
-            if let Some(row) = line.trim().strip_prefix("NSpid:") {
-                return Ok(Self(
-                    row.trim()
-                        .split_ascii_whitespace()
-                        .map(|pid| pid.parse::<i32>())
-                        .collect::<Result<Vec<_>, _>>()?,
-                ));
-            }
-        }
-        Err(procfs::ProcError::Incomplete(None))
+fn unmount_proc(chroot: &Path) -> Result<(), Error> {
+    if let Some(mount) = container_proc_mount(chroot)? {
+        detach_proc(mount)?;
     }
+    Ok(())
 }
 
 fn open_pidfd(pid: Pid) -> std::io::Result<OwnedFd> {
@@ -339,6 +437,8 @@ impl ExecParams {
 
 #[cfg(test)]
 mod environment_tests {
+    use std::ffi::OsStr;
+
     use super::*;
 
     #[test]
@@ -704,7 +804,9 @@ pub fn launch(
 ) -> Result<(), Error> {
     use std::io::Write;
 
-    kill_init(Path::new("/proc"), &chroot)?;
+    if let Some(mount) = container_proc_mount(&chroot)? {
+        kill_proc_init(mount)?;
+    }
     let mut sig = signal_hook::iterator::Signals::new(FWD_SIGNALS)?;
     let (send_pid, recv_pid) = oneshot::channel();
     std::thread::spawn(move || {
@@ -876,8 +978,7 @@ pub fn launch(
             .wait()
             .with_ctx(|_| (ErrorKind::Filesystem, "waiting on child process"))?;
         if let Some(code) = exit.code() {
-            nix::mount::umount(&chroot.join("proc"))
-                .with_ctx(|_| (ErrorKind::Filesystem, "umount procfs"))?;
+            unmount_proc(&chroot)?;
             std::process::exit(code);
         } else if exit.success() || exit.signal() == Some(15) {
             Ok(())

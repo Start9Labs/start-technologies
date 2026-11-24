@@ -239,16 +239,12 @@ impl CallbackHandle {
     pub fn is_active(&self) -> bool {
         self.0.strong_count() > 0
     }
-    pub fn params(
-        self,
-        registered: &mut BTreeSet<Arc<CallbackId>>,
-        args: Vector<Value>,
-    ) -> Option<CallbackParams> {
+    pub fn params(self, registered: &mut BTreeSet<Arc<CallbackId>>) -> Option<CallbackParams> {
         if let Some(id) = self.0.upgrade() {
             if let Some(strong) = registered.get(&id) {
                 if Arc::ptr_eq(strong, &id) {
                     registered.remove(&id);
-                    return Some(CallbackParams::new(&*id, args));
+                    return Some(CallbackParams::new(&*id));
                 }
             }
         }
@@ -259,6 +255,7 @@ impl CallbackHandle {
     }
 }
 
+/// Getter callbacks invalidate reads without carrying service or database values.
 #[derive(Clone, serde::Deserialize, serde::Serialize, VisitFields)]
 pub struct CallbackParams {
     id: u64,
@@ -267,9 +264,16 @@ pub struct CallbackParams {
 }
 
 rpc_toolkit::reflect_ts!(CallbackParams);
+
+#[cfg(test)]
+#[path = "rpc_callback_tests.rs"]
+mod callback_tests;
 impl CallbackParams {
-    fn new(id: &CallbackId, args: Vector<Value>) -> Self {
-        Self { id: id.0, args }
+    fn new(id: &CallbackId) -> Self {
+        Self {
+            id: id.0,
+            args: Vector::new(),
+        }
     }
 }
 

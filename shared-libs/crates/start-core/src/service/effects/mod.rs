@@ -430,6 +430,29 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
             "plugin",
             ParentHandler::<C>::new()
                 .subcommand(
+                    "http-proxy",
+                    ParentHandler::<C>::new()
+                        .subcommand(
+                            "set-profiles",
+                            from_fn_async(net::http_proxy::set_profiles).no_cli(),
+                        )
+                        .subcommand(
+                            "set-profiles",
+                            from_fn_async(forward_stdin)
+                                .no_ts()
+                                .no_display()
+                                .with_about("about.container-plugin-http-proxy-set-profiles"),
+                        )
+                        .subcommand(
+                            "get-attachments",
+                            from_fn_async(net::http_proxy::get_attachments)
+                                .with_display_serializable()
+                                .with_about("about.container-plugin-http-proxy-get-attachments")
+                                .with_call_remote::<ContainerCliContext>(),
+                        )
+                        .with_about("about.container-commands-plugin-http-proxy"),
+                )
+                .subcommand(
                     "url",
                     ParentHandler::<C>::new()
                         .subcommand("register", from_fn_async(net::plugin::register).no_cli())

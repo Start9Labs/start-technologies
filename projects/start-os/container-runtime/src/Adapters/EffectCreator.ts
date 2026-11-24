@@ -360,6 +360,24 @@ export function makeEffects(context: EffectContext): Effects {
       return rpcRound('set-data-version', options)
     },
     plugin: {
+      httpProxy: {
+        setProfiles(
+          ...[options]: Parameters<
+            T.Effects['plugin']['httpProxy']['setProfiles']
+          >
+        ) {
+          return rpcRound('plugin.http-proxy.set-profiles', options)
+        },
+        getAttachments(
+          ...[options]: Parameters<
+            T.Effects['plugin']['httpProxy']['getAttachments']
+          >
+        ) {
+          return rpcRound('plugin.http-proxy.get-attachments', {
+            callback: context.callbacks?.addCallback(options.callback) || null,
+          })
+        },
+      },
       url: {
         register(
           ...[options]: Parameters<T.Effects['plugin']['url']['register']>

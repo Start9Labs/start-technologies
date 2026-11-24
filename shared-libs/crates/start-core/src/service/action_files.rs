@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
 use std::fs::File;
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
-use std::path::{Component, Path};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 use crate::action::{ActionResult, ActionResultValue};
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation, RpcContinuations};
+use crate::util::directory::{open_at_nofollow as open_at, open_directory_nofollow};
 
 pub const PREPARED_TRANSFER_TTL: Duration = Duration::from_secs(30 * 60);
 pub const ACTIVE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -87,32 +88,14 @@ fn syscall(result: libc::c_int) -> std::io::Result<libc::c_int> {
     }
 }
 
-fn open_at(parent: &File, name: &CStr, flags: libc::c_int, mode: u32) -> std::io::Result<File> {
-    let fd = syscall(unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            flags | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-            mode as libc::c_uint,
-        )
-    })?;
-    Ok(unsafe { File::from_raw_fd(fd) })
-}
-
 fn open_root(root: &Path) -> Result<File, Error> {
-    let mut parent = File::open("/")?;
-    for component in root.components() {
-        match component {
-            Component::RootDir => (),
-            Component::Normal(name) => {
-                use std::os::unix::ffi::OsStrExt;
-                let name = CString::new(name.as_bytes()).map_err(|_| invalid())?;
-                parent = open_at(&parent, &name, libc::O_RDONLY | libc::O_DIRECTORY, 0)?;
-            }
-            _ => return Err(invalid()),
+    open_directory_nofollow(root).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::InvalidInput {
+            invalid()
+        } else {
+            error.into()
         }
-    }
-    Ok(parent)
+    })
 }
 
 struct Destination {

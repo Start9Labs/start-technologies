@@ -426,9 +426,9 @@ impl VHostController {
             private: private.clone(),
             acme: None,
             addr: backend,
-            // A manual passthrough is not a container the box gateways.
             addr_v6: None,
             proxy: None,
+            http_chain: None,
             connect_ssl: None,
             alpn: None,
             passthrough: true,
@@ -786,7 +786,7 @@ fn compute_bind_reqs<A: Accept + 'static>(mapping: &Mapping<A>) -> VHostBindRequ
 /// still held by a torn-down listener — instead of latching the hole until the
 /// next network change.
 const BIND_RETRY_BACKOFF: Duration = Duration::from_secs(2);
-const BACKEND_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const BACKEND_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Listener that manages its own TCP listeners with IP-level precision.
 /// Binds ALL IPs of public gateways and ONLY matching private IPs.
@@ -1146,6 +1146,8 @@ pub struct ProxyTarget {
     /// a v6 client's source can only be bound on a socket dialing v6.
     pub addr_v6: Option<SocketAddrV6>,
     pub proxy: Option<ProxyOptions>,
+    /// Changes retire ingress connections across the binding.
+    pub(crate) http_chain: Option<Arc<crate::net::http_proxy::GatewayRoutes>>,
     /// The config StartOS dials the container with when the container serves
     /// its own TLS. `None` dials it in plaintext.
     pub connect_ssl: Option<Arc<ClientConfig>>,
@@ -1201,6 +1203,38 @@ fn on_container_bridge(ip: IpAddr) -> bool {
 }
 
 impl ProxyTarget {
+    fn select_chain<A>(
+        &self,
+        metadata: &A::Metadata,
+    ) -> Result<Option<Arc<crate::net::http_proxy::ChainTarget>>, Error>
+    where
+        A: Accept + 'static,
+        A::Metadata: Visit<ExtractVisitor<GatewayInfo>>
+            + Visit<ExtractVisitor<TcpMetadata>>
+            + Clone
+            + Send
+            + Sync,
+    {
+        let tcp = extract::<TcpMetadata, _>(metadata);
+        let gateway = extract::<GatewayInfo, _>(metadata);
+        let origin = crate::net::request_origin::RequestOrigin::from_connection(
+            tcp.as_ref(),
+            gateway.as_ref(),
+        );
+        self.http_chain
+            .as_ref()
+            .map(|routes| routes.select(&origin))
+            .transpose()
+            .map(Option::flatten)
+    }
+
+    async fn chain_cancelled(chain: &Option<Arc<crate::net::http_proxy::ChainTarget>>) {
+        match chain {
+            Some(chain) => chain.cancel.cancelled().await,
+            None => std::future::pending().await,
+        }
+    }
+
     /// Whether to accept a connection that arrived on local address `dst` from
     /// `src`, via gateway `gw_id` whose on-link subnets are `subnets`. WAN accept
     /// is gated per family by `dst`'s family — a gateway public only on its GUA
@@ -1236,6 +1270,8 @@ impl ProxyTarget {
             && self.addr == other.addr
             && self.addr_v6 == other.addr_v6
             && self.proxy == other.proxy
+            && self.http_chain.as_ref().map(Arc::as_ptr)
+                == other.http_chain.as_ref().map(Arc::as_ptr)
             && self.passthrough == other.passthrough
             && self.preserve_source_ip == other.preserve_source_ip
             && self.alpn == other.alpn
@@ -1347,14 +1383,52 @@ impl ProxyTarget {
         Ok(Some(origin.register_proxy(local, peer)))
     }
 
-    async fn relay(
+    pub(crate) async fn relay(
+        &self,
+        stream: AcceptStream,
+        backend: AcceptStream,
+        alpn: Option<MaybeUtf8String>,
+        source_ip: Option<IpAddr>,
+        ssl: bool,
+        chain: Option<Arc<crate::net::http_proxy::ChainTarget>>,
+    ) {
+        tokio::select! {
+            _ = Self::chain_cancelled(&chain) => {}
+            _ = self.relay_http(stream, backend, alpn, source_ip, ssl, &chain) => {}
+        }
+    }
+
+    async fn relay_http(
         &self,
         mut stream: AcceptStream,
         mut backend: AcceptStream,
         alpn: Option<MaybeUtf8String>,
         source_ip: Option<IpAddr>,
         ssl: bool,
+        chain: &Option<Arc<crate::net::http_proxy::ChainTarget>>,
     ) {
+        if let Some(chain) = chain {
+            let protocol = if ssl {
+                if alpn.as_ref().is_some_and(|alpn| alpn.0 == b"h2") {
+                    crate::net::http_proxy::HttpProxyProtocol::Http2
+                } else {
+                    crate::net::http_proxy::HttpProxyProtocol::Http1
+                }
+            } else {
+                let mut buffered = crate::util::io::BackTrackingIO::new(stream);
+                let Ok(Some(protocol)) = crate::net::http::read_http_protocol(&mut buffered).await
+                else {
+                    return;
+                };
+                stream = Box::pin(buffered);
+                protocol
+            };
+            if !chain.protocols.contains(&protocol) {
+                backend = crate::net::http::proxy_status_stream(
+                    http::StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+                );
+            }
+        }
         match &self.proxy {
             Some(ProxyOptions::Http {
                 add_x_forwarded_headers,
@@ -1431,6 +1505,13 @@ where
     })
 }
 
+/// Prepared upstream and connection-scoped HTTP proxy selection.
+pub struct PreparedProxy(
+    AcceptStream,
+    Option<crate::util::GeneralBoxedGuard>,
+    Option<Arc<crate::net::http_proxy::ChainTarget>>,
+);
+
 impl<A> VHostTarget<A> for ProxyTarget
 where
     A: Accept + 'static,
@@ -1440,7 +1521,7 @@ where
         + Send
         + Sync,
 {
-    type PreprocessRes = (AcceptStream, Option<crate::util::GeneralBoxedGuard>);
+    type PreprocessRes = PreparedProxy;
     fn filter(&self, metadata: &<A as Accept>::Metadata) -> bool {
         arrival::<A>(metadata).is_some_and(|at| self.accepts_arrival(&at))
     }
@@ -1479,6 +1560,29 @@ where
         hello: &'a ClientHello<'a>,
         metadata: &'a <A as Accept>::Metadata,
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
+        let selected_chain = self.select_chain::<A>(metadata).ok()?;
+        if let Some(chain) = &selected_chain {
+            let allowed: Vec<Vec<u8>> = chain
+                .protocols
+                .iter()
+                .map(|protocol| protocol.alpn().to_vec())
+                .filter(|protocol| {
+                    self.alpn
+                        .as_ref()
+                        .is_none_or(|alpn| alpn.0.iter().any(|p| p.0 == *protocol))
+                })
+                .collect();
+            if allowed.is_empty()
+                || (hello.alpn().is_none() && !allowed.iter().any(|p| p == b"http/1.1"))
+            {
+                return None;
+            }
+            prev.alpn_protocols = allowed;
+            return Some((
+                prev,
+                PreparedProxy(chain.connect().await, None, selected_chain),
+            ));
+        }
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
         let (tcp_stream, deadline) = self.connect_backend(peer).await?;
         if let Err(e) = socket2::SockRef::from(&tcp_stream)
@@ -1513,7 +1617,10 @@ where
             && dialled.is_empty()
         {
             prev.alpn_protocols = offered;
-            return Some((prev, (Box::pin(tcp_stream), origin_registration)));
+            return Some((
+                prev,
+                PreparedProxy(Box::pin(tcp_stream), origin_registration, None),
+            ));
         }
         let (stream, negotiated): (AcceptStream, _) = match &self.connect_ssl {
             Some(client_cfg) => {
@@ -1546,13 +1653,13 @@ where
             Some(_) => negotiated.into_iter().collect(),
             None => offered,
         };
-        Some((prev, (stream, origin_registration)))
+        Some((prev, PreparedProxy(stream, origin_registration, None)))
     }
     fn handle_stream(
         &self,
         stream: AcceptStream,
         metadata: TlsMetadata<<A as Accept>::Metadata>,
-        (prev, origin_registration): Self::PreprocessRes,
+        PreparedProxy(prev, origin_registration, chain): Self::PreprocessRes,
         ctx: ProxyContext,
     ) {
         let target = self.clone();
@@ -1569,6 +1676,7 @@ where
                     metadata.tls_info.alpn,
                     extract::<TcpMetadata, _>(&metadata.inner).map(|m| m.peer_addr.ip()),
                     true,
+                    chain,
                 ) => {}
             }
         });
@@ -1884,19 +1992,28 @@ impl PlainHttpProxy {
                 tokio::spawn(async move {
                     let _registration = registration;
                     let work = async {
-                        let Some((backend, _)) = target.connect_plain().await else {
-                            return;
-                        };
-                        let Some(_origin) = target
-                            .register_origin::<VHostBindListener>(&metadata, &backend)
-                            .ok()
-                        else {
-                            return;
-                        };
                         let source = extract::<TcpMetadata, _>(&metadata).map(|m| m.peer_addr.ip());
-                        target
-                            .relay(stream, Box::pin(backend), None, source, false)
-                            .await;
+                        let Ok(chain) = target.select_chain::<VHostBindListener>(&metadata) else {
+                            return;
+                        };
+                        if let Some(selected) = &chain {
+                            target
+                                .relay(stream, selected.connect().await, None, source, false, chain)
+                                .await;
+                        } else {
+                            let Some((backend, _)) = target.connect_plain().await else {
+                                return;
+                            };
+                            let Some(_origin) = target
+                                .register_origin::<VHostBindListener>(&metadata, &backend)
+                                .ok()
+                            else {
+                                return;
+                            };
+                            target
+                                .relay(stream, Box::pin(backend), None, source, false, None)
+                                .await;
+                        }
                     };
                     tokio::select! {
                         _ = conn_cancel.cancelled() => {}
@@ -2625,6 +2742,7 @@ mod port_map_tests {
             addr: "10.0.3.2:443".parse().unwrap(),
             addr_v6: None,
             proxy: None,
+            http_chain: None,
             connect_ssl: None,
             alpn: None,
             passthrough: false,
@@ -2843,6 +2961,7 @@ mod accept_filter_tests {
             addr: "10.0.0.1:443".parse().unwrap(),
             addr_v6: None,
             proxy: None,
+            http_chain: None,
             connect_ssl: None,
             alpn: None,
             passthrough: false,
@@ -3132,7 +3251,7 @@ mod conn_cap_tests {
 
 /// Which protocols `preprocess` offers the container and the client.
 #[cfg(test)]
-mod upstream_alpn_tests {
+pub(crate) mod upstream_alpn_tests {
     use std::net::Ipv4Addr;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -3216,6 +3335,7 @@ mod upstream_alpn_tests {
         base_alpn: Vec<String>,
         /// Written to the stream `preprocess` hands back.
         probe: &'static [u8],
+        gateway: Option<GatewayInfo>,
     }
     impl<'a, A> TlsHandler<'a, A> for Preprocessing
     where
@@ -3233,15 +3353,23 @@ mod upstream_alpn_tests {
         ) -> Option<TlsHandlerAction> {
             let base_alpn: Vec<&str> = self.base_alpn.iter().map(|a| a.as_str()).collect();
             let base = config_advertising(&base_alpn);
-            let (cfg, upstream) =
-                VHostTarget::<A>::preprocess(&self.target, base, hello, metadata).await?;
+            let (cfg, upstream) = if let Some(info) = self.gateway.clone() {
+                let metadata = NetworkInterfaceListenerAcceptMetadata {
+                    inner: extract::<TcpMetadata, _>(metadata)?,
+                    info,
+                };
+                VHostTarget::<VHostBindListener>::preprocess(&self.target, base, hello, &metadata)
+                    .await?
+            } else {
+                VHostTarget::<A>::preprocess(&self.target, base, hello, metadata).await?
+            };
             if self.probe.is_empty() {
                 // The client handshakes off `cfg` alone.
                 drop(upstream);
             } else {
                 let probe = self.probe;
                 tokio::spawn(async move {
-                    let (mut upstream, _origin_registration) = upstream;
+                    let PreparedProxy(mut upstream, _origin_registration, _chain) = upstream;
                     let _ = upstream.write_all(probe).await;
                     let _ = upstream.flush().await;
                     // The stream stays open until the backend has the probe.
@@ -3278,6 +3406,7 @@ mod upstream_alpn_tests {
             acme: None,
             addr: backend,
             addr_v6: None,
+            http_chain: None,
             proxy: Some(ProxyOptions::Http {
                 add_x_forwarded_headers: true,
                 auth: None,
@@ -3325,20 +3454,51 @@ mod upstream_alpn_tests {
         client_alpn: &[&str],
         probe: &'static [u8],
     ) -> Result<Option<String>, std::io::Error> {
+        try_negotiate_target(
+            target(backend, connect_ssl, alpn),
+            base_alpn,
+            client_alpn,
+            probe,
+        )
+        .await
+    }
+
+    pub(crate) async fn try_negotiate_target(
+        target: ProxyTarget,
+        base_alpn: &[&str],
+        client_alpn: &[&str],
+        probe: &'static [u8],
+    ) -> Result<Option<String>, std::io::Error> {
+        try_negotiate_target_on_gateway(target, base_alpn, client_alpn, probe, None).await
+    }
+
+    pub(crate) async fn try_negotiate_target_on_gateway(
+        target: ProxyTarget,
+        base_alpn: &[&str],
+        client_alpn: &[&str],
+        probe: &'static [u8],
+        gateway: Option<GatewayInfo>,
+    ) -> Result<Option<String>, std::io::Error> {
         let handler = Preprocessing {
-            target: target(backend, connect_ssl, alpn),
+            target,
             base_alpn: base_alpn.iter().map(|a| a.to_string()).collect(),
             probe,
+            gateway,
         };
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let mut vhost = TlsListener::new(listener, handler);
 
-        let accepted = tokio::spawn(async move {
-            futures::future::poll_fn(|cx| vhost.poll_accept(cx))
-                .await
-                .map(|(metadata, _stream)| metadata.tls_info.alpn)
-        });
+        use tracing::instrument::WithSubscriber;
+
+        let accepted = tokio::spawn(
+            async move {
+                futures::future::poll_fn(|cx| vhost.poll_accept(cx))
+                    .await
+                    .map(|(metadata, _stream)| metadata.tls_info.alpn)
+            }
+            .with_current_subscriber(),
+        );
 
         let mut client = client_config_no_verify(provider()).unwrap();
         client.alpn_protocols = client_alpn.iter().map(|a| a.as_bytes().to_vec()).collect();
@@ -3442,6 +3602,7 @@ mod upstream_alpn_tests {
                         target,
                         base_alpn: Vec::new(),
                         probe: b"x",
+                        gateway: None,
                     },
                 );
                 let client =
@@ -3669,6 +3830,7 @@ mod upstream_alpn_tests {
             target: target(backend_addr, rewrap(), None),
             base_alpn: Vec::new(),
             probe: b"",
+            gateway: None,
         };
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let listener_addr = listener.local_addr().unwrap();
