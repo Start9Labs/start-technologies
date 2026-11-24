@@ -142,9 +142,7 @@ describe('MultiHost.bindPort overlay targets', () => {
   ])('forwards overlay targets for %j', async options => {
     const { host, bind } = fixture()
     await host.bindPort(58333, options)
-    expect(bind).toHaveBeenCalledWith(
-      expect.objectContaining({ networkPorts }),
-    )
+    expect(bind).toHaveBeenCalledWith(expect.objectContaining({ networkPorts }))
   })
 })
 
