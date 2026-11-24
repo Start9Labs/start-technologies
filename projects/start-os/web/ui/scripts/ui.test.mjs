@@ -5962,6 +5962,27 @@ test('provider discovery honors a matching physical update target and retains ne
   assert.deepEqual(f.queries, [])
 })
 
+test('provider discovery prefers an installable claiming release over a newer one needing a StartOS update', async t => {
+  const url = 'https://registry.test/'
+  const entry = providerRegistryEntry()
+  const index = providerIndex()
+  index.package.packages.alternate.versions['2.0.0:0'] = {
+    title: 'Newer OS',
+    osVersion: '0.5.0',
+    satisfiesPackages: { bitcoin: ['26.0.0:0'] },
+  }
+  entry.selections.alternate.versions['2.0.0:0'] = {
+    s9pks: [],
+    compatible: false,
+  }
+  const f = marketplaceFixture(t, { [url]: entry }, index)
+  const [selected] = await firstValueFrom(
+    f.service.fetchProviders$(url, 'bitcoin', '>=26.0.0'),
+  )
+  assert.equal(selected.version, '1.0.0:0')
+  assert.deepEqual(f.queries, [])
+})
+
 test('provider claims react without selection changes and hydrate only matching raw version keys', t => {
   const url = 'https://registry.test/'
   const entry = providerRegistryEntry()
