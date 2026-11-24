@@ -25,7 +25,7 @@ The CLI offers the same per-service choice:
 start-cli package select-dependency-provider <service-id> <dependency-id> --provider-id <provider-id> --locked
 ```
 
-Omit `--locked` to select an unlocked provider. Omit `--provider-id` to clear the saved choice. To preview an update or removal, pipe provider metadata to `start-cli package preview-provider-change`: the input contains `id`, `version`, `satisfies`, and `satisfiesPackages`; `version: null` previews removal. It lists affected dependent package IDs without applying the change. `start-cli registry package get --provides <dependency-id> --target-version <range>` finds releases that claim the requested dependency contract.
+Omit `--locked` to select an unlocked provider. Omit both options to clear the saved choice; `--locked` requires `--provider-id`. To preview an update or removal, pipe provider metadata to `start-cli package preview-provider-change`: the input contains `id`, `version`, `satisfies`, and `satisfiesPackages`; `version: null` previews removal. It lists affected dependent package IDs without applying the change. `start-cli registry package get --provides <dependency-id> --target-version <range>` finds releases that claim the requested dependency contract.
 
 ## Configuring Dependencies
 

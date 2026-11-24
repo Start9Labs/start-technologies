@@ -1828,6 +1828,13 @@ dependencies.providers.incompatible:
   fr_FR: "Le paquet sélectionné ne peut pas satisfaire cette dépendance."
   pl_PL: "Wybrany pakiet nie może spełnić tej zależności."
 
+dependencies.providers.lock-requires-provider:
+  en_US: "Choose a provider to lock."
+  de_DE: "Wählen Sie einen Anbieter zum Fixieren aus."
+  es_ES: "Elija un proveedor para fijar."
+  fr_FR: "Choisissez un fournisseur à verrouiller."
+  pl_PL: "Wybierz dostawcę do przypięcia."
+
 dependencies.providers.unresolved:
   en_US: "Choose a compatible provider for dependency %{dependency}."
   de_DE: "Wählen Sie einen kompatiblen Anbieter für die Abhängigkeit %{dependency}."

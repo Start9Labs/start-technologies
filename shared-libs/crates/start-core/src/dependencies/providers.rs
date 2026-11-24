@@ -320,7 +320,7 @@ pub struct SelectProviderParams {
     pub dependency_id: PackageId,
     #[arg(long, help = "help.arg.provider-id")]
     pub provider_id: Option<PackageId>,
-    /// Locks to this ID without fallback.
+    /// Locks against automatic fallback. Requires an explicit provider.
     #[serde(default)]
     #[arg(long, help = "help.arg.lock-provider")]
     pub locked: bool,
@@ -350,6 +350,11 @@ fn validate_selection(
                 ErrorKind::InvalidRequest,
             ));
         }
+    } else if params.locked {
+        return Err(Error::new(
+            eyre!("{}", t!("dependencies.providers.lock-requires-provider")),
+            ErrorKind::InvalidRequest,
+        ));
     }
     Ok(())
 }
@@ -558,6 +563,27 @@ mod tests {
     fn resolve(packages: &AllPackageData) -> DependencyBinding {
         bindings_for(packages, &packages.0["consumer"])["target"].clone()
     }
+    #[test]
+    fn locking_requires_a_provider() {
+        let packages = packages();
+        let clear = SelectProviderParams {
+            id: "consumer".parse().unwrap(),
+            dependency_id: "target".parse().unwrap(),
+            provider_id: None,
+            locked: false,
+        };
+        assert!(validate_selection(&packages, &clear).is_ok());
+        let error = validate_selection(
+            &packages,
+            &SelectProviderParams {
+                locked: true,
+                ..clear
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+    }
+
     #[test]
     fn lifecycle_operations_defer_binding_changes_until_completion() {
         let consumer = "consumer".parse().unwrap();

@@ -5592,7 +5592,7 @@
               "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
             },
             "locked": {
-              "description": "Locks to this ID without fallback.",
+              "description": "Locks against automatic fallback. Requires an explicit provider.",
               "type": "boolean"
             }
           },
@@ -5609,7 +5609,7 @@
           "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
         },
         "locked": {
-          "description": "Locks to this ID without fallback.",
+          "description": "Locks against automatic fallback. Requires an explicit provider.",
           "type": "boolean"
         }
       },
