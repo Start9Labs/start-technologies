@@ -6,7 +6,7 @@ use crate::sign::{AnySigningKey, Signer};
 use crate::util::net::secure::EncryptedSocket;
 use crate::util::net::tungstenite::transport;
 
-fn signer() -> Signer {
+pub(super) fn signer() -> Signer {
     Signer::Key(AnySigningKey::Ed25519(
         ed25519_dalek::SigningKey::from_bytes(&[71; 32]),
     ))
@@ -45,16 +45,23 @@ pub(super) async fn native_connection(
 
 #[test]
 fn channel_authenticated_watches_keep_distinct_ids_and_projection_versions() {
-    let version = device().os.version;
-    let index = subscription_request(&Subscription::Index(url()), &version);
-    let os = subscription_request(&Subscription::Os(url()), &version);
+    let view = RegistryView::new(&device());
+    let since = crate::db::DbCursor {
+        epoch: "epoch".into(),
+        id: 7,
+    };
+    let index = subscription_request(&Subscription::Index(url()), &view, Some(&since));
+    let os = subscription_request(&Subscription::Os(url()), &view, None);
     assert_ne!(index["id"], os["id"]);
     assert_eq!(index["params"]["pointer"], json!("/index"));
     assert_eq!(os["params"]["pointer"], json!("/index/os"));
+    assert_eq!(index["params"]["since"], json!({"epoch": "epoch", "id": 7}));
+    assert!(os["params"].get("since").is_none());
     for request in [index, os] {
         assert_eq!(request["method"], json!("db.subscribe"));
         assert_eq!(request["rpcstream"], json!(rpc_toolkit::RPCSTREAM_VERSION));
-        assert_eq!(request["params"]["osVersion"], json!(version));
+        assert_eq!(request["params"]["osVersion"], json!(view.os_version));
+        assert!(request["params"].get("language").is_none());
         assert!(request.get("signature").is_none());
     }
 }
@@ -333,7 +340,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         .result
         .unwrap();
     wait_for(&db, |db| {
-        db.as_private()
+        db.as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .is_some_and(|index| index.as_name().as_value() == &json!("Grant barrier"))
@@ -342,7 +349,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     assert!(
         db.peek()
             .await
-            .as_private()
+            .as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .unwrap()
@@ -371,7 +378,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .unwrap()
             .is_some_and(|cache| cache.status == RegistryStatus::Connected)
             && db
-                .as_private()
+                .as_public()
                 .as_registry_indexes()
                 .as_idx(&url)
                 .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_some())
@@ -379,7 +386,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     .await;
     let synced = db.peek().await;
     let private_s9pk = synced
-        .as_private()
+        .as_public()
         .as_registry_indexes()
         .as_idx(&url)
         .unwrap()
@@ -400,17 +407,18 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         private_s9pk.private,
         Some(crate::registry::tests::secret_keystream())
     );
-    let catalog = synced
+    let package = synced
         .as_public()
-        .as_registry_cache()
+        .as_registry_indexes()
         .as_idx(&url)
         .unwrap()
-        .as_catalog()
+        .as_package()
+        .as_packages()
         .as_idx(&secret)
         .unwrap()
         .de()
         .unwrap();
-    assert!(!catalog.versions.is_empty());
+    assert!(!package.versions.is_empty());
     let discovered = select(
         &synced,
         &url,
@@ -418,24 +426,32 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     )
     .unwrap();
     assert!(!discovered["secret"]["best"].as_object().unwrap().is_empty());
-    for release in catalog.versions.values() {
+    for release in package.versions.values() {
         assert_eq!(
-            release.info.metadata.satisfies_packages["logical"],
+            release.metadata.satisfies_packages["logical"],
             BTreeSet::from(["26.0.0:0".parse().unwrap()])
         );
-        for (_, asset) in &release.info.s9pks {
-            assert!(asset.private.is_none() && asset.readers.is_empty());
-        }
     }
+    let cache = synced.as_public().as_registry_cache().as_idx(&url).unwrap();
     assert!(
-        !to_value(&synced.as_public().de().unwrap())
-            .unwrap()
+        !cache
+            .as_value()
             .to_string()
             .contains(&crate::registry::tests::secret_keystream().key.to_string())
     );
+    assert!(
+        synced
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url)
+            .unwrap()
+            .as_selections()
+            .as_idx(&secret)
+            .is_some()
+    );
     crate::registry::tests::revoke_secret_reader(&registry).await;
     wait_for(&db, |db| {
-        db.as_private()
+        db.as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_none())
@@ -461,7 +477,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .unwrap()
             .de()
             .unwrap()
-            .catalog
+            .selections
             .contains_key(&secret)
     );
     assert!(!receiver.is_finished());

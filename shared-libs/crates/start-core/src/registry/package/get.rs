@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use clap::{Parser, ValueEnum};
-use exver::{ExtendedVersion, VersionRange};
+use exver::VersionRange;
 use imbl_value::{InternedString, json};
 use itertools::Itertools;
 use rusqlite::params;
@@ -61,6 +61,9 @@ pub struct PackageInfoShort {
     /// `PackageMetadata::default_locale`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_locale: Option<InternedString>,
+    /// A newer same-flavor revision covers this release's hardware.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub superseded: bool,
 }
 
 rpc_toolkit::reflect_ts!(PackageInfoShort);
@@ -204,7 +207,7 @@ fn get_matching_models(
         provides,
         ..
     }: &GetPackageParams,
-) -> Result<Vec<(PackageId, ExtendedVersion, Model<PackageVersionInfo>)>, Error> {
+) -> Result<Vec<(PackageId, VersionString, Model<PackageVersionInfo>)>, Error> {
     if let Some(id) = id {
         if let Some(pkg) = db.as_packages().as_idx(id) {
             vec![(id.clone(), pkg)]
@@ -219,13 +222,12 @@ fn get_matching_models(
         Ok(v.as_versions()
             .as_entries()?
             .into_iter()
-            .map(|(v, info)| {
-                let ev = (*v).clone();
+            .map(|(version, info)| {
                 let metadata = info.as_metadata().de()?;
                 let versions = crate::dependencies::providers::provided_versions(
                     &metadata,
                     k,
-                    &v,
+                    &version,
                     provides.as_ref().unwrap_or(k),
                 );
                 Ok::<_, Error>(
@@ -247,12 +249,12 @@ fn get_matching_models(
                         let mut info = info.clone();
                         if let Some(device_info) = &device_info {
                             if info.for_device(device_info)? {
-                                Some((k.clone(), ev, info))
+                                Some((k.clone(), version, info))
                             } else {
                                 None
                             }
                         } else {
-                            Some((k.clone(), ev, info))
+                            Some((k.clone(), version, info))
                         }
                     } else {
                         None
@@ -347,17 +349,17 @@ type Releases = BTreeMap<PackageId, BTreeMap<VersionString, Model<PackageVersion
 
 /// Splits releases into each package's best per flavor and the rest.
 fn partition_best(
-    matching: Vec<(PackageId, ExtendedVersion, Model<PackageVersionInfo>)>,
+    matching: Vec<(PackageId, VersionString, Model<PackageVersionInfo>)>,
 ) -> (Releases, Releases) {
     let mut best: Releases = Default::default();
     let mut other: Releases = Default::default();
     for (id, version, info) in matching {
         let package_best = best.entry(id.clone()).or_default();
         let package_other = other.entry(id.clone()).or_default();
-        if package_best.keys().all(|k| !(**k > version)) {
+        if package_best.keys().all(|k| !(**k > *version)) {
             for worse_version in package_best
                 .keys()
-                .filter(|k| ***k < version)
+                .filter(|k| ***k < *version)
                 .cloned()
                 .collect_vec()
             {
@@ -365,9 +367,9 @@ fn partition_best(
                     package_other.insert(worse_version, info);
                 }
             }
-            package_best.insert(version.into(), info);
+            package_best.insert(version, info);
         } else {
-            package_other.insert(version.into(), info);
+            package_other.insert(version, info);
         }
     }
     (best, other)
@@ -402,80 +404,157 @@ fn first_published_at(
         .process_results(|times| times.min())
 }
 
-/// Every release of a package that a device can run, as StartOS lists it in its registry cache.
+/// A package's releases this server can run, by version; release data stays in the saved index.
 #[derive(Debug, Deserialize, Serialize, VisitFields, HasModel)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
-pub struct PackageReleases {
-    pub categories: BTreeSet<InternedString>,
+pub struct PackageSelection {
+    /// The newest release of each flavor, preferring releases this StartOS can install.
+    pub best: BTreeSet<VersionString>,
+    /// Every release this server can run, keyed exactly as in the saved index.
+    pub versions: BTreeMap<VersionString, ListedVersion>,
     /// When this registry first published any version it still carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_published_at: Option<DateTime<Utc>>,
-    pub versions: BTreeMap<VersionString, PackageRelease>,
     /// Newest release of the installed flavor that the installed version can migrate to and this
     /// server can install.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_target: Option<VersionString>,
 }
 
-rpc_toolkit::reflect_ts!(PackageReleases);
+rpc_toolkit::reflect_ts!(PackageSelection);
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
-pub struct PackageRelease {
-    #[serde(flatten)]
-    pub info: PackageVersionInfo,
-    /// A newer revision of this upstream version and flavor covers its hardware.
+pub struct ListedVersion {
+    /// Raw `s9pks` positions in the installer's hardware-preference order.
+    #[serde(default)]
+    pub s9pks: Vec<usize>,
+    /// A newer same-flavor revision covers this release's hardware.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub superseded: bool,
+    /// This StartOS can install the release; others need a StartOS update first.
+    pub compatible: bool,
 }
 
-rpc_toolkit::reflect_ts!(PackageRelease);
+rpc_toolkit::reflect_ts!(ListedVersion);
 
-/// Lists every release the device can run, including superseded revisions, without update targets.
-pub(crate) fn select_releases(
+/// A package's selection, absent when the device can run none of its releases.
+pub(crate) fn selection(
     index: &Model<PackageIndex>,
+    id: &PackageId,
     device: &DeviceInfo,
-) -> Result<BTreeMap<PackageId, PackageReleases>, Error> {
-    let params = GetPackageParams {
-        id: None,
-        target_version: None,
-        provides: None,
-        source_version: None,
-        device_info: Some(device.clone()),
-        other_versions: None,
-        all_revisions: true,
-        reader: Default::default(),
+    update_target: Option<&VersionString>,
+) -> Result<Option<PackageSelection>, Error> {
+    let matching = |device: DeviceInfo| {
+        get_matching_models(
+            index,
+            &GetPackageParams {
+                id: Some(id.clone()),
+                target_version: None,
+                provides: None,
+                source_version: None,
+                device_info: Some(device),
+                other_versions: None,
+                all_revisions: true,
+                reader: Default::default(),
+            },
+        )
     };
-    let (best, mut other) = partition_best(get_matching_models(index, &params)?);
-    best.into_iter()
-        .map(|(id, best)| {
-            let other = other.remove(&id).unwrap_or_default();
-            let superseded = superseded_revisions(Some(&best), &other)?;
-            let versions = best
-                .into_iter()
-                .chain(other)
-                .map(|(version, info)| {
-                    Ok::<_, Error>((
-                        version.clone(),
-                        PackageRelease {
-                            superseded: superseded.contains(&version),
-                            info: info.de()?,
-                        },
-                    ))
-                })
-                .try_collect()?;
+    let listed = matching(device.for_listing())?;
+    if listed.is_empty() {
+        return Ok(None);
+    }
+    let installable = matching(device.clone())?;
+    let compatible: BTreeSet<String> = installable
+        .iter()
+        .map(|(_, version, _)| version.to_string())
+        .collect();
+    let (mut newest, mut older) = partition_best(listed);
+    let newest = newest.remove(id).unwrap_or_default();
+    let older = older.remove(id).unwrap_or_default();
+    let superseded = superseded_revisions(Some(&newest), &older)?;
+    let (mut installable_best, _) = partition_best(installable);
+    let mut best: BTreeMap<Option<String>, VersionString> = installable_best
+        .remove(id)
+        .unwrap_or_default()
+        .into_keys()
+        .map(|version| (version.flavor().map(str::to_owned), version))
+        .collect();
+    for version in newest.keys() {
+        best.entry(version.flavor().map(str::to_owned))
+            .or_insert_with(|| version.clone());
+    }
+    let package = index.as_packages().as_idx(id).or_not_found(id)?;
+    let versions = newest
+        .iter()
+        .chain(older.iter())
+        .map(|(version, selected)| {
+            let original = package
+                .as_versions()
+                .as_idx(version)
+                .or_not_found(version)?;
             Ok((
-                id.clone(),
-                PackageReleases {
-                    categories: categories(index, &id)?,
-                    first_published_at: first_published_at(index, &id)?,
-                    versions,
-                    update_target: None,
+                version.clone(),
+                ListedVersion {
+                    s9pks: asset_positions(original, selected)?,
+                    superseded: superseded.contains(version),
+                    compatible: compatible.contains(&version.to_string()),
                 },
             ))
         })
+        .collect::<Result<_, Error>>()?;
+    Ok(Some(PackageSelection {
+        best: best.into_values().collect(),
+        versions,
+        first_published_at: first_published_at(index, id)?,
+        update_target: update_target.cloned(),
+    }))
+}
+
+fn asset_positions(
+    original: &Model<PackageVersionInfo>,
+    selected: &Model<PackageVersionInfo>,
+) -> Result<Vec<usize>, Error> {
+    let original: Vec<Value> = from_value(original.as_s9pks().clone().into())?;
+    let selected: Vec<Value> = from_value(selected.as_s9pks().clone().into())?;
+    selected
+        .iter()
+        .map(|asset| {
+            original
+                .iter()
+                .position(|raw| raw == asset)
+                .or_not_found("s9pk")
+        })
         .collect()
+}
+
+/// Newest release of the installed flavor that the installed version can migrate to and the
+/// device can install.
+pub(crate) fn update_target(
+    index: &Model<PackageIndex>,
+    id: &PackageId,
+    installed: &VersionString,
+    device: &DeviceInfo,
+) -> Result<Option<VersionString>, Error> {
+    let params = GetPackageParams {
+        id: Some(id.clone()),
+        target_version: None,
+        provides: None,
+        source_version: Some(installed.clone()),
+        device_info: Some(device.clone()),
+        other_versions: None,
+        all_revisions: false,
+        reader: Default::default(),
+    };
+    Ok(get_matching_models(index, &params)?
+        .into_iter()
+        .map(|(_, version, _)| version)
+        .filter(|version| {
+            version.flavor() == installed.flavor()
+                && version.partial_cmp(installed) == Some(std::cmp::Ordering::Greater)
+        })
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)))
 }
 
 pub(crate) fn select_packages(
@@ -1064,7 +1143,7 @@ mod tests {
     }
 
     #[test]
-    fn select_releases_keeps_superseded_revisions_marked() {
+    fn selection_prefers_installable_releases_and_lists_every_runnable_version() {
         use crate::registry::package::index::tests::version_info_signed_by;
 
         let (_, info) = version_info_signed_by(1);
@@ -1074,36 +1153,137 @@ mod tests {
             "packages": { "demo": {
                 "authorized": {},
                 "categories": ["tools"],
-                "versions": { "1.0.0:0": info, "1.0.0:1": info, "2.0.0:0": info },
+                "versions": {
+                    "1.0.0:0": info,
+                    "1.0.0:1": info,
+                    "2.0.0:0": info,
+                    "#alt:1.0.0:0": info,
+                },
             } },
         })
         .into();
-        let device = DeviceInfo {
+        let device = |version: &str, compat: &str| DeviceInfo {
             os: crate::registry::device_info::OsInfo {
-                version: "0.4.0".parse().unwrap(),
-                compat: "*".parse().unwrap(),
+                version: version.parse().unwrap(),
+                compat: compat.parse().unwrap(),
                 platform: "x86_64".into(),
                 language: None,
             },
             hardware: None,
         };
-        let releases = select_releases(&index, &device).unwrap();
-        let demo = &releases[&"demo".parse::<PackageId>().unwrap()];
-        assert_eq!(demo.categories, ["tools".into()].into());
-        let marked: Vec<_> = demo
-            .versions
-            .iter()
-            .map(|(v, r)| (v.to_string(), r.superseded))
-            .collect();
+        let id: PackageId = "demo".parse().unwrap();
+        let version = |value: &str| value.parse::<VersionString>().unwrap();
+        let set = |versions: &[&str]| -> BTreeSet<String> {
+            versions.iter().map(|v| (*v).to_owned()).collect()
+        };
+        let strings = |versions: &mut dyn Iterator<Item = &VersionString>| -> BTreeSet<String> {
+            versions.map(ToString::to_string).collect()
+        };
+
+        let current = device("99.0.0", "*");
+        let selected = selection(&index, &id, &current, None).unwrap().unwrap();
         assert_eq!(
-            marked,
-            [
-                ("1.0.0:0".to_owned(), true),
-                ("1.0.0:1".to_owned(), false),
-                ("2.0.0:0".to_owned(), false),
-            ]
+            strings(&mut selected.best.iter()),
+            set(&["#alt:1.0.0:0", "2.0.0:0"])
         );
-        assert!(demo.update_target.is_none());
+        assert_eq!(
+            strings(&mut selected.versions.keys()),
+            set(&["#alt:1.0.0:0", "1.0.0:0", "1.0.0:1", "2.0.0:0"])
+        );
+        assert!(selected.versions[&version("1.0.0:0")].superseded);
+        assert!(!selected.versions[&version("1.0.0:1")].superseded);
+        assert!(selected.versions.values().all(|v| v.compatible));
+        assert!(selected.update_target.is_none());
+
+        let target = version("1.0.0:1");
+        let updating = selection(&index, &id, &current, Some(&target))
+            .unwrap()
+            .unwrap();
+        assert_eq!(updating.update_target, Some(target));
+        assert_eq!(
+            update_target(&index, &id, &version("1.0.0:0"), &current).unwrap(),
+            Some(version("2.0.0:0"))
+        );
+
+        let outdated = device("0.0.0", "=0.0.0");
+        let listed = selection(&index, &id, &outdated, None).unwrap().unwrap();
+        assert_eq!(
+            strings(&mut listed.best.iter()),
+            set(&["#alt:1.0.0:0", "2.0.0:0"])
+        );
+        assert_eq!(listed.versions.len(), 4);
+        assert!(listed.versions.values().all(|v| !v.compatible));
+    }
+
+    #[test]
+    fn selections_reference_raw_version_keys_and_device_preferred_assets() {
+        use crate::registry::device_info::{HardwareInfo, OsInfo};
+        use crate::registry::package::index::tests::version_info_signed_by;
+
+        let (_, arm) = version_info_signed_by(1);
+        let (_, generic) = version_info_signed_by(2);
+        let (_, native) = version_info_signed_by(3);
+        let mut info = to_value(&arm).unwrap();
+        info["s9pks"] = json!([
+            [{ "arch": ["aarch64"], "ram": null, "device": [] }, to_value(&arm.s9pks[0].1).unwrap()],
+            [{ "arch": null, "ram": null, "device": [] }, to_value(&generic.s9pks[0].1).unwrap()],
+            [{ "arch": ["x86_64"], "ram": null, "device": [] }, to_value(&native.s9pks[0].1).unwrap()],
+        ]);
+        let mut index: Model<PackageIndex> = json!({
+            "categories": {},
+            "packages": { "demo": {
+                "authorized": {}, "categories": [],
+                "versions": { "01.0.0:0": info },
+            } },
+        })
+        .into();
+        let device = DeviceInfo {
+            os: OsInfo {
+                version: "99.0.0".parse().unwrap(),
+                compat: "*".parse().unwrap(),
+                platform: "x86_64".into(),
+                language: None,
+            },
+            hardware: Some(HardwareInfo {
+                arch: "x86_64".into(),
+                ram: u64::MAX,
+                devices: Some(Vec::new()),
+            }),
+        };
+        let id: PackageId = "demo".parse().unwrap();
+        let version: VersionString = "01.0.0:0".parse().unwrap();
+        let selected = selection(&index, &id, &device, None).unwrap().unwrap();
+        assert_eq!(
+            selected.best.iter().map(ToString::to_string).collect_vec(),
+            vec!["01.0.0:0"]
+        );
+        assert_eq!(selected.versions[&version].s9pks, vec![2, 1]);
+        assert_eq!(
+            update_target(&index, &id, &"0.0.0:0".parse().unwrap(), &device)
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "01.0.0:0",
+        );
+        index
+            .as_packages_mut()
+            .as_idx_mut(&id)
+            .unwrap()
+            .as_versions_mut()
+            .as_idx_mut(&version)
+            .unwrap()
+            .as_s9pks_mut()
+            .mutate(|assets| {
+                assets.insert(0, assets[0].clone());
+                Ok(())
+            })
+            .unwrap();
+        let selected = selection(&index, &id, &device, None).unwrap().unwrap();
+        assert_eq!(
+            selected.versions.keys().next().unwrap().as_str(),
+            "01.0.0:0"
+        );
+        assert_eq!(selected.versions[&version].s9pks, vec![3, 2]);
     }
 
     #[test]

@@ -29,7 +29,6 @@ import {
   filter,
   firstValueFrom,
   map,
-  of,
   shareReplay,
   startWith,
   switchMap,
@@ -38,7 +37,7 @@ import {
 } from 'rxjs'
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
-import { MarketplacePkg } from '../types'
+import { MarketplaceListing, MarketplacePkg } from '../types'
 import {
   compatibleVersions,
   satisfiesWithAliases,
@@ -144,8 +143,8 @@ export class MarketplacePreviewComponent {
 
   readonly pkgId = input.required<string>()
 
-  /** A package already in hand, shown without fetching; defaults to the newest. */
-  readonly pkg = input<MarketplacePkg | null>(null)
+  /** The listed release to open; details resolve from the registry. */
+  readonly pkg = input<MarketplaceListing | null>(null)
 
   /** Action buttons for the resolved package (install/update), rendered with
    * the resolved `MarketplacePkg` as `$implicit`. The brochure omits it. */
@@ -221,21 +220,30 @@ export class MarketplacePreviewComponent {
   )
 
   private package$(version: string | null, flavor: string | null) {
-    const pkg = this.pkg()
-
-    return pkg && (!version || pkg.version === version)
-      ? of(pkg)
-      : this.marketplaceService.getPackage$(this.pkgId(), version, flavor)
+    return this.marketplaceService.getPackage$(
+      this.pkgId(),
+      version ?? this.pkg()?.version ?? null,
+      flavor,
+    )
   }
 
   private async selectSatisfyingFlavor(current: string | null, range: string) {
     const { packages } = await firstValueFrom(
       this.marketplaceService.currentRegistry$,
     )
-    const match = packages.find(
+    const flavors = packages.filter(
+      p => p.id === this.pkgId() && p.flavor !== current,
+    )
+    const resolved = await Promise.all(
+      flavors.map(p =>
+        firstValueFrom(
+          this.marketplaceService.getPackage$(p.id, p.version, p.flavor),
+        ),
+      ),
+    )
+    const match = resolved.find(
       p =>
-        p.id === this.pkgId() &&
-        p.flavor !== current &&
+        !!p &&
         !!compatibleVersions(this.exver, p, range, this.provides()).length,
     )
 
@@ -264,22 +272,10 @@ export class MarketplacePreviewComponent {
     ),
   )
 
-  readonly versions$ = this.flavor$.pipe(
-    switchMap(flavor =>
-      (this.pkg()?.flavor === flavor
-        ? of(this.pkg()!)
-        : this.marketplaceService.getPackage$(this.pkgId(), null, flavor)
-      ).pipe(
-        filter(Boolean),
-        map(pkg =>
-          compatibleVersions(
-            this.exver,
-            pkg,
-            this.targetRange(),
-            this.provides(),
-          ),
-        ),
-      ),
+  readonly versions$ = this.pkg$.pipe(
+    filter(Boolean),
+    map(pkg =>
+      compatibleVersions(this.exver, pkg, this.targetRange(), this.provides()),
     ),
   )
 

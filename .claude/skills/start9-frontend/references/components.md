@@ -158,6 +158,11 @@ readonly error = linkedSignal<string, i18nKey | null>({
 })
 ```
 
+- A query that drives a fetch debounces as a signal, `q = debounced(this.query, 300)` from
+  `@angular/core`, read as `q.value()` in a `resource`'s `params` or an `effect`; the page
+  it resets is `linkedSignal({ source: () => this.q.value(), computation: () => 0 })`. A
+  `(input.debounce~300ms)` handler that sets the query by hand is the rewrite target.
+
 - `effect()` is for **genuine external side effects** (syncing backend-stored theme/language to
   `TUI_DARK_MODE`, imperative DOM), never for deriving state — that's `computed`/`linkedSignal`.
 

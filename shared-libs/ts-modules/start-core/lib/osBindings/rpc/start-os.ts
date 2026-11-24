@@ -162,7 +162,6 @@ export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DbCursorInput = z.input<typeof schemas.DbCursor>
 export type DnsSource = z.output<typeof schemas.DnsSource>
 export type Dump = z.output<typeof schemas.Dump>
-export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type EchoParamsInput = z.input<typeof schemas.EchoParams>
 export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
 export type EndpointParamsInput = z.input<typeof schemas.EndpointParams>
@@ -323,6 +322,11 @@ export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
 export type ReplayIdInput = z.input<typeof schemas.ReplayId>
 export type RequiresReboot = z.output<typeof schemas.RequiresReboot>
 export type Security = z.output<typeof schemas.Security>
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export type SelectorParamsInput = z.input<typeof schemas.SelectorParams>
 export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>
@@ -533,6 +537,11 @@ export type PreviewProviderChangeParamsInput = z.input<
 >
 
 /**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
+
+/**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
  *
  * - `Bearer { tokens }`: any of `tokens` is accepted as `Authorization: Bearer <token>`.
@@ -608,7 +617,6 @@ export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
  * [`BackupUnencryptedMetadata`]'s key material.
  */
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
-export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TargetParamsInput = z.input<typeof schemas.TargetParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
@@ -648,6 +656,7 @@ export type ConvertParamsInput = z.input<typeof schemas.ConvertParams>
 export type CreateSharedVolumeParamsInput = z.input<
   typeof schemas.CreateSharedVolumeParams
 >
+export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
@@ -679,6 +688,7 @@ export type ResetPasswordParamsInput = z.input<
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
 export type SharedVolume = z.output<typeof schemas.SharedVolume>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
+export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -690,6 +700,9 @@ export type Transport = z.output<typeof schemas.Transport>
  * Signing-key material and independent package and OS-update trust.
  */
 export type TrustedKey = z.output<typeof schemas.TrustedKey>
+export type UpdateSubscriptionParamsInput = z.input<
+  typeof schemas.UpdateSubscriptionParams
+>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type ActionResult = z.output<typeof schemas.ActionResult>
@@ -731,6 +744,12 @@ export type LegacyProxySslOptions = z.output<
   typeof schemas.LegacyProxySslOptions
 >
 export type Revision = z.output<typeof schemas.Revision>
+
+/**
+ * A projected revision; with `extend`, what the latest `db.subscription.update` added,
+ * current as of `id`, sent once per update before any later revision.
+ */
+export type SubscriptionUpdate = z.output<typeof schemas.SubscriptionUpdate>
 export type CompatibleBindOptions = z.output<
   typeof schemas.CompatibleBindOptions
 >
