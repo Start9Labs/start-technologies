@@ -119,6 +119,7 @@ pub struct ProjectionParams {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<JsonPointer>,
     /// More subtrees, each with its own exclusions and depth, kept alongside the above.
+    /// An explicit root inclusion in the simple form keeps the entire subtree.
     #[arg(skip)]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selectors: Vec<SelectorParams>,
@@ -150,12 +151,13 @@ impl TryFrom<ProjectionParams> for Projection {
         }: ProjectionParams,
     ) -> Result<Self, Error> {
         let projection = || -> Result<Projection, patch_db::Error> {
+            let explicit = depth.is_some() || !include.is_empty() || !exclude.is_empty();
             let simple = Projection::new(depth, include, exclude)?;
             if selectors.is_empty() {
                 return Ok(simple);
             }
-            let mut union = if simple.is_identity() {
-                Vec::new()
+            let mut union = if explicit && simple.is_identity() {
+                vec![Selector::new(ROOT.to_owned(), Vec::new(), None)?]
             } else {
                 simple.into_selectors()
             };

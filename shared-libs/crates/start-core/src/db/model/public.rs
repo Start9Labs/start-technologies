@@ -45,6 +45,7 @@ pub struct Public {
     #[serde(default)]
     pub ssh_pubkeys: SshKeys,
     /// Each saved registry's last synchronized index, in the server's language.
+    /// Includes authorized private-asset keystreams from the server identity's registry view.
     #[serde(default)]
     pub registry_indexes: BTreeMap<Url, crate::registry::FullIndex>,
     #[serde(default)]

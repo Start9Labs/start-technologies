@@ -112,6 +112,22 @@ impl Default for Broadcast {
     }
 }
 impl Broadcast {
+    fn prune(&mut self) {
+        self.listeners.retain(|_, listeners| {
+            listeners.prune_unbounded();
+            listeners
+                .json
+                .retain(|_, sender| sender.receiver_count() != 0);
+            !listeners.is_empty()
+        });
+        let listeners = &self.listeners;
+        self.projected.retain(|id, key| {
+            listeners
+                .get(key)
+                .is_some_and(|l| l.projected.contains_key(id))
+        });
+    }
+
     pub fn new() -> Self {
         Default::default()
     }
@@ -146,19 +162,13 @@ impl Broadcast {
     }
 
     pub fn send(&mut self, value: &Arc<Revision>) {
+        self.prune();
         while self.history.len() >= HISTORY_LEN {
             self.history.pop_front();
         }
         self.history.push_back(value.clone());
         self.listeners.retain(|(ptr, projection), listeners| {
             listeners.dump = None;
-            listeners.prune_unbounded();
-            listeners
-                .json
-                .retain(|_, sender| sender.receiver_count() != 0);
-            if listeners.is_empty() {
-                return false;
-            }
             let scoped = projection.project_revision(value.for_path(ptr));
             if !scoped.patch.is_empty() {
                 listeners
@@ -186,10 +196,7 @@ impl Broadcast {
 
     /// Subscribers with equal pointers and projections share one listener.
     pub fn subscribe_projected(&mut self, ptr: JsonPointer, projection: Projection) -> Subscriber {
-        self.listeners.retain(|_, listeners| {
-            listeners.prune_unbounded();
-            !listeners.is_empty()
-        });
+        self.prune();
         let (send, recv) = mpsc::unbounded_channel();
         self.listeners
             .entry((ptr, projection))
@@ -206,12 +213,7 @@ impl Broadcast {
         ptr: JsonPointer,
         projection: Projection,
     ) -> ProjectedSubscriber {
-        let listeners = &self.listeners;
-        self.projected.retain(|id, key| {
-            listeners
-                .get(key)
-                .is_some_and(|l| l.projected.get(id).is_some_and(|s| !s.is_closed()))
-        });
+        self.prune();
         let id = self.next_projected;
         self.next_projected += 1;
         let (send, receiver) = mpsc::unbounded_channel();
@@ -244,6 +246,7 @@ impl Broadcast {
         else {
             return false;
         };
+        self.prune();
         let value = ptr.get(root).unwrap_or(&Value::Null);
         let extension = Revision {
             id: revision,

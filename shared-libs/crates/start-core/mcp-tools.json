@@ -1697,7 +1697,7 @@
               "items": { "type": "string" }
             },
             "selectors": {
-              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.",
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.",
               "type": "array",
               "items": { "$ref": "#/$defs/SelectorParams" }
             }
@@ -1857,7 +1857,7 @@
               "items": { "type": "string" }
             },
             "selectors": {
-              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.",
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.",
               "type": "array",
               "items": { "$ref": "#/$defs/SelectorParams" }
             }
@@ -1973,7 +1973,7 @@
               "items": { "type": "string" }
             },
             "selectors": {
-              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.",
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.",
               "type": "array",
               "items": { "$ref": "#/$defs/SelectorParams" }
             }
