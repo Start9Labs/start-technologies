@@ -140,55 +140,54 @@ export class InterfaceService {
       }
     })
 
-    const ranges = Object.entries(hosts)
-      .flatMap(([hostId, host]) =>
-        Object.entries(host.bindingRanges)
-          .filter(([, range]) => range.interface)
-          .map<MappedServiceInterface>(([key, range]) => {
-            const iface = range.interface!
-            const internalStartPort = Number(key)
-            const end = range.externalStartPort + range.numberOfPorts - 1
-            // Representative addressInfo: `internalPort` is the range's internal
-            // start port (its key in bindingRanges) so the per-address toggle
-            // and add-domain effects target the range; `scheme` prefixes URLs.
-            const addressInfo: T.AddressInfo = {
-              username: null,
-              hostId,
-              internalPort: internalStartPort,
-              scheme: iface.scheme,
-              sslScheme: null,
-              suffix: '',
-            }
+    const ranges = Object.entries(hosts).flatMap(([hostId, host]) =>
+      Object.entries(host.bindingRanges)
+        .filter(([, range]) => range.interface)
+        .map<MappedServiceInterface>(([key, range]) => {
+          const iface = range.interface!
+          const internalStartPort = Number(key)
+          const end = range.externalStartPort + range.numberOfPorts - 1
+          // Representative addressInfo: `internalPort` is the range's internal
+          // start port (its key in bindingRanges) so the per-address toggle
+          // and add-domain effects target the range; `scheme` prefixes URLs.
+          const addressInfo: T.AddressInfo = {
+            username: null,
+            hostId,
+            internalPort: internalStartPort,
+            scheme: iface.scheme,
+            sslScheme: null,
+            suffix: '',
+          }
 
-            return {
-              id: iface.id,
-              name: iface.name,
-              description: iface.description,
-              masked: false,
-              type: 'api',
-              preferredLauncherAddress: null,
-              index: iface.index,
+          return {
+            id: iface.id,
+            name: iface.name,
+            description: iface.description,
+            masked: false,
+            type: 'api',
+            preferredLauncherAddress: null,
+            index: iface.index,
+            addressInfo,
+            gatewayGroups: this.getRangeGatewayGroups(
               addressInfo,
-              gatewayGroups: this.getRangeGatewayGroups(
-                addressInfo,
-                range,
-                host,
-                gateways,
-              ),
-              pluginGroups: [],
-              anyAddSsl: Object.values(host.bindings).some(
-                b => !!b.options.addSsl,
-              ),
-              // Port ranges are always non-SSL (bound directly by the service).
-              addSsl: false,
-              sharedHostNames: [],
-              portRange:
-                range.numberOfPorts > 1
-                  ? `${range.externalStartPort}-${end}`
-                  : `${range.externalStartPort}`,
-            }
-          }),
-      )
+              range,
+              host,
+              gateways,
+            ),
+            pluginGroups: [],
+            anyAddSsl: Object.values(host.bindings).some(
+              b => !!b.options.addSsl,
+            ),
+            // Port ranges are always non-SSL (bound directly by the service).
+            addSsl: false,
+            sharedHostNames: [],
+            portRange:
+              range.numberOfPorts > 1
+                ? `${range.externalStartPort}-${end}`
+                : `${range.externalStartPort}`,
+          }
+        }),
+    )
 
     return [...single, ...ranges].sort(byInterfaceIndex)
   }

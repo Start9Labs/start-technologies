@@ -41,18 +41,17 @@ mod tests {
         let categories = db["index"]["package"]["categories"]
             .as_object_mut()
             .unwrap();
-        let next = next_index(categories.values().map(|category| {
-            from_value::<Option<u32>>(category["index"].clone()).unwrap()
-        }));
+        let next = next_index(
+            categories
+                .values()
+                .map(|category| from_value::<Option<u32>>(category["index"].clone()).unwrap()),
+        );
         categories.insert("new".into(), json!({ "name": "Third", "index": next }));
         CategoryOrder.action(&mut db, Path::new("")).unwrap();
         assert_eq!(
             db["index"]["package"]["categories"]["new"]["index"],
             json!(2)
         );
-        assert_eq!(
-            db["index"]["package"]["categories"]["z"]["index"],
-            json!(0)
-        );
+        assert_eq!(db["index"]["package"]["categories"]["z"]["index"], json!(0));
     }
 }

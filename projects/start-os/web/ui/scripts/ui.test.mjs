@@ -74,7 +74,6 @@ boundary(
     'TuiNotification',
     'TuiNotificationService',
     'TuiTextfield',
-    'TuiInput',
     'TuiError',
     'TuiIcon',
     'TuiInput',
@@ -1722,7 +1721,12 @@ test('single-port and range interfaces share one package index order', t => {
       80: {
         interfaces: { single },
         addresses,
-        options: { transport: ['tcp'], proxy: null, addSsl: null, secure: null },
+        options: {
+          transport: ['tcp'],
+          proxy: null,
+          addSsl: null,
+          secure: null,
+        },
       },
     },
     bindingRanges: {
@@ -1790,25 +1794,24 @@ test('numeric category IDs respect their index after pinned categories', t => {
   }
   const input = component.registry[SIGNAL]
   input.applyValueToInputSignal(input, registry)
-  assert.deepEqual([...component.categories().keys()], [
-    'all',
-    'new-arrivals',
-    '10',
-    '2',
-  ])
+  assert.deepEqual(
+    [...component.categories().keys()],
+    ['all', 'new-arrivals', '10', '2'],
+  )
   component.category.set('10')
   assert.equal(component.effectiveCategory(), '10')
   assert.equal(component.name(), 'Ten')
   input.applyValueToInputSignal(input, {
     ...registry,
-    info: { categories: { all: { name: 'All' }, 2: { name: 'Two', index: 0 } } },
+    info: {
+      categories: { all: { name: 'All' }, 2: { name: 'Two', index: 0 } },
+    },
   })
   assert.equal(component.effectiveCategory(), 'all')
-  assert.deepEqual([...component.categories().keys()], [
-    'all',
-    'new-arrivals',
-    '2',
-  ])
+  assert.deepEqual(
+    [...component.categories().keys()],
+    ['all', 'new-arrivals', '2'],
+  )
 })
 
 for (const [label, result, expected] of [

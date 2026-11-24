@@ -606,7 +606,11 @@ fn populating_indices_keeps_assigned_positions() {
     populate_indices(entries.iter_mut()).unwrap();
     assert_eq!(
         entries,
-        [json!({ "index": 3 }), json!({ "index": 4 }), json!({ "index": 1 })]
+        [
+            json!({ "index": 3 }),
+            json!({ "index": 4 }),
+            json!({ "index": 1 })
+        ]
     );
     let populated = entries.clone();
     populate_indices(entries.iter_mut()).unwrap();

@@ -173,11 +173,7 @@ describe('dynamic health ordering', () => {
   it('updates retained checks on insertion, reordering, and requested-index changes', async () => {
     const latest = new Map<string, { index?: number | null; result: string }>()
     const setHealth = jest.fn(
-      async (health: {
-        id: string
-        index?: number | null
-        result: string
-      }) => {
+      async (health: { id: string; index?: number | null; result: string }) => {
         latest.set(health.id, health)
         return null
       },
@@ -209,9 +205,7 @@ describe('dynamic health ordering', () => {
     const built = await reconciler.build()
     const settle = () => new Promise<void>(resolve => setImmediate(resolve))
     const indices = () =>
-      Object.fromEntries(
-        [...latest].map(([id, health]) => [id, health.index]),
-      )
+      Object.fromEntries([...latest].map(([id, health]) => [id, health.index]))
     try {
       await settle()
       expect(indices()).toEqual({ b: 0 })

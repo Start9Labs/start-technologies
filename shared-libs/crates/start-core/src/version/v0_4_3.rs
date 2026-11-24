@@ -271,9 +271,11 @@ mod tests {
         let tasks = db["public"]["packageData"]["service"]["tasks"]
             .as_object_mut()
             .unwrap();
-        let next = next_index(tasks.values().map(|task| {
-            from_value::<Option<u32>>(task["index"].clone()).unwrap()
-        }));
+        let next = next_index(
+            tasks
+                .values()
+                .map(|task| from_value::<Option<u32>>(task["index"].clone()).unwrap()),
+        );
         tasks.insert("new".into(), json!({ "index": next }));
         assert_eq!(tasks["new"]["index"], json!(2));
         index_existing_tasks(&mut db).unwrap();

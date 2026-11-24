@@ -381,7 +381,10 @@ export class MarketplaceComponent {
         ...(all ? [['all', all] as const] : []),
         ...(packages.some(isNewArrival)
           ? [
-              [NEW_ARRIVALS, { name: this.i18n.transform('New Arrivals') }] as const,
+              [
+                NEW_ARRIVALS,
+                { name: this.i18n.transform('New Arrivals') },
+              ] as const,
             ]
           : []),
         ...indexedEntries(listed),
