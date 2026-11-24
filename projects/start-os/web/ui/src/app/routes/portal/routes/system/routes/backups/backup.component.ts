@@ -22,7 +22,6 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getManifest } from 'src/app/utils/get-package-data'
 import {
   VOLUME_TYPES,
-  volumeName,
   volumePath,
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { BackupContext } from './backup.types'
@@ -181,7 +180,7 @@ export class BackupsBackupComponent {
           ...Object.entries(sharedVolumes).map<BackupItem>(([id, volume]) => ({
             kind: 'volume',
             id,
-            title: volumeName(volume),
+            title: volume.name,
             source: volume.source,
             disabled: volume.availability === 'unavailable',
             checked: false,

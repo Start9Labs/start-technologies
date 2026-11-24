@@ -278,7 +278,7 @@ export const mockPatchData: DataModel = {
       checkedAt: new Date(Date.now() - 3600000).toISOString(),
     },
     MOCKCIFSDOCUMENTS234567ABCDEFGHI: {
-      name: 'nas.local',
+      name: 'Documents',
       source: {
         kind: 'cifs',
         hostname: 'nas.local',
@@ -292,7 +292,7 @@ export const mockPatchData: DataModel = {
       checkedAt: new Date().toISOString(),
     },
     MOCKCIFSVOLUME234567ABCDEFGHIJKL: {
-      name: 'nas.invalid',
+      name: 'Music',
       source: {
         kind: 'cifs',
         hostname: 'nas.invalid',

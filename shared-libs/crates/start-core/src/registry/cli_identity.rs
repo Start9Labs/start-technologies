@@ -9,6 +9,7 @@ use crate::sign::fingerprint::fingerprint;
 use crate::sign::session::PeerIdentity;
 use crate::util::io::{AtomicFile, maybe_read_file_to_string};
 
+/// Equivalent registry bases share identity history.
 fn target(url: &Url, address: &str) -> Result<Url, Error> {
     let mut target = url.clone();
     target
@@ -22,7 +23,7 @@ fn target(url: &Url, address: &str) -> Result<Url, Error> {
         .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     target.set_query(None);
     target.set_fragment(None);
-    Ok(target)
+    crate::trusted_keys::connection::registry_url(target.as_str())
 }
 
 fn identity_file(directory: &Path, target: &Url) -> PathBuf {

@@ -206,7 +206,7 @@ async fn resolve_fstab_source(source: &str) -> Result<PathBuf, Error> {
 
 pub fn disk<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("repair", from_fn_async(|_: C| repair()).no_cli())
+        .subcommand("repair", from_fn_async(|_: RpcContext| repair()).no_cli())
         .subcommand(
             "repair",
             CallRemoteHandler::<CliContext, _, _>::new(

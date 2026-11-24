@@ -70,7 +70,7 @@ For each attachment:
 3. Forward accepted requests to `next.path` with their incoming HTTP framing.
 4. Stop the listener and remove its ingress socket when the attachment is withdrawn.
 
-Use the supplied paths verbatim. Socket paths are runtime values, not persisted configuration. `next` routes to the next selected stage, or to the protected application's original binding, including its upstream TLS validation. Preserve the incoming request's authority and trusted forwarded headers when forwarding. StartOS applies the binding's authentication and forwarded-header policy before the first stage.
+Use the supplied paths verbatim. Socket paths are runtime values, not persisted configuration. `next` routes to the next selected stage, or to the protected application's original binding, including its upstream TLS validation. Preserve the incoming request's authority and trusted forwarded headers when forwarding. StartOS applies the binding's authentication and forwarded-header policy before the first stage. With binding authentication enabled, an upgrade's supplied `Origin` must match the accepted transport's scheme, host and effective port; requests without `Origin` remain allowed.
 
 If a provider stops, a selected profile disappears, or a socket cannot be reached, the chain fails closed with HTTP 503. StartOS retains the user's selection during unavailability. Completing an uninstall instead removes every stage owned by that package from all service and OS bindings, preserving other stages, their order, and gateway preferences. An emptied chain routes directly to the application. StartOS neither skips unavailable stages nor replays their requests against the application. Policy changes disconnect existing connections on the binding, including its other gateways and upgraded WebSocket connections.
 
@@ -86,7 +86,7 @@ For an [Anubis Unix-socket listener](https://github.com/TecharoHQ/anubis/blob/ma
 | `CUSTOM_REAL_IP_HEADER` | `X-Forwarded-For`                      |
 | `XFF_STRIP_PRIVATE`     | `false` when protecting LAN clients    |
 
-StartOS strips client-supplied `X-Forwarded-*`, `Forwarded`, and `X-Real-IP` headers at ingress. With the protected binding's `addXForwardedHeaders` enabled, `X-Forwarded-For` supplies the client address. Make this a requirement for profiles whose policy depends on client IP; a binding with header generation disabled supplies no client-IP header. Anubis's private-IP filtering is provider policy: keep LAN addresses when those clients need challenges too. StartOS's network-gateway **Public only** option is separate: private clients bypass the entire chain before Anubis is involved. URL gateways have no such option; their chain handles traffic delivered by the URL-plugin container.
+StartOS applies the binding's [forwarded-header policy](interfaces.md#bindport-options) at ingress. With the protected binding's `addXForwardedHeaders` enabled, `X-Forwarded-For` supplies the client address. Make this a requirement for profiles whose policy depends on client IP; a binding with header generation disabled supplies no client-IP header. Anubis's private-IP filtering is provider policy: keep LAN addresses when those clients need challenges too. StartOS's network-gateway **Public only** option is separate: private clients bypass the entire chain before Anubis is involved. URL gateways have no such option; their chain handles traffic delivered by the URL-plugin container.
 
 ## Gateway scope and trust
 
