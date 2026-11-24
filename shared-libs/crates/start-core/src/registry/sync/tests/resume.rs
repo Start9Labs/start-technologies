@@ -131,7 +131,7 @@ async fn oversized_replay_retries_from_a_dump_without_discarding_cached_data() {
         };
         assert_eq!(
             saved
-                .as_private()
+                .as_public()
                 .as_registry_indexes()
                 .as_idx(&url())
                 .unwrap()

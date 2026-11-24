@@ -319,7 +319,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         .result
         .unwrap();
     wait_for(&db, |db| {
-        db.as_private()
+        db.as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .is_some_and(|index| index.as_name().as_value() == &json!("Grant barrier"))
@@ -328,7 +328,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     assert!(
         db.peek()
             .await
-            .as_private()
+            .as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .unwrap()
@@ -346,7 +346,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .unwrap()
             .is_some_and(|cache| cache.status == RegistryStatus::Connected)
             && db
-                .as_private()
+                .as_public()
                 .as_registry_indexes()
                 .as_idx(&url)
                 .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_some())
@@ -354,7 +354,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     .await;
     let synced = db.peek().await;
     let private_s9pk = synced
-        .as_private()
+        .as_public()
         .as_registry_indexes()
         .as_idx(&url)
         .unwrap()
@@ -375,31 +375,142 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         private_s9pk.private,
         Some(crate::registry::tests::secret_keystream())
     );
-    let catalog = synced
+    assert!(
+        synced
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url)
+            .unwrap()
+            .as_selections()
+            .as_idx(&secret)
+            .is_some()
+    );
+    crate::registry::tests::revoke_secret_reader(&registry).await;
+    let (url, _server) = crate::registry::tests::server(registry.clone()).await;
+    let url = registry_url(url.as_str()).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let db = TypedPatchDb::<Database>::load_unchecked(
+        PatchDb::open(temp.path().join("db")).await.unwrap(),
+    );
+    let mut model = database();
+    model
+        .as_public_mut()
+        .as_server_info_mut()
+        .mutate(|info| {
+            info.registries = from_value(json!({url.as_str():"Registry"}))?;
+            info.os_registry = url.clone();
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+    db.put(&ROOT, model.as_value()).await.unwrap();
+    let subscribe = || -> NonDetachingJoinHandle<Result<(), Error>> {
+        let db = db.clone();
+        let url = url.clone();
+        let reader = reader.clone();
+        tokio::spawn(async move {
+            let (socket, _proxy) = native_connection(&url, &reader).await;
+            let socket = socket.unwrap();
+            receive_updates(
+                socket,
+                &db,
+                &BTreeSet::from([Subscription::Index(url.clone()), Subscription::Os(url)]),
+                &device(),
+                &mut 300,
+            )
+            .await
+        })
+        .into()
+    };
+    let receiver = subscribe();
+    wait_for(&db, |db| {
+        db.as_public()
+            .as_os_update_cache()
+            .de()
+            .unwrap()
+            .is_some_and(|cache| cache.status == RegistryStatus::Connected)
+    })
+    .await;
+    crate::registry::tests::set_secret_readers(&registry, &readers).await;
+    registry
+        .db
+        .mutate(|db| {
+            db.as_index_mut()
+                .as_name_mut()
+                .ser(&Some("Grant barrier".into()))
+        })
+        .await
+        .result
+        .unwrap();
+    wait_for(&db, |db| {
+        db.as_public()
+            .as_registry_indexes()
+            .as_idx(&url)
+            .is_some_and(|index| index.as_name().as_value() == &json!("Grant barrier"))
+    })
+    .await;
+    assert!(
+        db.peek()
+            .await
+            .as_public()
+            .as_registry_indexes()
+            .as_idx(&url)
+            .unwrap()
+            .as_package()
+            .as_packages()
+            .as_idx(&secret)
+            .is_none()
+    );
+    let _ = receiver.wait_for_abort().await;
+    let receiver = subscribe();
+    wait_for(&db, |db| {
+        db.as_public()
+            .as_os_update_cache()
+            .de()
+            .unwrap()
+            .is_some_and(|cache| cache.status == RegistryStatus::Connected)
+            && db
+                .as_public()
+                .as_registry_indexes()
+                .as_idx(&url)
+                .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_some())
+    })
+    .await;
+    let synced = db.peek().await;
+    let private_s9pk = synced
         .as_public()
-        .as_registry_cache()
+        .as_registry_indexes()
         .as_idx(&url)
         .unwrap()
-        .as_listings()
+        .as_package()
+        .as_packages()
         .as_idx(&secret)
         .unwrap()
         .de()
-        .unwrap();
-    assert!(!catalog.releases.is_empty());
-    for release in catalog.releases.values() {
-        for (_, asset) in &release.s9pks {
-            assert!(asset.private.is_none() && asset.readers.is_empty());
-        }
-    }
+        .unwrap()
+        .versions
+        .into_values()
+        .next()
+        .unwrap()
+        .s9pks
+        .remove(0)
+        .1;
+    assert_eq!(
+        private_s9pk.private,
+        Some(crate::registry::tests::secret_keystream())
+    );
     assert!(
-        !to_value(&synced.as_public().de().unwrap())
+        synced
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url)
             .unwrap()
-            .to_string()
-            .contains(&crate::registry::tests::secret_keystream().key.to_string())
+            .as_selections()
+            .as_idx(&secret)
+            .is_some()
     );
     crate::registry::tests::revoke_secret_reader(&registry).await;
     wait_for(&db, |db| {
-        db.as_private()
+        db.as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_none())

@@ -89,7 +89,7 @@ async fn live_legacy_registries_discover_and_populate_both_catalogs() {
         eprintln!(
             "{registry}: name={:?}, packages={}, OS versions={}, both connected",
             catalog.info.name,
-            catalog.listings.len(),
+            catalog.selections.len(),
             os.versions.len()
         );
     }
