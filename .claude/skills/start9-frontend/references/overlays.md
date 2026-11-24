@@ -53,8 +53,12 @@ page, with no wrapper dialog; the extra key needs the options cast to
   A trigger at the inline end of its row or bar — row actions, a header menu — sets
   `tuiDropdownAlign="end"`: an anchored dropdown wraps to the room past its aligned edge rather
   than flipping. Leave `tuiDropdownDirection` unset: its default opens on whichever side has
-  room, and a pinned `top` breaks when there's none.
+  room, and a pinned `top` breaks when there's none. A menu that a phone should open as a
+  bottom sheet adds `tuiDropdownSheet` (`@taiga-ui/addon-mobile`) to the same host; it swaps
+  on the device (`WA_IS_MOBILE`), not the breakpoint, and the content's `close` still closes it.
 - **Hints**: `[tuiHint]` (template content allowed), tuned globally via `tuiHintOptionsProvider`.
+  It goes on the control, `<button [tuiHint]="…"><tui-icon … /></button>`, never on the icon
+  inside it, so the whole control shows it.
 - **Text from outside the OS never reaches Taiga as a raw string.** Taiga renders string
   content — hint, dialog `label` and content, confirm, notification, `tui-error` — through
   `[innerHTML]`. Text a package authors (spec descriptions, warnings, footnotes and pattern
