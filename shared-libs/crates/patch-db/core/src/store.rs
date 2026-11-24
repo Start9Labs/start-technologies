@@ -314,7 +314,7 @@ impl Store {
 
         let id = self.revision;
         let res = Arc::new(Revision { id, patch });
-        self.broadcast.send(&res);
+        self.broadcast.send(&res, &self.persistent);
 
         Ok(Some(res))
     }

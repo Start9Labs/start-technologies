@@ -46,8 +46,7 @@ fn idle_mutable_subscriptions_reclaim_senders_and_old_projection_entries() {
     let mut broadcast = super::Broadcast::new();
     for i in 0..100 {
         let projection =
-            crate::Projection::new(None, vec![format!("/value{i}").parse().unwrap()], vec![])
-                .unwrap();
+            crate::Projection::new(None, vec![format!("/value{i}").parse().unwrap()], vec![]);
         drop(broadcast.subscribe_mutable(ROOT.to_owned(), projection));
     }
     let mut live = broadcast.subscribe_mutable(ROOT.to_owned(), crate::Projection::default());
@@ -55,8 +54,7 @@ fn idle_mutable_subscriptions_reclaim_senders_and_old_projection_entries() {
     assert_eq!(broadcast.projected.len(), 1);
     for i in 0..100 {
         let projection =
-            crate::Projection::new(None, vec![format!("/next{i}").parse().unwrap()], vec![])
-                .unwrap();
+            crate::Projection::new(None, vec![format!("/next{i}").parse().unwrap()], vec![]);
         assert!(broadcast.reproject(live.id, projection, &json!({}), 0));
         assert!(live.receiver.try_recv().is_ok());
         assert_eq!(broadcast.listeners.len(), 1);

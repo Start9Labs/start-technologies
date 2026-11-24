@@ -110,7 +110,7 @@ pub struct ProjectionParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub depth: Option<usize>,
     /// Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
-    /// Empty keeps everything. Segments that are array positions (digits or `-`) are rejected.
+    /// Empty keeps everything. A numeric segment matches that key or array position.
     #[arg(long, help = "help.arg.db-include")]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<JsonPointer>,
@@ -140,50 +140,33 @@ pub struct SelectorParams {
 
 rpc_toolkit::reflect_ts!(SelectorParams);
 
-impl TryFrom<ProjectionParams> for Projection {
-    type Error = Error;
-    fn try_from(
+impl From<ProjectionParams> for Projection {
+    fn from(
         ProjectionParams {
             depth,
             include,
             exclude,
             selectors,
         }: ProjectionParams,
-    ) -> Result<Self, Error> {
-        let projection = || -> Result<Projection, patch_db::Error> {
-            let explicit = depth.is_some() || !include.is_empty() || !exclude.is_empty();
-            let simple = Projection::new(depth, include, exclude)?;
-            if selectors.is_empty() {
-                return Ok(simple);
-            }
-            let mut union = if explicit && simple.is_identity() {
-                vec![Selector::new(ROOT.to_owned(), Vec::new(), None)?]
-            } else {
-                simple.into_selectors()
-            };
-            for SelectorParams {
-                include,
-                exclude,
-                depth,
-            } in selectors
-            {
-                union.push(Selector::new(include, exclude, depth)?);
-            }
-            Projection::union(union)
+    ) -> Self {
+        let explicit = depth.is_some() || !include.is_empty() || !exclude.is_empty();
+        let simple = Projection::new(depth, include, exclude);
+        if selectors.is_empty() {
+            return simple;
+        }
+        let mut union = if explicit && simple.is_identity() {
+            vec![Selector::new(ROOT.to_owned(), Vec::new(), None)]
+        } else {
+            simple.into_selectors()
         };
-        projection().map_err(|e| match e {
-            patch_db::Error::PositionalPattern(pattern) => Error::new(
-                eyre!(
-                    "{}",
-                    t!(
-                        "db.projection-array-position",
-                        pattern = pattern.to_string()
-                    )
-                ),
-                ErrorKind::InvalidRequest,
-            ),
-            e => e.into(),
-        })
+        union.extend(selectors.into_iter().map(
+            |SelectorParams {
+                 include,
+                 exclude,
+                 depth,
+             }| Selector::new(include, exclude, depth),
+        ));
+        Projection::union(union)
     }
 }
 
@@ -224,7 +207,7 @@ async fn cli_dump(
     let dump = if let Some(path) = path {
         PatchDb::open(path)
             .await?
-            .dump_projected(&ROOT, &projection.try_into()?)
+            .dump_projected(&ROOT, &projection.into())
             .await
     } else {
         let method = parent_method.into_iter().chain(method).join(".");
@@ -268,10 +251,7 @@ pub async fn dump(
 ) -> Result<Dump, Error> {
     Ok(ctx
         .db
-        .dump_projected(
-            pointer.as_ref().unwrap_or(&*PUBLIC),
-            &projection.try_into()?,
-        )
+        .dump_projected(pointer.as_ref().unwrap_or(&*PUBLIC), &projection.into())
         .await)
 }
 
@@ -510,7 +490,7 @@ pub async fn subscribe(
             .db
             .catch_up_and_sub_mutable(
                 pointer,
-                projection.try_into()?,
+                projection.into(),
                 since.as_ref().map(|since| (&*since.epoch, since.id)),
             )
             .await;
@@ -543,7 +523,7 @@ pub async fn subscribe(
     }
     let (dump, sub) = ctx
         .db
-        .dump_and_sub_projected(pointer, projection.try_into()?)
+        .dump_and_sub_projected(pointer, projection.into())
         .await;
     let mut sub = DbSubscriber {
         rev: dump.id,
@@ -622,7 +602,7 @@ pub async fn update_subscription(
         projection,
     }: UpdateSubscriptionParams,
 ) -> Result<(), Error> {
-    let projection = projection.try_into()?;
+    let projection = projection.into();
     let id = ctx
         .db_subscriptions
         .peek(|subscriptions| subscriptions.get(&subscription).copied());

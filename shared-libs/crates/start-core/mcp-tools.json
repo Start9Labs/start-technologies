@@ -1687,7 +1687,7 @@
               ]
             },
             "include": {
-              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. Segments that are array positions (digits or `-`) are rejected.",
+              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.",
               "type": "array",
               "items": { "type": "string" }
             },
@@ -1847,7 +1847,7 @@
               ]
             },
             "include": {
-              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. Segments that are array positions (digits or `-`) are rejected.",
+              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.",
               "type": "array",
               "items": { "type": "string" }
             },
@@ -1963,7 +1963,7 @@
               ]
             },
             "include": {
-              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. Segments that are array positions (digits or `-`) are rejected.",
+              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.",
               "type": "array",
               "items": { "type": "string" }
             },

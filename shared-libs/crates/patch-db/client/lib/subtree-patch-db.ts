@@ -347,7 +347,9 @@ export class SubtreePatchDB<
       this.cursor = { ...this.cursor, id: revision.id }
     const patch =
       project && this.held
-        ? projectOperations(revision.patch, this.held)
+        ? projectOperations(revision.patch, this.held, path =>
+            Array.isArray(getValueByPointer(cache.value, pathFromArray(path))),
+          )
         : revision.patch
     patch.forEach(op => applyOperation(cache, op as Operation<unknown>))
     this.publishRevision({ id: revision.id, patch }, cache)

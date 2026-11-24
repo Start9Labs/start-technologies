@@ -9,6 +9,7 @@ import {
   normalizeSelector,
   projectOperations,
   projectRoot,
+  projectScoped,
   scopeOperations,
   SubtreePatchDB,
   watchSelectors,
@@ -411,16 +412,40 @@ test('a snapshot whose cursors disagree resumes from a dump', t => {
   assert.equal(f.calls[0].since, null)
 })
 
-test('array positions widen a watch to the part before them', () => {
-  assert.deepEqual(watchSelectors('/arr/0/name'), [{ include: '/arr' }])
+test('numeric watch paths select that key or position', () => {
+  assert.deepEqual(watchSelectors('/bindings/80'), [
+    { include: '/bindings/80' },
+  ])
   assert.deepEqual(
     watchSelectors(
       JSON.stringify(['/rows', { include: ['/*/a'], exclude: ['/0'] }]),
     ),
-    [{ include: '/rows/*/a' }],
+    [{ include: '/rows/*/a', exclude: ['/rows/0'] }],
   )
-  assert.throws(() => normalizeSelector({ include: '/arr/1' }))
-  assert.throws(() => normalizeSelector({ include: '', exclude: ['/arr/-'] }))
+  assert.deepEqual(
+    projectRoot([{ include: '/arr/1' }], { arr: ['a', 'b', 'c'] }),
+    { arr: [null, 'b', null] },
+  )
+})
+
+test('a held array keeps its positions through insertions and removals', t => {
+  const f = fixture(t)
+  const second = f.watch('arr', 1)
+  const rows = f.project({ include: ['/*/a'] }, 'rows')
+  f.db.start()
+  f.start(f.calls[0], 3, {
+    arr: [null, 'b', null],
+    rows: [{ a: 1 }, { a: 2 }],
+  })
+  assert.deepEqual(second.values, ['b'])
+  f.revision(f.calls[0], 4, [
+    { op: 'replace', path: '/arr', value: [null, null, 'b', null] },
+    { op: 'add', path: '/rows/0', value: { a: 0, b: 9 } },
+    { op: 'remove', path: '/rows/2' },
+  ])
+  t.mock.timers.tick(250)
+  assert.deepEqual(second.values.at(-1), null)
+  assert.deepEqual(rows.values.at(-1), [{ a: 0 }, { a: 1 }])
 })
 
 test('a minimal selection drops contained selectors', () => {
@@ -465,6 +490,9 @@ const SELECTIONS = [
   [{ include: '', exclude: [''] }],
   [{ include: '/a', exclude: ['/a/*/b'] }, { include: '/a/x/b' }],
   [{ include: '/*/b' }, { include: '/arr', exclude: ['/arr/*/b'], depth: 3 }],
+  [{ include: '/arr/1' }],
+  [{ include: '', exclude: ['/arr/0'] }],
+  [{ include: '/arr/1/a' }, { include: '/a' }],
 ]
 
 const STATES = [
@@ -478,25 +506,60 @@ const STATES = [
   { arr: [{ a: 3 }] },
 ]
 
+const patchesBetween = (from, to) => [
+  [{ op: 'replace', path: '', value: to }],
+  ...(Array.isArray(from?.arr) && Array.isArray(to?.arr)
+    ? [
+        [
+          { op: 'add', path: '/arr/0', value: to.arr[0] ?? null },
+          { op: 'remove', path: '/arr/1' },
+        ],
+        [{ op: 'add', path: '/arr/-', value: { a: 9 } }],
+      ]
+    : []),
+]
+
 test('projected operations track the projected document, as the server projects them', () => {
   for (const selection of SELECTIONS) {
     for (const from of STATES) {
       for (const to of STATES) {
-        const patch = [{ op: 'replace', path: '', value: to }]
-        const truth = { id: 0, value: structuredClone(from) }
-        patch.forEach(op => applyOperation(truth, op))
-        const projected = { id: 0, value: projectRoot(selection, from) }
-        projectOperations(scopeOperations(patch, ''), selection).forEach(op =>
-          applyOperation(projected, op),
-        )
-        assert.deepEqual(
-          projected.value,
-          projectRoot(selection, truth.value),
-          JSON.stringify({ selection, from, to }),
-        )
+        for (const patch of patchesBetween(from, to)) {
+          const truth = { id: 0, value: structuredClone(from) }
+          patch.forEach(op => applyOperation(truth, op))
+          const projected = { id: 0, value: projectRoot(selection, from) }
+          projectScoped(patch, '', selection, truth.value).forEach(op =>
+            applyOperation(projected, op),
+          )
+          assert.deepEqual(
+            projected.value,
+            projectRoot(selection, truth.value),
+            JSON.stringify({ selection, from, patch }),
+          )
+        }
       }
     }
   }
+})
+
+test('a replica applies array insertions and removals with placeholders, as it holds them', () => {
+  const selection = [{ include: '/rows/*/a' }]
+  const from = {
+    rows: [
+      { a: 1, b: 1 },
+      { a: 2, b: 2 },
+    ],
+  }
+  const patch = [
+    { op: 'add', path: '/rows/0', value: { a: 0, b: 0 } },
+    { op: 'remove', path: '/rows/2' },
+  ]
+  const truth = { id: 0, value: structuredClone(from) }
+  patch.forEach(op => applyOperation(truth, op))
+  const replica = { id: 0, value: projectRoot(selection, from) }
+  projectOperations(patch, selection, path =>
+    Array.isArray(path.reduce((v, k) => v?.[k], replica.value)),
+  ).forEach(op => applyOperation(replica, op))
+  assert.deepEqual(replica.value, projectRoot(selection, truth.value))
 })
 
 test('extensions add exactly what a wider selection keeps, as the server extends', () => {

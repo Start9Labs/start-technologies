@@ -125,8 +125,7 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
     .await
     .unwrap();
     let pkgs: JsonPointer = "/pkgs".parse().unwrap();
-    let projection =
-        patch_db::Projection::new(None, vec![], vec!["/*/icon".parse().unwrap()]).unwrap();
+    let projection = patch_db::Projection::new(None, vec![], vec!["/*/icon".parse().unwrap()]);
     let (epoch, catchup, mut sub) = db
         .catch_up_and_sub_projected(pkgs.clone(), projection.clone(), None)
         .await;
@@ -180,7 +179,7 @@ async fn reprojection_sends_what_it_adds_before_later_revisions() {
     .await
     .unwrap();
     let pkgs: JsonPointer = "/pkgs".parse().unwrap();
-    let states = Projection::new(None, vec!["/*/state".parse().unwrap()], vec![]).unwrap();
+    let states = Projection::new(None, vec!["/*/state".parse().unwrap()], vec![]);
     let (_, catchup, mut sub) = db
         .catch_up_and_sub_mutable(pkgs.clone(), states.clone(), None)
         .await;
