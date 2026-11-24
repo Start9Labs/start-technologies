@@ -1104,5 +1104,7 @@ export const ENGLISH: Record<string, number> = {
   'Sign in from the command line': 1309,
   'Enroll this browser': 1310,
   'Get help': 1311,
-  'Enter your master password to continue.': 1312,
+  'Last synced': 1312,
+  'just now': 1313,
+  'Enter your master password to continue.': 1314,
 }

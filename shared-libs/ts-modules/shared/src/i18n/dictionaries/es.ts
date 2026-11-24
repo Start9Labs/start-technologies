@@ -1103,5 +1103,7 @@ export default {
   1309: 'Iniciar sesión desde la línea de comandos',
   1310: 'Registrar este navegador',
   1311: 'Obtener ayuda',
-  1312: 'Introduzca su contraseña maestra para continuar.',
+  1312: 'Última sincronización',
+  1313: 'justo ahora',
+  1314: 'Introduzca su contraseña maestra para continuar.',
 } satisfies i18n

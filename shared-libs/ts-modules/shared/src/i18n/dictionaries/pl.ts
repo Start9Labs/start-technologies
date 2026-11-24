@@ -1103,5 +1103,7 @@ export default {
   1309: 'Zaloguj się z wiersza poleceń',
   1310: 'Zarejestruj tę przeglądarkę',
   1311: 'Uzyskaj pomoc',
-  1312: 'Wprowadź hasło główne, aby kontynuować.',
+  1312: 'Ostatnia synchronizacja',
+  1313: 'przed chwilą',
+  1314: 'Wprowadź hasło główne, aby kontynuować.',
 } satisfies i18n

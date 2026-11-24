@@ -41,9 +41,7 @@ export interface ReplaceOperation<T> extends BaseOperation {
  * @typeParam T - The type of values carried by add/replace operations.
  */
 export type Operation<T> =
-  | AddOperation<T>
-  | RemoveOperation
-  | ReplaceOperation<T>
+  AddOperation<T> | RemoveOperation | ReplaceOperation<T>
 
 /**
  * Sentinel value used internally to distinguish a "remove" result from a
@@ -264,6 +262,39 @@ function recursiveApplyArray<T extends any[]>(
   }
 
   return result
+}
+
+/**
+ * Scopes a patch to the subtree at `pointer`, as the server scopes a subscription's
+ * revisions: operations below it become relative, and an operation on an ancestor
+ * becomes one on the subtree root.
+ */
+export function scopeOperations(
+  patch: Operation<unknown>[],
+  pointer: string,
+): Operation<unknown>[] {
+  return patch.flatMap((op): Operation<unknown>[] => {
+    if (
+      op.path === pointer ||
+      op.path === '' ||
+      pointer.startsWith(op.path + '/')
+    ) {
+      if (op.op === PatchOp.REMOVE)
+        return [{ op: PatchOp.REPLACE, path: '', value: null }]
+      return [
+        {
+          ...op,
+          path: '',
+          value:
+            getValueByPointer(op.value as any, pointer.slice(op.path.length)) ??
+            null,
+        },
+      ]
+    }
+    if (op.path.startsWith(pointer + '/'))
+      return [{ ...op, path: op.path.slice(pointer.length) }]
+    return []
+  })
 }
 
 function isObject(val: any): val is Record<string, unknown> {

@@ -1103,5 +1103,7 @@ export default {
   1309: 'Über die Befehlszeile anmelden',
   1310: 'Diesen Browser registrieren',
   1311: 'Hilfe erhalten',
-  1312: 'Geben Sie Ihr Master-Passwort ein, um fortzufahren.',
+  1312: 'Zuletzt synchronisiert',
+  1313: 'gerade eben',
+  1314: 'Geben Sie Ihr Master-Passwort ein, um fortzufahren.',
 } satisfies i18n
