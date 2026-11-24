@@ -21,6 +21,22 @@ mod tests;
 
 pub type Subscriber = mpsc::UnboundedReceiver<Revision>;
 
+/// What a subscription with a changeable projection receives, in order.
+#[derive(Clone, Debug)]
+pub enum Update {
+    /// A revision, projected.
+    Revision(Revision),
+    /// What the latest projection change added, current as of its id; one per change.
+    Extend(Revision),
+}
+
+/// A subscription whose projection [`PatchDb::reproject`](crate::PatchDb::reproject) changes.
+#[derive(Debug)]
+pub struct ProjectedSubscriber {
+    pub id: u64,
+    pub receiver: mpsc::UnboundedReceiver<Update>,
+}
+
 type JsonRevision = Result<Bytes, Arc<serde_json::Error>>;
 
 /// A bounded JSON revision stream. Overflow permanently closes the subscription.
@@ -55,16 +71,18 @@ impl JsonSubscriber {
 #[derive(Debug, Default)]
 struct ScopedBroadcast {
     unbounded: Vec<mpsc::UnboundedSender<Revision>>,
+    projected: BTreeMap<u64, mpsc::UnboundedSender<Update>>,
     json: BTreeMap<NonZeroUsize, broadcast::Sender<JsonRevision>>,
     dump: Option<Bytes>,
 }
 impl ScopedBroadcast {
     fn prune_unbounded(&mut self) {
         self.unbounded.retain(|sender| !sender.is_closed());
+        self.projected.retain(|_, sender| !sender.is_closed());
     }
 
     fn is_empty(&self) -> bool {
-        self.unbounded.is_empty() && self.json.is_empty()
+        self.unbounded.is_empty() && self.projected.is_empty() && self.json.is_empty()
     }
 }
 
@@ -73,6 +91,9 @@ const HISTORY_LEN: usize = 1024;
 #[derive(Debug)]
 pub struct Broadcast {
     listeners: BTreeMap<(JsonPointer, Projection), ScopedBroadcast>,
+    /// The listener of each subscription with a changeable projection.
+    projected: BTreeMap<u64, (JsonPointer, Projection)>,
+    next_projected: u64,
     history: VecDeque<Arc<Revision>>,
     epoch: InternedString,
 }
@@ -80,6 +101,8 @@ impl Default for Broadcast {
     fn default() -> Self {
         Self {
             listeners: BTreeMap::new(),
+            projected: BTreeMap::new(),
+            next_projected: 0,
             history: VecDeque::new(),
             epoch: InternedString::from_display(&format_args!(
                 "{:016x}",
@@ -141,6 +164,9 @@ impl Broadcast {
                 listeners
                     .unbounded
                     .retain(|sender| sender.send(scoped.clone()).is_ok());
+                listeners
+                    .projected
+                    .retain(|_, sender| sender.send(Update::Revision(scoped.clone())).is_ok());
                 if !listeners.json.is_empty() {
                     let json = serde_json::to_vec(&scoped)
                         .map(Bytes::from)
@@ -171,6 +197,69 @@ impl Broadcast {
             .unbounded
             .push(send);
         recv
+    }
+
+    /// A subscription whose projection [`Broadcast::reproject`] changes; subscriptions holding
+    /// equal projections share one listener.
+    pub fn subscribe_mutable(
+        &mut self,
+        ptr: JsonPointer,
+        projection: Projection,
+    ) -> ProjectedSubscriber {
+        let listeners = &self.listeners;
+        self.projected.retain(|id, key| {
+            listeners
+                .get(key)
+                .is_some_and(|l| l.projected.get(id).is_some_and(|s| !s.is_closed()))
+        });
+        let id = self.next_projected;
+        self.next_projected += 1;
+        let (send, receiver) = mpsc::unbounded_channel();
+        let key = (ptr, projection);
+        self.listeners
+            .entry(key.clone())
+            .or_default()
+            .projected
+            .insert(id, send);
+        self.projected.insert(id, key);
+        ProjectedSubscriber { id, receiver }
+    }
+
+    /// Moves a subscription to another projection, first sending it the extension of the
+    /// subtree value as of the revision. False once the subscription has closed.
+    pub fn reproject(
+        &mut self,
+        id: u64,
+        projection: Projection,
+        root: &OrdValue,
+        revision: u64,
+    ) -> bool {
+        let Some((ptr, held)) = self.projected.remove(&id) else {
+            return false;
+        };
+        let Some(sender) = self
+            .listeners
+            .get_mut(&(ptr.clone(), held.clone()))
+            .and_then(|listeners| listeners.projected.remove(&id))
+        else {
+            return false;
+        };
+        let value = ptr.get(root).unwrap_or(&OrdValue::Null);
+        let extension = Revision {
+            id: revision,
+            patch: held.extension(&projection, value),
+        };
+        if sender.send(Update::Extend(extension)).is_err() {
+            return false;
+        }
+        let key = (ptr, projection);
+        self.listeners
+            .entry(key.clone())
+            .or_default()
+            .projected
+            .insert(id, sender);
+        self.projected.insert(id, key);
+        true
     }
 
     pub fn subscribe_json(

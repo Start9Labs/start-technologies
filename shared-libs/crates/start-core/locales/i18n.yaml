@@ -1184,6 +1184,13 @@ db.projection-array-position:
   fr_FR: "Le motif de projection %{pattern} désigne une position de tableau ; utilisez * pour les éléments de tableau"
   pl_PL: "Wzorzec projekcji %{pattern} wskazuje pozycję w tablicy; dla elementów tablicy użyj *"
 
+db.subscription-not-found:
+  en_US: "Database subscription %{subscription} has ended or does not exist"
+  de_DE: "Das Datenbankabonnement %{subscription} ist beendet oder existiert nicht"
+  es_ES: "La suscripción a la base de datos %{subscription} ha terminado o no existe"
+  fr_FR: "L'abonnement à la base de données %{subscription} est terminé ou n'existe pas"
+  pl_PL: "Subskrypcja bazy danych %{subscription} zakończyła się lub nie istnieje"
+
 # disk/main.rs
 disk.main.defrag-failed:
   en_US: "Filesystem optimization failed; continuing with the converted filesystem."

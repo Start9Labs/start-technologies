@@ -26,7 +26,7 @@ fn failure_details_follow_attempts_without_discarding_cached_catalogs() {
         .unwrap()
         .de()
         .unwrap()
-        .listings;
+        .selections;
     let versions = db
         .as_public()
         .as_os_update_cache()
@@ -50,7 +50,7 @@ fn failure_details_follow_attempts_without_discarding_cached_catalogs() {
         assert_eq!(cache.status, RegistryStatus::Error);
         assert_eq!(cache.error.as_deref(), Some(message));
         assert_eq!(
-            to_value(&cache.listings).unwrap(),
+            to_value(&cache.selections).unwrap(),
             to_value(&packages).unwrap()
         );
         let os_cache = db.as_public().as_os_update_cache().de().unwrap().unwrap();
@@ -74,7 +74,7 @@ fn failure_details_follow_attempts_without_discarding_cached_catalogs() {
         assert_eq!(cache.status, RegistryStatus::Connecting);
         assert!(cache.error.is_none());
         assert_eq!(
-            to_value(&cache.listings).unwrap(),
+            to_value(&cache.selections).unwrap(),
             to_value(&packages).unwrap()
         );
         assert!(
@@ -142,7 +142,7 @@ fn first_failure_retains_details_and_legacy_snapshots_without_details_still_load
         .de()
         .unwrap();
     assert_eq!(cache.error.as_deref(), Some("Connection refused"));
-    assert!(cache.listings.is_empty());
+    assert!(cache.selections.is_empty());
     let cache: RegistryCache =
         from_value(json!({"info": RegistryInfo::default(), "packages": {}, "status": "error"}))
             .unwrap();

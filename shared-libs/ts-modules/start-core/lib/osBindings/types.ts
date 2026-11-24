@@ -1028,6 +1028,16 @@ export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
+
+/**
+ * A package's releases this server can run, by version; release data stays in the saved index.
+ */
+export type PackageSelection = z.output<typeof schemas.PackageSelection>
+
+/**
+ * A package's releases this server can run, by version; release data stays in the saved index.
+ */
+export type PackageSelectionInput = z.input<typeof schemas.PackageSelection>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PassthroughInfoInput = z.input<typeof schemas.PassthroughInfo>
 export type PasswordType = z.output<typeof schemas.PasswordType>
@@ -1556,6 +1566,16 @@ export type OsIndex = z.output<typeof schemas.OsIndex>
 export type OsIndexInput = z.input<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type PackageVersionInfoInput = z.input<typeof schemas.PackageVersionInfo>
+
+/**
+ * A saved registry's synchronization state and what this server can run from its index.
+ */
+export type RegistryCache = z.output<typeof schemas.RegistryCache>
+
+/**
+ * A saved registry's synchronization state and what this server can run from its index.
+ */
+export type RegistryCacheInput = z.input<typeof schemas.RegistryCache>
 export type ServerStatus = z.output<typeof schemas.ServerStatus>
 export type ServerStatusInput = z.input<typeof schemas.ServerStatus>
 export type SetBackupProgress = z.output<typeof schemas.SetBackupProgress>
@@ -1616,16 +1636,6 @@ export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
 
 /**
- * One package as StartOS lists it in its registry cache.
- */
-export type PackageListing = z.output<typeof schemas.PackageListing>
-
-/**
- * One package as StartOS lists it in its registry cache.
- */
-export type PackageListingInput = z.input<typeof schemas.PackageListing>
-
-/**
  * A package version as the requester sees it, for promotion to another registry.
  */
 export type PackageVersionExport = z.output<typeof schemas.PackageVersionExport>
@@ -1660,16 +1670,6 @@ export type Manifest = z.output<typeof schemas.Manifest>
 export type ManifestInput = z.input<typeof schemas.Manifest>
 export type PackageIndex = z.output<typeof schemas.PackageIndex>
 export type PackageIndexInput = z.input<typeof schemas.PackageIndex>
-
-/**
- * Last synchronized package listings and registry trust proposals.
- */
-export type RegistryCache = z.output<typeof schemas.RegistryCache>
-
-/**
- * Last synchronized package listings and registry trust proposals.
- */
-export type RegistryCacheInput = z.input<typeof schemas.RegistryCache>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 export type BindOptionsInput = z.input<typeof schemas.BindOptions>
 export type FullIndex = z.output<typeof schemas.FullIndex>

@@ -16,7 +16,11 @@ const SYNCED = 'synced'
 const KEYED: readonly string[] = ['packageData']
 const KEYED_ROOT = Object.freeze({})
 /** Data fetched from outside the server is shown only while live. */
-const UNPERSISTED: readonly string[] = ['registryCache', 'osUpdateCache']
+const UNPERSISTED: readonly string[] = [
+  'registryCache',
+  'registryIndexes',
+  'osUpdateCache',
+]
 
 type Snapshot = { id: number; roots: Record<string, Cursor> }
 type Restored = { dump: Dump<DataModel>; cursors: Record<string, Cursor> }

@@ -319,7 +319,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         .result
         .unwrap();
     wait_for(&db, |db| {
-        db.as_private()
+        db.as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .is_some_and(|index| {
@@ -330,7 +330,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     assert!(
         db.peek()
             .await
-            .as_private()
+            .as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .unwrap()
@@ -348,7 +348,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
             .unwrap()
             .is_some_and(|cache| cache.status == RegistryStatus::Connected)
             && db
-                .as_private()
+                .as_public()
                 .as_registry_indexes()
                 .as_idx(&url)
                 .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_some())
@@ -356,7 +356,7 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
     .await;
     let synced = db.peek().await;
     let private_s9pk = synced
-        .as_private()
+        .as_public()
         .as_registry_indexes()
         .as_idx(&url)
         .unwrap()
@@ -377,31 +377,19 @@ async fn resubscribing_discovers_later_private_grants_and_keeps_live_revocation(
         private_s9pk.private,
         Some(crate::registry::tests::secret_keystream())
     );
-    let catalog = synced
-        .as_public()
-        .as_registry_cache()
-        .as_idx(&url)
-        .unwrap()
-        .as_listings()
-        .as_idx(&secret)
-        .unwrap()
-        .de()
-        .unwrap();
-    assert!(!catalog.releases.is_empty());
-    for release in catalog.releases.values() {
-        for (_, asset) in &release.s9pks {
-            assert!(asset.private.is_none() && asset.readers.is_empty());
-        }
-    }
     assert!(
-        !to_value(&synced.as_public().de().unwrap())
+        synced
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url)
             .unwrap()
-            .to_string()
-            .contains(&crate::registry::tests::secret_keystream().key.to_string())
+            .as_selections()
+            .as_idx(&secret)
+            .is_some()
     );
     crate::registry::tests::revoke_secret_reader(&registry).await;
     wait_for(&db, |db| {
-        db.as_private()
+        db.as_public()
             .as_registry_indexes()
             .as_idx(&url)
             .is_some_and(|index| index.as_package().as_packages().as_idx(&secret).is_none())

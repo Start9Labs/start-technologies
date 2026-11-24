@@ -12,6 +12,7 @@ import {
 import { FormBuilder, NonNullableFormBuilder, Validators } from '@angular/forms'
 import {
   BehaviorSubject,
+  defer,
   EMPTY,
   filter,
   firstValueFrom,
@@ -233,7 +234,8 @@ const { ActivatedRoute, convertToParamMap, Router } =
   await import('@angular/router')
 const { RefreshAlertComponent } =
   await import('src/app/components/refresh-alert.component')
-const { PatchDB, SubtreePatchDB } = await import('patch-db-client')
+const { PatchDB, SubtreePatchDB, projectRoot, selectorKey, watchSelection } =
+  await import('patch-db-client')
 const { OSService } = await import('src/app/services/os.service')
 const { i18nService: ProductionI18nService } =
   await import('../../../../../shared-libs/ts-modules/shared/src/i18n/i18n.service.ts')
@@ -4311,7 +4313,7 @@ test('a late registry cache update cannot restore a removed registry', async t =
     'https://registry.test/': {
       status: 'connected',
       info: { name: 'New name' },
-      listings: {},
+      selections: {},
     },
   })
   await new Promise(setImmediate)
@@ -4330,7 +4332,7 @@ test('registry status keeps its last known observation while the server is disco
       status: 'error',
       error: 'connection timed out',
       info: { name: 'Test' },
-      listings: {},
+      selections: {},
     },
   })
   const registries = of({ 'https://registry.test': 'Test' })
@@ -4367,6 +4369,7 @@ test('registry status keeps its last known observation while the server is disco
     'https://registry.test/',
   ])
   assert.equal((await current()).status, 'error')
+  const observed = catalogs.length
 
   connected.next(false)
   const [registry] = await firstValueFrom(service.registries$)
@@ -4376,7 +4379,8 @@ test('registry status keeps its last known observation while the server is disco
     'https://registry.test/',
   ])
   assert.equal((await current()).status, 'error')
-  assert.equal(catalogs.length, 1)
+  assert.equal(catalogs.length, observed)
+  assert.equal(catalogs.at(-1)['https://registry.test/'].status, 'error')
 })
 
 test('header status separates offline, unreachable server, connecting, restarting and live', async t => {
@@ -4600,18 +4604,33 @@ const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
     categories: { bitcoin: { name: 'Bitcoin' } },
     icon: null,
   },
-  listings: {
-    example: {
-      categories: ['bitcoin'],
-      releases: {
-        [version]: { title: version, description: { short: '', long: '' } },
-      },
-      versions: { [version]: {} },
-    },
+  selections: {
+    example: { best: [version], versions: { [version]: { compatible: true } } },
   },
 })
 
-function marketplaceFixture(t, entries = {}) {
+const registryIndex = (versions = ['1.0.0:0', '2.0.0:0', '3.0.0:0']) => ({
+  package: {
+    packages: {
+      example: {
+        authorized: {},
+        categories: ['bitcoin'],
+        versions: Object.fromEntries(
+          versions.map(version => [
+            version,
+            { title: version, description: { short: '', long: '' } },
+          ]),
+        ),
+      },
+    },
+    categories: {},
+  },
+})
+
+const indexedRelease = version =>
+  `/registryIndexes/https:~1~1registry.test~1/package/packages/example/versions/${version}`
+
+function marketplaceFixture(t, entries = {}, index = registryIndex()) {
   const source = new Subject()
   const connection = new BehaviorSubject(true)
   const cache = new BehaviorSubject({
@@ -4620,20 +4639,17 @@ function marketplaceFixture(t, entries = {}) {
       ui: {},
       serverInfo: { registries: { 'https://registry.test': 'Saved name' } },
       registryCache: entries,
+      registryIndexes: { 'https://registry.test/': index },
     },
   })
   const patch = new PatchDB(source, cache)
+  patch.watchProjection$ = (projection, ...path) =>
+    patch
+      .watch$(...path)
+      .pipe(map(value => projectRoot(watchSelection(projection), value)))
   patch.start()
   const queries = []
   const responses = []
-  const packageQueries = []
-  const details = {
-    best: {},
-    otherVersions: {},
-    missing: new Set(),
-    error: null,
-  }
-  const detailsWaiters = new Set()
   const errors = []
   const refreshes = []
   const connections = []
@@ -4698,40 +4714,6 @@ function marketplaceFixture(t, entries = {}) {
           iconResponses.push(response)
           return response.promise
         },
-        streams: {
-          server: {
-            registries: {
-              package: async (params, options) => {
-                packageQueries.push(params)
-                if (details.error) throw details.error
-                const version = params.targetVersion.slice(1)
-                const select = () => ({
-                  categories: [],
-                  best: details.missing.has(version)
-                    ? {}
-                    : {
-                        [version]: details.best[version] ?? { title: version },
-                      },
-                  otherVersions: details.otherVersions,
-                })
-                async function* items() {
-                  while (true) {
-                    await new Promise((resolve, reject) => {
-                      detailsWaiters.add(resolve)
-                      options?.signal?.addEventListener(
-                        'abort',
-                        () => reject(options.signal.reason),
-                        { once: true },
-                      )
-                    })
-                    yield select()
-                  }
-                }
-                return { initial: select(), items: items() }
-              },
-            },
-          },
-        },
         rpc: {
           server: {
             registries: {
@@ -4769,15 +4751,14 @@ function marketplaceFixture(t, entries = {}) {
   })
   return {
     service,
+    patch,
     injector,
     source,
     cache,
     connection,
     queries,
     responses,
-    packageQueries,
     errors,
-    details,
     refreshes,
     connections,
     iconRequests,
@@ -4803,11 +4784,6 @@ function marketplaceFixture(t, entries = {}) {
     replace(path, value) {
       source.next([{ id: ++revision, patch: [{ op: 'replace', path, value }] }])
     },
-    pushDetails() {
-      const waiters = [...detailsWaiters]
-      detailsWaiters.clear()
-      waiters.forEach(resolve => resolve())
-    },
   }
 }
 
@@ -4822,7 +4798,7 @@ test('registry availability distinguishes first sync, empty success and cached r
   const packages = f.watch(f.service.getPackage$('missing', null, null))
   assert.equal(rows.at(-1)[0].status, 'connecting')
   assert.deepEqual(errors.at(-1), [])
-  const entry = { ...registryEntry(), status: 'connecting', listings: {} }
+  const entry = { ...registryEntry(), status: 'connecting', selections: {} }
   f.replace('/registryCache', { 'https://registry.test/': entry })
   assert.equal(
     isRegistryLoading(stores.at(-1).status, stores.at(-1).packages.length),
@@ -4952,9 +4928,10 @@ for (const status of ['connected', 'connecting', 'error']) {
 
 test('the visible refresh action retries failed icons when the refreshed cache arrives and shares successful loads', async t => {
   const entry = registryEntry()
+  const index = registryIndex()
   const icon = 'blake3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png'
-  entry.listings.example.releases['1.0.0:0'].icon = icon
-  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  index.package.packages.example.versions['1.0.0:0'].icon = icon
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
   f.makePage()
   const refresh = f.makeRefresh('https://registry.test/')
   const visible = f.watch(
@@ -5121,7 +5098,57 @@ test('marketplace lists and metadata stream from canonical cache keys without na
   assert.deepEqual(f.queries, [])
 })
 
-test('marketplace tolerates browser snapshots without listings and consumes the live replacement', async t => {
+test('a connected catalog shows no listing until its index projection arrives', async t => {
+  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
+  const projected = new Subject()
+  f.patch.watchProjection$ = () => projected
+  const marketplace = f.watch(f.service.marketplace$)
+  await f.service.connect('https://registry.test')
+  const stores = f.watch(f.service.currentRegistry$)
+  assert.deepEqual(stores, [])
+  assert.ok(marketplace.length > 0)
+  assert.ok(marketplace.every(m => m['https://registry.test/'] === null))
+
+  projected.next(registryIndex().package.packages)
+  assert.deepEqual(
+    stores.map(store => store.packages.map(({ version }) => version)),
+    [['1.0.0:0']],
+  )
+  assert.deepEqual(
+    marketplace
+      .at(-1)
+      ['https://registry.test/'].packages.map(({ version }) => version),
+    ['1.0.0:0'],
+  )
+})
+
+test('a status-only registry change updates the listing without resubscribing the index projection', async t => {
+  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
+  const watchProjection$ = f.patch.watchProjection$
+  let subscriptions = 0
+  f.patch.watchProjection$ = (...args) =>
+    defer(() => {
+      subscriptions++
+      return watchProjection$(...args)
+    })
+  await f.service.connect('https://registry.test')
+  const stores = f.watch(f.service.currentRegistry$)
+  assert.equal(stores.at(-1).status, 'connected')
+  assert.equal(subscriptions, 1)
+
+  f.replace('/registryCache', {
+    'https://registry.test/': {
+      ...registryEntry('1.0.0:0', 'error'),
+      error: 'connection timed out',
+    },
+  })
+  assert.equal(stores.at(-1).status, 'error')
+  assert.equal(stores.at(-1).error, 'connection timed out')
+  assert.ok(stores.every(store => store.packages.length === 1))
+  assert.equal(subscriptions, 1)
+})
+
+test('marketplace tolerates browser snapshots without selections and consumes the live replacement', async t => {
   const legacy = {
     status: 'connected',
     info: registryEntry().info,
@@ -5141,7 +5168,7 @@ test('marketplace tolerates browser snapshots without listings and consumes the 
   assert.deepEqual(marketplace.at(-1)['https://registry.test/'].packages, [])
   assert.deepEqual(stores.at(-1).packages, [])
   assert.equal(packages.at(-1), null)
-  assert.equal(legacy.listings, undefined)
+  assert.equal(legacy.selections, undefined)
 
   f.replace('/registryCache', { 'https://registry.test/': registryEntry() })
   assert.equal(marketplace.at(-1)['https://registry.test/'].packages.length, 1)
@@ -5151,20 +5178,20 @@ test('marketplace tolerates browser snapshots without listings and consumes the 
   assert.deepEqual(f.queries, [])
 })
 
-test('marketplace reads listed releases and the update target from the row without fetching', async t => {
+test('marketplace lists the newest release and the update target from the index without long descriptions', async t => {
   const entry = registryEntry('3.0.0:0')
-  entry.listings.example.releases['2.0.0:0'] = {
-    title: '2.0.0:0',
+  entry.selections.example.versions = {
+    '1.0.0:0': { superseded: true, compatible: true },
+    '2.0.0:0': { compatible: true },
+    '3.0.0:0': { compatible: true },
+  }
+  entry.selections.example.updateTarget = '2.0.0:0'
+  const index = registryIndex()
+  Object.assign(index.package.packages.example.versions['2.0.0:0'], {
     description: { short: '', long: 'Stepping stone details' },
     releaseNotes: 'Stepping stone',
-  }
-  entry.listings.example.versions = {
-    '1.0.0:0': { superseded: true },
-    '2.0.0:0': {},
-    '3.0.0:0': {},
-  }
-  entry.listings.example.updateTarget = '2.0.0:0'
-  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
+  })
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
   await f.service.connect('https://registry.test')
   const store = await firstValueFrom(f.service.currentRegistry$)
   assert.deepEqual(
@@ -5176,145 +5203,119 @@ test('marketplace reads listed releases and the update target from the row witho
     ['2.0.0:0'],
   )
   assert.equal(store.updates[0].releaseNotes, 'Stepping stone')
+  assert.equal(store.updates[0].description.long, undefined)
   const newest = await firstValueFrom(
     f.service.getPackage$('example', null, null),
   )
   assert.equal(newest.version, '3.0.0:0')
-  assert.deepEqual(Object.keys(newest.otherVersions).sort(), [
-    '1.0.0:0',
-    '2.0.0:0',
-  ])
-  assert.equal(newest.otherVersions['1.0.0:0'].superseded, true)
-  assert.equal(newest.otherVersions['2.0.0:0'].releaseNotes, 'Stepping stone')
+  assert.deepEqual(newest.otherVersions, {
+    '1.0.0:0': { superseded: true },
+    '2.0.0:0': {},
+  })
   const target = await firstValueFrom(
     f.service.getPackage$('example', '2.0.0:0', null),
   )
   assert.equal(target.description.long, 'Stepping stone details')
-  assert.deepEqual(f.packageQueries, [])
   assert.deepEqual(f.queries, [])
 })
 
-test("details fetch other versions' release notes on demand", async t => {
-  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
-  f.details.otherVersions = { '0.9.0:0': { releaseNotes: 'Older notes' } }
-  const pkg = await firstValueFrom(
+test("details carry every other version's release notes from the index, which a release alone omits", async t => {
+  const entry = registryEntry()
+  entry.selections.example.versions['0.9.0:0'] = { compatible: true }
+  const index = registryIndex(['0.9.0:0', '1.0.0:0'])
+  Object.assign(index.package.packages.example.versions['0.9.0:0'], {
+    releaseNotes: 'Older notes',
+    defaultLocale: 'en_US',
+  })
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
+  const details = await firstValueFrom(
     f.service
       .getDetails$('example', '1.0.0:0', 'https://registry.test/')
       .pipe(filter(Boolean)),
   )
-  assert.equal(pkg.otherVersions['0.9.0:0'].releaseNotes, 'Older notes')
-  assert.deepEqual(f.packageQueries, [
-    {
-      registry: 'https://registry.test/',
-      id: 'example',
-      targetVersion: '=1.0.0:0',
-    },
-  ])
-})
-
-test('details recover after transport loss', async t => {
-  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
-  f.details.error = { code: 0 }
-  const values = f.watch(
-    f.service.getDetails$('example', '1.0.0:0', 'https://registry.test/'),
-  )
-  await tick()
-  assert.equal(values.at(-1), null)
-  assert.deepEqual(f.errors, [])
-  f.connection.next(false)
-  f.details.error = null
-  f.connection.next(true)
-  await tick()
-  assert.equal(values.at(-1).version, '1.0.0:0')
-  assert.equal(f.packageQueries.length, 2)
-})
-
-test('an application error is reported and the other-version observation resumes once connected', async t => {
-  const f = marketplaceFixture(t, { 'https://registry.test/': registryEntry() })
+  assert.deepEqual(details.otherVersions['0.9.0:0'], {
+    releaseNotes: 'Older notes',
+    defaultLocale: 'en_US',
+  })
   await f.service.connect('https://registry.test')
-  f.details.error = new Error('Failed to read saved package')
-  const values = f.watch(f.service.getPackage$('example', '0.9.0:0', null))
-  await tick()
-  assert.equal(values.at(-1), null)
-  assert.deepEqual(f.errors, [f.details.error])
-  f.details.error = null
-  f.connection.next(false)
-  f.connection.next(true)
-  await tick()
-  assert.equal(values.at(-1).version, '0.9.0:0')
+  const release = await firstValueFrom(
+    f.service.getPackage$('example', '1.0.0:0', null).pipe(filter(Boolean)),
+  )
+  assert.deepEqual(release.otherVersions['0.9.0:0'], {})
+  assert.deepEqual(f.queries, [])
 })
 
-test('expanded details follow the server stream without refetching', async t => {
+test('expanded details follow live index changes to every version', async t => {
   const entry = registryEntry('2.0.0:0')
-  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
-  f.details.best['2.0.0:0'] = { title: 'Example', releaseNotes: 'Before' }
-  f.details.otherVersions = { '1.5.0:0': { releaseNotes: 'Intermediate' } }
+  entry.selections.example.versions['1.5.0:0'] = { compatible: true }
+  const index = registryIndex(['1.5.0:0', '2.0.0:0'])
+  index.package.packages.example.versions['2.0.0:0'].releaseNotes = 'Before'
+  index.package.packages.example.versions['1.5.0:0'].releaseNotes =
+    'Intermediate'
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
   const values = f.watch(
     f.service.getDetails$('example', '2.0.0:0', 'https://registry.test/'),
   )
-  await tick()
   assert.equal(values.at(-1).releaseNotes, 'Before')
-  f.details.otherVersions = { '1.5.0:0': { releaseNotes: 'Edited' } }
-  f.replace(
-    '/registryCache/https:~1~1registry.test~1/listings/example/releases/2.0.0:0/releaseNotes',
-    'After',
+  assert.equal(
+    values.at(-1).otherVersions['1.5.0:0'].releaseNotes,
+    'Intermediate',
   )
-  f.pushDetails()
-  await tick()
-  assert.equal(f.packageQueries.length, 1)
+  f.replace(`${indexedRelease('2.0.0:0')}/releaseNotes`, 'After')
+  f.replace(`${indexedRelease('1.5.0:0')}/releaseNotes`, 'Edited')
+  assert.equal(values.at(-1).releaseNotes, 'After')
   assert.equal(values.at(-1).otherVersions['1.5.0:0'].releaseNotes, 'Edited')
+  assert.deepEqual(f.queries, [])
 })
 
-test('an older release follows its streamed signatures without refetching on row changes', async t => {
+test('an unlisted exact version is read from the index and follows its live signatures', async t => {
   const entry = registryEntry('2.0.0:0')
-  entry.listings.example.versions['1.0.0:0'] = {}
-  const f = marketplaceFixture(t, { 'https://registry.test/': entry })
-  const release = signatures => ({
-    title: 'Older',
-    s9pks: [[{}, { signatures }]],
+  entry.selections.example.versions['1.0.0:0'] = { compatible: true }
+  const index = registryIndex(['1.0.0:0', '2.0.0:0'])
+  const s9pks = signatures => [[{}, { signatures }]]
+  index.package.packages.example.versions['1.0.0:0'].s9pks = s9pks({
+    first: 'signature',
   })
-  f.details.best['1.0.0:0'] = release({ first: 'signature' })
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
   await f.service.connect('https://registry.test')
+  const store = await firstValueFrom(f.service.currentRegistry$)
+  assert.deepEqual(
+    store.packages.map(({ version }) => version),
+    ['2.0.0:0'],
+  )
   const values = f.watch(f.service.getPackage$('example', '1.0.0:0', null))
-  await tick()
   assert.deepEqual(Object.keys(values.at(-1).s9pks[0][1].signatures), ['first'])
   f.replace(
-    '/registryCache/https:~1~1registry.test~1/listings/example/detailsHash',
-    'after',
+    `${indexedRelease('1.0.0:0')}/s9pks`,
+    s9pks({ first: 'signature', second: 'signature' }),
   )
-  f.details.best['1.0.0:0'] = release({
-    first: 'signature',
-    second: 'signature',
-  })
-  f.pushDetails()
-  await tick()
-  assert.equal(f.packageQueries.length, 1)
   assert.deepEqual(Object.keys(values.at(-1).s9pks[0][1].signatures), [
     'first',
     'second',
   ])
+  assert.deepEqual(f.queries, [])
 })
 
-test('an exact version is subscribed once its package is listed and follows the stream across row changes', async t => {
+test('an exact version resolves while its registry selects it and the index holds it', async t => {
   const f = marketplaceFixture(t)
-  f.details.best['1.0.0:0'] = { title: 'Older' }
   await f.service.connect('https://registry.test')
   const values = f.watch(f.service.getPackage$('example', '1.0.0:0', null))
   assert.deepEqual(values, [])
-  f.replace('/registryCache', {
-    'https://registry.test/': registryEntry('2.0.0:0'),
-  })
-  await tick()
+  const entry = registryEntry('2.0.0:0')
+  entry.selections.example.versions['1.0.0:0'] = { compatible: true }
+  f.replace('/registryCache', { 'https://registry.test/': entry })
   assert.equal(values.at(-1).version, '1.0.0:0')
-  assert.equal(values.at(-1).title, 'Older')
+  assert.equal(values.at(-1).title, '1.0.0:0')
   f.replace('/registryCache', {
     'https://registry.test/': registryEntry('3.0.0:0'),
   })
-  await tick()
-  assert.equal(f.packageQueries.length, 1)
-  f.details.missing.add('1.0.0:0')
-  f.pushDetails()
-  await tick()
+  assert.equal(values.at(-1), null)
+  f.replace('/registryCache', { 'https://registry.test/': entry })
+  assert.equal(values.at(-1).version, '1.0.0:0')
+  f.replace(
+    '/registryIndexes/https:~1~1registry.test~1/package/packages/example/versions',
+    registryIndex(['2.0.0:0']).package.packages.example.versions,
+  )
   assert.equal(values.at(-1), null)
   assert.deepEqual(f.queries, [])
 })
@@ -5465,6 +5466,7 @@ test('patch cache never persists registry or OS update data, or their cursors', 
   const roots = {
     '/serverInfo': { epoch: 'boot', id: 3 },
     '/registryCache': { epoch: 'boot', id: 3 },
+    '/registryIndexes': { epoch: 'boot', id: 3 },
     '/osUpdateCache': { epoch: 'boot', id: 3 },
   }
   await cache.write(
@@ -5473,6 +5475,7 @@ test('patch cache never persists registry or OS update data, or their cursors', 
       value: {
         serverInfo: { a: 1 },
         registryCache: { 'https://a.test/': {} },
+        registryIndexes: { 'https://a.test/': {} },
         osUpdateCache: { versions: {} },
       },
     },
@@ -5489,20 +5492,29 @@ test('whole-document subscriptions retain offline coverage without persisting ex
   const { win } = fakeIndexedDb()
   const cache = await rawPatchDbCache(t, win)
   const cursor = { epoch: 'boot', id: 5 }
-  const newer = { epoch: 'boot', id: 6 }
+  const projected = selectorKey({ include: '/ui', depth: 2 })
   const value = {
     serverInfo: { hostname: 'cached' },
     packageData: {},
     ui: { a: 1 },
     registryCache: { r: {} },
+    registryIndexes: { r: {} },
     osUpdateCache: { versions: {} },
   }
-  await cache.write({ id: 5, value }, { '': cursor, '/ui': newer })
+  await cache.write(
+    { id: 5, value },
+    {
+      '': cursor,
+      [projected]: cursor,
+      [selectorKey({ include: '/registryIndexes/r', exclude: ['/x'] })]: cursor,
+    },
+  )
   const { dump, cursors } = await (await rawPatchDbCache(t, win)).read()
   assert.deepEqual(cursors, {
     '/serverInfo': cursor,
     '/packageData': cursor,
-    '/ui': newer,
+    '/ui': cursor,
+    [projected]: cursor,
   })
   assert.deepEqual(Object.keys(dump.value).sort(), [
     'packageData',

@@ -1,5 +1,5 @@
-import { normalizeProjection } from 'patch-db-client'
-import type { Dump, Projection, Revision, Update } from 'patch-db-client'
+import { normalizeSelector } from 'patch-db-client'
+import type { Dump, Revision, Selection, Update } from 'patch-db-client'
 import { createRpcStreamClient } from '@start9labs/start-core'
 import type { RPC, RpcStreamClient } from '@start9labs/start-core'
 import {
@@ -25,12 +25,15 @@ type LegacySubscription = { dump: Dump<unknown>; guid: string }
 export type DatabaseCursor = { epoch: string; id: number }
 
 /** A dump, or the revisions a resumed subscriber lacks, current as of `id`. */
-export type DatabaseStart<T> = { epoch?: string } & (
+export type DatabaseStart<T> = { epoch?: string; subscription?: string } & (
   | (Dump<T> & { revisions?: null })
   | { id: number; revisions: Revision[] }
 )
 
-export type DatabaseUpdate<T> = DatabaseStart<T> | Revision
+/** A projected revision; with `extend`, what the latest selection change added. */
+export type DatabaseRevision = Revision & { extend?: boolean }
+
+export type DatabaseUpdate<T> = DatabaseStart<T> | DatabaseRevision
 
 /** The initial start establishes PatchDB fences; callers must not await the cache before emitting it. */
 export function databaseSubscription<T>(
@@ -39,7 +42,7 @@ export function databaseSubscription<T>(
   identity: ServerIdentityService,
   since: () => DatabaseCursor | null = () => null,
   pointer?: string,
-  projection?: Projection | null,
+  selection?: Selection | null,
 ): Observable<DatabaseUpdate<T>> {
   return withAbortSignal(signal => {
     const client = createRpcStreamClient<RpcStreamClient<RPC.StartOS>>(
@@ -52,12 +55,14 @@ export function databaseSubscription<T>(
           {
             ...(cursor ? { since: cursor } : {}),
             ...(pointer ? { pointer } : {}),
-            ...normalizeProjection(projection),
+            ...(selection?.length
+              ? { selectors: selection.map(normalizeSelector) }
+              : {}),
           },
           { signal },
         )
         yield initial as DatabaseStart<T>
-        for await (const revision of items) yield revision as Revision
+        for await (const revision of items) yield revision as DatabaseRevision
       })(),
     )
   })

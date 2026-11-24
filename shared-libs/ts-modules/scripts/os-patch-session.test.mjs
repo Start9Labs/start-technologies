@@ -107,6 +107,13 @@ async function fixture(t, { snapshot } = {}) {
     AuthService,
     PatchMonitorService,
   ])
+  const updates = []
+  injector.get(ApiService).updateDbSubscription = async (
+    subscription,
+    selection,
+  ) => {
+    updates.push({ subscription, selection })
+  }
   const auth = injector.get(AuthService)
   const effects = injector.get(ɵEffectScheduler)
   const db = injector.get(PATCH_DB)
@@ -119,8 +126,7 @@ async function fixture(t, { snapshot } = {}) {
     session.unsubscribe()
     injector.destroy()
   })
-  const open = pointer =>
-    calls.filter(c => c.params.pointer === pointer && !c.signal.aborted)
+  const open = () => calls.filter(c => !c.signal.aborted)
   const frame = (call, value) => {
     const message = { id: `source-${calls.indexOf(call)}`, ...value }
     call.frames.next({
@@ -128,17 +134,17 @@ async function fixture(t, { snapshot } = {}) {
       bytes: Buffer.byteLength(JSON.stringify(message)),
     })
   }
-  const start = async (pointer, result) => {
-    frame(open(pointer)[0], {
+  const start = async (result, call = open()[0]) => {
+    frame(call, {
       jsonrpc: '2.0',
-      result: { epoch: 'boot', ...result },
+      result: { epoch: 'boot', subscription: 'sub', ...result },
       meta: { patchSequence: result.id },
     })
     await flush()
   }
-  const startAll = async (id, values = {}) => {
-    for (const key of ['serverInfo', 'packageData', 'ui'])
-      await start(`/public/${key}`, { id, value: values[key] ?? {} })
+  const item = async (result, call = open()[0]) => {
+    frame(call, { rpcstream: '1.0', end: false, result })
+    await flush()
   }
   const verify = async () => {
     lifetime = new AbortController()
@@ -156,114 +162,139 @@ async function fixture(t, { snapshot } = {}) {
     retriggers,
     patchCache,
     calls,
+    updates,
     open,
     frame,
     start,
-    startAll,
+    item,
     verify,
   }
 }
 
-test('os subscribes each always-watched path and is live only once all of them are', async t => {
+const ALWAYS = [
+  { include: '/packageData' },
+  { include: '/serverInfo' },
+  { include: '/ui' },
+]
+
+test('os subscribes once to the always-watched paths and is live once that starts', async t => {
   const f = await fixture(t)
   assert.equal(f.calls.length, 0)
   await f.verify()
   assert.deepEqual(
     f.calls.map(c => c.params),
-    [
-      { pointer: '/public/serverInfo' },
-      { pointer: '/public/packageData' },
-      { pointer: '/public/ui' },
-    ],
+    [{ pointer: '/public', selectors: ALWAYS }],
   )
-  await f.start('/public/serverInfo', { id: 10, value: { hostname: 'box' } })
   assert.equal(f.live.value, false)
-  await f.start('/public/packageData', { id: 10, value: {} })
-  await f.start('/public/ui', { id: 10, value: {} })
+  await f.start({
+    id: 10,
+    value: { serverInfo: { hostname: 'box' }, packageData: {}, ui: {} },
+  })
   assert.equal(f.live.value, true)
   assert.equal(f.cache.value.id, 10)
   assert.equal(f.cache.value.value.serverInfo.hostname, 'box')
+  assert.deepEqual(f.updates, [])
 })
 
-test('os opens a page subscription on demand without affecting the live state', async t => {
+test('os widens the subscription for a page without affecting the live state', async t => {
   const f = await fixture(t)
   await f.verify()
-  await f.startAll(10)
+  await f.start({ id: 10, value: { serverInfo: {}, packageData: {}, ui: {} } })
   const registries = []
   const subscription = f.db
     .watch$('registryCache')
     .subscribe(value => registries.push(value))
   await flush()
-  assert.deepEqual(f.open('/public/registryCache')[0].params, {
-    pointer: '/public/registryCache',
-  })
+  assert.deepEqual(f.updates, [
+    {
+      subscription: 'sub',
+      selection: [
+        { include: '/packageData' },
+        { include: '/registryCache' },
+        { include: '/serverInfo' },
+        { include: '/ui' },
+      ],
+    },
+  ])
   assert.equal(f.live.value, true)
   assert.deepEqual(registries, [])
-  await f.start('/public/registryCache', { id: 11, value: { r: {} } })
+  await f.item({
+    id: 10,
+    extend: true,
+    patch: [{ op: 'add', path: '/registryCache', value: { r: {} } }],
+  })
   assert.deepEqual(registries, [{ r: {} }])
   subscription.unsubscribe()
   t.mock.timers.tick(5000)
   await flush()
-  assert.equal(f.open('/public/registryCache').length, 0)
+  assert.deepEqual(f.updates.at(-1).selection, ALWAYS)
+  assert.equal(f.cache.value.value.registryCache, undefined)
+  assert.equal(f.calls.length, 1)
 })
 
-test('os resumes each path from its persisted cursor and recovers from loss with live cursors', async t => {
+test('os resumes its persisted selection from its cursor and recovers from loss', async t => {
+  const cursor = { epoch: 'boot', id: 7 }
   const f = await fixture(t, {
     snapshot: {
       dump: { id: 7, value: { serverInfo: { hostname: 'cached' } } },
-      cursors: { '/serverInfo': { epoch: 'boot', id: 7 } },
+      cursors: { '/serverInfo': cursor },
     },
   })
   const hostnames = []
   f.db.watch$('serverInfo', 'hostname').subscribe(h => hostnames.push(h))
   await f.verify()
   assert.deepEqual(hostnames, ['cached'])
-  assert.deepEqual(f.open('/public/serverInfo')[0].params, {
-    pointer: '/public/serverInfo',
-    since: { epoch: 'boot', id: 7 },
+  assert.deepEqual(f.calls[0].params, {
+    pointer: '/public',
+    since: cursor,
+    selectors: [{ include: '/serverInfo' }],
   })
-  assert.deepEqual(f.open('/public/packageData')[0].params, {
-    pointer: '/public/packageData',
-  })
-  await f.start('/public/serverInfo', {
+  await f.start({
     id: 9,
     value: null,
     revisions: [
       {
         id: 8,
-        patch: [{ op: 'replace', path: '/hostname', value: 'resumed' }],
+        patch: [
+          { op: 'replace', path: '/serverInfo/hostname', value: 'resumed' },
+        ],
       },
     ],
   })
-  assert.deepEqual(hostnames, ['cached', 'resumed'])
-  await f.start('/public/packageData', { id: 9, value: {} })
-  await f.start('/public/ui', { id: 9, value: {} })
+  assert.deepEqual(hostnames.at(-1), 'resumed')
+  assert.deepEqual(f.updates.at(-1).selection, ALWAYS)
+  assert.equal(f.live.value, false)
+  await f.item({
+    id: 9,
+    extend: true,
+    patch: [
+      { op: 'add', path: '/packageData', value: {} },
+      { op: 'add', path: '/ui', value: {} },
+    ],
+  })
   assert.equal(f.live.value, true)
 
-  f.open('/public/ui')[0].frames.error({ code: 0, message: 'lost' })
+  f.open()[0].frames.error({ code: 0, message: 'lost' })
   await flush()
   assert.equal(f.live.value, false)
   assert.deepEqual(f.retriggers, [[false, 2000]])
-  assert.equal(f.calls.filter(c => !c.signal.aborted).length, 0)
+  assert.equal(f.open().length, 0)
   f.state.next('error')
   f.state.next('running')
   await flush()
-  assert.deepEqual(
-    f.calls.slice(3).map(c => c.params),
-    [
-      { pointer: '/public/serverInfo', since: { epoch: 'boot', id: 9 } },
-      { pointer: '/public/packageData', since: { epoch: 'boot', id: 9 } },
-      { pointer: '/public/ui', since: { epoch: 'boot', id: 9 } },
-    ],
-  )
+  assert.deepEqual(f.calls[1].params, {
+    pointer: '/public',
+    since: { epoch: 'boot', id: 9 },
+    selectors: ALWAYS,
+  })
 })
 
 test('os rejection of the session logs out, clears the browser cache and does not reconnect', async t => {
   const f = await fixture(t)
   await f.verify()
-  await f.startAll(10)
+  await f.start({ id: 10, value: { serverInfo: {}, packageData: {}, ui: {} } })
   const clears = f.patchCache.clears
-  f.frame(f.open('/public/serverInfo')[0], {
+  f.frame(f.open()[0], {
     rpcstream: '1.0',
     end: true,
     error: { code: 34, message: 'revoked' },
@@ -279,5 +310,5 @@ test('os rejection of the session logs out, clears the browser cache and does no
   f.state.next('error')
   f.state.next('running')
   await flush()
-  assert.equal(f.calls.filter(c => !c.signal.aborted).length, 0)
+  assert.equal(f.open().length, 0)
 })

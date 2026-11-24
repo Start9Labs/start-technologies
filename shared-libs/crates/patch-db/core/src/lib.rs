@@ -21,9 +21,11 @@ pub use json_ptr;
 pub use model::{DestructureMut, HasModel, Model, ModelExt, Pointer};
 pub use patch::{Catchup, DiffPatch, Dump, JsonCatchup, Revision};
 pub use patch_db_macro::HasModel;
-pub use projection::{is_positional, Projection, Reach};
+pub use projection::{is_positional, Projection, Reach, Selector};
 pub use store::{MutateResult, PatchDb, Store, TypedPatchDb};
-pub use subscriber::{DbWatch, JsonSubscriber, Subscriber, TypedDbWatch};
+pub use subscriber::{
+    DbWatch, JsonSubscriber, ProjectedSubscriber, Subscriber, TypedDbWatch, Update,
+};
 use tokio::sync::TryLockError;
 
 #[derive(Error, Debug)]
