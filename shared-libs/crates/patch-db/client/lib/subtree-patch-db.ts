@@ -85,7 +85,9 @@ export type SubtreeOptions = {
  * leaves. The document is a replica of the server's under the requested selection, which
  * is the union of the watches' selectors. A selection change prunes the replica at once
  * and fills it from the stream's `extend` revision, which also confirms the change; a watch
- * is served once the confirmed selection covers it. The document cursor is the
+ * is served once the confirmed selection covers it. Selected array positions remain
+ * correct across selection changes and preceding revisions. Selection updates remain
+ * serialized through synchronous watcher callbacks. The document cursor is the
  * subscription's. A failed subscription is reported on {@link failures$}; {@link start}
  * resumes it from the cursor.
  */
@@ -103,6 +105,8 @@ export class SubtreePatchDB<
   /** Confirmed coverage within `held`; empty coverage uses `NOTHING`, never `[]`. */
   private confirmed: Selection | null = null
   private updating: Selection | null = null
+  /** Revisions preceding the extension still use the previous selection. */
+  private beforeUpdate?: Dump<T>
   private pending: Revision[] = []
   private flush?: ReturnType<typeof setTimeout>
   private running = false
@@ -268,13 +272,17 @@ export class SubtreePatchDB<
     })
   }
 
-  /** Requests the desired selection once the previous request is confirmed. */
   private reselect() {
     const subscription = this.subscription
     if (!this.running || !subscription || this.updating || !this.held) return
     const desired = this.desired()
     if (selectionKey(desired) === selectionKey(this.held)) return
-    this.applyPending()
+    if (this.pending.length) {
+      this.applyPending()
+      this.reselect()
+      return
+    }
+    this.beforeUpdate = { ...this.cache$.value }
     this.held = desired
     const confirmed = this.confirmed ?? NOTHING
     const retained = minimalSelection([
@@ -317,6 +325,7 @@ export class SubtreePatchDB<
     }
     if (event.extend) {
       this.applyPending()
+      this.beforeUpdate = undefined
       const cache = this.cache$.value
       this.apply(cache, event, false)
       this.confirmed = this.updating
@@ -341,23 +350,32 @@ export class SubtreePatchDB<
     this.emit(cache)
   }
 
-  /** Applies a revision as the document holds it; an extension is already projected. */
+  /** Extensions are already projected. */
   private apply(cache: Dump<T>, revision: Revision, project = true) {
     if (this.cursor && revision.id > this.cursor.id)
       this.cursor = { ...this.cursor, id: revision.id }
+    const target = (project && this.beforeUpdate) || cache
     const patch =
-      project && this.held
+      project && target === cache && this.held
         ? projectOperations(revision.patch, this.held, path =>
             Array.isArray(getValueByPointer(cache.value, pathFromArray(path))),
           )
         : revision.patch
-    patch.forEach(op => applyOperation(cache, op as Operation<unknown>))
-    this.publishRevision({ id: revision.id, patch }, cache)
+    patch.forEach(op => applyOperation(target, op as Operation<unknown>))
+    if (target === cache) {
+      this.publishRevision({ id: revision.id, patch }, cache)
+    } else {
+      this.handleDump(
+        { id: revision.id, value: projectRoot(this.held!, target.value) as T },
+        cache,
+      )
+    }
   }
 
   private suspend() {
     this.running = false
     this.applyPending()
+    this.beforeUpdate = undefined
     this.stream?.unsubscribe()
     this.stream = undefined
     this.subscription = null
