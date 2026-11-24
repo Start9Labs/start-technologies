@@ -6369,6 +6369,9 @@ export const SetupProgress: z.ZodObject<{
 })
 export const SharedVolume: z.ZodIntersection<
   z.ZodObject<{
+    /**
+     * A unique single folder name; services mount a volume at a path matching it.
+     */
     name: z.ZodString
     source: typeof SharedVolumeSource
     grants: z.ZodRecord<z.ZodString, typeof SharedVolumeGrant>
@@ -6377,7 +6380,13 @@ export const SharedVolume: z.ZodIntersection<
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      name: z.string(),
+      /**
+       * A unique single folder name; services mount a volume at a path matching it.
+       */
+      name: z.string().meta({
+        description:
+          'A unique single folder name; services mount a volume at a path matching it.',
+      }),
       source: SharedVolumeSource,
       grants: z.record(z.string(), SharedVolumeGrant),
     }),
