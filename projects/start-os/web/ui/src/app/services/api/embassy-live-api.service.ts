@@ -20,7 +20,12 @@ import {
 } from '@start9labs/shared'
 import { createRpcClient, createRpcStreamClient } from '@start9labs/start-core'
 import type { RpcStreamOptions } from '@start9labs/start-core'
-import { Dump, normalizeSelector, pathFromArray, Selection } from 'patch-db-client'
+import {
+  Dump,
+  normalizeSelector,
+  pathFromArray,
+  Selection,
+} from 'patch-db-client'
 import { catchError } from 'rxjs'
 import type { Observable } from 'rxjs'
 import type { WebSocketSubject } from 'rxjs/webSocket'

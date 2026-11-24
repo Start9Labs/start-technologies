@@ -133,7 +133,7 @@ export class SubtreePatchDB<
       )
     this.cache$.next({ id: dump.id, value: { ...dump.value } })
     if (agreed) {
-      this.held = entries.map(([key]) => parseSelectorKey(key))
+      this.held = minimalSelection(entries.map(([key]) => parseSelectorKey(key)))
       this.confirmed = this.held
       this.cursor = first[1]
     }

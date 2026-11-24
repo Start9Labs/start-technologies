@@ -99,6 +99,7 @@ import {
   mockOsUpdateCache,
   mockPatchData,
   mockRegistryCache,
+  mockRegistryIndex,
 } from './mock-patch'
 
 import markdown from './md-sample.md'
@@ -237,6 +238,11 @@ export class MockApiService extends ApiService implements StartupApiService {
           mockRegistryCache(url, this.mockRegistryInfo(url)),
         ]),
       )
+      mockPatchData.registryIndexes = Object.fromEntries(
+        Object.entries(mockPatchData.registryCache)
+          .filter(([, entry]) => entry.status !== 'error')
+          .map(([url, entry]) => [url, mockRegistryIndex(entry.info)]),
+      )
       mockPatchData.serverInfo.gitHash = this.gitHash
       mockPatchData.osUpdateCache = mockOsUpdateCache(
         mockPatchData.serverInfo.osRegistry,
@@ -360,6 +366,7 @@ export class MockApiService extends ApiService implements StartupApiService {
         normalized,
         info,
       )
+      mockPatchData.registryIndexes[normalized] = mockRegistryIndex(info)
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
@@ -387,18 +394,10 @@ export class MockApiService extends ApiService implements StartupApiService {
         normalized,
         info,
       )
+      mockPatchData.registryIndexes[normalized] = mockRegistryIndex(info)
       this.importRegistryKeys(normalized, info)
       await this.publishTrust()
       return null
-    },
-    'server.registries.package': async ({ id, targetVersion }) => {
-      await pauseFor(500)
-      const pkg = Mock.RegistryPackages[id]
-      if (!pkg) return { categories: [], best: {}, otherVersions: {} }
-      const exact = targetVersion
-        ? Mock.OtherPackageVersions[id]?.[targetVersion]
-        : undefined
-      return exact ? { ...pkg, best: exact.best } : pkg
     },
     'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
@@ -409,6 +408,9 @@ export class MockApiService extends ApiService implements StartupApiService {
       const offered = this.offeredKeys(url)
       for (const saved of Object.keys(mockPatchData.registryCache)) {
         if (sameUrl(saved, url)) delete mockPatchData.registryCache[saved]
+      }
+      for (const saved of Object.keys(mockPatchData.registryIndexes)) {
+        if (sameUrl(saved, url)) delete mockPatchData.registryIndexes[saved]
       }
       for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
         if (sameUrl(saved, url))
@@ -2102,13 +2104,6 @@ export class MockApiService extends ApiService implements StartupApiService {
           return this.initSubscriptionStream(options)
         case 'diagnostic.update':
           return this.diagnosticUpdateStream(options)
-        case 'server.registries.package':
-          return {
-            initial: await this.handlers['server.registries.package']!(
-              params as Params<'server.registries.package'>,
-            ),
-            items: this.idle(options?.signal),
-          }
         default:
           throw new Error(`No mock stream for ${method}`)
       }
