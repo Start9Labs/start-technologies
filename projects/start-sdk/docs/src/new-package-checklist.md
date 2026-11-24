@@ -36,6 +36,9 @@ The scaffold names its arbitrary ids `example-*` (`example-volume`, `example-ima
   `checkPortListening` health check on `uiPort` (`startos/utils.ts`) — point `uiPort` at the
   port your service listens on, or swap in another check. Keep only the i18n keys in
   `startos/i18n/dictionaries` that you actually reference.
+- If upstream has a setting that names its own address (external, base, root, public or
+  site URL), wire it through [Set a Primary URL](recipe-primary-url.md) rather than leaving
+  it unset.
 - Interfaces: `startos/interfaces.ts` ships wired into `startos/init/index.ts` but returns an
   empty list. If the service exposes a network interface, bind a port and export the interface
   there (see [Interfaces](interfaces.md)).

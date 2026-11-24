@@ -38,6 +38,8 @@ async fn signed_asset(path: &Path, key: &SigningKey) -> RegistryAsset<Blake3Comm
             AnyVerifyingKey::Ed25519(key.verifying_key()),
             AnySignature::Ed25519ph(signature),
         )]),
+        private: None,
+        readers: Default::default(),
     }
 }
 

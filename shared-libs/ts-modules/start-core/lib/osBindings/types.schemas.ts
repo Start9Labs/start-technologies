@@ -769,6 +769,20 @@ export const ImageMetadata: z.ZodObject<{
 }).meta({
   id: 'ImageMetadata',
 })
+
+/**
+ * An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.
+ *
+ * Ciphertext has the plaintext's length, and any byte range decrypts on its own.
+ */
+export const KeyStreamInfo: z.ZodObject<{
+  key: typeof literal_0
+  iv: typeof literal_0
+}> = /* @__PURE__ */ object({ key: literal_0, iv: literal_0 }).meta({
+  id: 'KeyStreamInfo',
+  description:
+    "An AES-256-CTR keystream with a 128-bit big-endian counter starting at `iv`.\n\nCiphertext has the plaintext's length, and any byte range decrypts on its own.",
+})
 export const KeyboardOptions: z.ZodObject<{
   layout: z.ZodString
   keymap: z.ZodCodec<
@@ -1370,6 +1384,20 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
     urls: z.array(z.string()),
     commitment: Commitment,
     signatures: z.record(z.string(), AnySignature),
+    /**
+     * Keystream the hosted bytes are encrypted with. Null for hosted plaintext visible to everyone.
+     */
+    private: KeyStreamInfo.nullable().optional().meta({
+      description:
+        'Keystream the hosted bytes are encrypted with. Null for hosted plaintext visible to everyone.',
+    }),
+    /**
+     * Reader keys in `FullIndex.readers` allowed to see this private asset.
+     */
+    readers: z.array(Guid).optional().meta({
+      description:
+        'Reader keys in `FullIndex.readers` allowed to see this private asset.',
+    }),
   })
   return self
 }
@@ -2423,6 +2451,20 @@ export const AddPackageParams: z.ZodObject<{
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
     z.ZodRecord<z.ZodString, typeof AnySignature>
   >
+  /**
+   * Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.
+   */
+  private: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<typeof KeyStreamInfo>>,
+    z.ZodNullable<typeof KeyStreamInfo>
+  >
+  /**
+   * Keys in the registry's reader directory allowed to see this private s9pk.
+   */
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
+    z.ZodArray<typeof AnyVerifyingKey>
+  >
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
@@ -2431,6 +2473,26 @@ export const AddPackageParams: z.ZodObject<{
     z.record(z.string(), AnySignature).optional(),
     z.record(z.string(), AnySignature),
   ),
+  /**
+   * Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.
+   */
+  private: wire(
+    KeyStreamInfo.nullable().optional(),
+    KeyStreamInfo.nullable(),
+  ).meta({
+    description:
+      'Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.',
+  }),
+  /**
+   * Keys in the registry's reader directory allowed to see this private s9pk.
+   */
+  readers: wire(
+    z.array(AnyVerifyingKey).optional(),
+    z.array(AnyVerifyingKey),
+  ).meta({
+    description:
+      "Keys in the registry's reader directory allowed to see this private s9pk.",
+  }),
 }).meta({
   id: 'AddPackageParams',
 })
@@ -2477,6 +2539,12 @@ export const AddPublicDomainParams: z.ZodObject<{
   internalPort: z.int(),
 }).meta({
   id: 'AddPublicDomainParams',
+})
+export const AddReaderParams: z.ZodObject<{
+  label: z.ZodString
+  key: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ label: z.string(), key: AnyVerifyingKey }).meta({
+  id: 'AddReaderParams',
 })
 export const AddTunnelParams: z.ZodObject<{
   name: z.ZodString
@@ -2949,6 +3017,12 @@ export const EditGatewayParams: z.ZodObject<{
 }).meta({
   id: 'EditGatewayParams',
 })
+export const EditReaderParams: z.ZodObject<{
+  id: typeof Guid
+  label: z.ZodString
+}> = /* @__PURE__ */ object({ id: Guid, label: z.string() }).meta({
+  id: 'EditReaderParams',
+})
 export const EditSignerParams: z.ZodObject<{
   id: typeof Guid
   setName: z.ZodCodec<
@@ -3041,6 +3115,14 @@ export const EffectsRunActionParams: z.ZodObject<{
 }).meta({
   id: 'EffectsRunActionParams',
 })
+export const ExportPackageVersionParams: z.ZodIntersection<
+  z.ZodObject<{ id: typeof PackageId; version: typeof Version }>,
+  typeof ReaderParams
+> = /* @__PURE__ */ z
+  .intersection(object({ id: PackageId, version: Version }), ReaderParams)
+  .meta({
+    id: 'ExportPackageVersionParams',
+  })
 export const ExportRangeServiceInterfaceParams: z.ZodObject<{
   hostId: typeof HostId
   internalStartPort: z.ZodInt
@@ -3177,10 +3259,6 @@ export const GetOutboundGatewayParams: z.ZodObject<{
 }).meta({
   id: 'GetOutboundGatewayParams',
 })
-export const GetPackageAccessParams: z.ZodObject<{ id: typeof PackageId }> =
-  /* @__PURE__ */ object({ id: PackageId }).meta({
-    id: 'GetPackageAccessParams',
-  })
 export const GetPackageParams: z.ZodIntersection<
   z.ZodObject<{
     id: z.ZodCodec<
@@ -4002,18 +4080,6 @@ export const OsVersionInfo: z.ZodObject<{
 }).meta({
   id: 'OsVersionInfo',
 })
-export const PackageAccessControl: z.ZodObject<{
-  private: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  readers: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof Guid>>,
-    z.ZodArray<typeof Guid>
-  >
-}> = /* @__PURE__ */ object({
-  private: wire(z.boolean().optional(), z.boolean()),
-  readers: wire(z.array(Guid).optional(), z.array(Guid)),
-}).meta({
-  id: 'PackageAccessControl',
-})
 export const PackageBackupInfo: z.ZodObject<{
   title: z.ZodString
   version: typeof Version
@@ -4061,12 +4127,6 @@ export const PackageInfoShort: z.ZodObject<{
   }),
 }).meta({
   id: 'PackageInfoShort',
-})
-export const PackageReaderParams: z.ZodObject<{
-  id: typeof PackageId
-  signer: typeof Guid
-}> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
-  id: 'PackageReaderParams',
 })
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
@@ -4302,6 +4362,17 @@ export const RangeServiceInterface: z.ZodObject<{
   description:
     "The single restricted service interface a port-range binding may export.\n\nUnlike [`ServiceInterface`], a range interface is always `api`-typed and\ncarries no `masked` / `username` / `path` / `query` and no per-address\n[`AddressInfo`] — its address is the host plus the range's external port\nspan, taken from the [`RangeBindInfo`](crate::net::host::binding::RangeBindInfo)\nit lives under. `scheme` is an optional transport prefix (e.g. `tcp` for\nbitcoin ZMQ endpoints); most ranges (coturn RTP, FTP data) omit it.",
 })
+
+/**
+ * A key allowed to read the private s9pks that list it.
+ */
+export const ReaderKey: z.ZodObject<{
+  label: z.ZodString
+  key: typeof AnyVerifyingKey
+}> = /* @__PURE__ */ object({ label: z.string(), key: AnyVerifyingKey }).meta({
+  id: 'ReaderKey',
+  description: 'A key allowed to read the private s9pks that list it.',
+})
 export const RebuildParams: z.ZodObject<{ id: typeof PackageId }> =
   /* @__PURE__ */ object({ id: PackageId }).meta({
     id: 'RebuildParams',
@@ -4376,6 +4447,10 @@ export const RemovePackageSignerParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'RemovePackageSignerParams',
 })
+export const RemoveReaderParams: z.ZodObject<{ id: typeof Guid }> =
+  /* @__PURE__ */ object({ id: Guid }).meta({
+    id: 'RemoveReaderParams',
+  })
 export const RemoveSignerParams: z.ZodObject<{ id: typeof Guid }> =
   /* @__PURE__ */ object({ id: Guid }).meta({
     id: 'RemoveSignerParams',
@@ -4529,12 +4604,6 @@ export const SetOutboundGatewayParams: z.ZodObject<{
   ),
 }).meta({
   id: 'SetOutboundGatewayParams',
-})
-export const SetPackagePrivateParams: z.ZodObject<{
-  id: typeof PackageId
-  private: z.ZodBoolean
-}> = /* @__PURE__ */ object({ id: PackageId, private: z.boolean() }).meta({
-  id: 'SetPackagePrivateParams',
 })
 export const SetStaticDnsParams: z.ZodObject<{
   gateway: typeof GatewayId
@@ -5787,15 +5856,6 @@ export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
     id: 'OsVersionInfoMap',
   })
-export const PackageAccess: z.ZodObject<{
-  private: z.ZodBoolean
-  readers: z.ZodRecord<z.ZodString, typeof SignerInfo>
-}> = /* @__PURE__ */ object({
-  private: z.boolean(),
-  readers: z.record(z.string(), SignerInfo),
-}).meta({
-  id: 'PackageAccess',
-})
 export const PackageMetadata: z.ZodObject<{
   title: z.ZodString
   /**
@@ -7237,25 +7297,17 @@ export const LegacyProxySslOptions: z.ZodIntersection<
   .meta({
     id: 'LegacyProxySslOptions',
   })
-export const PackageInfo: z.ZodIntersection<
-  z.ZodObject<{
-    authorized: z.ZodRecord<z.ZodString, z.ZodString>
-    versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
-    categories: z.ZodArray<z.ZodString>
-  }>,
-  typeof PackageAccessControl
-> = /* @__PURE__ */ z
-  .intersection(
-    object({
-      authorized: z.record(z.string(), z.string()),
-      versions: z.record(z.string(), PackageVersionInfo),
-      categories: z.array(z.string()),
-    }),
-    PackageAccessControl,
-  )
-  .meta({
-    id: 'PackageInfo',
-  })
+export const PackageInfo: z.ZodObject<{
+  authorized: z.ZodRecord<z.ZodString, z.ZodString>
+  versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
+  categories: z.ZodArray<z.ZodString>
+}> = /* @__PURE__ */ object({
+  authorized: z.record(z.string(), z.string()),
+  versions: z.record(z.string(), PackageVersionInfo),
+  categories: z.array(z.string()),
+}).meta({
+  id: 'PackageInfo',
+})
 export const PackageRelease: z.ZodIntersection<
   z.ZodObject<{
     /**
@@ -7280,6 +7332,49 @@ export const PackageRelease: z.ZodIntersection<
   .meta({
     id: 'PackageRelease',
   })
+
+/**
+ * A package version as the requester sees it, for promotion to another registry.
+ */
+export const PackageVersionExport: z.ZodObject<{
+  /**
+   * The s9pks the requester can see, with their keystreams. Reader ids appear for admins and
+   * the package's publishers.
+   */
+  info: typeof PackageVersionInfo
+  /**
+   * The reader directory entries the s9pks list. Null for requesters who cannot see reader
+   * lists.
+   */
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, typeof ReaderKey>>>,
+    z.ZodNullable<z.ZodRecord<z.ZodString, typeof ReaderKey>>
+  >
+}> = /* @__PURE__ */ object({
+  /**
+   * The s9pks the requester can see, with their keystreams. Reader ids appear for admins and
+   * the package's publishers.
+   */
+  info: PackageVersionInfo.meta({
+    description:
+      "The s9pks the requester can see, with their keystreams. Reader ids appear for admins and\nthe package's publishers.",
+  }),
+  /**
+   * The reader directory entries the s9pks list. Null for requesters who cannot see reader
+   * lists.
+   */
+  readers: wire(
+    z.record(z.string(), ReaderKey).nullable().optional(),
+    z.record(z.string(), ReaderKey).nullable(),
+  ).meta({
+    description:
+      'The reader directory entries the s9pks list. Null for requesters who cannot see reader\nlists.',
+  }),
+}).meta({
+  id: 'PackageVersionExport',
+  description:
+    'A package version as the requester sees it, for promotion to another registry.',
+})
 
 /**
  * A contiguous binding keyed by its internal start port in [`BindingRanges`].
@@ -7537,6 +7632,13 @@ export const FullIndex: z.ZodObject<{
     z.ZodOptional<z.ZodArray<typeof Guid>>,
     z.ZodArray<typeof Guid>
   >
+  /**
+   * Keys allowed to read the private s9pks that list them. Admin-only.
+   */
+  readers: z.ZodCodec<
+    z.ZodOptional<z.ZodRecord<z.ZodString, typeof ReaderKey>>,
+    z.ZodRecord<z.ZodString, typeof ReaderKey>
+  >
 }> = /* @__PURE__ */ object({
   name: wire(z.string().nullable().optional(), z.string().nullable()),
   icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
@@ -7558,6 +7660,16 @@ export const FullIndex: z.ZodObject<{
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
   trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
+  /**
+   * Keys allowed to read the private s9pks that list them. Admin-only.
+   */
+  readers: wire(
+    z.record(z.string(), ReaderKey).optional(),
+    z.record(z.string(), ReaderKey),
+  ).meta({
+    description:
+      'Keys allowed to read the private s9pks that list them. Admin-only.',
+  }),
 }).meta({
   id: 'FullIndex',
 })

@@ -58,6 +58,7 @@ import settings from '@taiga-ui/icons/src/settings.svg'
 import shield from '@taiga-ui/icons/src/shield.svg'
 import terminal from '@taiga-ui/icons/src/terminal.svg'
 import trash from '@taiga-ui/icons/src/trash.svg'
+import triangleAlert from '@taiga-ui/icons/src/triangle-alert.svg'
 import userLock from '@taiga-ui/icons/src/user-lock.svg'
 import wifi from '@taiga-ui/icons/src/wifi.svg'
 import x from '@taiga-ui/icons/src/x.svg'
@@ -123,6 +124,7 @@ export const ICONS = {
   '@tui.shield': shield,
   '@tui.terminal': terminal,
   '@tui.trash': trash,
+  '@tui.triangle-alert': triangleAlert,
   '@tui.user-lock': userLock,
   '@tui.wifi': wifi,
   '@tui.x': x,

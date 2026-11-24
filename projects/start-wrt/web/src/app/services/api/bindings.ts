@@ -291,6 +291,7 @@ export type WanIpv4Mode = z.output<typeof schemas.WanIpv4Mode>
 export type WanIpv4ModeInput = z.input<typeof schemas.WanIpv4Mode>
 export type WanIpv6Mode = z.output<typeof schemas.WanIpv6Mode>
 export type WanIpv6ModeInput = z.input<typeof schemas.WanIpv6Mode>
+export type WanOverlap = z.output<typeof schemas.WanOverlap>
 export type WifiRadio = z.output<typeof schemas.WifiRadio>
 export type WifiRadioInput = z.input<typeof schemas.WifiRadio>
 export type ActivityListResponse = z.output<typeof schemas.ActivityListResponse>

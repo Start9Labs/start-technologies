@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,7 +12,9 @@ use url::Url;
 use crate::prelude::*;
 use crate::progress::PhaseProgressTrackerHandle;
 use crate::registry::signer::AcceptSigners;
+use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
+use crate::s9pk::merkle_archive::source::encrypted::{KeyStreamInfo, KeyStreamSource};
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::merkle_archive::source::{ArchiveSource, Section};
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
@@ -30,6 +33,12 @@ pub struct RegistryAsset<Commitment> {
     pub urls: Vec<Url>,
     pub commitment: Commitment,
     pub signatures: SignatureMap,
+    /// Keystream the hosted bytes are encrypted with. Null for hosted plaintext visible to everyone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private: Option<KeyStreamInfo>,
+    /// Reader keys in `FullIndex.readers` allowed to see this private asset.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub readers: BTreeSet<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(generic RegistryAsset<Commitment>);
@@ -112,13 +121,17 @@ impl<C: for<'a> Commitment<&'a HttpSource>> RegistryAsset<C> {
             .await
     }
 }
+/// Downloads decrypt the hosted bytes with `private`.
 impl RegistryAsset<MerkleArchiveCommitment> {
+    fn decrypted<S>(&self, source: S) -> Arc<KeyStreamSource<S>> {
+        Arc::new(KeyStreamSource::new(source, self.private.clone()))
+    }
     pub async fn deserialize_s9pk(
         &self,
         client: Client,
-    ) -> Result<S9pk<Section<Arc<HttpSource>>>, Error> {
+    ) -> Result<S9pk<Section<Arc<KeyStreamSource<HttpSource>>>>, Error> {
         S9pk::deserialize(
-            &Arc::new(self.load_http_source(client).await?),
+            &self.decrypted(self.load_http_source(client).await?),
             Some(&self.commitment),
         )
         .await
@@ -127,13 +140,14 @@ impl RegistryAsset<MerkleArchiveCommitment> {
         &self,
         client: Client,
         progress: PhaseProgressTrackerHandle,
-    ) -> Result<S9pk<Section<Arc<BufferedHttpSource>>>, Error> {
+    ) -> Result<S9pk<Section<Arc<KeyStreamSource<BufferedHttpSource>>>>, Error> {
         S9pk::deserialize(
-            &Arc::new(self.load_buffered_http_source(client, progress).await?),
+            &self.decrypted(self.load_buffered_http_source(client, progress).await?),
             Some(&self.commitment),
         )
         .await
     }
+    /// The returned source buffers the hosted bytes, which are ciphertext for a private asset.
     pub async fn download_to(
         &self,
         path: impl AsRef<Path>,
@@ -141,12 +155,12 @@ impl RegistryAsset<MerkleArchiveCommitment> {
         progress: PhaseProgressTrackerHandle,
     ) -> Result<
         (
-            S9pk<Section<Arc<BufferedHttpSource>>>,
-            Arc<BufferedHttpSource>,
+            S9pk<Section<Arc<KeyStreamSource<BufferedHttpSource>>>>,
+            Arc<KeyStreamSource<BufferedHttpSource>>,
         ),
         Error,
     > {
-        let source = Arc::new(
+        let source = self.decrypted(
             self.load_buffered_http_source_with_path(path, client, progress)
                 .await?,
         );
@@ -529,6 +543,8 @@ mod tests {
                 urls: vec![server.url.join(path)?],
                 commitment: commitment.clone(),
                 signatures: Default::default(),
+                private: None,
+                readers: Default::default(),
             };
             let mut output = Vec::new();
             let result = asset.download(Client::new(), &mut output).await;
@@ -550,6 +566,8 @@ mod tests {
             urls: vec![server.url.join("resume")?, server.url.join("complete")?],
             commitment: (),
             signatures: SignatureMap::new(),
+            private: None,
+            readers: BTreeSet::new(),
         };
 
         assert_eq!(buffered_contents(asset).await?, b"hello world");
@@ -568,6 +586,8 @@ mod tests {
             ],
             commitment: (),
             signatures: SignatureMap::new(),
+            private: None,
+            readers: BTreeSet::new(),
         };
 
         assert_eq!(buffered_contents(asset).await?, b"hello world");
@@ -586,6 +606,8 @@ mod tests {
             ],
             commitment: (),
             signatures: SignatureMap::new(),
+            private: None,
+            readers: BTreeSet::new(),
         };
 
         assert_eq!(buffered_contents(asset).await?, b"hello world");
@@ -601,6 +623,8 @@ mod tests {
             urls: vec![server.url.join("changes")?, server.url.join("complete")?],
             commitment: (),
             signatures: SignatureMap::new(),
+            private: None,
+            readers: BTreeSet::new(),
         };
         assert!(buffered_contents(asset).await.is_err());
         assert_eq!(server.complete_hits.load(Ordering::SeqCst), 0);
@@ -616,6 +640,8 @@ mod tests {
             urls: vec![server.url.join("always-truncated")?],
             commitment: (),
             signatures: SignatureMap::new(),
+            private: None,
+            readers: BTreeSet::new(),
         };
 
         assert!(buffered_contents(asset).await.is_err());
@@ -630,6 +656,8 @@ mod tests {
             urls: vec![server.url.join("slow-tail")?],
             commitment: (),
             signatures: SignatureMap::new(),
+            private: None,
+            readers: BTreeSet::new(),
         };
 
         let progress = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
