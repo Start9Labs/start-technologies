@@ -1,6 +1,9 @@
-use std::net::IpAddr;
+use std::future::Future;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
+use std::time::Duration;
 
+use nix::net::if_::InterfaceFlags;
 use serde::{Deserialize, Serialize};
 use uciedit::openwrt::NetworkInterface;
 use uciedit::{parse_all, Arena, Configs};
@@ -262,10 +265,76 @@ pub async fn apply_smartdns_groups(groups: Vec<SmartDnsGroup>) -> Result<(), Err
     let conf = generate_smartdns_conf(&groups);
     tokio::fs::create_dir_all("/etc/smartdns").await?;
     tokio::fs::write(SMARTDNS_CONF_PATH, &conf).await?;
-    let _ =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/smartdns").arg("restart"))
-            .await;
+    restart_smartdns().await;
     Ok(())
+}
+
+const LOOPBACK_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
+const LOOPBACK_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+fn is_loopback_ipv4(name: &str, flags: InterfaceFlags, addr: Option<Ipv4Addr>) -> bool {
+    name == "lo" && flags.contains(InterfaceFlags::IFF_UP) && addr == Some(Ipv4Addr::LOCALHOST)
+}
+
+fn loopback_has_ipv4() -> bool {
+    nix::ifaddrs::getifaddrs().is_ok_and(|addrs| {
+        addrs.into_iter().any(|ifaddr| {
+            let ip = ifaddr
+                .address
+                .and_then(|a| a.as_sockaddr_in().map(|v4| v4.ip()));
+            is_loopback_ipv4(&ifaddr.interface_name, ifaddr.flags, ip)
+        })
+    })
+}
+
+async fn restart_smartdns_with<RFut: Future<Output = ()>>(
+    mut is_ready: impl FnMut() -> bool,
+    timeout: Duration,
+    poll_interval: Duration,
+    restart: impl FnOnce() -> RFut,
+) -> bool {
+    let ready = is_ready()
+        || tokio::time::timeout(timeout, async {
+            loop {
+                tokio::time::sleep(poll_interval).await;
+                if is_ready() {
+                    break;
+                }
+            }
+        })
+        .await
+        .is_ok();
+    if !ready {
+        tracing::warn!(
+            "loopback 127.0.0.1 not ready after {timeout:?}; restarting smartdns anyway"
+        );
+    }
+    restart().await;
+    ready
+}
+
+/// Restarts SmartDNS once `127.0.0.1` is back on `lo`. Waits up to 10 s.
+pub(crate) async fn restart_smartdns() {
+    let restart = || async {
+        let _ = crate::run_quiet_async(
+            tokio::process::Command::new("/etc/init.d/smartdns").arg("restart"),
+        )
+        .await;
+    };
+    if !tokio::fs::try_exists(SMARTDNS_CONF_PATH)
+        .await
+        .unwrap_or(true)
+    {
+        restart().await;
+        return;
+    }
+    restart_smartdns_with(
+        loopback_has_ipv4,
+        LOOPBACK_WAIT_TIMEOUT,
+        LOOPBACK_POLL_INTERVAL,
+        restart,
+    )
+    .await;
 }
 
 /// Rewrites the SmartDNS config from UCI, restarting SmartDNS only when it differs.
@@ -488,6 +557,150 @@ server-https https://8.8.8.8/dns-query -group profile_guest -exclude-default-gro
         ));
         assert!(conf.contains(
             "server-https https://8.8.8.8/dns-query -group profile_guest -exclude-default-group -interface wg_proton\n"
+        ));
+    }
+
+    #[derive(Clone, Default)]
+    struct LogBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuf {
+        type Writer = Self;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn test_logger() -> (LogBuf, impl tracing::Subscriber) {
+        let buf = LogBuf::default();
+        let sub = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(buf.clone())
+            .finish();
+        (buf, sub)
+    }
+
+    #[tokio::test]
+    async fn test_restart_smartdns_waits_for_loopback_before_restarting() {
+        use std::cell::Cell;
+
+        use tracing::instrument::WithSubscriber;
+
+        let (polls, loopback_up, restarted) =
+            (Cell::new(0usize), Cell::new(false), Cell::new(false));
+        let (logs, sub) = test_logger();
+
+        let ready = restart_smartdns_with(
+            || {
+                let n = polls.get() + 1;
+                polls.set(n);
+                let up = n >= 4;
+                loopback_up.set(up);
+                up
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+            || async {
+                assert!(
+                    loopback_up.get(),
+                    "SmartDNS restart ran before 127.0.0.1 returned to lo"
+                );
+                restarted.set(true);
+            },
+        )
+        .with_subscriber(sub)
+        .await;
+
+        assert!(ready && restarted.get());
+        assert_eq!(polls.get(), 4);
+        assert!(logs.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_restart_smartdns_proceeds_immediately_when_loopback_ready() {
+        use std::cell::Cell;
+
+        use tracing::instrument::WithSubscriber;
+
+        let (polls, restarted) = (Cell::new(0usize), Cell::new(false));
+        let (logs, sub) = test_logger();
+
+        // Zero timeout + 60 s poll interval proves the immediate path neither sleeps nor arms a timer.
+        let ready = restart_smartdns_with(
+            || {
+                polls.set(polls.get() + 1);
+                true
+            },
+            Duration::ZERO,
+            Duration::from_secs(60),
+            || async { restarted.set(true) },
+        )
+        .with_subscriber(sub)
+        .await;
+
+        assert!(ready && restarted.get());
+        assert_eq!(polls.get(), 1);
+        assert!(logs.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_restart_smartdns_restarts_with_warning_on_timeout() {
+        use std::cell::Cell;
+
+        use tracing::instrument::WithSubscriber;
+
+        let (polls, restarted) = (Cell::new(0usize), Cell::new(false));
+        let (logs, sub) = test_logger();
+
+        let ready = restart_smartdns_with(
+            || {
+                polls.set(polls.get() + 1);
+                false
+            },
+            Duration::from_millis(15),
+            Duration::from_millis(5),
+            || async { restarted.set(true) },
+        )
+        .with_subscriber(sub)
+        .await;
+
+        assert!(!ready && restarted.get());
+        assert!(polls.get() >= 1);
+        let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            text.contains("WARN") && text.contains("loopback 127.0.0.1 not ready"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn test_is_loopback_ipv4_filtering() {
+        let up_lo = InterfaceFlags::IFF_UP | InterfaceFlags::IFF_LOOPBACK;
+        assert!(is_loopback_ipv4("lo", up_lo, Some(Ipv4Addr::LOCALHOST)));
+        assert!(!is_loopback_ipv4(
+            "lo",
+            InterfaceFlags::IFF_LOOPBACK,
+            Some(Ipv4Addr::LOCALHOST),
+        ));
+        assert!(!is_loopback_ipv4("lo", up_lo, None));
+        assert!(!is_loopback_ipv4(
+            "lo",
+            up_lo,
+            Some(Ipv4Addr::new(127, 0, 0, 2)),
+        ));
+        assert!(!is_loopback_ipv4(
+            "eth0",
+            InterfaceFlags::IFF_UP,
+            Some(Ipv4Addr::LOCALHOST),
         ));
     }
 }
