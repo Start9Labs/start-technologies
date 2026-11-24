@@ -1,28 +1,45 @@
 import { inject, Service, signal } from '@angular/core'
 import { WA_WINDOW } from '@ng-web-apis/common'
-import { arrayFromPath, Dump, pathFromArray } from 'patch-db-client'
+import {
+  arrayFromPath,
+  Cursor,
+  Dump,
+  parseSubscriptionKey,
+  pathFromArray,
+} from 'patch-db-client'
 import { DataModel } from './data-model'
 
 const VALUES = 'values'
 const META = 'meta'
 const CURSOR = 'cursor'
 const SYNCED = 'synced'
-const KEYED: readonly string[] = ['packageData', 'registryCache']
+const KEYED: readonly string[] = ['packageData']
 const KEYED_ROOT = Object.freeze({})
+/** Data fetched from outside the server is shown only while live. */
+const UNPERSISTED: readonly string[] = [
+  'registryCache',
+  'registryIndexes',
+  'osUpdateCache',
+]
 
-type Cursor = { id: number; epoch: string | null }
+type Snapshot = { id: number; roots: Record<string, Cursor> }
+type Restored = { dump: Dump<DataModel>; cursors: Record<string, Cursor> }
+
+const EMPTY_RESTORE = (): Restored => ({
+  dump: { id: 0, value: {} as DataModel },
+  cursors: {},
+})
 
 @Service()
 export class PatchDbCache {
   private readonly win = inject(WA_WINDOW)
   private db?: Promise<IDBDatabase>
-  private saved?: Cursor & { value: DataModel }
-  epoch: string | null = null
+  private saved?: Snapshot & { value: DataModel }
   /** Persisted freshness requires a committed snapshot cursor. */
   readonly synced = signal<number | null>(null)
 
   /** Unavailable persistence yields an empty baseline for live synchronization. */
-  async read(): Promise<Dump<DataModel>> {
+  async read(): Promise<Restored> {
     try {
       const { keys, values, cursor, synced } = await this.transaction(
         'readonly',
@@ -33,32 +50,45 @@ export class PatchDbCache {
           synced: tx.objectStore(META).get(SYNCED),
         }),
       )
-      const { id, epoch } = (cursor.result ?? {}) as Partial<Cursor>
-      if (!id) {
+      const { id, roots } = (cursor.result ?? {}) as Partial<Snapshot>
+      if (!id || !roots) {
         this.saved = undefined
         this.synced.set(null)
-        return { id: 0, value: {} as DataModel }
+        return EMPTY_RESTORE()
       }
       this.synced.set(typeof synced.result === 'number' ? synced.result : null)
       const value = fromEntries(
         keys.result.map((key, i) => [String(key), values.result[i]]),
       )
-      this.epoch = epoch ?? null
-      this.saved = { id, epoch: this.epoch, value }
-      return { id, value: { ...value } }
+      this.saved = { id, roots, value }
+      return { dump: { id, value: { ...value } }, cursors: { ...roots } }
     } catch (e) {
       console.error(e)
       this.saved = undefined
       this.synced.set(null)
-      return { id: 0, value: {} as DataModel }
+      return EMPTY_RESTORE()
     }
   }
 
-  /** Stored revisions describe complete snapshots across browser tabs. */
-  async write({ id, value }: Dump<DataModel>): Promise<void> {
-    const { epoch } = this
+  /**
+   * Stored revisions describe complete snapshots across browser tabs.
+   * Every persisted root retains resumable coverage after a whole-document subscription.
+   */
+  async write(
+    { id, value }: Dump<DataModel>,
+    cursors: Record<string, Cursor>,
+  ): Promise<void> {
+    const root = cursors['']
+    const roots = Object.fromEntries(
+      [
+        ...(root
+          ? Object.keys(value).map(key => [pathFromArray([key]), root] as const)
+          : []),
+        ...Object.entries(cursors),
+      ].filter(([key]) => persisted(key)),
+    )
     const previous = this.saved
-    this.saved = { id, epoch, value: { ...value } }
+    this.saved = { id, roots, value: { ...value } }
     try {
       await this.transaction('readwrite', tx => {
         const meta = tx.objectStore(META)
@@ -78,7 +108,7 @@ export class PatchDbCache {
           prior?.forEach((_, key) => {
             if (!next.has(key)) store.delete(key)
           })
-          meta.put({ id, epoch }, CURSOR)
+          meta.put({ id, roots }, CURSOR)
         }
       })
     } catch (e) {
@@ -115,7 +145,6 @@ export class PatchDbCache {
 
   async clear(): Promise<void> {
     this.saved = undefined
-    this.epoch = null
     this.synced.set(null)
     await this.transaction('readwrite', tx => {
       tx.objectStore(VALUES).clear()
@@ -137,13 +166,23 @@ export class PatchDbCache {
   }
 }
 
-function sameCursor(stored: Cursor | undefined, saved: Cursor): boolean {
-  return stored?.id === saved.id && stored?.epoch === saved.epoch
+function sameCursor(stored: Snapshot | undefined, saved: Snapshot): boolean {
+  return (
+    stored?.id === saved.id &&
+    JSON.stringify(stored.roots) === JSON.stringify(saved.roots)
+  )
+}
+
+/** Whether a subscription key's cursor is stored, from the root its pointer lies under. */
+function persisted(key: string): boolean {
+  const [root] = arrayFromPath(parseSubscriptionKey(key).pointer)
+  return root !== undefined && !UNPERSISTED.includes(root)
 }
 
 function toEntries(value: DataModel): Map<string, unknown> {
   const entries = new Map<string, unknown>()
   Object.entries(value).forEach(([key, v]) => {
+    if (UNPERSISTED.includes(key)) return
     const pointer = pathFromArray([key])
     if (KEYED.includes(key) && isMap(v)) {
       entries.set(pointer, KEYED_ROOT)
@@ -178,7 +217,7 @@ function isMap(value: unknown): value is Record<string, unknown> {
 
 function open(win: Window): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = win.indexedDB.open('startos-patchdb', 2)
+    const request = win.indexedDB.open('startos-patchdb', 3)
     request.onupgradeneeded = ({ oldVersion }) => {
       const db = request.result
       if (oldVersion) {

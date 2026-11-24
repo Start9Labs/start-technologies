@@ -24,7 +24,9 @@ use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 use crate::patch::{diff, Catchup, DiffPatch, Dump, JsonCatchup, Revision};
 use crate::subscriber::Broadcast;
-use crate::{DbWatch, Error, HasModel, JsonSubscriber, Subscriber};
+use crate::{
+    DbWatch, Error, HasModel, JsonSubscriber, ProjectedSubscriber, Projection, Subscriber,
+};
 
 const STORE_FILE_MODE: u32 = 0o600;
 
@@ -169,6 +171,26 @@ impl Store {
     pub(crate) fn sequence(&self) -> u64 {
         self.revision
     }
+    /// What a subscriber holding revision `since` of this epoch lacks.
+    fn catch_up(
+        &self,
+        ptr: &JsonPointer,
+        projection: &Projection,
+        since: Option<(&str, u64)>,
+    ) -> (InternedString, Catchup) {
+        let epoch = self.broadcast.epoch().clone();
+        let catchup = since
+            .filter(|(since_epoch, _)| *since_epoch == &*epoch)
+            .and_then(|(_, id)| self.broadcast.replay(ptr, projection, id, self.revision))
+            .map_or_else(
+                || Catchup::Dump(projection.project_dump(self.dump(ptr))),
+                |revisions| Catchup::Replay {
+                    id: self.revision,
+                    revisions,
+                },
+            );
+        (epoch, catchup)
+    }
     pub(crate) fn subscribe(&mut self, ptr: JsonPointer) -> Subscriber {
         self.broadcast.subscribe(ptr)
     }
@@ -292,7 +314,7 @@ impl Store {
 
         let id = self.revision;
         let res = Arc::new(Revision { id, patch });
-        self.broadcast.send(&res);
+        self.broadcast.send(&res, &self.persistent);
 
         Ok(Some(res))
     }
@@ -417,12 +439,30 @@ impl PatchDb {
     pub async fn dump<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> Dump {
         self.store.read().await.dump(ptr)
     }
+    pub async fn dump_projected<S: AsRef<str>, V: SegList>(
+        &self,
+        ptr: &JsonPointer<S, V>,
+        projection: &Projection,
+    ) -> Dump {
+        projection.project_dump(self.store.read().await.dump(ptr))
+    }
     pub async fn sequence(&self) -> u64 {
         self.store.read().await.sequence()
     }
     pub async fn dump_and_sub(&self, ptr: JsonPointer) -> (Dump, Subscriber) {
+        self.dump_and_sub_projected(ptr, Projection::default())
+            .await
+    }
+    pub async fn dump_and_sub_projected(
+        &self,
+        ptr: JsonPointer,
+        projection: Projection,
+    ) -> (Dump, Subscriber) {
         let mut store = self.store.write().await;
-        (store.dump(&ptr), store.broadcast.subscribe(ptr))
+        (
+            projection.project_dump(store.dump(&ptr)),
+            store.broadcast.subscribe_projected(ptr, projection),
+        )
     }
     /// Atomically captures what a subscriber holding revision `since` lacks,
     /// plus a revision stream. `since` resumes only within the returned epoch;
@@ -432,19 +472,51 @@ impl PatchDb {
         ptr: JsonPointer,
         since: Option<(&str, u64)>,
     ) -> (InternedString, Catchup, Subscriber) {
+        self.catch_up_and_sub_projected(ptr, Projection::default(), since)
+            .await
+    }
+    /// [`catch_up_and_sub`](Self::catch_up_and_sub) restricted to a projection of the subtree.
+    pub async fn catch_up_and_sub_projected(
+        &self,
+        ptr: JsonPointer,
+        projection: Projection,
+        since: Option<(&str, u64)>,
+    ) -> (InternedString, Catchup, Subscriber) {
         let mut store = self.store.write().await;
-        let epoch = store.broadcast.epoch().clone();
-        let catchup = since
-            .filter(|(since_epoch, _)| *since_epoch == &*epoch)
-            .and_then(|(_, id)| store.broadcast.replay(&ptr, id, store.revision))
-            .map_or_else(
-                || Catchup::Dump(store.dump(&ptr)),
-                |revisions| Catchup::Replay {
-                    id: store.revision,
-                    revisions,
-                },
-            );
-        (epoch, catchup, store.broadcast.subscribe(ptr))
+        let (epoch, catchup) = store.catch_up(&ptr, &projection, since);
+        (
+            epoch,
+            catchup,
+            store.broadcast.subscribe_projected(ptr, projection),
+        )
+    }
+    /// [`catch_up_and_sub_projected`](Self::catch_up_and_sub_projected) for a subscription
+    /// whose projection [`reproject`](Self::reproject) changes.
+    pub async fn catch_up_and_sub_mutable(
+        &self,
+        ptr: JsonPointer,
+        projection: Projection,
+        since: Option<(&str, u64)>,
+    ) -> (InternedString, Catchup, ProjectedSubscriber) {
+        let mut store = self.store.write().await;
+        let (epoch, catchup) = store.catch_up(&ptr, &projection, since);
+        (
+            epoch,
+            catchup,
+            store.broadcast.subscribe_mutable(ptr, projection),
+        )
+    }
+    /// Changes a subscription's projection, sending what it adds before any later revision.
+    /// False once the subscription has closed.
+    pub async fn reproject(&self, id: u64, projection: Projection) -> bool {
+        let mut store = self.store.write().await;
+        let Store {
+            persistent,
+            revision,
+            broadcast,
+            ..
+        } = &mut *store;
+        broadcast.reproject(id, projection, persistent, *revision)
     }
     /// [`catch_up_and_sub`](Self::catch_up_and_sub) with the shared JSON dump of
     /// [`dump_and_sub_json`](Self::dump_and_sub_json) when it cannot replay.
@@ -458,7 +530,11 @@ impl PatchDb {
         let epoch = store.broadcast.epoch().clone();
         let replay = since
             .filter(|(since_epoch, _)| *since_epoch == &*epoch)
-            .and_then(|(_, id)| store.broadcast.replay(&ptr, id, store.revision));
+            .and_then(|(_, id)| {
+                store
+                    .broadcast
+                    .replay(&ptr, &Projection::default(), id, store.revision)
+            });
         Ok(match replay {
             Some(revisions) => {
                 let id = store.revision;

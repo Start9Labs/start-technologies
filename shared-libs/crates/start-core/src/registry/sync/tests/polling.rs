@@ -161,7 +161,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Legacy Registry"));
-    assert!(cache.listings.contains_key("test"));
+    assert!(cache.selections.contains_key("test"));
     assert_eq!(
         snapshot
             .as_public()
@@ -182,7 +182,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
     assert!(selection["best"].get("2.0.0:0").is_none());
     assert_eq!(
         snapshot
-            .as_private()
+            .as_public()
             .as_registry_indexes()
             .as_idx(&registry)
             .unwrap()

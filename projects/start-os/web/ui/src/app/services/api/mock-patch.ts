@@ -80,43 +80,71 @@ const MOCK_UPDATE_TARGETS: Record<string, string> = {
   'btc-rpc-proxy': '0.4.0:0',
 }
 
-function mockListings(): T.RegistryCache['listings'] {
+function mockReleases(id: string): Record<string, T.PackageVersionInfo> {
+  return Object.fromEntries([
+    ...Object.values(Mock.OtherPackageVersions[id] ?? {}).flatMap(res =>
+      Object.entries(res.best),
+    ),
+    ...Object.entries(Mock.RegistryPackages[id]?.best ?? {}),
+  ])
+}
+
+function mockSelections(): T.RegistryCache['selections'] {
   return Object.fromEntries(
     Object.entries(Mock.RegistryPackages).map(([id, pkg]) => {
+      const releases = mockReleases(id)
       const updateTarget = MOCK_UPDATE_TARGETS[id]
-      const versions: Record<string, T.PackageVersionInfo> = Object.fromEntries(
-        [
-          ...Object.values(Mock.OtherPackageVersions[id] ?? {}).flatMap(res =>
-            Object.entries(res.best),
-          ),
-          ...Object.entries(pkg.best),
-        ],
-      )
-      const listed = Object.keys(pkg.best)
-      if (
-        updateTarget &&
-        versions[updateTarget] &&
-        !listed.includes(updateTarget)
-      )
-        listed.push(updateTarget)
       return [
         id,
         {
-          detailsHash: 'mock',
-          categories: pkg.categories,
+          best: Object.keys(pkg.best),
           firstPublishedAt: pkg.firstPublishedAt,
-          releases: Object.fromEntries(listed.map(v => [v, versions[v]!])),
           versions: Object.fromEntries(
             [
-              ...Object.keys(versions),
+              ...Object.keys(releases),
               ...Object.keys(pkg.otherVersions ?? {}),
-            ].map(v => [v, {}]),
+            ].map(v => [
+              v,
+              {
+                s9pks: releases[v]?.s9pks.map((_, index) => index) ?? [],
+                compatible: true,
+              },
+            ]),
           ),
-          updateTarget,
+          ...(updateTarget && releases[updateTarget] ? { updateTarget } : {}),
         },
       ]
     }),
   )
+}
+
+/** The saved index of a reachable mock registry. */
+export function mockRegistryIndex(
+  info: T.RegistryInfo,
+): DataModel['registryIndexes'][string] {
+  return {
+    name: info.name,
+    icon: null,
+    description: null,
+    defaultLocale: info.defaultLocale,
+    package: {
+      categories: info.categories,
+      packages: Object.fromEntries(
+        Object.entries(Mock.RegistryPackages).map(([id, pkg]) => [
+          id,
+          {
+            authorized: {},
+            categories: pkg.categories,
+            versions: mockReleases(id),
+          },
+        ]),
+      ),
+    },
+    os: { versions: {} },
+    signers: {},
+    trustSigners: [],
+    readers: {},
+  } as unknown as DataModel['registryIndexes'][string]
 }
 
 /** The community registry mocks an unreachable registry. */
@@ -127,14 +155,14 @@ export function mockRegistryCache(
   return sameUrl(url, defaultRegistries.community)
     ? {
         info,
-        listings: {},
+        selections: {},
         publishesOsUpdates: false,
         status: 'error',
         error: `error sending request for url (${registryUrl(url)}): connection timed out`,
       }
     : {
         info,
-        listings: mockListings(),
+        selections: mockSelections(),
         publishesOsUpdates: true,
         status: 'connected',
       }
@@ -173,6 +201,9 @@ export const mockPatchData: DataModel = {
       defaultRegistries.community,
       { ...Mock.RegistryInfo, name: 'Community Registry' },
     ),
+  },
+  registryIndexes: {
+    [defaultRegistries.start9]: mockRegistryIndex(Mock.RegistryInfo),
   },
   osUpdateCache: mockOsUpdateCache(defaultRegistries.start9),
   disks: structuredClone(Mock.Disks),

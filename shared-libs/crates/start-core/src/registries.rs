@@ -24,10 +24,6 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand("refresh", from_fn_async(refresh).no_cli())
         .subcommand(
-            "package",
-            from_fn_async(crate::registry::sync::synced_package).no_cli(),
-        )
-        .subcommand(
             "remove",
             from_fn_async(remove)
                 .with_metadata("sync_db", Value::Bool(true))

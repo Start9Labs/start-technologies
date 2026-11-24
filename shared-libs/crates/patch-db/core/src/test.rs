@@ -116,6 +116,120 @@ async fn catch_up_replays_scoped_revisions_within_its_epoch() {
 }
 
 #[tokio::test]
+async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() {
+    let db = PatchDb::in_memory();
+    db.put(
+        &ROOT,
+        &json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
+    )
+    .await
+    .unwrap();
+    let pkgs: JsonPointer = "/pkgs".parse().unwrap();
+    let projection = patch_db::Projection::new(None, vec![], vec!["/*/icon".parse().unwrap()]);
+    let (epoch, catchup, mut sub) = db
+        .catch_up_and_sub_projected(pkgs.clone(), projection.clone(), None)
+        .await;
+    let Catchup::Dump(dump) = catchup else {
+        panic!("expected a dump")
+    };
+    assert_eq!(dump.value, json!({ "x": { "state": 1 } }));
+    assert_eq!(
+        db.dump_projected(&pkgs, &projection).await.value,
+        dump.value
+    );
+    let (_, _, mut shared) = db
+        .catch_up_and_sub_projected(pkgs.clone(), projection.clone(), None)
+        .await;
+
+    db.put(&"/pkgs/x/icon".parse::<JsonPointer>().unwrap(), &"bigger")
+        .await
+        .unwrap();
+    db.put(
+        &"/pkgs/y".parse::<JsonPointer>().unwrap(),
+        &json!({ "state": 2, "icon": "big" }),
+    )
+    .await
+    .unwrap();
+    let streamed = sub.recv().await.unwrap();
+    assert_eq!(streamed.id, 3);
+    assert_eq!(shared.recv().await.unwrap().id, 3);
+    let mut value = dump.value.clone();
+    json_patch::patch(&mut value, &streamed.patch).unwrap();
+    assert_eq!(value, json!({ "x": { "state": 1 }, "y": { "state": 2 } }));
+
+    let (_, catchup, _) = db
+        .catch_up_and_sub_projected(pkgs, projection, Some((&epoch, dump.id)))
+        .await;
+    let Catchup::Replay { id, revisions } = catchup else {
+        panic!("expected a replay")
+    };
+    assert_eq!(id, 3);
+    assert_eq!(revisions.iter().map(|rev| rev.id).collect::<Vec<_>>(), [3]);
+}
+
+#[tokio::test]
+async fn reprojection_sends_what_it_adds_before_later_revisions() {
+    use patch_db::{Projection, Update};
+
+    let db = PatchDb::in_memory();
+    db.put(
+        &ROOT,
+        &json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
+    )
+    .await
+    .unwrap();
+    let pkgs: JsonPointer = "/pkgs".parse().unwrap();
+    let states = Projection::new(None, vec!["/*/state".parse().unwrap()], vec![]);
+    let (_, catchup, mut sub) = db
+        .catch_up_and_sub_mutable(pkgs.clone(), states.clone(), None)
+        .await;
+    let Catchup::Dump(dump) = catchup else {
+        panic!("expected a dump")
+    };
+    let mut replica = dump.value;
+    assert_eq!(replica, json!({ "x": { "state": 1 } }));
+
+    db.put(&"/pkgs/x/icon".parse::<JsonPointer>().unwrap(), &"bigger")
+        .await
+        .unwrap();
+    assert!(db.reproject(sub.id, Projection::default()).await);
+    db.put(&"/pkgs/x/icon".parse::<JsonPointer>().unwrap(), &"biggest")
+        .await
+        .unwrap();
+    let Update::Extend(extension) = sub.receiver.recv().await.unwrap() else {
+        panic!("expected the extension first")
+    };
+    assert_eq!(extension.id, 2);
+    json_patch::patch(&mut replica, &extension.patch).unwrap();
+    assert_eq!(replica, json!({ "x": { "state": 1, "icon": "bigger" } }));
+    let Update::Revision(revision) = sub.receiver.recv().await.unwrap() else {
+        panic!("expected a revision")
+    };
+    assert_eq!(revision.id, 3);
+    json_patch::patch(&mut replica, &revision.patch).unwrap();
+    assert_eq!(replica, json!({ "x": { "state": 1, "icon": "biggest" } }));
+
+    assert!(db.reproject(sub.id, states).await);
+    let Update::Extend(narrowed) = sub.receiver.recv().await.unwrap() else {
+        panic!("expected an acknowledgement")
+    };
+    assert!(narrowed.patch.is_empty());
+    db.put(&"/pkgs/x/icon".parse::<JsonPointer>().unwrap(), &"small")
+        .await
+        .unwrap();
+    db.put(&"/pkgs/x/state".parse::<JsonPointer>().unwrap(), &2)
+        .await
+        .unwrap();
+    let Update::Revision(revision) = sub.receiver.recv().await.unwrap() else {
+        panic!("expected a revision")
+    };
+    assert_eq!(revision.id, 5);
+
+    drop(sub);
+    assert!(!db.reproject(0, Projection::default()).await);
+}
+
+#[tokio::test]
 async fn json_catch_up_replays_within_its_epoch_and_streams_later_revisions() {
     let db = PatchDb::in_memory();
     db.put(&ROOT, &json!({ "index": { "package": {} }, "other": 0 }))

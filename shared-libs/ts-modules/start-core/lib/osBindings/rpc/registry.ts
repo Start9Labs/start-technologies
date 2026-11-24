@@ -128,7 +128,6 @@ export type DataUrlInput = z.input<typeof schemas.DataUrl>
 export type DbCursorInput = z.input<typeof schemas.DbCursor>
 export type DeviceFilter = z.output<typeof schemas.DeviceFilter>
 export type Dump = z.output<typeof schemas.Dump>
-export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type GetDownloadsParamsInput = z.input<typeof schemas.GetDownloadsParams>
 export type GetOsAssetParamsInput = z.input<typeof schemas.GetOsAssetParams>
 export type GetOsVersionParamsInput = z.input<typeof schemas.GetOsVersionParams>
@@ -209,6 +208,11 @@ export type RemoveVersionParamsInput = z.input<
  * JSON Patch 'replace' operation representation
  */
 export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export type SelectorParamsInput = z.input<typeof schemas.SelectorParams>
 export type SetDefaultLocaleParamsInput = z.input<
   typeof schemas.SetDefaultLocaleParams
 >
@@ -275,6 +279,11 @@ export type PatchOperation = z.output<typeof schemas.PatchOperation>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
 
 /**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
+
+/**
  * A key allowed to read the private s9pks that list it.
  */
 export type ReaderKey = z.output<typeof schemas.ReaderKey>
@@ -309,6 +318,7 @@ export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
 >
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
+export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 
