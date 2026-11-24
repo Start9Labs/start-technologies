@@ -10,7 +10,7 @@ fn patterns(patterns: &[&str]) -> Vec<JsonPointer> {
 }
 
 fn projection(depth: Option<usize>, include: &[&str], exclude: &[&str]) -> Projection {
-    Projection::new(depth, patterns(include), patterns(exclude)).unwrap()
+    Projection::new(depth, patterns(include), patterns(exclude))
 }
 
 fn projections() -> Vec<Projection> {
@@ -32,6 +32,9 @@ fn projections() -> Vec<Projection> {
         union(&[("/a", &["/a/*/b"], None), ("/a/x/b", &[], None)]),
         union(&[("/*/b", &[], None), ("/arr", &["/arr/*/b"], Some(3))]),
         union(&[("/a", &[], Some(2)), ("/b", &["/b/a"], None)]),
+        projection(None, &["/arr/1"], &[]),
+        projection(None, &[], &["/arr/0"]),
+        union(&[("/arr/1/a", &[], None), ("/a", &[], None)]),
     ]
 }
 
@@ -40,11 +43,10 @@ fn union(selectors: &[(&str, &[&str], Option<usize>)]) -> Projection {
         selectors
             .iter()
             .map(|(include, exclude, depth)| {
-                Selector::new(include.parse().unwrap(), patterns(exclude), *depth).unwrap()
+                Selector::new(include.parse().unwrap(), patterns(exclude), *depth)
             })
             .collect(),
     )
-    .unwrap()
 }
 
 /// A replica re-projected to the wider projection, then extended, holds its projection.
@@ -75,7 +77,10 @@ fn assert_commutes(projection: &Projection, old: &OrdValue, new: &OrdValue) {
         patch: diff(old, new),
     };
     let mut applied = projection.project_root(old);
-    let projected = projection.project_revision(revision.for_path(&ROOT));
+    let shifted = shifted_arrays(&revision.patch, new);
+    let projected = projection
+        .project_scoped(&ROOT.to_owned(), &revision, &shifted, Some(new))
+        .unwrap();
     let before = applied.clone();
     if let Err(e) = json_patch::patch(&mut applied, &projected.patch.0) {
         panic!(
@@ -102,7 +107,7 @@ fn values_keep_included_paths_minus_exclusions() {
     });
     assert_eq!(
         projection(None, &["/*/b"], &[]).project_root(&value),
-        ord_json!({ "a": {}, "b": {}, "arr": [] }),
+        ord_json!({ "a": {}, "b": {}, "arr": [null, null] }),
     );
     assert_eq!(
         projection(None, &["/a"], &["/a/*/b"]).project_root(&value),
@@ -254,13 +259,55 @@ fn subtree_scoping_composes_with_projection() {
 }
 
 #[test]
-fn array_position_patterns_are_rejected() {
-    for pattern in ["/arr/1", "/arr/-", "/*/0/a"] {
-        assert!(matches!(
-            Projection::new(None, patterns(&[pattern]), vec![]),
-            Err(crate::Error::PositionalPattern(p)) if p.to_string() == pattern
-        ));
-        assert!(Projection::new(None, vec![], patterns(&[pattern])).is_err());
+fn positions_stay_aligned_and_shifted_arrays_are_resent() {
+    let projection = projection(None, &["/arr/1", "/bindings/80"], &[]);
+    let old = ord_json!({ "arr": ["a", "b", "c"], "bindings": { "80": 1, "443": 2 } });
+    assert_eq!(
+        projection.project_root(&old),
+        ord_json!({ "arr": [null, "b", null], "bindings": { "80": 1 } }),
+    );
+    for patch in [
+        ord_json!([{ "op": "add", "path": "/arr/0", "value": "x" }]),
+        ord_json!([{ "op": "remove", "path": "/arr/0" }]),
+        ord_json!([
+            { "op": "add", "path": "/arr/3", "value": "d" },
+            { "op": "replace", "path": "/arr/1", "value": "B" },
+            { "op": "remove", "path": "/arr/0" },
+        ]),
+    ] {
+        let patch: DiffPatch = serde_json::from_value(patch.into()).unwrap();
+        let mut new = old.clone();
+        json_patch::patch(&mut new, &patch.0).unwrap();
+        let revision = Revision { id: 2, patch };
+        let shifted = shifted_arrays(&revision.patch, &new);
+        assert_eq!(shifted, vec!["/arr".parse::<JsonPointer>().unwrap()]);
+        let projected = projection
+            .project_scoped(&ROOT.to_owned(), &revision, &shifted, Some(&new))
+            .unwrap();
+        let mut applied = projection.project_root(&old);
+        json_patch::patch(&mut applied, &projected.patch.0).unwrap();
+        assert_eq!(applied, projection.project_root(&new));
+        assert!(projection
+            .project_scoped(&ROOT.to_owned(), &revision, &shifted, None)
+            .is_none());
     }
-    assert!(Projection::new(None, patterns(&["/arr/*/a", "/v1", "/-x"]), vec![]).is_ok());
+}
+
+#[test]
+fn a_subtree_inside_a_shifted_array_follows_its_position() {
+    let ptr: JsonPointer = "/arr/1".parse().unwrap();
+    let old = ord_json!({ "arr": ["a", "b"] });
+    let patch: DiffPatch =
+        serde_json::from_value(ord_json!([{ "op": "add", "path": "/arr/0", "value": "x" }]).into())
+            .unwrap();
+    let mut new = old.clone();
+    json_patch::patch(&mut new, &patch.0).unwrap();
+    let revision = Revision { id: 2, patch };
+    let shifted = shifted_arrays(&revision.patch, &new);
+    let projected = Projection::default()
+        .project_scoped(&ptr, &revision, &shifted, Some(&new))
+        .unwrap();
+    let mut applied = ptr.get(&old).unwrap().clone();
+    json_patch::patch(&mut applied, &projected.patch.0).unwrap();
+    assert_eq!(applied, ord_json!("a"));
 }

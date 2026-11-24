@@ -1177,13 +1177,6 @@ error.backup-password-mismatch:
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
 # db/mod.rs
-db.projection-array-position:
-  en_US: "Projection pattern %{pattern} addresses an array position; use * for array elements"
-  de_DE: "Projektionsmuster %{pattern} adressiert eine Array-Position; verwenden Sie * für Array-Elemente"
-  es_ES: "El patrón de proyección %{pattern} se refiere a una posición de arreglo; use * para los elementos de arreglos"
-  fr_FR: "Le motif de projection %{pattern} désigne une position de tableau ; utilisez * pour les éléments de tableau"
-  pl_PL: "Wzorzec projekcji %{pattern} wskazuje pozycję w tablicy; dla elementów tablicy użyj *"
-
 db.subscription-not-found:
   en_US: "Database subscription %{subscription} has ended or does not exist"
   de_DE: "Das Datenbankabonnement %{subscription} ist beendet oder existiert nicht"
@@ -5389,13 +5382,6 @@ help.arg.smtp-username:
   es_ES: "Nombre de usuario de autenticación SMTP"
   fr_FR: "Nom d'utilisateur d'authentification SMTP"
   pl_PL: "Nazwa użytkownika uwierzytelniania SMTP"
-
-help.arg.smtp-keep-password:
-  en_US: "Keep the saved SMTP password when no password is given"
-  de_DE: "Gespeichertes SMTP-Passwort beibehalten, wenn kein Passwort angegeben ist"
-  es_ES: "Conservar la contraseña SMTP guardada cuando no se indica ninguna"
-  fr_FR: "Conserver le mot de passe SMTP enregistré si aucun mot de passe n'est fourni"
-  pl_PL: "Zachowaj zapisane hasło SMTP, gdy nie podano hasła"
 
 help.arg.smtp-password:
   en_US: "SMTP authentication password"

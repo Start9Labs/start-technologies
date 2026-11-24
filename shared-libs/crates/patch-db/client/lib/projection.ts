@@ -1,11 +1,16 @@
-import { arrayFromPath, Operation, pathFromArray } from './json-patch-lib'
+import {
+  arrayFromPath,
+  getValueByPointer,
+  Operation,
+  pathFromArray,
+  scopeOperations,
+} from './json-patch-lib'
 import { PatchOp } from './types'
 
 /**
  * One included subtree, mirroring the server's `Selector`. Patterns are pointers relative to
- * the subscribed subtree, where a `*` segment matches any single key or index; `depth`
- * counts levels below the subscribed subtree. Array-position segments (digits or `-`) are
- * rejected.
+ * the subscribed subtree, where a `*` segment matches any single key or index and a numeric
+ * segment that key or array position; `depth` counts levels below the subscribed subtree.
  */
 export type Selector = {
   include: string
@@ -33,32 +38,12 @@ export type Reach = 'out' | 'route' | 'in'
 
 const RANK: Record<Reach, number> = { out: 0, route: 1, in: 2 }
 
-/** Whether a pattern segment would select an array position. */
-export function isPositional(segment: string): boolean {
-  return segment === '-' || /^[0-9]+$/.test(segment)
-}
-
-/** The longest prefix of a path without an array-position segment. */
-export function beforePositional(path: readonly string[]): string[] {
-  const at = path.findIndex(isPositional)
-  return at < 0 ? [...path] : path.slice(0, at)
-}
-
-function assertNotPositional(pattern: string) {
-  if (arrayFromPath(pattern).some(isPositional))
-    throw new Error(
-      `Projection pattern ${pattern} addresses an array position; use *`,
-    )
-}
-
 /** A selector as the server's parameters take it. */
 export type WireSelector = { include: string; exclude?: string[]; depth?: number }
 
-/** Patterns sorted and deduplicated; throws for an array-position segment. */
+/** Patterns sorted and deduplicated. */
 export function normalizeSelector(selector: Selector): WireSelector {
-  assertNotPositional(selector.include)
   const exclude = [...new Set(selector.exclude ?? [])].sort()
-  exclude.forEach(assertNotPositional)
   const depth = selector.depth ?? null
   return {
     include: selector.include,
@@ -124,31 +109,20 @@ export function watchSelection(projection: Projection | null): Selection {
   }))
 }
 
-/**
- * The selectors a watch needs, relative to the subscribed root. Array-position segments
- * widen a pattern to the part before them, and drop an exclusion.
- */
+/** The selectors a watch needs, relative to the subscribed root. */
 export function watchSelectors(key: string): Selector[] {
   const { pointer, projection } = parseSubscriptionKey(key)
   const base = arrayFromPath(pointer)
-  const at = (pattern: string) => [...base, ...arrayFromPath(pattern)]
+  const at = (pattern: string) =>
+    pathFromArray([...base, ...arrayFromPath(pattern)])
   const selection = watchSelection(projection)
-  return (selection.length ? selection : [{ include: '' }]).map(selector => {
-    const include = at(selector.include)
-    const kept = beforePositional(include)
-    const widened = kept.length < include.length
-    return normalizeSelector({
-      include: pathFromArray(kept),
-      exclude: widened
-        ? []
-        : (selector.exclude ?? [])
-            .map(at)
-            .filter(exclude => !exclude.some(isPositional))
-            .map(pathFromArray),
-      depth:
-        widened || selector.depth == null ? null : base.length + selector.depth,
-    })
-  })
+  return (selection.length ? selection : [{ include: '' }]).map(selector =>
+    normalizeSelector({
+      include: at(selector.include),
+      exclude: (selector.exclude ?? []).map(at),
+      depth: selector.depth == null ? null : base.length + selector.depth,
+    }),
+  )
 }
 
 function segmentMatches(pattern: string, segment: string): boolean {
@@ -215,6 +189,19 @@ function wholeBelow(selection: Selection, path: readonly string[]): boolean {
   return !selection.length || selection.some(s => keepsWhole(s, path))
 }
 
+/** Whether depth drops every child of the path, which then projects as an empty container. */
+function cutsBelow(selection: Selection, path: readonly string[]): boolean {
+  return (
+    !!selection.length &&
+    selection
+      .filter(s => selectorReach(s, path) !== 'out')
+      .every(s => {
+        const { depth } = parse(s)
+        return depth !== null && depth <= path.length
+      })
+  )
+}
+
 /** The projected value at a path the selection reaches. */
 export function projectValue(
   selection: Selection,
@@ -222,13 +209,15 @@ export function projectValue(
   value: unknown,
 ): unknown {
   if (wholeBelow(selection, path)) return value
-  if (Array.isArray(value))
-    return value.flatMap((child, i) => {
+  if (Array.isArray(value)) {
+    if (cutsBelow(selection, path)) return []
+    return value.map((child, i) => {
       const at = [...path, String(i)]
       return reach(selection, at) === 'out'
-        ? []
-        : [projectValue(selection, at, child)]
+        ? null
+        : projectValue(selection, at, child)
     })
+  }
   if (isObject(value))
     return Object.fromEntries(
       Object.entries(value).flatMap(([key, child]) => {
@@ -248,17 +237,138 @@ export function projectRoot(selection: Selection, value: unknown): unknown {
     : projectValue(selection, [], value)
 }
 
-/** Restricts operations already scoped to the subtree, as the server's `Projection` does. */
+function projectOperation(
+  selection: Selection,
+  op: Operation<unknown>,
+): Operation<unknown>[] {
+  const path = arrayFromPath(op.path)
+  if (reach(selection, path) === 'out') return []
+  if (op.op === PatchOp.REMOVE) return [op]
+  return [{ ...op, value: projectValue(selection, path, op.value) }]
+}
+
+/**
+ * Restricts operations already scoped to the subtree. An insertion into or removal from an
+ * array the replica holds stays, with a null placeholder for an element the selection drops,
+ * so positions stay aligned.
+ */
 export function projectOperations(
   patch: Operation<unknown>[],
   selection: Selection,
+  isArray: (path: string[]) => boolean = () => false,
 ): Operation<unknown>[] {
   if (!selection.length) return patch
   return patch.flatMap((op): Operation<unknown>[] => {
     const path = arrayFromPath(op.path)
-    if (reach(selection, path) === 'out') return []
-    if (op.op === PatchOp.REMOVE) return [op]
-    return [{ ...op, value: projectValue(selection, path, op.value) }]
+    if (
+      op.op !== PatchOp.REPLACE &&
+      path.length &&
+      isArray(path.slice(0, -1)) &&
+      reach(selection, path.slice(0, -1)) !== 'out'
+    ) {
+      if (op.op === PatchOp.REMOVE) return [op]
+      return [
+        {
+          ...op,
+          value:
+            reach(selection, path) === 'out'
+              ? null
+              : projectValue(selection, path, op.value),
+        },
+      ]
+    }
+    return projectOperation(selection, op)
+  })
+}
+
+/** The arrays a patch inserts into or removes from, read from the document after it. */
+export function shiftedArrays(
+  patch: Operation<unknown>[],
+  after: unknown,
+): string[] {
+  const arrays = new Set<string>()
+  patch.forEach(op => {
+    if (op.op === PatchOp.REPLACE) return
+    const path = arrayFromPath(op.path)
+    if (!path.length) return
+    const parent = pathFromArray(path.slice(0, -1))
+    if (Array.isArray(getValueByPointer(after as any, parent))) arrays.add(parent)
+  })
+  return [...arrays]
+}
+
+/**
+ * A patch scoped to the subtree at `pointer` and restricted to the selection, as the server's
+ * `Projection::project_scoped` sends it: arrays the patch shifts are sent whole from the
+ * document after it unless the selection keeps them whole, and so is the subtree itself when
+ * it lies inside one.
+ */
+export function projectScoped(
+  patch: Operation<unknown>[],
+  pointer: string,
+  selection: Selection,
+  after: unknown,
+): Operation<unknown>[] {
+  const shifted = shiftedArrays(patch, after)
+  const root = arrayFromPath(pointer)
+  const valueAt = (path: string[]) =>
+    getValueByPointer(after as any, pathFromArray([...root, ...path]))
+  if (
+    shifted.some(array => {
+      const at = arrayFromPath(array)
+      return at.length < root.length && at.every((s, i) => s === root[i])
+    })
+  )
+    return [
+      {
+        op: PatchOp.REPLACE,
+        path: '',
+        value: projectRoot(selection, valueAt([]) ?? null),
+      },
+    ]
+  const resent = shifted
+    .map(arrayFromPath)
+    .filter(
+      at => at.length >= root.length && root.every((s, i) => s === at[i]),
+    )
+    .map(at => at.slice(root.length))
+    .filter(
+      rel => reach(selection, rel) !== 'out' && !wholeBelow(selection, rel),
+    )
+    .sort((a, b) => a.length - b.length)
+    .filter(
+      (rel, i, all) =>
+        !all
+          .slice(0, i)
+          .some(outer => outer.every((s, k) => s === rel[k])),
+    )
+  const ops = scopeOperations(patch, pointer)
+  const under = (op: Operation<unknown>, rel: string[]) => {
+    const path = arrayFromPath(op.path)
+    return rel.every((s, k) => s === path[k])
+  }
+  const last = resent.map(rel => {
+    let found = -1
+    ops.forEach((op, i) => {
+      if (under(op, rel)) found = i
+    })
+    return found
+  })
+  return ops.flatMap((op, i): Operation<unknown>[] => {
+    const array = resent.findIndex(rel => under(op, rel))
+    if (array < 0) return projectOperation(selection, op)
+    if (last[array] !== i) return []
+    const rel = resent[array]!
+    const value = valueAt(rel)
+    return value === undefined
+      ? []
+      : [
+          {
+            op: PatchOp.REPLACE,
+            path: pathFromArray(rel),
+            value: projectValue(selection, rel, value),
+          } as Operation<unknown>,
+        ]
   })
 }
 
@@ -290,12 +400,8 @@ export function extension(
     if (gains(held, wider, path)) return set(path, inArray, value)
     if (wholeBelow(held, path)) return
     if (Array.isArray(value)) {
-      const shifted = value.some(
-        (_, i) =>
-          reach(held, [...path, String(i)]) === 'out' &&
-          reach(wider, [...path, String(i)]) !== 'out',
-      )
-      if (shifted) return set(path, inArray, value)
+      if (cutsBelow(held, path) && !cutsBelow(wider, path))
+        return set(path, inArray, value)
       value.forEach((child, i) => {
         if (reach(wider, [...path, String(i)]) !== 'out')
           walk([...path, String(i)], true, child)

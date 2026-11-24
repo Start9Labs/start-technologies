@@ -3002,7 +3002,7 @@ export const ProjectionParams: z.ZodObject<{
   depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
   /**
    * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
-   * Empty keeps everything. Segments that are array positions (digits or `-`) are rejected.
+   * Empty keeps everything. A numeric segment matches that key or array position.
    */
   include: z.ZodOptional<z.ZodArray<z.ZodString>>
   /**
@@ -3011,6 +3011,7 @@ export const ProjectionParams: z.ZodObject<{
   exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
   /**
    * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
    */
   selectors: z.ZodOptional<z.ZodArray<typeof SelectorParams>>
 }> = /* @__PURE__ */ object({
@@ -3023,11 +3024,11 @@ export const ProjectionParams: z.ZodObject<{
   }),
   /**
    * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
-   * Empty keeps everything. Segments that are array positions (digits or `-`) are rejected.
+   * Empty keeps everything. A numeric segment matches that key or array position.
    */
   include: z.array(z.string()).optional().meta({
     description:
-      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. Segments that are array positions (digits or `-`) are rejected.',
+      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.',
   }),
   /**
    * Subtrees removed from what `include` keeps, in the same form.
@@ -3038,10 +3039,11 @@ export const ProjectionParams: z.ZodObject<{
   }),
   /**
    * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
    */
   selectors: z.array(SelectorParams).optional().meta({
     description:
-      'More subtrees, each with its own exclusions and depth, kept alongside the above.',
+      'More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.',
   }),
 }).meta({
   id: 'ProjectionParams',
@@ -3354,28 +3356,6 @@ export const SetSharedVolumeGrantParams: z.ZodObject<{
 }).meta({
   id: 'SetSharedVolumeGrantParams',
 })
-export const SetSmtpParams: z.ZodObject<{
-  host: z.ZodString
-  port: z.ZodInt
-  from: z.ZodString
-  username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  keepPassword: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
-}> = /* @__PURE__ */ object({
-  host: z.string(),
-  port: z.int(),
-  from: z.string(),
-  username: z.string(),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
-  keepPassword: wire(z.boolean().optional(), z.boolean()),
-  security: wire(SmtpSecurity.optional(), SmtpSecurity),
-}).meta({
-  id: 'SetSmtpParams',
-})
 export const SetStaticDnsParams: z.ZodObject<{
   gateway: typeof GatewayId
   servers: z.ZodCodec<
@@ -3514,6 +3494,69 @@ export const SideloadResponse: z.ZodObject<{
 }).meta({
   id: 'SideloadResponse',
 })
+export const SmtpValue: z.ZodCodec<
+  z.ZodIntersection<
+    z.ZodIntersection<
+      z.ZodObject<{
+        host: z.ZodOptional<z.ZodString>
+        server: z.ZodOptional<z.ZodString>
+        port: z.ZodInt
+        from: z.ZodString
+        login: z.ZodOptional<z.ZodString>
+        username: z.ZodOptional<z.ZodString>
+        password: z.ZodOptional<z.ZodNullable<z.ZodString>>
+        security: z.ZodOptional<typeof SmtpSecurity>
+      }>,
+      z.ZodUnion<
+        readonly [
+          z.ZodObject<{ host: z.ZodString }>,
+          z.ZodObject<{ server: z.ZodString }>,
+        ]
+      >
+    >,
+    z.ZodUnion<
+      readonly [
+        z.ZodObject<{ login: z.ZodString }>,
+        z.ZodObject<{ username: z.ZodString }>,
+      ]
+    >
+  >,
+  z.ZodObject<{
+    host: z.ZodString
+    port: z.ZodInt
+    from: z.ZodString
+    username: z.ZodString
+    password: z.ZodNullable<z.ZodString>
+    security: typeof SmtpSecurity
+  }>
+> = /* @__PURE__ */ wire(
+  z.intersection(
+    z.intersection(
+      object({
+        host: z.string().optional(),
+        server: z.string().optional(),
+        port: z.int(),
+        from: z.string(),
+        login: z.string().optional(),
+        username: z.string().optional(),
+        password: z.string().nullable().optional(),
+        security: SmtpSecurity.optional(),
+      }),
+      z.union([object({ host: z.string() }), object({ server: z.string() })]),
+    ),
+    z.union([object({ login: z.string() }), object({ username: z.string() })]),
+  ),
+  object({
+    host: z.string(),
+    port: z.int(),
+    from: z.string(),
+    username: z.string(),
+    password: z.string().nullable(),
+    security: SmtpSecurity,
+  }),
+).meta({
+  id: 'SmtpValue',
+})
 export const SshAddParams: z.ZodObject<{ key: typeof SshPubKey }> =
   /* @__PURE__ */ object({ key: SshPubKey }).meta({
     id: 'SshAddParams',
@@ -3557,13 +3600,7 @@ export const TestSmtpParams: z.ZodObject<{
   from: z.ZodString
   to: z.ZodString
   username: z.ZodString
-  /**
-   * Omitted, uses the saved password for the same host, port and username.
-   */
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodString
   security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
 }> = /* @__PURE__ */ object({
   host: z.string(),
@@ -3571,13 +3608,7 @@ export const TestSmtpParams: z.ZodObject<{
   from: z.string(),
   to: z.string(),
   username: z.string(),
-  /**
-   * Omitted, uses the saved password for the same host, port and username.
-   */
-  password: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Omitted, uses the saved password for the same host, port and username.',
-  }),
+  password: z.string(),
   security: wire(SmtpSecurity.optional(), SmtpSecurity),
 }).meta({
   id: 'TestSmtpParams',
@@ -6994,7 +7025,7 @@ export const Api = {
           _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-smtp': {
-          _PARAMS: /* @__PURE__ */ SetSmtpParams,
+          _PARAMS: /* @__PURE__ */ SmtpValue,
           _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),

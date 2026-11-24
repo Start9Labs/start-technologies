@@ -103,7 +103,13 @@ function mockSelections(): T.RegistryCache['selections'] {
             [
               ...Object.keys(releases),
               ...Object.keys(pkg.otherVersions ?? {}),
-            ].map(v => [v, { compatible: true }]),
+            ].map(v => [
+              v,
+              {
+                s9pks: releases[v]?.s9pks.map((_, index) => index) ?? [],
+                compatible: true,
+              },
+            ]),
           ),
           ...(updateTarget && releases[updateTarget] ? { updateTarget } : {}),
         },

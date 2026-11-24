@@ -51,7 +51,7 @@ fn database() -> DatabaseModel {
     public.server_info.version = device().os.version;
     Model::from_value(imbl_value::ord_json!({
         "public": public,
-        "private": {"registryIndexes": {}, "notifications": {}, "osSecurityNotifications": {},
+        "private": {"notifications": {}, "osSecurityNotifications": {},
             "push": crate::notifications::push::PushState::default()},
     }))
 }

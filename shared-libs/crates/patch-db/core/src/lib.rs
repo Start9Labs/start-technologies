@@ -21,7 +21,7 @@ pub use json_ptr;
 pub use model::{DestructureMut, HasModel, Model, ModelExt, Pointer};
 pub use patch::{Catchup, DiffPatch, Dump, JsonCatchup, Revision};
 pub use patch_db_macro::HasModel;
-pub use projection::{is_positional, Projection, Reach, Selector};
+pub use projection::{shifted_arrays, Projection, Reach, Selector};
 pub use store::{MutateResult, PatchDb, Store, TypedPatchDb};
 pub use subscriber::{
     DbWatch, JsonSubscriber, ProjectedSubscriber, Subscriber, TypedDbWatch, Update,
@@ -52,8 +52,6 @@ pub enum Error {
     Subscriber(#[from] tokio::sync::mpsc::error::TryRecvError),
     #[error("Node Does Not Exist: {0}")]
     NodeDoesNotExist(JsonPointer),
-    #[error("Projection Pattern Addresses An Array Position: {0}")]
-    PositionalPattern(JsonPointer),
     #[error("Provided Function Panicked! {0}")]
     Panic(String),
     #[error("Would Block")]

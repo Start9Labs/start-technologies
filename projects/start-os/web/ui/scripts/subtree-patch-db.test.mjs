@@ -5,9 +5,11 @@ import {
   applyOperation,
   extension,
   minimalSelection,
+  NOTHING,
   normalizeSelector,
   projectOperations,
   projectRoot,
+  projectScoped,
   scopeOperations,
   SubtreePatchDB,
   watchSelectors,
@@ -41,7 +43,10 @@ const shape = selection => selection.map(normalizeSelector)
 const sorted = selection =>
   [...selection].sort((a, b) => (a.include < b.include ? -1 : 1))
 
-function fixture(t, { releaseDelay = 5000 } = {}) {
+function fixture(
+  t,
+  { releaseDelay = 5000, update = () => Promise.resolve() } = {},
+) {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const calls = []
   const updates = []
@@ -66,7 +71,7 @@ function fixture(t, { releaseDelay = 5000 } = {}) {
     },
     update(subscription, selection) {
       updates.push({ subscription, selection: shape(selection) })
-      return Promise.resolve()
+      return update()
     },
   }
   const cache = new BehaviorSubject({ id: 0, value: {} })
@@ -162,6 +167,50 @@ test('a released watch narrows the selection after the delay and prunes its data
   f.extend(f.calls[0], 4)
   assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' } })
   assert.equal(f.cache.value.id, 4)
+})
+
+test('narrowing a whole-document watch retains only confirmed subset coverage', t => {
+  const f = fixture(t)
+  const info = f.watch('serverInfo')
+  const whole = f.watch()
+  f.db.start()
+  f.start(f.calls[0], 3, { serverInfo: { name: 'box' }, ui: { theme: 1 } })
+  whole.subscription.unsubscribe()
+  t.mock.timers.tick(5000)
+  const ui = f.watch('ui')
+  assert.deepEqual(ui.values, [])
+  assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' } })
+  assert.deepEqual(info.values.at(-1), { name: 'box' })
+  f.calls[0].events.error(new Error('closed before confirmation'))
+  assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' } })
+  f.db.start()
+  assert.deepEqual(f.calls[1].since, { epoch: 'boot', id: 3 })
+  assert.deepEqual(f.calls[1].selection, [{ include: '/serverInfo' }])
+  f.calls[1].events.next({
+    epoch: 'boot',
+    id: 3,
+    subscription: 'again',
+    revisions: [],
+  })
+  assert.deepEqual(ui.values, [])
+  f.extend(f.calls[1], 3, [{ op: 'add', path: '/ui', value: { theme: 2 } }])
+  assert.deepEqual(ui.values, [{ theme: 2 }])
+})
+
+test('releasing every watch resumes an empty replica with NOTHING, not universal coverage', t => {
+  const f = fixture(t)
+  const ui = f.watch('ui')
+  f.db.start()
+  f.start(f.calls[0], 3, { ui: { theme: 1 } })
+  ui.subscription.unsubscribe()
+  t.mock.timers.tick(5000)
+  const info = f.watch('serverInfo')
+  assert.deepEqual(info.values, [])
+  f.calls[0].events.error(new Error('closed before confirmation'))
+  f.db.start()
+  assert.deepEqual(f.calls[1].selection, shape(NOTHING))
+  assert.deepEqual(f.calls[1].since, { epoch: 'boot', id: 3 })
+  assert.deepEqual(info.values, [])
 })
 
 test('selection changes wait for the previous extension', t => {
@@ -290,6 +339,37 @@ test('a failure keeps the data and resumes from the cursor with the confirmed se
   ])
 })
 
+test('a late selection-update failure cannot stop a replacement subscription', async t => {
+  let rejectOld
+  const oldReply = new Promise((_, reject) => {
+    rejectOld = reject
+  })
+  let requests = 0
+  const f = fixture(t, {
+    update: () => (requests++ ? Promise.resolve() : oldReply),
+  })
+  const failures = []
+  f.db.failures$.subscribe(error => failures.push(error))
+  f.watch('serverInfo')
+  f.db.start()
+  f.start(f.calls[0], 3, { serverInfo: { name: 'box' } })
+  f.watch('ui')
+  f.calls[0].events.error(new Error('stream lost'))
+  f.db.start()
+  f.calls[1].events.next({
+    epoch: 'boot',
+    id: 3,
+    subscription: 'again',
+    revisions: [],
+  })
+  rejectOld(new Error('old update failed'))
+  await Promise.resolve()
+  assert.equal(failures.length, 1)
+  assert.equal(f.calls[1].closed, false)
+  f.extend(f.calls[1], 3, [{ op: 'add', path: '/ui', value: {} }])
+  assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' }, ui: {} })
+})
+
 test('a restored snapshot serves its selection offline and resumes it from its cursor', t => {
   const f = fixture(t)
   const cursor = { epoch: 'boot', id: 4 }
@@ -332,16 +412,40 @@ test('a snapshot whose cursors disagree resumes from a dump', t => {
   assert.equal(f.calls[0].since, null)
 })
 
-test('array positions widen a watch to the part before them', () => {
-  assert.deepEqual(watchSelectors('/arr/0/name'), [{ include: '/arr' }])
+test('numeric watch paths select that key or position', () => {
+  assert.deepEqual(watchSelectors('/bindings/80'), [
+    { include: '/bindings/80' },
+  ])
   assert.deepEqual(
     watchSelectors(
       JSON.stringify(['/rows', { include: ['/*/a'], exclude: ['/0'] }]),
     ),
-    [{ include: '/rows/*/a' }],
+    [{ include: '/rows/*/a', exclude: ['/rows/0'] }],
   )
-  assert.throws(() => normalizeSelector({ include: '/arr/1' }))
-  assert.throws(() => normalizeSelector({ include: '', exclude: ['/arr/-'] }))
+  assert.deepEqual(
+    projectRoot([{ include: '/arr/1' }], { arr: ['a', 'b', 'c'] }),
+    { arr: [null, 'b', null] },
+  )
+})
+
+test('a held array keeps its positions through insertions and removals', t => {
+  const f = fixture(t)
+  const second = f.watch('arr', 1)
+  const rows = f.project({ include: ['/*/a'] }, 'rows')
+  f.db.start()
+  f.start(f.calls[0], 3, {
+    arr: [null, 'b', null],
+    rows: [{ a: 1 }, { a: 2 }],
+  })
+  assert.deepEqual(second.values, ['b'])
+  f.revision(f.calls[0], 4, [
+    { op: 'replace', path: '/arr', value: [null, null, 'b', null] },
+    { op: 'add', path: '/rows/0', value: { a: 0, b: 9 } },
+    { op: 'remove', path: '/rows/2' },
+  ])
+  t.mock.timers.tick(250)
+  assert.deepEqual(second.values.at(-1), null)
+  assert.deepEqual(rows.values.at(-1), [{ a: 0 }, { a: 1 }])
 })
 
 test('a minimal selection drops contained selectors', () => {
@@ -386,6 +490,9 @@ const SELECTIONS = [
   [{ include: '', exclude: [''] }],
   [{ include: '/a', exclude: ['/a/*/b'] }, { include: '/a/x/b' }],
   [{ include: '/*/b' }, { include: '/arr', exclude: ['/arr/*/b'], depth: 3 }],
+  [{ include: '/arr/1' }],
+  [{ include: '', exclude: ['/arr/0'] }],
+  [{ include: '/arr/1/a' }, { include: '/a' }],
 ]
 
 const STATES = [
@@ -399,25 +506,60 @@ const STATES = [
   { arr: [{ a: 3 }] },
 ]
 
+const patchesBetween = (from, to) => [
+  [{ op: 'replace', path: '', value: to }],
+  ...(Array.isArray(from?.arr) && Array.isArray(to?.arr)
+    ? [
+        [
+          { op: 'add', path: '/arr/0', value: to.arr[0] ?? null },
+          { op: 'remove', path: '/arr/1' },
+        ],
+        [{ op: 'add', path: '/arr/-', value: { a: 9 } }],
+      ]
+    : []),
+]
+
 test('projected operations track the projected document, as the server projects them', () => {
   for (const selection of SELECTIONS) {
     for (const from of STATES) {
       for (const to of STATES) {
-        const patch = [{ op: 'replace', path: '', value: to }]
-        const truth = { id: 0, value: structuredClone(from) }
-        patch.forEach(op => applyOperation(truth, op))
-        const projected = { id: 0, value: projectRoot(selection, from) }
-        projectOperations(scopeOperations(patch, ''), selection).forEach(op =>
-          applyOperation(projected, op),
-        )
-        assert.deepEqual(
-          projected.value,
-          projectRoot(selection, truth.value),
-          JSON.stringify({ selection, from, to }),
-        )
+        for (const patch of patchesBetween(from, to)) {
+          const truth = { id: 0, value: structuredClone(from) }
+          patch.forEach(op => applyOperation(truth, op))
+          const projected = { id: 0, value: projectRoot(selection, from) }
+          projectScoped(patch, '', selection, truth.value).forEach(op =>
+            applyOperation(projected, op),
+          )
+          assert.deepEqual(
+            projected.value,
+            projectRoot(selection, truth.value),
+            JSON.stringify({ selection, from, patch }),
+          )
+        }
       }
     }
   }
+})
+
+test('a replica applies array insertions and removals with placeholders, as it holds them', () => {
+  const selection = [{ include: '/rows/*/a' }]
+  const from = {
+    rows: [
+      { a: 1, b: 1 },
+      { a: 2, b: 2 },
+    ],
+  }
+  const patch = [
+    { op: 'add', path: '/rows/0', value: { a: 0, b: 0 } },
+    { op: 'remove', path: '/rows/2' },
+  ]
+  const truth = { id: 0, value: structuredClone(from) }
+  patch.forEach(op => applyOperation(truth, op))
+  const replica = { id: 0, value: projectRoot(selection, from) }
+  projectOperations(patch, selection, path =>
+    Array.isArray(path.reduce((v, k) => v?.[k], replica.value)),
+  ).forEach(op => applyOperation(replica, op))
+  assert.deepEqual(replica.value, projectRoot(selection, truth.value))
 })
 
 test('extensions add exactly what a wider selection keeps, as the server extends', () => {

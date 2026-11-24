@@ -1102,8 +1102,6 @@ export default {
   1308: 'Este navegador aún no está registrado',
   1309: 'Iniciar sesión desde la línea de comandos',
   1310: 'Registrar este navegador',
-  1311: 'Hay una contraseña guardada. Deje «Contraseña» vacío para conservarla.',
-  1312: 'Eliminar la contraseña guardada',
-  1313: 'Última sincronización',
-  1314: 'justo ahora',
+  1311: 'Última sincronización',
+  1312: 'justo ahora',
 } satisfies i18n

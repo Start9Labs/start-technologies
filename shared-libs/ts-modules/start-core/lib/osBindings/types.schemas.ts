@@ -860,6 +860,10 @@ export const ListVersionSignersParams: z.ZodObject<{ version: z.ZodString }> =
   })
 export const ListedVersion: z.ZodObject<{
   /**
+   * Raw `s9pks` positions in the installer's hardware-preference order.
+   */
+  s9pks: z.ZodCodec<z.ZodOptional<z.ZodArray<z.ZodInt>>, z.ZodArray<z.ZodInt>>
+  /**
    * A newer same-flavor revision covers this release's hardware.
    */
   superseded: z.ZodOptional<z.ZodBoolean>
@@ -868,6 +872,13 @@ export const ListedVersion: z.ZodObject<{
    */
   compatible: z.ZodBoolean
 }> = /* @__PURE__ */ object({
+  /**
+   * Raw `s9pks` positions in the installer's hardware-preference order.
+   */
+  s9pks: wire(z.array(z.int()).optional(), z.array(z.int())).meta({
+    description:
+      "Raw `s9pks` positions in the installer's hardware-preference order.",
+  }),
   /**
    * A newer same-flavor revision covers this release's hardware.
    */
@@ -4198,7 +4209,7 @@ export const PackageSelection: z.ZodObject<{
    */
   best: z.ZodArray<typeof Version>
   /**
-   * Every release this server can run.
+   * Every release this server can run, keyed exactly as in the saved index.
    */
   versions: z.ZodRecord<z.ZodString, typeof ListedVersion>
   /**
@@ -4219,10 +4230,11 @@ export const PackageSelection: z.ZodObject<{
       'The newest release of each flavor, preferring releases this StartOS can install.',
   }),
   /**
-   * Every release this server can run.
+   * Every release this server can run, keyed exactly as in the saved index.
    */
   versions: z.record(z.string(), ListedVersion).meta({
-    description: 'Every release this server can run.',
+    description:
+      'Every release this server can run, keyed exactly as in the saved index.',
   }),
   /**
    * When this registry first published any version it still carries.
@@ -4732,28 +4744,6 @@ export const SetOutboundGatewayParams: z.ZodObject<{
 }).meta({
   id: 'SetOutboundGatewayParams',
 })
-export const SetSmtpParams: z.ZodObject<{
-  host: z.ZodString
-  port: z.ZodInt
-  from: z.ZodString
-  username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  keepPassword: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
-}> = /* @__PURE__ */ object({
-  host: z.string(),
-  port: z.int(),
-  from: z.string(),
-  username: z.string(),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
-  keepPassword: wire(z.boolean().optional(), z.boolean()),
-  security: wire(SmtpSecurity.optional(), SmtpSecurity),
-}).meta({
-  id: 'SetSmtpParams',
-})
 export const SetStaticDnsParams: z.ZodObject<{
   gateway: typeof GatewayId
   servers: z.ZodCodec<
@@ -4961,23 +4951,6 @@ export const SignerInfo: z.ZodObject<{
 }).meta({
   id: 'SignerInfo',
 })
-export const SmtpInfo: z.ZodObject<{
-  host: z.ZodString
-  port: z.ZodInt
-  from: z.ZodString
-  username: z.ZodString
-  passwordSet: z.ZodBoolean
-  security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
-}> = /* @__PURE__ */ object({
-  host: z.string(),
-  port: z.int(),
-  from: z.string(),
-  username: z.string(),
-  passwordSet: z.boolean(),
-  security: wire(SmtpSecurity.optional(), SmtpSecurity),
-}).meta({
-  id: 'SmtpInfo',
-})
 export const SmtpValue: z.ZodCodec<
   z.ZodIntersection<
     z.ZodIntersection<
@@ -5123,13 +5096,7 @@ export const TestSmtpParams: z.ZodObject<{
   from: z.ZodString
   to: z.ZodString
   username: z.ZodString
-  /**
-   * Omitted, uses the saved password for the same host, port and username.
-   */
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodString
   security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
 }> = /* @__PURE__ */ object({
   host: z.string(),
@@ -5137,13 +5104,7 @@ export const TestSmtpParams: z.ZodObject<{
   from: z.string(),
   to: z.string(),
   username: z.string(),
-  /**
-   * Omitted, uses the saved password for the same host, port and username.
-   */
-  password: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Omitted, uses the saved password for the same host, port and username.',
-  }),
+  password: z.string(),
   security: wire(SmtpSecurity.optional(), SmtpSecurity),
 }).meta({
   id: 'TestSmtpParams',
@@ -8219,8 +8180,8 @@ export const ServerInfo: z.ZodObject<{
     z.ZodNullable<typeof Epp>
   >
   smtp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof SmtpInfo>>,
-    z.ZodNullable<typeof SmtpInfo>
+    z.ZodOptional<z.ZodNullable<typeof SmtpValue>>,
+    z.ZodNullable<typeof SmtpValue>
   >
   nut: z.ZodCodec<z.ZodOptional<typeof NutConfig>, typeof NutConfig>
   echoipUrls: z.ZodCodec<
@@ -8294,7 +8255,7 @@ export const ServerInfo: z.ZodObject<{
   zram: wire(z.boolean().optional(), z.boolean()),
   governor: wire(Governor.nullable().optional(), Governor.nullable()),
   epp: wire(Epp.nullable().optional(), Epp.nullable()),
-  smtp: wire(SmtpInfo.nullable().optional(), SmtpInfo.nullable()),
+  smtp: wire(SmtpValue.nullable().optional(), SmtpValue.nullable()),
   nut: wire(NutConfig.optional(), NutConfig),
   echoipUrls: wire(z.array(z.string()).optional(), z.array(z.string())),
   ram: z.int(),
@@ -8318,6 +8279,7 @@ export const Public: z.ZodObject<{
   sshPubkeys: z.ZodCodec<z.ZodOptional<typeof SshKeys>, typeof SshKeys>
   /**
    * Each saved registry's last synchronized index, in the server's language.
+   * Includes authorized private-asset keystreams from the server identity's registry view.
    */
   registryIndexes: z.ZodCodec<
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof FullIndex>>,
@@ -8353,13 +8315,14 @@ export const Public: z.ZodObject<{
   sshPubkeys: wire(SshKeys.optional(), SshKeys),
   /**
    * Each saved registry's last synchronized index, in the server's language.
+   * Includes authorized private-asset keystreams from the server identity's registry view.
    */
   registryIndexes: wire(
     z.record(z.string(), FullIndex).optional(),
     z.record(z.string(), FullIndex),
   ).meta({
     description:
-      "Each saved registry's last synchronized index, in the server's language.",
+      "Each saved registry's last synchronized index, in the server's language.\nIncludes authorized private-asset keystreams from the server identity's registry view.",
   }),
   registryCache: wire(
     z.record(z.string(), RegistryCache).optional(),

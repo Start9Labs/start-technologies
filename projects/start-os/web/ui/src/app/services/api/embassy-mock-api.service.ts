@@ -34,10 +34,9 @@ import {
   extension,
   normalizeSelector,
   pathFromArray,
-  projectOperations,
   projectRoot,
+  projectScoped,
   Selection,
-  scopeOperations,
   RemoveOperation,
   ReplaceOperation,
   Revision,
@@ -914,19 +913,13 @@ export class MockApiService extends ApiService implements StartupApiService {
       await pauseFor(2000)
       return null
     },
-    'server.set-smtp': async ({ password, keepPassword, ...params }) => {
+    'server.set-smtp': async params => {
       await pauseFor(2000)
       const patch = [
         {
           op: PatchOp.REPLACE,
           path: '/serverInfo/smtp',
-          value: {
-            ...params,
-            passwordSet:
-              !!password ||
-              (!!keepPassword &&
-                !!this.mockData('/serverInfo/smtp')?.passwordSet),
-          },
+          value: params,
         },
       ]
       this.mockRevision(patch)
@@ -3374,9 +3367,11 @@ export class MockApiService extends ApiService implements StartupApiService {
             const revisions = this.mockWsSource$.subscribe(({ id, patch }) =>
               entry.out.next({
                 id,
-                patch: projectOperations(
-                  scopeOperations(patch, pointer),
+                patch: projectScoped(
+                  patch,
+                  pointer,
                   entry.selection,
+                  this.document.value,
                 ),
               }),
             )

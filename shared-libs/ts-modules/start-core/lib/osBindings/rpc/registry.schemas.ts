@@ -1374,7 +1374,7 @@ export const ProjectionParams: z.ZodObject<{
   depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
   /**
    * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
-   * Empty keeps everything. Segments that are array positions (digits or `-`) are rejected.
+   * Empty keeps everything. A numeric segment matches that key or array position.
    */
   include: z.ZodOptional<z.ZodArray<z.ZodString>>
   /**
@@ -1383,6 +1383,7 @@ export const ProjectionParams: z.ZodObject<{
   exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
   /**
    * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
    */
   selectors: z.ZodOptional<z.ZodArray<typeof SelectorParams>>
 }> = /* @__PURE__ */ object({
@@ -1395,11 +1396,11 @@ export const ProjectionParams: z.ZodObject<{
   }),
   /**
    * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
-   * Empty keeps everything. Segments that are array positions (digits or `-`) are rejected.
+   * Empty keeps everything. A numeric segment matches that key or array position.
    */
   include: z.array(z.string()).optional().meta({
     description:
-      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. Segments that are array positions (digits or `-`) are rejected.',
+      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.',
   }),
   /**
    * Subtrees removed from what `include` keeps, in the same form.
@@ -1410,10 +1411,11 @@ export const ProjectionParams: z.ZodObject<{
   }),
   /**
    * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
    */
   selectors: z.array(SelectorParams).optional().meta({
     description:
-      'More subtrees, each with its own exclusions and depth, kept alongside the above.',
+      'More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.',
   }),
 }).meta({
   id: 'ProjectionParams',

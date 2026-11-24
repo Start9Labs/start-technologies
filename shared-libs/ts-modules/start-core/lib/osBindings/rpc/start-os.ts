@@ -595,7 +595,6 @@ export type SetOutboundGatewayParamsInput = z.input<
 export type SetSharedVolumeGrantParamsInput = z.input<
   typeof schemas.SetSharedVolumeGrantParams
 >
-export type SetSmtpParamsInput = z.input<typeof schemas.SetSmtpParams>
 export type SetStaticDnsParamsInput = z.input<typeof schemas.SetStaticDnsParams>
 export type SharedVolumeInspection = z.output<
   typeof schemas.SharedVolumeInspection
@@ -603,6 +602,7 @@ export type SharedVolumeInspection = z.output<
 export type SharedVolumeParamsInput = z.input<typeof schemas.SharedVolumeParams>
 export type SharedVolumeSource = z.output<typeof schemas.SharedVolumeSource>
 export type SideloadResponse = z.output<typeof schemas.SideloadResponse>
+export type SmtpValueInput = z.input<typeof schemas.SmtpValue>
 export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
 
 /**

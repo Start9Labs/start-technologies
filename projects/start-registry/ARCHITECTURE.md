@@ -87,7 +87,10 @@ without walking the index. Root revisions also advance snapshot freshness when
 permissions outside `/index` change. Each distinct reader, `osVersion`
 compatibility and `language` combination is an `IndexView` served by a lazily
 created in-memory PatchDB mirror (`registry/mirror.rs`), shared by its
-subscribers and dropped with the last of them.
+subscribers and dropped with the last of them. A localized mirror ends its subscriptions
+when the reader-visible locale inventory changes; reconnecting resolves the requested
+language again, including newly added exact or same-language translations. Unlocalized
+mirrors continue streaming.
 
 With `rpcstream: "1.0"` on `/rpc/v2`, the same method returns the dump directly as its initiating
 result and sends subsequent `Revision` events under that request ID. Closing a stream releases
@@ -99,9 +102,10 @@ signed-DH admission; initiating messages include the client's OS version inside 
 Responses permit 64 MiB logical payloads independently of request limits; wire allowances include
 framing and ciphertext overhead.
 Package queries and registry information use the backend cache; browser sessions observe projected
-package and OS metadata through PatchDB. Subscriptions reconnect with jittered backoff and a fresh
-dump. Cached metadata remains available offline, with connection availability reported separately
-from registry configuration. Malformed saved source URLs are skipped independently without
+package and OS metadata through PatchDB. Subscriptions reconnect with jittered backoff,
+resuming from a matching saved cursor when the registry retains that view and history;
+otherwise they receive a fresh dump. Cached metadata remains available offline, with connection
+availability reported separately from registry configuration. Malformed saved source URLs are skipped independently without
 rewriting configured intent. Streaming requires signed-DH admission, `rpcstream` and a configured
 hostname covering the client's selected URL host. A legacy HTTP 200 without upgrading, or upgrade HTTP 404/405/501, selects signed HTTP
 polling every 15 minutes, using full/all-revision `package.get`, `info` and the selected `os.index`.

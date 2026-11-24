@@ -108,13 +108,8 @@ async fn projected_stream_start_dumps_and_replays_only_the_projection() {
     }))
     .unwrap();
     let pointer = params.pointer.unwrap();
-    let (start, _) = subscribe_start(
-        &db,
-        pointer.clone(),
-        params.projection.clone().try_into().unwrap(),
-        None,
-    )
-    .await;
+    let (start, _) =
+        subscribe_start(&db, pointer.clone(), params.projection.clone().into(), None).await;
     assert_eq!(
         start.value,
         Some(imbl_value::ord_json!({ "x": { "state": 1 } }))
@@ -137,13 +132,7 @@ async fn projected_stream_start_dumps_and_replays_only_the_projection() {
         epoch: start.epoch.clone(),
         id: start.id,
     };
-    let (resumed, _) = subscribe_start(
-        &db,
-        pointer,
-        params.projection.try_into().unwrap(),
-        Some(&cursor),
-    )
-    .await;
+    let (resumed, _) = subscribe_start(&db, pointer, params.projection.into(), Some(&cursor)).await;
     assert_eq!(
         serde_json::to_value(&resumed.revisions).unwrap(),
         serde_json::json!([{
@@ -154,11 +143,14 @@ async fn projected_stream_start_dumps_and_replays_only_the_projection() {
 }
 
 #[test]
-fn projection_params_reject_array_positions() {
+fn projection_params_select_port_keyed_bindings() {
     let params: ProjectionParams =
-        serde_json::from_value(serde_json::json!({ "include": ["/arr/1"] })).unwrap();
-    let error = Projection::try_from(params).unwrap_err();
-    assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        serde_json::from_value(serde_json::json!({ "include": ["/bindings/80"] })).unwrap();
+    assert_eq!(
+        Projection::from(params)
+            .project_root(&imbl_value::ord_json!({ "bindings": { "80": 1, "443": 2 } })),
+        imbl_value::ord_json!({ "bindings": { "80": 1 } })
+    );
 }
 
 #[test]
@@ -171,7 +163,7 @@ fn selectors_join_the_simple_projection_with_their_own_exclusions() {
         }],
     }))
     .unwrap();
-    let projection = Projection::try_from(params).unwrap();
+    let projection = Projection::from(params);
     let value = imbl_value::ord_json!({
         "packageData": { "x": { "releaseNotes": "kept" } },
         "registryIndexes": { "r": { "package": { "packages": { "y": { "versions": {
@@ -187,6 +179,27 @@ fn selectors_join_the_simple_projection_with_their_own_exclusions() {
                 "1.0.0:0": { "title": "Y" },
             } } } } } },
         })
+    );
+}
+
+#[test]
+fn explicit_root_inclusion_dominates_additional_selectors() {
+    let value = imbl_value::ord_json!({ "a": 1, "b": 2 });
+    for include in [serde_json::json!([""]), serde_json::json!(["", "/a"])] {
+        let params: ProjectionParams = serde_json::from_value(serde_json::json!({
+            "include": include,
+            "selectors": [{ "include": "/a" }],
+        }))
+        .unwrap();
+        assert_eq!(Projection::from(params).project_root(&value), value);
+    }
+    let params: ProjectionParams = serde_json::from_value(serde_json::json!({
+        "selectors": [{ "include": "/a" }],
+    }))
+    .unwrap();
+    assert_eq!(
+        Projection::from(params).project_root(&value),
+        imbl_value::ord_json!({ "a": 1 }),
     );
 }
 

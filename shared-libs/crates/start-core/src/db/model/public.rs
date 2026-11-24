@@ -25,7 +25,7 @@ use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::ssh::SshKeys;
-use crate::system::{KeyboardOptions, SmtpInfo};
+use crate::system::{KeyboardOptions, SmtpValue};
 use crate::trusted_keys::{
     Registries, TrustedKeys, initial_os_registry, initial_registries, initial_trusted_keys,
 };
@@ -45,6 +45,7 @@ pub struct Public {
     #[serde(default)]
     pub ssh_pubkeys: SshKeys,
     /// Each saved registry's last synchronized index, in the server's language.
+    /// Includes authorized private-asset keystreams from the server identity's registry view.
     #[serde(default)]
     pub registry_indexes: BTreeMap<Url, crate::registry::FullIndex>,
     #[serde(default)]
@@ -223,7 +224,7 @@ pub struct ServerInfo {
     pub governor: Option<Governor>,
     #[serde(default)]
     pub epp: Option<Epp>,
-    pub smtp: Option<SmtpInfo>,
+    pub smtp: Option<SmtpValue>,
     #[serde(default)]
     pub nut: NutConfig,
     #[serde(default = "default_echoip_urls")]

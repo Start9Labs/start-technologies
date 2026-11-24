@@ -50,22 +50,24 @@ patch-db/
 
 The main database engine. Key types:
 
-| Type                 | Role                                                                                                                                                                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                                                                                                                                        |
-| `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                                                                                                                                     |
-| `Store`              | Internal state container. Holds the current `OrdValue`, revision counter, `Broadcast`, and optional CBOR file storage.                                                                                                                              |
-| `Dump`               | Snapshot: `{ id: u64, value: OrdValue }`                                                                                                                                                                                                            |
-| `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                                                                                                                                                 |
-| `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                                                                                                                                                  |
-| `DbWatch`            | Combines a `Dump` + `Subscriber` into a `Stream` of values.                                                                                                                                                                                         |
-| `TypedDbWatch<T>`    | Type-safe wrapper around `DbWatch`.                                                                                                                                                                                                                 |
-| `Subscriber`         | `tokio::sync::mpsc::UnboundedReceiver<Revision>`.                                                                                                                                                                                                   |
-| `JsonSubscriber`     | Bounded JSON revision receiver. Closes permanently on overflow.                                                                                                                                                                                     |
-| `Broadcast`          | Per-pointer fan-out with shared JSON serialization and cached dumps. Reclaims dropped typed senders on send and typed subscription. Retains the last 1024 revisions under a random per-open epoch.                                                  |
-| `Catchup`            | What a resuming subscriber lacks: a `Dump`, or the scoped revisions since its cursor plus the current revision id.                                                                                                                                  |
-| `Projection`         | Optional `depth`, `include` and `exclude` narrowing a subscribed subtree; `Projection::new` rejects array-position pattern segments. A pure function of each dump and revision, so subscribers sharing a pointer and projection share one listener. |
-| `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced.                                                                                                                    |
+| Type                 | Role                                                                                                                                                                                                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                                                                                                                                                                              |
+| `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                                                                                                                                                                           |
+| `Store`              | Internal state container. Holds the current `OrdValue`, revision counter, `Broadcast`, and optional CBOR file storage.                                                                                                                                                                    |
+| `Dump`               | Snapshot: `{ id: u64, value: OrdValue }`                                                                                                                                                                                                                                                  |
+| `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                                                                                                                                                                                       |
+| `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                                                                                                                                                                                        |
+| `DbWatch`            | Combines a `Dump` + `Subscriber` into a `Stream` of values.                                                                                                                                                                                                                               |
+| `TypedDbWatch<T>`    | Type-safe wrapper around `DbWatch`.                                                                                                                                                                                                                                                       |
+| `Subscriber`         | `tokio::sync::mpsc::UnboundedReceiver<Revision>`.                                                                                                                                                                                                                                         |
+| `JsonSubscriber`     | Bounded JSON revision receiver. Closes permanently on overflow.                                                                                                                                                                                                                           |
+| `Broadcast`          | Per-pointer fan-out with shared JSON serialization and cached dumps. Reclaims dropped typed senders on send and typed subscription. Retains the last 1024 revisions under a random per-open epoch.                                                                                        |
+| `Catchup`            | What a resuming subscriber lacks: a `Dump`, or the scoped revisions since its cursor plus the current revision id.                                                                                                                                                                        |
+| `Projection`         | A union of selectors, each with an inclusion, exclusions and depth. An empty union is identity. Projected arrays keep their length with null placeholders, and an array a revision shifts is sent whole unless kept whole; dumps, revisions and extensions use the same projection owner. |
+| `MutateResult<T, E>` | Pairs a `Result<T, E>` with an optional `Revision`, allowing callers to check both the outcome and whether a patch was produced.                                                                                                                                                          |
+
+`Selector` owns one included subtree and its exclusions/depth. `ProjectedSubscriber` owns a mutable subscription id and an ordered `Update` receiver. `Update::Revision` carries normal projected changes; `Update::Extend` carries fields added by a selection change, or an empty acknowledgement when nothing is added. Mutable and fixed typed subscription admission reclaim closed senders without requiring a database revision; reprojection also retires empty listener entries.
 
 #### Write path
 
@@ -109,6 +111,8 @@ PatchDb::dump_and_sub(ptr) → (Dump, Subscriber)
 PatchDb::catch_up_and_sub(ptr, since) → (epoch, Catchup, Subscriber)
 PatchDb::catch_up_and_sub_projected(ptr, projection, since) → (epoch, Catchup, Subscriber)
 PatchDb::dump_projected(ptr, projection) → Dump
+PatchDb::catch_up_and_sub_mutable(ptr, projection, since) → (epoch, Catchup, ProjectedSubscriber)
+PatchDb::reproject(id, projection) → bool
 PatchDb::catch_up_and_sub_json(ptr, since, capacity) → Result<(epoch, JsonCatchup, JsonSubscriber)>
 PatchDb::dump_and_sub_json(ptr, capacity) → Result<(Bytes, JsonSubscriber)>
 ```
@@ -190,6 +194,12 @@ watch$(...path) → BehaviorSubject per unique path → Observable to consumer
 - Watched nodes are keyed by their JSON Pointer path string
 - A revision triggers updates only for watchers whose path overlaps with any operation in the patch (prefix match in either direction)
 - A dump triggers updates for all watchers
+
+### `SubtreePatchDB<T>`
+
+One stream carries the union of reference-counted watches, with a five-second release delay and 250ms batching. Selection changes prune the browser replica immediately and request an ordered server extension. Confirmed coverage retains provable subsets of the previous selection; no coverage is `NOTHING`, while `[]` means the whole subtree. New watches wait for coverage confirmation. Failure resumes the confirmed selection from its single epoch/revision cursor rather than replaying discarded fields.
+
+`Projection::extension` computes fields newly required by a selection against the current store value. `PatchDb::reproject` changes the listener and sends the extension under the store lock, before later revisions. The TypeScript projection module mirrors selector unions and extension semantics.
 
 ### `json-patch-lib`
 
