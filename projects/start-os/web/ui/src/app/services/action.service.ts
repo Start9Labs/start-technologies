@@ -1,5 +1,10 @@
 import { inject, Injectable } from '@angular/core'
-import { DialogService, getErrorMessage, i18nKey } from '@start9labs/shared'
+import {
+  DialogService,
+  escapeHtml,
+  getErrorMessage,
+  i18nKey,
+} from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { ActionRes } from './api/api.types'
 import { TuiNotificationMiddleService } from '@taiga-ui/kit'
@@ -76,7 +81,9 @@ export class ActionService {
       }
     } catch (e: any) {
       this.dialog
-        .openAlert(getErrorMessage(e) as i18nKey, { label: 'Error' })
+        .openAlert(escapeHtml(getErrorMessage(e)) as i18nKey, {
+          label: 'Error',
+        })
         .subscribe()
     } finally {
       loader.unsubscribe()

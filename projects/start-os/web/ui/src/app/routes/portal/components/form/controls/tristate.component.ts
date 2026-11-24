@@ -1,7 +1,8 @@
 import { Component } from '@angular/core'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nPipe, MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { TuiIcon } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiSegmented, TuiTooltip } from '@taiga-ui/kit'
 
 import { Control } from './control'
@@ -12,7 +13,15 @@ import { HintPipe } from '../pipes/hint.pipe'
   template: `
     {{ spec.name }}
     @if (spec.description || spec.disabled) {
-      <tui-icon [tuiTooltip]="spec | hint" />
+      <tui-icon [tuiTooltip]="tooltip">
+        <ng-template #tooltip>
+          <div
+            class="g-markdown"
+            safeLinks
+            [innerHTML]="spec | hint | markdown | dompurify"
+          ></div>
+        </ng-template>
+      </tui-icon>
     }
     <tui-segmented
       size="s"
@@ -66,7 +75,16 @@ import { HintPipe } from '../pipes/hint.pipe'
     }
   `,
   host: { class: 'g-toggle' },
-  imports: [TuiIcon, TuiTooltip, HintPipe, TuiSegmented, i18nPipe],
+  imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
+    TuiIcon,
+    TuiTooltip,
+    HintPipe,
+    TuiSegmented,
+    i18nPipe,
+  ],
 })
 export class FormTriStateComponent extends Control<
   IST.ValueSpecTriState,
