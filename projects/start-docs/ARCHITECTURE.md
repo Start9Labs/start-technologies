@@ -4,13 +4,13 @@ How the documentation site is built, versioned, and deployed.
 
 ## Place in the monorepo
 
-This is the `projects/start-docs/` project in the `start-technologies` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides book — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
+This is the `projects/start-docs/` project in the `start-technologies` monorepo. It owns the site build infra (`build.sh`, `serve.sh`, `versions.conf`), the shared mdBook `theme/`, the `landing/` page, and the Bitcoin Guides, Email Guides and Start9 Support books — and it wires together the per-product books that live in their own product dirs (`../start-os/docs/`, `../start-tunnel/docs/`, `../start-sdk/docs/`, `../start-wrt/docs/`) into one deployed site. CI (`.github/workflows/docs-deploy.yml`) consumes its output to deploy `docs.start9.com`.
 
 ## Multi-Book Design
 
 The site is composed of independent mdBook instances — one per product. Each book has its own `book.toml`, `src/SUMMARY.md`, and content tree. Books build into subdirectories of `docs/` (the build output, gitignored) and are deployed together under a shared domain.
 
-The per-product books live **next to the code they document**, not inside this directory. This `docs/` project owns only the build infra, the shared theme, the landing page, and the Bitcoin Guides book.
+The per-product books live **next to the code they document**, not inside this directory. This `docs/` project owns only the build infra, the shared theme, the landing page, and the Bitcoin Guides, Email Guides and Start9 Support books.
 
 ```
 start-technologies/ (monorepo root)
@@ -18,7 +18,7 @@ start-technologies/ (monorepo root)
 ├── projects/start-tunnel/docs/    ← StartTunnel book
 ├── projects/start-sdk/docs/       ← Service Packaging book (book name: "packaging")
 ├── projects/start-wrt/docs/       ← StartWRT book
-└── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides + support
+└── projects/start-docs/           ← THIS project: site build + landing + bitcoin-guides + email-guides + support
     ├── build.sh          ← builds all books into docs/ output
     ├── serve.sh          ← build + local dev server
     ├── versions.conf     ← books, their current and archived versions (single source of truth)
@@ -29,6 +29,7 @@ start-technologies/ (monorepo root)
     │   ├── book.toml
     │   ├── theme -> ../theme
     │   └── src/ (SUMMARY.md, README.md, archival-vs-pruned.md, electrum-servers.md, ...)
+    ├── email-guides/     ← Email Guides book
     └── support/          ← Start9 Support book (support.start9.com's user guide)
 ```
 
@@ -49,7 +50,7 @@ book_path() {
     start-tunnel) echo projects/start-tunnel/docs ;;
     packaging) echo projects/start-sdk/docs ;;
     start-wrt) echo projects/start-wrt/docs ;;
-    *) echo "projects/start-docs/$1" ;;   # bitcoin-guides, support
+    *) echo "projects/start-docs/$1" ;;   # bitcoin-guides, email-guides, support
   esac
 }
 ```
@@ -69,7 +70,7 @@ Each book's `book.toml` references these under `additional-css` / `additional-js
 
 ## Versioning
 
-Product books get one book per minor release — `0.4.0.x` and `0.4.1.x` for StartOS, whose versions carry an extra leading `0`, and `1.5.x` for StartTunnel. Patch releases update their minor's book in place. The other books (`packaging`, `bitcoin-guides`, `support`) are unversioned. `versions.conf` lists them all:
+Product books get one book per minor release — `0.4.0.x` and `0.4.1.x` for StartOS, whose versions carry an extra leading `0`, and `1.5.x` for StartTunnel. Patch releases update their minor's book in place. The other books (`packaging`, `bitcoin-guides`, `email-guides`, `support`) are unversioned. `versions.conf` lists them all:
 
 ```
 start-os=0.4.1.x
@@ -78,6 +79,7 @@ start-tunnel=1.5.x
 start-wrt=1.3.x
 packaging
 bitcoin-guides
+email-guides
 support
 ```
 

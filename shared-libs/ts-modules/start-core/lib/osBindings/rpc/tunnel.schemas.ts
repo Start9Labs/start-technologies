@@ -356,16 +356,6 @@ export const Dump: z.ZodObject<{ id: z.ZodInt; value: z.ZodUnknown }> =
   /* @__PURE__ */ object({ id: z.int(), value: z.unknown() }).meta({
     id: 'Dump',
   })
-export const DumpParams: z.ZodObject<{
-  pointer: z.ZodDefault<z.ZodNullable<z.ZodString>>
-}> = /* @__PURE__ */ object({
-  pointer: z
-    .string()
-    .nullable()
-    .default(() => null),
-}).meta({
-  id: 'DumpParams',
-})
 
 /**
  * Transport-qualified keys use `tcp@socket` or `udp@socket`; socket-only keys retain both.
@@ -556,6 +546,23 @@ export const ReplaceOperation: z.ZodObject<{
 }).meta({
   id: 'ReplaceOperation',
   description: "JSON Patch 'replace' operation representation",
+})
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export const SelectorParams: z.ZodObject<{
+  include: z.ZodString
+  exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
+  depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+}> = /* @__PURE__ */ object({
+  include: z.string(),
+  exclude: z.array(z.string()).optional(),
+  depth: z.int().nullable().optional(),
+}).meta({
+  id: 'SelectorParams',
+  description:
+    'One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.',
 })
 export const Session: z.ZodObject<{
   /**
@@ -1046,6 +1053,65 @@ export const PatchOperation: z.ZodUnion<
     id: 'PatchOperation',
     description: 'JSON Patch single patch operation',
   })
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export const ProjectionParams: z.ZodObject<{
+  /**
+   * Levels kept below the pointer; deeper objects and arrays become empty.
+   */
+  depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
+  /**
+   * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+   * Empty keeps everything. A numeric segment matches that key or array position.
+   */
+  include: z.ZodOptional<z.ZodArray<z.ZodString>>
+  /**
+   * Subtrees removed from what `include` keeps, in the same form.
+   */
+  exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
+  /**
+   * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
+   */
+  selectors: z.ZodOptional<z.ZodArray<typeof SelectorParams>>
+}> = /* @__PURE__ */ object({
+  /**
+   * Levels kept below the pointer; deeper objects and arrays become empty.
+   */
+  depth: z.int().nullable().optional().meta({
+    description:
+      'Levels kept below the pointer; deeper objects and arrays become empty.',
+  }),
+  /**
+   * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+   * Empty keeps everything. A numeric segment matches that key or array position.
+   */
+  include: z.array(z.string()).optional().meta({
+    description:
+      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.',
+  }),
+  /**
+   * Subtrees removed from what `include` keeps, in the same form.
+   */
+  exclude: z.array(z.string()).optional().meta({
+    description:
+      'Subtrees removed from what `include` keeps, in the same form.',
+  }),
+  /**
+   * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
+   */
+  selectors: z.array(SelectorParams).optional().meta({
+    description:
+      'More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.',
+  }),
+}).meta({
+  id: 'ProjectionParams',
+  description:
+    'Narrows a dumped or subscribed subtree; omitted fields narrow nothing.',
+})
 export const RemoveKeyParams: z.ZodObject<{
   keys: z.ZodArray<typeof AnyVerifyingKey>
 }> = /* @__PURE__ */ object({ keys: z.array(AnyVerifyingKey) }).meta({
@@ -1140,29 +1206,6 @@ export const SetSubnetDnsParams: z.ZodObject<{
   }),
 }).meta({
   id: 'SetSubnetDnsParams',
-})
-export const SubscribeParams: z.ZodObject<{
-  pointer: z.ZodDefault<z.ZodNullable<z.ZodString>>
-  /**
-   * The subscriber's last revision; resumes only within the epoch that reported it.
-   */
-  since: z.ZodDefault<z.ZodNullable<typeof DbCursor>>
-}> = /* @__PURE__ */ object({
-  pointer: z
-    .string()
-    .nullable()
-    .default(() => null),
-  /**
-   * The subscriber's last revision; resumes only within the epoch that reported it.
-   */
-  since: DbCursor.nullable()
-    .default(() => null)
-    .meta({
-      description:
-        "The subscriber's last revision; resumes only within the epoch that reported it.",
-    }),
-}).meta({
-  id: 'SubscribeParams',
 })
 export const SubscribeRes: z.ZodObject<{
   dump: typeof Dump
@@ -1283,6 +1326,22 @@ export const WgConfig: z.ZodObject<{
 }).meta({
   id: 'WgConfig',
 })
+export const DumpParams: z.ZodIntersection<
+  z.ZodObject<{ pointer: z.ZodDefault<z.ZodNullable<z.ZodString>> }>,
+  typeof ProjectionParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      pointer: z
+        .string()
+        .nullable()
+        .default(() => null),
+    }),
+    ProjectionParams,
+  )
+  .meta({
+    id: 'DumpParams',
+  })
 
 /**
  * Enrolled keys, including ephemeral ones, and the caller's own.
@@ -1309,6 +1368,37 @@ export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
   .meta({
     id: 'Patch',
     description: 'Representation of JSON Patch (list of patch operations)',
+  })
+export const SubscribeParams: z.ZodIntersection<
+  z.ZodObject<{
+    pointer: z.ZodDefault<z.ZodNullable<z.ZodString>>
+    /**
+     * The subscriber's last revision; resumes only within the epoch that reported it.
+     */
+    since: z.ZodDefault<z.ZodNullable<typeof DbCursor>>
+  }>,
+  typeof ProjectionParams
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      pointer: z
+        .string()
+        .nullable()
+        .default(() => null),
+      /**
+       * The subscriber's last revision; resumes only within the epoch that reported it.
+       */
+      since: DbCursor.nullable()
+        .default(() => null)
+        .meta({
+          description:
+            "The subscriber's last revision; resumes only within the epoch that reported it.",
+        }),
+    }),
+    ProjectionParams,
+  )
+  .meta({
+    id: 'SubscribeParams',
   })
 
 /**
@@ -1436,6 +1526,10 @@ export const SubscribeStart: z.ZodObject<{
   id: z.ZodInt
   value: z.ZodDefault<z.ZodNullable<z.ZodUnknown>>
   revisions: z.ZodDefault<z.ZodNullable<z.ZodArray<typeof Revision>>>
+  /**
+   * Names the stream to `db.subscription.update`; absent where its projection is fixed.
+   */
+  subscription: z.ZodOptional<z.ZodNullable<typeof Guid>>
 }> = /* @__PURE__ */ object({
   epoch: z.string(),
   id: z.int(),
@@ -1447,6 +1541,13 @@ export const SubscribeStart: z.ZodObject<{
     .array(Revision)
     .nullable()
     .default(() => null),
+  /**
+   * Names the stream to `db.subscription.update`; absent where its projection is fixed.
+   */
+  subscription: Guid.nullable().optional().meta({
+    description:
+      'Names the stream to `db.subscription.update`; absent where its projection is fixed.',
+  }),
 }).meta({
   id: 'SubscribeStart',
   description:

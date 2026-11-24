@@ -13,7 +13,12 @@ fn idle_subscriptions_reclaim_dropped_listeners_without_a_revision() {
     }
     let _live = broadcast.subscribe(ROOT.to_owned());
     assert_eq!(broadcast.listeners.len(), 1);
-    assert_eq!(broadcast.listeners[&ROOT.to_owned()].unbounded.len(), 1);
+    assert_eq!(
+        broadcast.listeners[&(ROOT.to_owned(), crate::Projection::default())]
+            .unbounded
+            .len(),
+        1
+    );
 
     let capacity = NonZeroUsize::new(1).unwrap();
     let dump = Dump {
@@ -30,10 +35,42 @@ fn idle_subscriptions_reclaim_dropped_listeners_without_a_revision() {
     let (_, _live_json) = broadcast
         .subscribe_json(ROOT.to_owned(), dump, capacity)
         .unwrap();
-    let listeners = &broadcast.listeners[&ROOT.to_owned()];
+    let listeners = &broadcast.listeners[&(ROOT.to_owned(), crate::Projection::default())];
     assert_eq!(listeners.unbounded.len(), 1);
     assert_eq!(listeners.json.len(), 1);
     assert_eq!(listeners.json[&capacity].receiver_count(), 1);
+}
+
+#[test]
+fn idle_mutable_subscriptions_reclaim_senders_and_old_projection_entries() {
+    let mut broadcast = super::Broadcast::new();
+    for i in 0..100 {
+        let projection =
+            crate::Projection::new(None, vec![format!("/value{i}").parse().unwrap()], vec![]);
+        drop(broadcast.subscribe_mutable(ROOT.to_owned(), projection));
+    }
+    let mut live = broadcast.subscribe_mutable(ROOT.to_owned(), crate::Projection::default());
+    assert_eq!(broadcast.listeners.len(), 1);
+    assert_eq!(broadcast.projected.len(), 1);
+    for i in 0..100 {
+        let projection =
+            crate::Projection::new(None, vec![format!("/next{i}").parse().unwrap()], vec![]);
+        assert!(broadcast.reproject(live.id, projection, &json!({}), 0));
+        assert!(live.receiver.try_recv().is_ok());
+        assert_eq!(broadcast.listeners.len(), 1);
+        assert_eq!(broadcast.projected.len(), 1);
+    }
+    drop(live);
+    for _ in 0..100 {
+        drop(broadcast.subscribe_mutable(ROOT.to_owned(), crate::Projection::default()));
+    }
+    let _live = broadcast.subscribe_mutable(ROOT.to_owned(), crate::Projection::default());
+    assert_eq!(broadcast.listeners.len(), 1);
+    assert_eq!(
+        broadcast.listeners.values().next().unwrap().projected.len(),
+        1
+    );
+    assert_eq!(broadcast.projected.len(), 1);
 }
 
 #[tokio::test]
