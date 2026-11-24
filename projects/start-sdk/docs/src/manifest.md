@@ -146,7 +146,7 @@ Use when an image exists on Docker Hub or another registry:
 images: {
   main: {
     source: {
-      dockerTag: 'nginx:1.25',
+      dockerTag: 'nginx:1.25.5',
     },
     arch: ['x86_64', 'aarch64'],
   },
@@ -357,11 +357,11 @@ Services can define multiple images. Each image needs its own `arch` field:
 ```typescript
 images: {
   app: {
-    source: { dockerTag: 'myapp:latest' },
+    source: { dockerTag: 'myapp:2.4.1' },
     arch: ['x86_64', 'aarch64'],
   },
   db: {
-    source: { dockerTag: 'postgres:15' },
+    source: { dockerTag: 'postgres:15.10' },
     arch: ['x86_64', 'aarch64'],
   },
 },

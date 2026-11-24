@@ -16,6 +16,8 @@ const osIp = await sdk.getOsIp(effects) // "10.0.3.1" — a plain Promise, not r
 
 Every port a service **binds** (via `sdk.MultiHost.of(...).bindPort(...)` in [interfaces.ts](interfaces.md)) is reachable from other containers at `10.0.3.1:<assigned external port>`. This holds even for a binding with **no exported interface** — binding a port is enough to make it reachable on the bridge (see [Exposing a bridge-only port](#exposing-a-bridge-only-port) below).
 
+The converse does not hold: not binding a port does not hide it. Every service's container sits on the same bridge, so a daemon listening on `0.0.0.0` or `::` is reachable from every other service at your container's IP, binding or no binding. **Bind every listener that only your own daemons use — a database, a cache, an internal API, a daemon init starts temporarily — to `127.0.0.1`.**
+
 > [!IMPORTANT]
 > The bridge exposes a service at its **assigned external port**, which you must not assume. `preferredExternalPort` is a request, not a guarantee: the first service to claim a given external port gets it and later claimants fall back to a random port, and when `preferredExternalPort` is omitted it defaults to the protocol default (`http` → 80). So the external port is only knowable at runtime, by reading the dependency's live binding. What _is_ stable is the dependency's **internal** port and **host id** — import those as constants from the dependency's package.
 
@@ -155,7 +157,7 @@ Declare the volume in the manifest (`volumes: [..., 'startos']`) and add it to t
 
 ## Exposing a bridge-only port
 
-If you are on the _provider_ side — you want other services to reach a port but you do **not** want it on the LAN — bind the port and simply don't export an interface on it. A binding with no exported interface is reachable on `lo`/`lxcbr0` only, never the LAN. This is how the Tor service publishes its SOCKS proxy:
+If you are on the _provider_ side — you want other services to reach a port but you do **not** want it on the LAN — bind the port and simply don't export an interface on it. A binding with no exported interface is reachable on `lo`/`lxcbr0` only, never the LAN. That means every service on this server, not only your dependents: bridge-only is not an access control, so a port that grants anything still needs its own authentication. It is the right shape for a port only dependents consume (ZeroMQ, a SOCKS proxy, an internal RPC) — don't export an interface on one "so dependents can find it", which puts it on the LAN; `getBridgeAddress` resolves the binding without one. This is how the Tor service publishes its SOCKS proxy:
 
 ```typescript
 // tor-startos/startos/interfaces.ts
