@@ -778,10 +778,11 @@ pub struct BindOptions {
     pub secure: Option<Security>,
     /// HTTP request policy shared by every exposed leg of this binding.
     pub proxy: Option<ProxyOptions>,
-    /// Internal ports on this host that receive the binding's connections
-    /// arriving over each overlay network. A plugin serving that network
-    /// forwards there instead of to this binding's port, and serves nothing
-    /// while the target port is unbound.
+    /// Plugin-owned forwarding targets for this binding's overlay connections.
+    /// Each port names another binding on this host. Plugins must forward to
+    /// that binding only while it is enabled and has no exported interfaces;
+    /// otherwise they must stop forwarding, without falling back to this
+    /// binding's own port. An absent network entry retains the default target.
     #[serde(default)]
     pub network_ports: BTreeMap<OverlayNetwork, u16>,
 }

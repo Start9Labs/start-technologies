@@ -127,6 +127,27 @@ describe('MultiHost binding transports', () => {
   )
 })
 
+describe('MultiHost.bindPort overlay targets', () => {
+  const networkPorts = { onion: 58335 }
+
+  test.each<BindOptionsByProtocol>([
+    { protocol: 'ssh', networkPorts },
+    {
+      protocol: null,
+      preferredExternalPort: 8333,
+      secure: { ssl: false },
+      addSsl: null,
+      networkPorts,
+    },
+  ])('forwards overlay targets for %j', async options => {
+    const { host, bind } = fixture()
+    await host.bindPort(58333, options)
+    expect(bind).toHaveBeenCalledWith(
+      expect.objectContaining({ networkPorts }),
+    )
+  })
+})
+
 describe('MultiHost.bindPort HTTP proxy configuration', () => {
   test.each([
     ['http', 80, null, ['http/1.1']],
