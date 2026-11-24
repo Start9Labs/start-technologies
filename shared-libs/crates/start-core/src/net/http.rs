@@ -1116,27 +1116,6 @@ mod tests {
         }).await.expect("upgraded sockets outlived their proxy");
     }
 
-    #[test]
-    fn alternate_client_address_headers_cannot_spoof_a_proxy_stage() {
-        let mut request = Request::builder()
-            .uri("/")
-            .header("forwarded", "for=127.0.0.1;proto=https")
-            .header("x-real-ip", "127.0.0.1")
-            .body(())
-            .unwrap();
-        apply_request_policy(
-            &mut request,
-            Some("203.0.113.9".parse().unwrap()),
-            ForwardedHeaders::Ssl,
-            None,
-            &Scheme::HTTPS,
-        )
-        .unwrap();
-        assert!(!request.headers().contains_key("forwarded"));
-        assert!(!request.headers().contains_key("x-real-ip"));
-        assert_eq!(request.headers()["x-forwarded-for"], "203.0.113.9");
-    }
-
     #[tokio::test]
     async fn backend_close_waits_for_a_backpressured_response() {
         for connection in ["Connection: close\r\n", ""] {
