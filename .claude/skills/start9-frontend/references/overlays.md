@@ -60,8 +60,10 @@ page, with no wrapper dialog; the extra key needs the options cast to
   package, registry or user supplies goes in as a template or component that interpolates it:
   `<tui-icon [tuiTooltip]="tooltip" />` beside
   `<ng-template #tooltip>{{ spec.description }}</ng-template>`, or a confirm/toast
-  `PolymorpheusComponent` reading `context.data`. Where only a string fits (a validation
-  message, a value inside OS-authored dialog markup), pass it through `escapeHtml`;
+  `PolymorpheusComponent` reading `context.data`. Inside a textfield's `@if`, nest the
+  template in the icon to preserve its `tui-icon` projection slot. Where only a string fits
+  (a validation message, a value inside OS-authored dialog markup), pass it through `escapeHtml`.
+  Escape the complete rendered `displayAs` label, including template literals and raw substitutions.
   `DialogService` escapes every `label` itself. A hint and a `pre-line` host keep `\n` breaks.
   `[innerHTML]` is for rendered markdown (`| markdown | dompurify`) and escaped ANSI logs only.
 - **Drawers/sheets**: `<tui-drawer *tuiPopup="open()" (click.self)="toggle(false)">` with

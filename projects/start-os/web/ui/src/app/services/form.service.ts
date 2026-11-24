@@ -10,9 +10,10 @@ import {
   ValidatorFn,
   Validators,
 } from '@angular/forms'
+import { escapeHtml } from '@start9labs/shared'
 import { ISB, IST, utils } from '@start9labs/start-core'
 import { TUI_FORMAT_ERROR, tuiCreateFileSizeValidator } from '@taiga-ui/kit'
-import Mustache from 'mustache'
+import { renderDisplayAs } from 'src/app/utils/display-as'
 
 @Injectable({
   providedIn: 'root',
@@ -316,7 +317,7 @@ export function datetimeMin(min: string): ValidatorFn {
     const minDate = new Date(min.length === 5 ? `2000-01-01T${min}` : min)
 
     return date < minDate
-      ? { datetimeMin: `Minimum is ${Mustache.escape(min)}` }
+      ? { datetimeMin: `Minimum is ${escapeHtml(min)}` }
       : null
   }
 }
@@ -329,7 +330,7 @@ export function datetimeMax(max: string): ValidatorFn {
     const maxDate = new Date(max.length === 5 ? `2000-01-01T${max}` : max)
 
     return date > maxDate
-      ? { datetimeMax: `Maximum is ${Mustache.escape(max)}` }
+      ? { datetimeMax: `Maximum is ${escapeHtml(max)}` }
       : null
   }
 }
@@ -379,9 +380,9 @@ export function listUnique(spec: IST.ValueSpecList): ValidatorFn {
             : ''
 
           if (isListObject(objSpec) && objSpec.displayAs) {
-            // tui-error renders validation messages through innerHTML.
-            display1 = `"${Mustache.render(objSpec.displayAs, list[idx])}"`
-            display2 = `"${Mustache.render(objSpec.displayAs, list[idx2])}"`
+            // tui-error consumes the complete rendered label as HTML.
+            display1 = `"${escapeHtml(renderDisplayAs(objSpec.displayAs, list[idx]))}"`
+            display2 = `"${escapeHtml(renderDisplayAs(objSpec.displayAs, list[idx2]))}"`
           } else {
             display1 = `Entry ${idx + 1}`
             display2 = `Entry ${idx2 + 1}`
@@ -493,7 +494,7 @@ function uniqueByMessage(
   if (!uniqueBy) {
     return ''
   } else if (typeof uniqueBy === 'string') {
-    return Mustache.escape(
+    return escapeHtml(
       configSpec[uniqueBy]
         ? (configSpec[uniqueBy] as IST.ValueSpecObject).name
         : uniqueBy,

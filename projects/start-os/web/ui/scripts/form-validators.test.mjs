@@ -26,6 +26,34 @@ test('maximum text length reports a grammatical error message', () => {
   assert.equal(validate(new FormControl('abc')), null)
 })
 
+test('duplicate-entry messages escape template markup and raw displayAs substitutions', () => {
+  for (const displayAs of [
+    '<b>{{name}}</b>',
+    '<b>{{{name}}}</b>',
+    '<b>{{&name}}</b>',
+  ]) {
+    const validate = listUnique({
+      spec: {
+        type: 'object',
+        displayAs,
+        uniqueBy: 'name',
+        spec: { name: { type: 'text', name: 'Registry Name' } },
+      },
+    })
+    const result = validate(
+      new FormControl([
+        { name: 'x < y &amp;' },
+        { name: 'x < y &amp;' },
+      ]),
+    )
+    const label = '&lt;b&gt;x &lt; y &amp;amp;&lt;&#x2F;b&gt;'
+    assert.equal(
+      result.listNotUnique,
+      `"${label}" and "${label}" are not unique. Must be unique by: Registry Name`,
+    )
+  }
+})
+
 test('duplicate-entry messages HTML-escape displayAs labels', () => {
   const validate = listUnique({
     spec: {

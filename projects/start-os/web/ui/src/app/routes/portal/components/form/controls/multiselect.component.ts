@@ -29,8 +29,9 @@ import { Control } from './control'
         (blur)="control.onTouched()"
       ></select>
       @if (spec | hint; as hint) {
-        <tui-icon [tuiTooltip]="tooltip" />
-        <ng-template #tooltip>{{ hint }}</ng-template>
+        <tui-icon [tuiTooltip]="tooltip">
+          <ng-template #tooltip>{{ hint }}</ng-template>
+        </tui-icon>
       }
     </tui-textfield>
   `,
