@@ -51,11 +51,11 @@
 
       .cards {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         grid-auto-rows: 1fr;
         gap: 1.5rem;
         width: 100%;
-        max-width: 660px;
+        max-width: 1000px;
       }
 
       a.card {
@@ -69,6 +69,13 @@
         transition:
           border-color 0.2s,
           transform 0.2s;
+      }
+
+      @media (max-width: 900px) {
+        .cards {
+          grid-template-columns: repeat(2, 1fr);
+          max-width: 660px;
+        }
       }
 
       @media (max-width: 600px) {
@@ -172,6 +179,14 @@
         <p>
           Guides for running Bitcoin, Lightning, and related services on
           StartOS.
+        </p>
+      </a>
+
+      <a class="card" href="/email-guides/">
+        <h2>Email Guides</h2>
+        <p>
+          How email works, getting it delivered, and choosing between hosted and
+          self-hosted mail.
         </p>
       </a>
 
