@@ -29,7 +29,43 @@ fn projections() -> Vec<Projection> {
         projection(None, &["/arr/*/a"], &[]),
         projection(None, &[], &["/arr/*/b"]),
         projection(None, &[], &[""]),
+        union(&[("/a", &["/a/*/b"], None), ("/a/x/b", &[], None)]),
+        union(&[("/*/b", &[], None), ("/arr", &["/arr/*/b"], Some(3))]),
+        union(&[("/a", &[], Some(2)), ("/b", &["/b/a"], None)]),
     ]
+}
+
+fn union(selectors: &[(&str, &[&str], Option<usize>)]) -> Projection {
+    Projection::union(
+        selectors
+            .iter()
+            .map(|(include, exclude, depth)| {
+                Selector::new(include.parse().unwrap(), patterns(exclude), *depth).unwrap()
+            })
+            .collect(),
+    )
+    .unwrap()
+}
+
+/// A replica re-projected to the wider projection, then extended, holds its projection.
+fn assert_extends(held: &Projection, wider: &Projection, value: &Value) {
+    let mut replica = wider.project_root(&held.project_root(value));
+    let extension = held.extension(wider, value);
+    let before = replica.clone();
+    if let Err(e) = json_patch::patch(&mut replica, &extension.0) {
+        panic!(
+            "{:?} -> {:?}: {} applying {:?} to {}",
+            held, wider, e, extension, before
+        );
+    }
+    assert_eq!(
+        replica,
+        wider.project_root(value),
+        "{:?} -> {:?} over {}",
+        held,
+        wider,
+        value
+    );
 }
 
 /// Projecting the new value equals applying the projected patch to the projected old value.
@@ -158,7 +194,39 @@ fn value() -> impl Strategy<Value = Value> {
     })
 }
 
+#[test]
+fn extensions_add_exactly_what_a_wider_projection_keeps() {
+    let value = json!({
+        "a": { "x": { "b": 1, "c": 2 }, "y": { "b": 3 } },
+        "b": { "a": [1, 2] },
+        "arr": [{ "a": 1, "b": 2 }, { "a": 3, "b": 4 }],
+    });
+    for held in projections() {
+        for wider in projections() {
+            assert_extends(&held, &wider, &value);
+        }
+    }
+    let narrow = projection(None, &["/a"], &["/a/*/b"]);
+    let wide = projection(None, &["/a"], &[]);
+    assert_eq!(
+        serde_json::to_value(&narrow.extension(&wide, &value)).unwrap(),
+        serde_json::json!([
+            { "op": "add", "path": "/a/x/b", "value": 1 },
+            { "op": "add", "path": "/a/y/b", "value": 3 },
+        ]),
+    );
+}
+
 proptest! {
+    #[test]
+    fn extensions_track_arbitrary_documents(value in value()) {
+        for held in projections() {
+            for wider in projections() {
+                assert_extends(&held, &wider, &value);
+            }
+        }
+    }
+
     #[test]
     fn projected_revisions_track_arbitrary_documents(old in value(), new in value()) {
         for projection in projections() {
