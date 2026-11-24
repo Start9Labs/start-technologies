@@ -1,5 +1,6 @@
 import { Component } from '@angular/core'
 import { FormsModule } from '@angular/forms'
+import { MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import {
   TUI_FIRST_DAY,
@@ -9,6 +10,7 @@ import {
   TuiTime,
 } from '@taiga-ui/cdk'
 import { TuiIcon, TuiInput } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiInputDate,
   TuiInputDateTime,
@@ -35,7 +37,15 @@ import { HintPipe } from '../pipes/hint.pipe'
         </label>
       }
       @if (spec | hint; as hint) {
-        <tui-icon [tuiTooltip]="hint" />
+        <tui-icon [tuiTooltip]="tooltip">
+          <ng-template #tooltip>
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="hint | markdown | dompurify"
+            ></div>
+          </ng-template>
+        </tui-icon>
       }
       @if (spec.inputmode !== 'time') {
         <tui-calendar *tuiDropdown />
@@ -80,6 +90,9 @@ import { HintPipe } from '../pipes/hint.pipe'
     </tui-textfield>
   `,
   imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     FormsModule,
     TuiInput,
     TuiIcon,

@@ -38,6 +38,7 @@ const bareEager = (destroyFs: () => Promise<null>) =>
     destroyRequested: false,
     holdCount: 0,
     teardown: null,
+    releaseContextCleanup: () => {},
     fileMounts: new FileMounts(),
     leaderExited: true,
     guid: 'guid',

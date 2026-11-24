@@ -1,161 +1,21 @@
 # SMTP
 
-Configure StartOS with third-party SMTP credentials so that services like NextCloud, Vaultwarden, and Gitea can send email notifications. SMTP is configured under **System > SMTP**.
+Configure StartOS with third-party SMTP credentials so that services like Nextcloud, Vaultwarden, and Gitea can send email notifications. SMTP is configured under **System > SMTP**.
 
 > [!WARNING]
-> This guide is _not_ for using StartOS as an email server. It is for granting StartOS the simple ability to _send_ emails through a 3rd party SMTP server.
+> This guide is _not_ for using StartOS as an email server. It is for granting StartOS the simple ability to _send_ emails through a 3rd party SMTP server. To run your own mail server, see [Self-Hosting with Stalwart](/email-guides/self-hosting.html).
 
 ## Getting SMTP Credentials
 
-We recommend [Forward Email](https://forwardemail.net): it is open source and privacy-focused, and sends from your own domain. StartOS has presets for Amazon SES, Forward Email, Gmail, Mailgun, Proton Mail, and SendGrid, covered below. To use any other provider, choose **Other** and enter its settings.
-
-{{#tabs global="smtp-provider"}}
-
-{{#tab name="Amazon SES"}}
-
-To use Amazon SES you will need:
-
-- An Amazon Web Services (AWS) account. If you don't have one, you can [register here](https://aws.amazon.com/) for free.
-- Amazon Simple Email Service (SES) set up from [inside your AWS console](https://console.aws.amazon.com/ses/), free for a time within [certain limits](https://aws.amazon.com/ses/pricing/).
-- A verified identity to send from: either your own domain name (add the DNS records Amazon gives you) or a single email address, under **Identities** in the SES console.
-
-New SES accounts start in the _sandbox_, which can only send to addresses you have also verified. To send to anyone else, request production access from the SES **Account dashboard**.
-
-1. Open the [SES console](https://console.aws.amazon.com/ses/) and check the **region** selected in the top bar. Credentials, verified identities, and the SMTP host are all specific to this region, so use the same one throughout.
-
-1. Choose **SMTP settings** in the left navigation pane. The page shows two cards: **Mail Manager SMTP** (marked "Recommended") and **IAM SMTP credentials**.
-
-1. In the **IAM SMTP credentials** card, click **Create IAM credentials**. The IAM console opens. Do not use the Mail Manager card's **Create SMTP credentials** button: it creates an _ingress endpoint_, a separately billed product that is not needed.
-
-1. Enter a user name (or keep the default) and click **Create user**.
-
-1. Click **Show** under _SMTP password_, then **Download .csv file**. The SMTP user name and password are shown only once; save them somewhere secure, such as your Vaultwarden password manager. The user name is an access key ID (starts with `AKIA`); the password is _not_ your AWS secret access key.
-
-1. In StartOS, go to **System > SMTP**, select **Amazon SES** as the provider, and enter the values below. Choosing Amazon SES pre-fills the host for `us-east-1` and defaults to TLS on port 465.
-
-   | Parameter           | Value                                                                          |
-   | ------------------- | ------------------------------------------------------------------------------ |
-   | Host                | `email-smtp.<region>.amazonaws.com`, e.g. `email-smtp.us-east-1.amazonaws.com` |
-   | Connection Security | TLS                                                                            |
-   | Port                | 465                                                                            |
-   | From Address        | an address at your verified domain, or your verified email address             |
-   | Username            | your SMTP user name (from above)                                               |
-   | Password            | your SMTP password (from above)                                                |
-
-   > [!NOTE]
-   > Replace `<region>` in the **Host** with the region you created the credentials in, e.g. `email-smtp.eu-west-1.amazonaws.com`. The SMTP settings page in the SES console shows the exact hostname for that region. To use STARTTLS instead, set **Connection Security** to **STARTTLS** and the **Port** becomes **587**. The **From Address** may optionally include a display name, e.g. `Your Name <you@yourdomain.com>`.
-
-{{#endtab}}
-
-{{#tab name="Forward Email"}}
-
-To use Forward Email you will need a domain name on a Forward Email paid plan, which includes outbound SMTP.
-
-1. Follow Forward Email's [Send Email with Custom Domain](https://forwardemail.net/en/guides/send-email-with-custom-domain-smtp) guide until it has you configure an email application. By then your domain is set up for outbound SMTP and you have an alias to send from, such as `no-reply@yourdomain.com`, and its generated password.
-
-1. In StartOS, go to **System > SMTP**, select **Forward Email** as the provider, and enter the values below. Choosing Forward Email pre-fills the host and defaults to TLS on port 465.
-
-   | Parameter           | Value                             |
-   | ------------------- | --------------------------------- |
-   | Host                | smtp.forwardemail.net             |
-   | Connection Security | TLS                               |
-   | Port                | 465                               |
-   | From Address        | no-reply@yourdomain.com           |
-   | Username            | no-reply@yourdomain.com           |
-   | Password            | the alias's password (from above) |
-
-   > [!NOTE]
-   > The **From Address** must be the alias in **Username**; Forward Email rejects mail sent from any other address. It may optionally include a display name, e.g. `Your Name <no-reply@yourdomain.com>`.
-
-{{#endtab}}
-
-{{#tab name="Gmail"}}
-
-1. Access your Google 2-step verification settings: https://myaccount.google.com/signinoptions/two-step-verification.
-
-1. Enable 2-Step verification if not already.
-
-1. Go to the App Passwords page: https://myaccount.google.com/apppasswords. Google no longer links to it from the 2-Step Verification page, so navigate there directly.
-
-1. Choose a name for the new App Password. You may call it anything, such as "SMTP", then click "Create".
-
-1. A random 16-character password will be created and shown to you. This is your app password. Save it somewhere secure, such as your Vaultwarden password manager, then click "Done".
-
-1. In StartOS, go to **System > SMTP**, select **Gmail** as the provider, and enter the values below. Choosing Gmail pre-fills the host and defaults to TLS on port 465.
-
-   | Parameter           | Value                          |
-   | ------------------- | ------------------------------ |
-   | Host                | smtp.gmail.com                 |
-   | Connection Security | TLS                            |
-   | Port                | 465                            |
-   | From Address        | your-username@gmail.com        |
-   | Username            | your-username@gmail.com        |
-   | Password            | your App Password (from above) |
-
-   > [!NOTE]
-   > Selecting Gmail pre-fills and locks the **Host**, and choosing **TLS** locks the **Port** at 465. To use STARTTLS instead, set **Connection Security** to **STARTTLS** and the **Port** becomes **587**. The **From Address** may optionally include a display name, e.g. `Your Name <your-username@gmail.com>`.
-
-{{#endtab}}
-
-{{#tab name="Mailgun"}}
-
-To use Mailgun you will need a Mailgun account with a sending domain you have verified by adding the DNS records Mailgun gives you.
-
-1. In Mailgun, open your domain's **SMTP credentials** and create a credential, such as `no-reply@mg.yourdomain.com`. Save its password somewhere secure; Mailgun shows it only once. See Mailgun's [SMTP credentials](https://documentation.mailgun.com/docs/mailgun/user-manual/sending-messages/send-smtp) guide.
-
-1. In StartOS, go to **System > SMTP**, select **Mailgun** as the provider, and enter the values below. Choosing Mailgun pre-fills and locks the host and defaults to TLS on port 465.
-
-   | Parameter           | Value                             |
-   | ------------------- | --------------------------------- |
-   | Host                | smtp.mailgun.org                  |
-   | Connection Security | TLS                               |
-   | Port                | 465                               |
-   | From Address        | an address at your sending domain |
-   | Username            | your SMTP credential's login      |
-   | Password            | your SMTP credential's password   |
-
-   > [!NOTE]
-   > A domain in Mailgun's EU region sends through `smtp.eu.mailgun.org`. Choose **Other** as the provider to enter that host.
-
-{{#endtab}}
-
-{{#tab name="Proton Mail"}}
-
-Access to Proton Mail's SMTP settings is currently only made available by Proton to their customers with **Proton for Business**, as well as certain higher tier individual and family plans (**Proton Duo**, **Proton Family** – both with "SMTP Submission" as a listed feature), and then only when you point a custom domain to your account.
-
-To set up Proton Mail for SMTP you will need:
-
-- To purchase and point a domain name from a domain registrar to Proton's servers by following this guide here: [Custom Domain](https://proton.me/support/custom-domain)
-- To follow the steps in the section **How to set up SMTP** in the guide here: [SMTP Submission](https://proton.me/support/smtp-submission)
-
-{{#endtab}}
-
-{{#tab name="SendGrid"}}
-
-To use SendGrid you will need a SendGrid account with a verified sender: either a single sender address or an authenticated domain.
-
-1. In SendGrid, create an API key with **Mail Send** permission. Save it somewhere secure; SendGrid shows it only once. See SendGrid's [SMTP integration](https://www.twilio.com/docs/sendgrid/for-developers/sending-email/integrating-with-the-smtp-api) guide.
-
-1. In StartOS, go to **System > SMTP**, select **SendGrid** as the provider, and enter the values below. Choosing SendGrid pre-fills and locks the host and defaults to TLS on port 465.
-
-   | Parameter           | Value                        |
-   | ------------------- | ---------------------------- |
-   | Host                | smtp.sendgrid.net            |
-   | Connection Security | TLS                          |
-   | Port                | 465                          |
-   | From Address        | your verified sender address |
-   | Username            | `apikey`, exactly as written |
-   | Password            | your API key (from above)    |
-
-{{#endtab}}
-
-{{#endtabs}}
+You need credentials from a provider that will send mail for you. [SMTP Credentials](/email-guides/smtp-credentials.html) in the Email Guides walks through getting them from Forward Email (which we recommend), Amazon SES, Gmail, Mailgun, Proton Mail and SendGrid.
 
 ## Configuring StartOS
 
-1. Navigate to `System > SMTP`
+1. Navigate to `System > SMTP`.
 
-1. Enter your SMTP credentials and hit "Save".
+1. Select your provider, or **Other** for any provider not listed, and enter your credentials. Choosing a listed provider pre-fills its host and defaults to TLS on port 465; to use STARTTLS instead, set **Connection Security** to **STARTTLS** and the **Port** becomes **587**. The **From Address** may optionally include a display name, e.g. `Your Name <you@yourdomain.com>`.
+
+1. Hit "Save".
 
 1. On the same page, send yourself a test email. Remember to check your spam folder. If the email goes to spam, mark it as not spam.
 

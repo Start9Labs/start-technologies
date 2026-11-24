@@ -242,6 +242,8 @@ export type ListVersionSignersParams = z.output<
 export type ListVersionSignersParamsInput = z.input<
   typeof schemas.ListVersionSignersParams
 >
+export type ListedVersion = z.output<typeof schemas.ListedVersion>
+export type ListedVersionInput = z.input<typeof schemas.ListedVersion>
 export type LocaleString = z.output<typeof schemas.LocaleString>
 export type LocaleStringInput = z.input<typeof schemas.LocaleString>
 export type LogEntry = z.output<typeof schemas.LogEntry>
@@ -1028,6 +1030,16 @@ export type PackageIcon = z.output<typeof schemas.PackageIcon>
 export type PackageIconInput = z.input<typeof schemas.PackageIcon>
 export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
+
+/**
+ * A package's releases this server can run, by version; release data stays in the saved index.
+ */
+export type PackageSelection = z.output<typeof schemas.PackageSelection>
+
+/**
+ * A package's releases this server can run, by version; release data stays in the saved index.
+ */
+export type PackageSelectionInput = z.input<typeof schemas.PackageSelection>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
 export type PassthroughInfoInput = z.input<typeof schemas.PassthroughInfo>
 export type PasswordType = z.output<typeof schemas.PasswordType>
@@ -1552,6 +1564,16 @@ export type OsIndex = z.output<typeof schemas.OsIndex>
 export type OsIndexInput = z.input<typeof schemas.OsIndex>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type PackageVersionInfoInput = z.input<typeof schemas.PackageVersionInfo>
+
+/**
+ * A saved registry's synchronization state and what this server can run from its index.
+ */
+export type RegistryCache = z.output<typeof schemas.RegistryCache>
+
+/**
+ * A saved registry's synchronization state and what this server can run from its index.
+ */
+export type RegistryCacheInput = z.input<typeof schemas.RegistryCache>
 export type ServerStatus = z.output<typeof schemas.ServerStatus>
 export type ServerStatusInput = z.input<typeof schemas.ServerStatus>
 export type SetBackupProgress = z.output<typeof schemas.SetBackupProgress>
@@ -1610,8 +1632,6 @@ export type LegacyProxySslOptionsInput = z.input<
 >
 export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
-export type PackageRelease = z.output<typeof schemas.PackageRelease>
-export type PackageReleaseInput = z.input<typeof schemas.PackageRelease>
 
 /**
  * A package version as the requester sees it, for promotion to another registry.
@@ -1648,16 +1668,6 @@ export type Manifest = z.output<typeof schemas.Manifest>
 export type ManifestInput = z.input<typeof schemas.Manifest>
 export type PackageIndex = z.output<typeof schemas.PackageIndex>
 export type PackageIndexInput = z.input<typeof schemas.PackageIndex>
-
-/**
- * Every release of a package that a device can run, as StartOS lists it in its registry cache.
- */
-export type PackageReleases = z.output<typeof schemas.PackageReleases>
-
-/**
- * Every release of a package that a device can run, as StartOS lists it in its registry cache.
- */
-export type PackageReleasesInput = z.input<typeof schemas.PackageReleases>
 export type BindOptions = z.output<typeof schemas.BindOptions>
 export type BindOptionsInput = z.input<typeof schemas.BindOptions>
 export type FullIndex = z.output<typeof schemas.FullIndex>
@@ -1666,16 +1676,6 @@ export type InstalledState = z.output<typeof schemas.InstalledState>
 export type InstalledStateInput = z.input<typeof schemas.InstalledState>
 export type InstallingInfo = z.output<typeof schemas.InstallingInfo>
 export type InstallingInfoInput = z.input<typeof schemas.InstallingInfo>
-
-/**
- * Last synchronized package listings and registry trust proposals.
- */
-export type RegistryCache = z.output<typeof schemas.RegistryCache>
-
-/**
- * Last synchronized package listings and registry trust proposals.
- */
-export type RegistryCacheInput = z.input<typeof schemas.RegistryCache>
 export type BindInfo = z.output<typeof schemas.BindInfo>
 export type BindInfoInput = z.input<typeof schemas.BindInfo>
 export type BindParams = z.output<typeof schemas.BindParams>

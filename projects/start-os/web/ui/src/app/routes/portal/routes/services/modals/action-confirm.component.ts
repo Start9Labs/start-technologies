@@ -1,6 +1,7 @@
 import { Component } from '@angular/core'
-import { i18nPipe } from '@start9labs/shared'
+import { i18nPipe, MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { TuiButton, TuiDialogContext, TuiNotification } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { PackageActionData } from './action-input.component'
@@ -12,7 +13,11 @@ import { PackageActionData } from './action-input.component'
       <h4>{{ pkgInfo.title }}</h4>
     </div>
     <div tuiNotification appearance="warning">
-      <div [innerHTML]="warning"></div>
+      <div
+        class="g-markdown"
+        safeLinks
+        [innerHTML]="warning | markdown | dompurify"
+      ></div>
     </div>
     <footer class="g-buttons">
       <button tuiButton appearance="flat" (click)="context.completeWith(false)">
@@ -44,7 +49,15 @@ import { PackageActionData } from './action-input.component'
       margin-top: 1.5rem;
     }
   `,
-  imports: [TuiButton, TuiNotification, i18nPipe, PkgIconDirective],
+  imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
+    TuiButton,
+    TuiNotification,
+    i18nPipe,
+    PkgIconDirective,
+  ],
 })
 export class ActionConfirmModal {
   readonly context =

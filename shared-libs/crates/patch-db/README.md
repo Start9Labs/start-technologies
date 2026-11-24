@@ -72,7 +72,8 @@ and watches keep their existing unbounded behavior.
 `Some((epoch, id))` from an earlier call to the same open store, and an `id` the retained history of
 1024 revisions still reaches, it replays the revisions after `id` scoped to `pointer`, followed by the
 current revision id; otherwise it dumps. The epoch is random per open, so a cursor never resumes
-against another store or a reopened one.
+against another store or a reopened one. `catch_up_and_sub_json(pointer, since, capacity)` does the
+same with a bounded JSON subscription, its dump being the shared buffer `dump_and_sub_json` returns.
 
 ### TypeScript
 
