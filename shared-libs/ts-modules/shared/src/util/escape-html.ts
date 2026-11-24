@@ -1,3 +1,11 @@
-import Mustache from 'mustache'
+const ENTITIES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}
 
-export const escapeHtml = Mustache.escape
+export function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, char => ENTITIES[char]!)
+}

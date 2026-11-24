@@ -38,8 +38,9 @@ import { FormObjectComponent } from './object.component'
     <div class="label">
       {{ spec.name }}
       @if (spec.description || spec.disabled) {
-        <tui-icon [tuiTooltip]="tooltip" />
-        <ng-template #tooltip>{{ spec | hint }}</ng-template>
+        <tui-icon [tuiTooltip]="tooltip">
+          <ng-template #tooltip>{{ spec | hint }}</ng-template>
+        </tui-icon>
       }
       <button
         tuiLink

@@ -19,8 +19,9 @@ import { HintPipe } from '../pipes/hint.pipe'
       />
       {{ spec.name }}
       @if (spec.description) {
-        <tui-icon [tuiTooltip]="tooltip" />
-        <ng-template #tooltip>{{ spec | hint }}</ng-template>
+        <tui-icon [tuiTooltip]="tooltip">
+          <ng-template #tooltip>{{ spec | hint }}</ng-template>
+        </tui-icon>
       }
     </label>
   `,

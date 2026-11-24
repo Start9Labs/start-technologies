@@ -27,8 +27,9 @@ import { Control } from './control'
               <span>*</span>
             }
             @if (spec.description) {
-              <tui-icon [tuiTooltip]="tooltip" />
-              <ng-template #tooltip>{{ spec.description }}</ng-template>
+              <tui-icon [tuiTooltip]="tooltip">
+                <ng-template #tooltip>{{ spec.description }}</ng-template>
+              </tui-icon>
             }
           </div>
           @if (value) {
