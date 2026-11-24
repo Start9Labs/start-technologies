@@ -12,7 +12,7 @@ fn key() -> PeerIdentity {
 #[tokio::test]
 async fn first_contact_is_silent_and_rotations_are_remembered_without_a_prompt() {
     let temp = tempfile::tempdir().unwrap();
-    let url: Url = "https://registry.test/catalog/".parse().unwrap();
+    let url: Url = "https://registry.test/catalog".parse().unwrap();
     let first = key();
     let second = key();
     assert!(
@@ -44,6 +44,41 @@ async fn first_contact_is_silent_and_rotations_are_remembered_without_a_prompt()
             .await
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn equivalent_registry_bases_share_rotation_history() {
+    for (first_url, second_url) in [
+        (
+            "https://registry.test/catalog",
+            "https://registry.test/catalog/",
+        ),
+        (
+            "https://registry.test/catalog/",
+            "https://registry.test/catalog",
+        ),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let first_url: Url = first_url.parse().unwrap();
+        let second_url: Url = second_url.parse().unwrap();
+        let first = key();
+        let second = key();
+        assert!(
+            observe(temp.path(), &first_url, "registry.test", &first)
+                .await
+                .is_empty()
+        );
+        let warnings = observe(temp.path(), &second_url, "registry.test", &second).await;
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains(&fingerprint(&first.key)));
+        assert!(warnings[0].contains(&fingerprint(&second.key)));
+        assert!(
+            observe(temp.path(), &first_url, "registry.test", &second)
+                .await
+                .is_empty()
+        );
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
 }
 
 #[tokio::test]
@@ -83,7 +118,7 @@ async fn temporary_identities_neither_create_nor_replace_history() {
 #[tokio::test]
 async fn identity_scope_keeps_selected_names_ports_and_prefixes_without_credentials() {
     let temp = tempfile::tempdir().unwrap();
-    let selected: Url = "https://registry.local:4433/catalog/".parse().unwrap();
+    let selected: Url = "https://registry.local:4433/catalog".parse().unwrap();
     let dial: Url = "https://user:secret@127.0.0.1:4433/catalog/?token=private"
         .parse()
         .unwrap();
@@ -116,7 +151,7 @@ async fn identity_scope_keeps_selected_names_ports_and_prefixes_without_credenti
 
 #[test]
 fn identity_targets_keep_ipv6_authorities_and_ports() {
-    let url: Url = "https://[::1]:4433/prefix/".parse().unwrap();
+    let url: Url = "https://[::1]:4433/prefix".parse().unwrap();
     assert_eq!(target(&url, "[::1]").unwrap(), url);
 }
 
