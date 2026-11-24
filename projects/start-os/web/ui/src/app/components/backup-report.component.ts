@@ -13,7 +13,6 @@ import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { BACKUP_LIST_STYLES } from 'src/app/routes/portal/routes/system/routes/backups/list.styles'
 import {
   VOLUME_TYPES,
-  volumeName,
   volumePath,
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { DataModel } from '../services/patch-db/data-model'
@@ -178,7 +177,7 @@ export class BackupsReportModal {
         return {
           id,
           result,
-          title: volume ? volumeName(volume) : result.name,
+          title: volume?.name ?? result.name,
           source: volume?.source,
         }
       },

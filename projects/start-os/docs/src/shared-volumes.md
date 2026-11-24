@@ -6,7 +6,7 @@ A shared volume is a folder managed independently of services. It can use your s
 
 ## Create and manage volumes
 
-Open **System → Shared Volumes**, choose **Add**, pick a source and give the volume a name. A CIFS share is named by its host:
+Open **System → Shared Volumes**, choose **Add**, pick a source and give the volume a name that no other volume uses and that works as a folder name: no `/`, and not `.` or `..`. Services can find a volume by its name, so renaming it can change where they look for it:
 
 - **Local folder** creates a managed folder on the server's data drive.
 - **External drive** first selects a connected drive, then one of its partitions or **Erase and format this drive**, suggests a name from the partition's label or the drive's make and model, and optionally a folder on it, such as `media/photos`. The server's own system and data drives are not offered. Missing folders are created; leaving the path blank uses the whole partition. The selected folder becomes the volume root, and services cannot use it to access parent or sibling folders. Its filesystem UUID identifies it independently of device names and USB ports. Keep it connected while services use it. The filesystem must support Linux ownership mapping; mounting does not rewrite its existing file ownership.
@@ -16,7 +16,7 @@ The volume list shows each volume's status and free space. When you open the pag
 
 **Erase and format this drive** permanently erases the drive after a confirmation and creates one Btrfs partition labeled with the volume name, then creates the volume on it. If the volume cannot be created, the drive stays formatted and its new partition can be selected. System and active mounted drives are protected. Formatting a drive changes its filesystem UUID: an existing volume for its old filesystem becomes unavailable rather than acquiring access to the replacement.
 
-Select a volume's settings button to open **Manage**, where you can see its details, rename it (a CIFS share is renamed by changing its host), change service access and remove it; changes apply when you **Save**. For a CIFS share you can also update the host, path, username and password; leave the password blank to keep it. Edits keep the volume's identity and service grants. Services that read their volumes reactively restart to use the new connection details. Other services keep their existing mount, including its old source and credentials, until they remount or restart. The catalog and new independent backups use the edited source immediately; editing is not access revocation. The source of a local folder or external drive is fixed; create a separate volume to use another one.
+Select a volume's settings button to open **Manage**, where you can see its details, rename it, change service access and remove it; changes apply when you **Save**. For a CIFS share you can also update the host, path, username and password; leave the password blank to keep it. Edits keep the volume's identity and service grants. Services that read their volumes reactively restart to use the new connection details. Other services keep their existing mount, including its old source and credentials, until they remount or restart. The catalog and new independent backups use the edited source immediately; editing is not access revocation. The source of a local folder or external drive is fixed; create a separate volume to use another one.
 
 ## Grant service access
 
@@ -49,4 +49,4 @@ Use a backup destination outside every selected volume, including any server-sid
 
 A service backup excludes its attached volume contents. Back up the volume itself to protect those files.
 
-[Restoring a volume](backups.md#restoring-individual-services-or-volumes) creates a new local volume with a new identity and no grants, even when the backup came from an external drive or network share. Existing local and remote data stays untouched. Grant the restored copy to its consumers and select it again in any service settings that stored the original volume's identity.
+[Restoring a volume](backups.md#restoring-individual-services-or-volumes) creates a new local volume with a new identity and no grants, under its backed-up name with a number added when another volume already has it, such as `Photos (2)`. This holds even when the backup came from an external drive or network share. Existing local and remote data stays untouched. Grant the restored copy to its consumers and select it again in any service settings that stored the original volume's identity.
