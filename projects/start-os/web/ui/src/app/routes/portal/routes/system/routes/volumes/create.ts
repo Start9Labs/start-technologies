@@ -95,7 +95,15 @@ export function diskSpec(i18n: i18nPipe, drives: Disk[]) {
 }
 
 export function cifsSpec(i18n: i18nPipe) {
-  return ISB.InputSpec.of({
+  return ISB.InputSpec.of(cifsFields(i18n))
+}
+
+export function namedCifsSpec(i18n: i18nPipe) {
+  return ISB.InputSpec.of({ name: nameSpec(i18n), ...cifsFields(i18n) })
+}
+
+function cifsFields(i18n: i18nPipe) {
+  return {
     hostname: ISB.Value.text({
       name: i18n.transform('Hostname'),
       description: i18n.transform(
@@ -131,7 +139,7 @@ export function cifsSpec(i18n: i18nPipe) {
       default: null,
       masked: true,
     }),
-  })
+  }
 }
 
 export const diskSource = (
