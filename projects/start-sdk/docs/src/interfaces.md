@@ -393,11 +393,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
 })
 ```
 
-<<<<<<< HEAD
-A range binds **TCP + UDP** by default. Set `transport: ['tcp']` or `transport: ['udp']` to forward one protocol, or `transport: ['tcp', 'udp']` to select both. A bare `'tcp'` or `'udp'` is accepted as a singleton set. Empty sets are rejected; duplicate protocols are deduplicated. This declaration is independent of the interface's URL scheme. A range exposes **exactly one** `api` service interface spanning the whole range. The interface is deliberately restricted compared to `createInterface`: it is always `type: 'api'` and has **no** `masked`, `username`, `path`, `query`, or `schemeOverride`. The one extra option is an optional `scheme` — a transport prefix for protocols addressed as `scheme://host:port`, e.g. `tcp` for bitcoin ZMQ:
-=======
-A range binds **TCP + UDP** together and exposes **exactly one** `api` service interface spanning the whole range. The interface is deliberately restricted compared to `createInterface`: it is always `type: 'api'` and has **no** `masked`, `username`, `path`, `query`, or `schemeOverride`. The one extra option is an optional `scheme` — a transport prefix for protocols addressed as `scheme://host:port`, e.g. `tcp`:
->>>>>>> 0c9f8d437 (docs(start-sdk): close the security gaps a week of package fixes shared (#4925))
+A range binds **TCP + UDP** by default. Set `transport: ['tcp']` or `transport: ['udp']` to forward one protocol, or `transport: ['tcp', 'udp']` to select both. A bare `'tcp'` or `'udp'` is accepted as a singleton set. Empty sets are rejected; duplicate protocols are deduplicated. This declaration is independent of the interface's URL scheme. A range exposes **exactly one** `api` service interface spanning the whole range. The interface is deliberately restricted compared to `createInterface`: it is always `type: 'api'` and has **no** `masked`, `username`, `path`, `query`, or `schemeOverride`. The one extra option is an optional `scheme` — a transport prefix for protocols addressed as `scheme://host:port`, e.g. `tcp`:
 
 ```typescript
 const feeds = sdk.MultiHost.of(effects, 'feeds')
