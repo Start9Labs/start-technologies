@@ -99,20 +99,7 @@ async fn subscribe(socket: &mut EncryptedSocket) -> String {
 }
 
 async fn revoke_private_reader(ctx: &RegistryContext) {
-    ctx.db
-        .mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_readers_mut()
-                .ser(&BTreeSet::new())
-        })
-        .await
-        .result
-        .unwrap();
+    crate::registry::tests::revoke_secret_reader(ctx).await
 }
 
 #[tokio::test]
@@ -191,19 +178,19 @@ async fn encrypted_identity_reaches_live_auth_without_per_message_proofs() {
     let (url, _task) = session_server(ctx.clone()).await;
     let mut admin_socket = encrypted(&secure_url(&url), &admin).await;
     for id in [u64::MAX, 2] {
-        let reply = call(&mut admin_socket, json!({"jsonrpc":"2.0","id":id,"method":"package.access.get","params":{"id":"secret"},"signature":"invalid ignored legacy proof"})).await;
+        let reply = call(&mut admin_socket, json!({"jsonrpc":"2.0","id":id,"method":"admin.reader.list","params":{},"signature":"invalid ignored legacy proof"})).await;
         assert_eq!(reply["id"], json!(id));
-        assert_eq!(reply["result"]["private"], json!(true));
+        assert_eq!(reply["result"].as_object().unwrap().len(), 1, "{reply}");
     }
     let mut reader_socket = encrypted(&secure_url(&url), &reader).await;
-    let forged = json!({"jsonrpc":"2.0","id":3,"method":"package.access.get","params":{"id":"secret","__Auth_signer":admin.verifying_key().await.unwrap()},"signature":"untrusted"});
+    let forged = json!({"jsonrpc":"2.0","id":3,"method":"admin.reader.list","params":{"__Auth_signer":admin.verifying_key().await.unwrap()},"signature":"untrusted"});
     assert_eq!(
         call(&mut reader_socket, forged).await["error"]["code"],
         json!(ErrorKind::Authorization as i32)
     );
     assert!(ctx.secure_session().is_none());
     assert_eq!(
-        rpc(&url, "package.access.get", json!({"id":"secret"}), None).await["error"]["code"],
+        rpc(&url, "admin.reader.list", json!({}), None).await["error"]["code"],
         json!(ErrorKind::Authorization as i32)
     );
 }
@@ -269,11 +256,13 @@ async fn membership_and_package_access_remain_live_on_an_admitted_socket() {
         "{after}"
     );
     let mut admin_socket = encrypted(&secure_url(&url), &admin).await;
-    let request =
-        json!({"jsonrpc":"2.0","id":9,"method":"package.access.get","params":{"id":"secret"}});
+    let request = json!({"jsonrpc":"2.0","id":9,"method":"admin.reader.list","params":{}});
     assert_eq!(
-        call(&mut admin_socket, request.clone()).await["result"]["private"],
-        json!(true)
+        call(&mut admin_socket, request.clone()).await["result"]
+            .as_object()
+            .unwrap()
+            .len(),
+        1
     );
     ctx.db
         .mutate(|db| db.as_admins_mut().ser(&BTreeSet::<Guid>::new()))

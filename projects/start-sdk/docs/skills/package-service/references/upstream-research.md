@@ -110,8 +110,10 @@ three files usually settle this section on their own.
   SMTP/IMAP, database wire, sync. A port you don't bind is a feature that silently
   doesn't work.
 - Which are `ui`, which are `api`, which are `p2p` — a label for the user, not a control.
-- Whether the service needs a **stable public URL** it knows about (federation, invites,
-  OAuth callbacks, webhooks). If so, `recipe-primary-url.md`.
+- Any setting that names the service's **own address** — external, base, root, public or
+  site URL — whether it feeds federation, invites and OAuth callbacks or only the links
+  in its UI, alerts and emails. Left unset, those links name the container. If there is
+  one, `recipe-primary-url.md`.
 - Outbound requirements: does it need to reach the internet, a LAN device, or another
   service on the box.
 

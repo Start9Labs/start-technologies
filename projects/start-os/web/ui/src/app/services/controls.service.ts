@@ -1,6 +1,7 @@
 import { inject, Injectable } from '@angular/core'
 import {
   DialogService,
+  escapeHtml,
   i18nKey,
   i18nPipe,
   i18nService,
@@ -63,7 +64,7 @@ export class ControlsService {
 
   async start({ title, id }: T.Manifest, unmet: boolean) {
     const deps =
-      `${title} ${this.i18n.transform('has unmet dependencies. It will not work as expected.')}` as i18nKey
+      `${escapeHtml(title)} ${this.i18n.transform('has unmet dependencies. It will not work as expected.')}` as i18nKey
 
     if (!unmet || (await this.alert(deps))) {
       this.tasks.run(
@@ -77,7 +78,7 @@ export class ControlsService {
     let content = ''
 
     if (hasCurrentDeps(id, await getAllPackages(this.patch))) {
-      content = `${this.i18n.transform('Services that depend on')} ${title} ${this.i18n.transform('will no longer work properly and may crash.')}`
+      content = `${this.i18n.transform('Services that depend on')} ${escapeHtml(title)} ${this.i18n.transform('will no longer work properly and may crash.')}`
     }
 
     defer(() =>

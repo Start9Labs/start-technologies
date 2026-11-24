@@ -1103,7 +1103,8 @@ export const ENGLISH: Record<string, number> = {
   'This browser is not enrolled yet': 1308,
   'Sign in from the command line': 1309,
   'Enroll this browser': 1310,
-  'Force stop': 1311,
-  'Force stopping': 1312,
-  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1313,
+  'Get help': 1311,
+  'Force stop': 1312,
+  'Force stopping': 1313,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1314,
 }

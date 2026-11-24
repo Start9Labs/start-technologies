@@ -13,7 +13,7 @@ import { Injector, runInInjectionContext } from '@angular/core'
 import { Observable, Subject } from 'rxjs'
 import './typescript-loader.mjs'
 const { HttpService } = await import('../src/services/http.service.ts')
-const { getErrorMessage } = await import('../src/services/error.service.ts')
+const { getErrorMessage } = await import('../src/util/error-message.ts')
 const { HttpError } = await import('../src/classes/http-error.ts')
 
 test('transport error messages preserve structured failures and handle unknown thrown values', () => {

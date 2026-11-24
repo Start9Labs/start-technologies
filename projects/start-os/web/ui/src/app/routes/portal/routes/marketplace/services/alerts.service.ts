@@ -1,6 +1,7 @@
 import { Component, inject, Injectable } from '@angular/core'
 import {
   DialogService,
+  escapeHtml,
   Exver,
   i18nKey,
   i18nPipe,
@@ -65,10 +66,12 @@ export class MarketplaceAlertsService {
   ): Promise<boolean> {
     const registries = await firstValueFrom(this.marketplaceService.registries$)
     const message = originalUrl
-      ? `${this.i18n.transform('installed from')} ${registries.find(r => sameUrl(r.url, originalUrl))?.name || originalUrl}`
+      ? `${this.i18n.transform('installed from')} ${escapeHtml(registries.find(r => sameUrl(r.url, originalUrl))?.name || originalUrl)}`
       : this.i18n.transform('sideloaded')
 
-    const currentName = registries.find(h => sameUrl(h.url, url))?.name || url
+    const currentName = escapeHtml(
+      registries.find(h => sameUrl(h.url, url))?.name || url,
+    )
 
     return new Promise(async resolve => {
       this.dialog
@@ -120,7 +123,9 @@ export class MarketplaceAlertsService {
   async alertBreakages(breakages: string[]): Promise<boolean> {
     let content =
       `${this.i18n.transform('As a result of this update, the following services will no longer work properly and may crash')}:<ul>` as i18nKey
-    const bullets = breakages.map(title => `<li><b>${title}</b></li>`)
+    const bullets = breakages.map(
+      title => `<li><b>${escapeHtml(title)}</b></li>`,
+    )
     content = `${content}${bullets.join('')}</ul>` as i18nKey
 
     return new Promise(async resolve => {

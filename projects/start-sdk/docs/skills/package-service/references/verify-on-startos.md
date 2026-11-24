@@ -26,8 +26,12 @@ make install HOST=<host>    # a named host
 Then drive it with `start-cli -H <host>` — start, stop, actions, logs, health. Watch the
 install itself: a package that installs with errors in the log has not installed cleanly.
 
+For a new version of a package that is already published, also install the published
+release first, put data in it, then install the new build over it: the migration runs and
+the data is still there.
+
 **Catches:** manifest and asset problems, an image that won't pull for the arch, a
-signing or pack fault.
+signing or pack fault; a migration that fails, or that loses what the last release wrote.
 
 ## 2 · First run
 
@@ -46,8 +50,12 @@ green — watch it past the first minute.
 Open **every** interface you declared, not just the UI. An interface that resolves but
 serves nothing is a bound port, not a working interface.
 
+Install and start each declared dependency, and confirm the package sees it as satisfied:
+the version range admits it, and its required health checks pass.
+
 **Catches:** a `ready` check that passes on a port that is listening but not serving; an
-interface bound to the wrong container port; a service that comes up and then crash-loops.
+interface bound to the wrong container port; a service that comes up and then crash-loops;
+a dependency range or health-check id that the published dependency does not match.
 
 ## 4 · Actions and tasks
 

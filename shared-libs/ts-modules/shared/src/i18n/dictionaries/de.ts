@@ -1102,7 +1102,8 @@ export default {
   1308: 'Dieser Browser ist noch nicht registriert',
   1309: 'Über die Befehlszeile anmelden',
   1310: 'Diesen Browser registrieren',
-  1311: 'Stopp erzwingen',
-  1312: 'Stopp wird erzwungen',
-  1313: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
+  1311: 'Hilfe erhalten',
+  1312: 'Stopp erzwingen',
+  1313: 'Stopp wird erzwungen',
+  1314: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n

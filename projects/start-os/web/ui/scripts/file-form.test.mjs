@@ -5,7 +5,14 @@ import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
 import { UntypedFormBuilder } from '@angular/forms'
 import { loadTypeScript } from './typescript-loader.mjs'
 
-loadTypeScript(new Map())
+loadTypeScript(
+  new Map([
+    [
+      '@start9labs/shared',
+      `export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)}`,
+    ],
+  ]),
+)
 const { FormService, numberInRange, isInteger } =
   await import('../src/app/services/form.service.ts')
 

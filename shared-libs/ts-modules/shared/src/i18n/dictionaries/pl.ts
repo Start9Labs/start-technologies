@@ -1102,7 +1102,8 @@ export default {
   1308: 'Ta przeglądarka nie jest jeszcze zarejestrowana',
   1309: 'Zaloguj się z wiersza poleceń',
   1310: 'Zarejestruj tę przeglądarkę',
-  1311: 'Wymuś zatrzymanie',
-  1312: 'Wymuszanie zatrzymania',
-  1313: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
+  1311: 'Uzyskaj pomoc',
+  1312: 'Wymuś zatrzymanie',
+  1313: 'Wymuszanie zatrzymania',
+  1314: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
 } satisfies i18n

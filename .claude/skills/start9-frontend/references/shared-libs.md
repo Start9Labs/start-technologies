@@ -19,7 +19,7 @@ Before writing a utility or component in a monorepo app, check these libraries f
   until resolved; it owns the fallback and exposes `loading` for the avatar's `[tuiSkeleton]`;
   `FALLBACK_ICON`), `SetupLogsService` + `provideSetupLogsService(Api)`, `DownloadHTMLService`.
 - **Pipes and utils** — `convertBytes`, `empty`, `compareExver`, `leafProgress`, `markdown`;
-  `Exver`, `convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `withAbortSignal`,
+  `escapeHtml`, `Exver`, `convertAnsi`, `formatProgress`, `getPkgId`, `pauseFor`, `withAbortSignal`,
   `@debounce`, `sameUrl`, `isValidHttpUrl`, `registryUrl`, `hostnameValidator`,
   `hostnameValidationErrors`, `randomHostname`, keyboards/languages data,
   `defaultRegistries`/`knownRegistries`, the `RELATIVE_URL` token.
