@@ -1428,7 +1428,6 @@ test('StartOS mock routes keep build identity and UPS discovery and expose no re
   )
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
-  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
@@ -1508,7 +1507,6 @@ test('StartOS mock uninstall retires stages and effective plugin addresses in on
   )
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
-  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
@@ -1624,7 +1622,6 @@ test('StartOS trust mock rejects whole batches and imports the requested trust a
   )
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
-  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()

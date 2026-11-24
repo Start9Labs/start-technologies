@@ -1806,12 +1806,10 @@ export class MockApiService extends ApiService implements StartupApiService {
             path: `/packageData/${params.id}`,
           },
         ]
+        const data = this.document.value
         const hosts: Array<[string, T.Host]> = [
-          [
-            '/serverInfo/network/host',
-            this.cache.value.value.serverInfo.network.host,
-          ],
-          ...Object.entries(this.cache.value.value.packageData)
+          ['/serverInfo/network/host', data.serverInfo.network.host],
+          ...Object.entries(data.packageData)
             .filter(([id]) => id !== params.id)
             .flatMap(([id, pkg]) =>
               Object.entries(pkg.hosts).map(
