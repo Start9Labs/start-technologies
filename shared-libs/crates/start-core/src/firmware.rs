@@ -1,18 +1,26 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use async_compression::tokio::bufread::GzipDecoder;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::io::BufReader;
 use tokio::process::Command;
 
 use crate::PLATFORM;
+use crate::context::RpcContext;
 use crate::disk::fsck::RequiresReboot;
+use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
-use crate::util::Invoke;
-use crate::util::io::open_file;
+use crate::util::io::{delete_file, maybe_read_file_to_string, open_file, write_file_atomic};
+use crate::util::{Invoke, new_guid};
 
 pub(crate) const LIBREM_MINI_V2: &str = "librem_mini_v2";
+const FLASH_RECORD_DIR: &str = "/media/startos/config/firmware-updates";
+
+fn new_flash_record_path(directory: &Path) -> PathBuf {
+    directory.join(format!("{}.json", new_guid()))
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -52,6 +60,30 @@ pub struct Firmware {
     bios_version: Option<VersionMatcher>,
     /// SHA-256 of the compressed `.rom.gz` file.
     shasum: String,
+    #[serde(skip)]
+    installed_bios_version: String,
+}
+
+/// Unreported attempts survive automatic retries.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FlashRecord {
+    id: String,
+    from: String,
+    started_at: DateTime<Utc>,
+    /// Absent when the flash never returned.
+    finished_at: Option<DateTime<Utc>>,
+    error: Option<String>,
+}
+
+async fn save_flash_record(path: &Path, record: &FlashRecord) -> Result<(), Error> {
+    write_file_atomic(
+        path,
+        serde_json::to_vec(record).with_kind(ErrorKind::Serialization)?,
+    )
+    .await?;
+    Command::new("sync").invoke(ErrorKind::Filesystem).await?;
+    Ok(())
 }
 
 pub fn display_firmware_update_result(result: RequiresReboot) {
@@ -95,12 +127,14 @@ pub async fn check_for_firmware_update() -> Result<Option<Firmware>, Error> {
     )
     .with_kind(ErrorKind::Deserialization)?;
 
-    Ok(find_firmware_update(
-        firmwares,
-        &PLATFORM,
-        &system_product_name,
-        &bios_version,
-    ))
+    Ok(
+        find_firmware_update(firmwares, &PLATFORM, &system_product_name, &bios_version).map(
+            |firmware| Firmware {
+                installed_bios_version: bios_version,
+                ..firmware
+            },
+        ),
+    )
 }
 
 fn find_firmware_update(
@@ -146,6 +180,23 @@ fn find_firmware_update(
 /// Flashes the bundled ROM after verifying its compressed SHA-256.
 #[instrument]
 pub async fn update_firmware(firmware: Firmware) -> Result<(), Error> {
+    let path = new_flash_record_path(Path::new(FLASH_RECORD_DIR));
+    let mut record = FlashRecord {
+        id: firmware.id.clone(),
+        from: firmware.installed_bios_version.clone(),
+        started_at: Utc::now(),
+        finished_at: None,
+        error: None,
+    };
+    save_flash_record(&path, &record).await.log_err();
+    let res = flash(&firmware).await;
+    record.finished_at = Some(Utc::now());
+    record.error = res.as_ref().err().map(|e| e.to_string());
+    save_flash_record(&path, &record).await.log_err();
+    res
+}
+
+async fn flash(firmware: &Firmware) -> Result<(), Error> {
     let id = &firmware.id;
     let firmware_dir = Path::new("/usr/lib/startos/firmware");
     let filename = format!("{id}.rom.gz");
@@ -177,9 +228,173 @@ pub async fn update_firmware(firmware: Firmware) -> Result<(), Error> {
     Ok(())
 }
 
+fn flash_notification(record: &FlashRecord) -> (NotificationLevel, String, String) {
+    let (level, title, message) = match (&record.finished_at, &record.error) {
+        (Some(_), None) => (
+            NotificationLevel::Success,
+            t!("firmware.updated-title"),
+            t!(
+                "firmware.updated-message",
+                from = &record.from,
+                id = &record.id
+            ),
+        ),
+        (Some(_), Some(error)) => (
+            NotificationLevel::Error,
+            t!("firmware.failed-title"),
+            t!("firmware.failed-message", id = &record.id, error = error),
+        ),
+        (None, _) => (
+            NotificationLevel::Error,
+            t!("firmware.failed-title"),
+            t!("firmware.interrupted-message", id = &record.id),
+        ),
+    };
+    (level, title.into(), message.into())
+}
+
+async fn pending_flash_records(directory: &Path) -> Result<Vec<(PathBuf, FlashRecord)>, Error> {
+    let mut entries = match tokio::fs::read_dir(directory).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut records = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
+            if let Some(contents) = maybe_read_file_to_string(&path).await? {
+                let record: FlashRecord =
+                    serde_json::from_str(&contents).with_kind(ErrorKind::Deserialization)?;
+                records.push((path, record));
+            }
+        }
+    }
+    records.sort_by_key(|(_, record)| record.started_at);
+    Ok(records)
+}
+
+/// Reports each unreported attempt, including attempts preceding an automatic retry.
+pub async fn report_flash(ctx: &RpcContext) -> Result<(), Error> {
+    for (path, record) in pending_flash_records(Path::new(FLASH_RECORD_DIR)).await? {
+        tracing::debug!("{record:?}");
+        let (level, title, message) = flash_notification(&record);
+        if level == NotificationLevel::Success {
+            tracing::info!("{title}: {message}");
+        } else {
+            tracing::error!("{title}: {message}");
+        }
+        ctx.db
+            .mutate(|db| notify(db, None, level, title, message, ()))
+            .await
+            .result?;
+        delete_file(&path).await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn record(finished: bool, error: Option<&str>) -> FlashRecord {
+        FlashRecord {
+            id: "pureboot-start9-30.1.2".into(),
+            from: "PureBoot-Release-29".into(),
+            started_at: Utc::now(),
+            finished_at: finished.then(Utc::now),
+            error: error.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_finished_flash_reports_both_versions() {
+        let (level, _, message) = flash_notification(&record(true, None));
+        assert_eq!(level, NotificationLevel::Success);
+        assert!(message.contains("PureBoot-Release-29"));
+        assert!(message.contains("pureboot-start9-30.1.2"));
+    }
+
+    #[test]
+    fn a_failed_flash_reports_its_error() {
+        let (level, _, message) = flash_notification(&record(true, Some("flashrom exited 1")));
+        assert_eq!(level, NotificationLevel::Error);
+        assert!(message.contains("flashrom exited 1"));
+    }
+
+    #[test]
+    fn a_flash_that_never_returned_reports_an_interruption() {
+        let (level, _, message) = flash_notification(&record(false, None));
+        assert_eq!(level, NotificationLevel::Error);
+        assert_eq!(
+            message,
+            t!(
+                "firmware.interrupted-message",
+                id = "pureboot-start9-30.1.2"
+            )
+        );
+    }
+
+    #[test]
+    fn a_flash_record_round_trips() {
+        let record = record(false, None);
+        let parsed: FlashRecord =
+            serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
+        assert_eq!(parsed.id, record.id);
+        assert_eq!(parsed.from, record.from);
+        assert!(parsed.finished_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn retry_retains_unreported_failed_and_interrupted_attempts() {
+        let directory = tempfile::tempdir().unwrap();
+        let failed = new_flash_record_path(directory.path());
+        let interrupted = new_flash_record_path(directory.path());
+        let retry = new_flash_record_path(directory.path());
+        assert_ne!(failed, interrupted);
+        assert_ne!(interrupted, retry);
+        assert_ne!(failed, retry);
+        save_flash_record(&failed, &record(true, Some("flashrom exited 1")))
+            .await
+            .unwrap();
+        save_flash_record(&interrupted, &record(false, None))
+            .await
+            .unwrap();
+        save_flash_record(&retry, &record(false, None))
+            .await
+            .unwrap();
+        save_flash_record(&retry, &record(true, None))
+            .await
+            .unwrap();
+
+        let records = pending_flash_records(directory.path()).await.unwrap();
+        assert_eq!(records.len(), 3);
+        assert!(records.is_sorted_by_key(|(_, record)| record.started_at));
+        assert!(records.iter().any(|(path, record)| {
+            path == &failed && record.error.as_deref() == Some("flashrom exited 1")
+        }));
+        assert!(
+            records
+                .iter()
+                .any(|(path, record)| { path == &interrupted && record.finished_at.is_none() })
+        );
+        assert!(records.iter().any(|(path, record)| {
+            path == &retry && record.finished_at.is_some() && record.error.is_none()
+        }));
+
+        for (path, _) in records {
+            delete_file(path).await.unwrap();
+        }
+        assert!(
+            pending_flash_records(directory.path())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     fn shipped_firmwares() -> Vec<Firmware> {
         serde_json::from_str(include_str!(

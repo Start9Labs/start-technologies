@@ -25,6 +25,7 @@ use crate::context::CliContext;
 use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::middleware::auth::DbContext;
 use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::middleware::auth::signature::{
     NonceCache, SignatureAuthContext, SignatureAuthMetadata, SignatureAuthorizationContext,
     SigningContext,
@@ -280,15 +281,15 @@ impl Deref for RegistryContext {
     }
 }
 
+/// Calls the registry at its base URL; unsigned calls fall back to HTTP.
 pub(crate) async fn call_cli(
     ctx: &CliContext,
-    url: Url,
+    registry: &Url,
     headers: HeaderMap,
     address: &str,
     method: &str,
     mut params: Value,
 ) -> Result<Value, RpcError> {
-    use crate::middleware::auth::session::client;
     super::compat::pem_wire(&mut params);
     if let Some(signer) = ctx.rpc_signer(&headers)? {
         let request = ctx.rpc_client.capture(method, params)?;
@@ -296,7 +297,7 @@ pub(crate) async fn call_cli(
             .rpc_client
             .session(
                 &signer,
-                client::websocket_url(url.clone())?,
+                RpcSessionUpgrader::url(registry.clone())?,
                 address,
                 headers,
             )
@@ -310,7 +311,7 @@ pub(crate) async fn call_cli(
         }
         for warning in super::cli_identity::observe(
             &ctx.id_key_path.with_file_name("registry-identities"),
-            &url,
+            registry,
             address,
             &connection.peer,
         )
@@ -322,7 +323,7 @@ pub(crate) async fn call_cli(
     } else {
         crate::middleware::auth::signature::call_http(
             ctx.client.clone(),
-            url,
+            registry_rpc_url(registry)?,
             headers,
             method,
             params,
@@ -353,7 +354,7 @@ impl CallRemote<RegistryContext> for CliContext {
             .parse()
             .map_err(Error::from)?;
             // The listen address identifies this machine, including non-loopback binds.
-            (registry_rpc_url(&url)?, true)
+            (url, true)
         } else {
             return Err(Error::new(
                 eyre!("{}", t!("registry.context.registry-required")),
@@ -384,7 +385,7 @@ impl CallRemote<RegistryContext> for CliContext {
 
         call_cli(
             self,
-            url,
+            &url,
             headers,
             sig_context.as_deref().or_not_found("registry hostname")?,
             method,

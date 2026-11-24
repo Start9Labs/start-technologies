@@ -105,8 +105,12 @@ export type RpcSchemaTree<Schema> = {
 }
 export type ApiState = z.output<typeof schemas.ApiState>
 export type CapabilityVerdict = z.output<typeof schemas.CapabilityVerdict>
-export type DiagnosticUpdateSystemParamsInput = z.input<
-  typeof schemas.DiagnosticUpdateSystemParams
+
+/**
+ * Credential for a diagnostic command that changes the server.
+ */
+export type DiagnosticPasswordParamsInput = z.input<
+  typeof schemas.DiagnosticPasswordParams
 >
 export type DnsSource = z.output<typeof schemas.DnsSource>
 export type GatewayId = z.output<typeof schemas.GatewayId>
@@ -127,6 +131,9 @@ export type QueryDnsParamsInput = z.input<typeof schemas.QueryDnsParams>
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export type QueryDnsRes = z.output<typeof schemas.QueryDnsRes>
+export type DiagnosticUpdateSystemParamsInput = z.input<
+  typeof schemas.DiagnosticUpdateSystemParams
+>
 
 /**
  * Per-gateway DNS intent and effective upstreams. `static_servers` is the persisted
