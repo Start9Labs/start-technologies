@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn subscription_emits_sync_fences_before_following_revisions() {
-    let (send, sub) = mpsc::unbounded_channel();
+    let (send, sub) = mpsc::unbounded_channel::<Revision>();
     let (sync, sync_db) = watch::channel(0);
     let mut subscriber = DbSubscriber {
         rev: 0,
@@ -26,7 +26,7 @@ async fn subscription_emits_sync_fences_before_following_revisions() {
 
 #[tokio::test]
 async fn closed_sync_owner_does_not_spin_or_discard_remaining_revisions() {
-    let (send, sub) = mpsc::unbounded_channel();
+    let (send, sub) = mpsc::unbounded_channel::<Revision>();
     let (sync, sync_db) = watch::channel(0);
     let mut subscriber = DbSubscriber {
         rev: 0,
@@ -159,4 +159,49 @@ fn projection_params_reject_array_positions() {
         serde_json::from_value(serde_json::json!({ "include": ["/arr/1"] })).unwrap();
     let error = Projection::try_from(params).unwrap_err();
     assert_eq!(error.kind, ErrorKind::InvalidRequest);
+}
+
+#[test]
+fn selectors_join_the_simple_projection_with_their_own_exclusions() {
+    let params: ProjectionParams = serde_json::from_value(serde_json::json!({
+        "include": ["/packageData"],
+        "selectors": [{
+            "include": "/registryIndexes/*/package/packages",
+            "exclude": ["/registryIndexes/*/package/packages/*/versions/*/releaseNotes"],
+        }],
+    }))
+    .unwrap();
+    let projection = Projection::try_from(params).unwrap();
+    let value = imbl_value::json!({
+        "packageData": { "x": { "releaseNotes": "kept" } },
+        "registryIndexes": { "r": { "package": { "packages": { "y": { "versions": {
+            "1.0.0:0": { "title": "Y", "releaseNotes": "dropped" },
+        } } } } } },
+        "ui": {},
+    });
+    assert_eq!(
+        projection.project_root(&value),
+        imbl_value::json!({
+            "packageData": { "x": { "releaseNotes": "kept" } },
+            "registryIndexes": { "r": { "package": { "packages": { "y": { "versions": {
+                "1.0.0:0": { "title": "Y" },
+            } } } } } },
+        })
+    );
+}
+
+#[test]
+fn stream_items_mark_extensions() {
+    let revision = Revision {
+        id: 4,
+        patch: DiffPatch::default(),
+    };
+    assert_eq!(
+        serde_json::to_value(SubscriptionUpdate::from(Update::Revision(revision.clone()))).unwrap(),
+        serde_json::json!({ "id": 4, "patch": [] })
+    );
+    assert_eq!(
+        serde_json::to_value(SubscriptionUpdate::from(Update::Extend(revision))).unwrap(),
+        serde_json::json!({ "id": 4, "patch": [], "extend": true })
+    );
 }

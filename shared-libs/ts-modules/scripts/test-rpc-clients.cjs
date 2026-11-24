@@ -196,6 +196,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
 }
 
 function mockPatchFixture(data) {
+  data.registryIndexes ??= {}
   return {
     mockPatchData: data,
     mockRegistryCache: () => ({
@@ -206,9 +207,10 @@ function mockPatchFixture(data) {
         categories: {},
         trustSigners: {},
       },
-      packages: {},
+      selections: {},
       status: 'connected',
     }),
+    mockRegistryIndex: () => ({}),
     mockOsUpdateCache: registry => ({
       registry,
       versions: {},

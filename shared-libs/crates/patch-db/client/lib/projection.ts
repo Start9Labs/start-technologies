@@ -2,59 +2,86 @@ import { arrayFromPath, Operation, pathFromArray } from './json-patch-lib'
 import { PatchOp } from './types'
 
 /**
- * The part of a subscribed subtree a subscriber receives, mirroring the server's `Projection`.
- *
- * Patterns are pointers relative to the subtree, and a `*` segment matches any single key or
- * index. An empty `include` keeps everything. Segments that are array positions (digits or
- * `-`) are rejected, so array elements are addressed only by `*`.
+ * One included subtree, mirroring the server's `Selector`. Patterns are pointers relative to
+ * the subscribed subtree, where a `*` segment matches any single key or index; `depth`
+ * counts levels below the subscribed subtree. Array-position segments (digits or `-`) are
+ * rejected.
+ */
+export type Selector = {
+  include: string
+  exclude?: readonly string[] | null
+  depth?: number | null
+}
+
+/**
+ * What one watch keeps of the subtree at its path: patterns relative to that path, and
+ * an empty `include` keeps everything.
  */
 export type Projection = {
-  /** Levels kept below the subtree; deeper objects and arrays become empty. */
   depth?: number | null
   include?: readonly string[] | null
-  /** Subtrees removed from what `include` keeps. */
   exclude?: readonly string[] | null
 }
 
+/** A union of selectors, mirroring the server's `Projection`; empty keeps everything. */
+export type Selection = readonly Selector[]
+
+/** Keeps nothing, which an empty selection cannot express. */
+export const NOTHING: Selection = [{ include: '', exclude: [''] }]
+
 export type Reach = 'out' | 'route' | 'in'
 
-export type NormalizedProjection = {
-  depth?: number
-  include?: string[]
-  exclude?: string[]
-}
+const RANK: Record<Reach, number> = { out: 0, route: 1, in: 2 }
 
 /** Whether a pattern segment would select an array position. */
 export function isPositional(segment: string): boolean {
   return segment === '-' || /^[0-9]+$/.test(segment)
 }
 
-/**
- * Null for a projection that keeps everything; patterns sorted and deduplicated otherwise.
- * Throws for a positional pattern segment, as the server rejects it.
- */
-export function normalizeProjection(
-  projection: Projection | null | undefined,
-): NormalizedProjection | null {
-  const depth = projection?.depth ?? null
-  const include = [...new Set(projection?.include ?? [])].sort()
-  const exclude = [...new Set(projection?.exclude ?? [])].sort()
-  const positional = [...include, ...exclude].find(p =>
-    arrayFromPath(p).some(isPositional),
-  )
-  if (positional !== undefined)
+/** The longest prefix of a path without an array-position segment. */
+export function beforePositional(path: readonly string[]): string[] {
+  const at = path.findIndex(isPositional)
+  return at < 0 ? [...path] : path.slice(0, at)
+}
+
+function assertNotPositional(pattern: string) {
+  if (arrayFromPath(pattern).some(isPositional))
     throw new Error(
-      `Projection pattern ${positional} addresses an array position; use *`,
+      `Projection pattern ${pattern} addresses an array position; use *`,
     )
-  if (depth === null && !include.length && !exclude.length) return null
+}
+
+/** A selector as the server's parameters take it. */
+export type WireSelector = { include: string; exclude?: string[]; depth?: number }
+
+/** Patterns sorted and deduplicated; throws for an array-position segment. */
+export function normalizeSelector(selector: Selector): WireSelector {
+  assertNotPositional(selector.include)
+  const exclude = [...new Set(selector.exclude ?? [])].sort()
+  exclude.forEach(assertNotPositional)
+  const depth = selector.depth ?? null
   return {
-    ...(depth === null ? {} : { depth }),
-    ...(include.length ? { include } : {}),
+    include: selector.include,
     ...(exclude.length ? { exclude } : {}),
+    ...(depth === null ? {} : { depth }),
   }
 }
 
-/** Identifies a subscription; a pointer alone when nothing is projected. */
+/** Identifies a selector; its include path alone when it excludes nothing and has no depth. */
+export function selectorKey(selector: Selector): string {
+  const { include, exclude, depth } = normalizeSelector(selector)
+  return exclude || depth !== undefined
+    ? JSON.stringify([include, { exclude, depth }])
+    : include
+}
+
+export function parseSelectorKey(key: string): Selector {
+  if (!key.startsWith('[')) return { include: key }
+  const [include, rest] = JSON.parse(key) as [string, Omit<Selector, 'include'>]
+  return normalizeSelector({ include, ...rest })
+}
+
+/** Identifies a watch; its pointer alone when it keeps everything there. */
 export function subscriptionKey(
   pointer: string,
   projection: Projection | null | undefined,
@@ -70,6 +97,58 @@ export function parseSubscriptionKey(key: string): {
   if (!key.startsWith('[')) return { pointer: key, projection: null }
   const [pointer, projection] = JSON.parse(key) as [string, Projection]
   return { pointer, projection }
+}
+
+function normalizeProjection(
+  projection: Projection | null | undefined,
+): Projection | null {
+  const depth = projection?.depth ?? null
+  const include = [...new Set(projection?.include ?? [])].sort()
+  const exclude = [...new Set(projection?.exclude ?? [])].sort()
+  if (depth === null && !include.length && !exclude.length) return null
+  return {
+    ...(depth === null ? {} : { depth }),
+    ...(include.length ? { include } : {}),
+    ...(exclude.length ? { exclude } : {}),
+  }
+}
+
+/** A watch's projection as selectors relative to its own path. */
+export function watchSelection(projection: Projection | null): Selection {
+  if (!projection) return []
+  const include = projection.include?.length ? projection.include : ['']
+  return include.map(include => ({
+    include,
+    exclude: projection.exclude ?? undefined,
+    depth: projection.depth ?? undefined,
+  }))
+}
+
+/**
+ * The selectors a watch needs, relative to the subscribed root. Array-position segments
+ * widen a pattern to the part before them, and drop an exclusion.
+ */
+export function watchSelectors(key: string): Selector[] {
+  const { pointer, projection } = parseSubscriptionKey(key)
+  const base = arrayFromPath(pointer)
+  const at = (pattern: string) => [...base, ...arrayFromPath(pattern)]
+  const selection = watchSelection(projection)
+  return (selection.length ? selection : [{ include: '' }]).map(selector => {
+    const include = at(selector.include)
+    const kept = beforePositional(include)
+    const widened = kept.length < include.length
+    return normalizeSelector({
+      include: pathFromArray(kept),
+      exclude: widened
+        ? []
+        : (selector.exclude ?? [])
+            .map(at)
+            .filter(exclude => !exclude.some(isPositional))
+            .map(pathFromArray),
+      depth:
+        widened || selector.depth == null ? null : base.length + selector.depth,
+    })
+  })
 }
 
 function segmentMatches(pattern: string, segment: string): boolean {
@@ -90,172 +169,148 @@ function leadsThrough(pattern: string[], path: readonly string[]): boolean {
   )
 }
 
-const parsed = new WeakMap<
-  Projection,
-  { include: string[][]; exclude: string[][] }
->()
+type Parsed = { include: string[]; exclude: string[][]; depth: number | null }
 
-function patterns(projection: Projection) {
-  let found = parsed.get(projection)
+const parsed = new WeakMap<Selector, Parsed>()
+
+function parse(selector: Selector): Parsed {
+  let found = parsed.get(selector)
   if (!found) {
     found = {
-      include: (projection.include ?? []).map(arrayFromPath),
-      exclude: (projection.exclude ?? []).map(arrayFromPath),
+      include: arrayFromPath(selector.include),
+      exclude: (selector.exclude ?? []).map(arrayFromPath),
+      depth: selector.depth ?? null,
     }
-    parsed.set(projection, found)
+    parsed.set(selector, found)
   }
   return found
 }
 
-export function reach(
-  projection: Projection | null,
-  path: readonly string[],
-): Reach {
-  if (!projection) return 'in'
-  const depth = projection.depth ?? null
+function selectorReach(selector: Selector, path: readonly string[]): Reach {
+  const { include, exclude, depth } = parse(selector)
   if (depth !== null && path.length > depth) return 'out'
-  const { include, exclude } = patterns(projection)
   if (exclude.some(p => covers(p, path))) return 'out'
-  if (!include.length || include.some(p => covers(p, path))) return 'in'
-  if (include.some(p => leadsThrough(p, path))) return 'route'
+  if (covers(include, path)) return 'in'
+  if (leadsThrough(include, path)) return 'route'
   return 'out'
 }
 
-function wholeBelow(projection: Projection, path: readonly string[]): boolean {
+function keepsWhole(selector: Selector, path: readonly string[]): boolean {
+  const { include, exclude, depth } = parse(selector)
   return (
-    (projection.depth ?? null) === null &&
-    !patterns(projection).exclude.some(p => leadsThrough(p, path))
+    depth === null &&
+    covers(include, path) &&
+    !exclude.some(p => covers(p, path) || leadsThrough(p, path))
   )
 }
 
-/** The projected value at a path the projection reaches. */
+export function reach(selection: Selection, path: readonly string[]): Reach {
+  if (!selection.length) return 'in'
+  return selection
+    .map(selector => selectorReach(selector, path))
+    .reduce((a, b) => (RANK[b] > RANK[a] ? b : a), 'out' as Reach)
+}
+
+function wholeBelow(selection: Selection, path: readonly string[]): boolean {
+  return !selection.length || selection.some(s => keepsWhole(s, path))
+}
+
+/** The projected value at a path the selection reaches. */
 export function projectValue(
-  projection: Projection | null,
+  selection: Selection,
   path: readonly string[],
   value: unknown,
 ): unknown {
-  if (!projection) return value
-  if (reach(projection, path) === 'in' && wholeBelow(projection, path))
-    return value
+  if (wholeBelow(selection, path)) return value
   if (Array.isArray(value))
     return value.flatMap((child, i) => {
       const at = [...path, String(i)]
-      return reach(projection, at) === 'out'
+      return reach(selection, at) === 'out'
         ? []
-        : [projectValue(projection, at, child)]
+        : [projectValue(selection, at, child)]
     })
   if (isObject(value))
     return Object.fromEntries(
       Object.entries(value).flatMap(([key, child]) => {
         const at = [...path, key]
-        return reach(projection, at) === 'out'
+        return reach(selection, at) === 'out'
           ? []
-          : [[key, projectValue(projection, at, child)]]
+          : [[key, projectValue(selection, at, child)]]
       }),
     )
   return value
 }
 
-/** The projected subtree value; null when the projection excludes the subtree itself. */
-export function projectRoot(
-  projection: Projection | null,
-  value: unknown,
-): unknown {
-  if (!projection) return value
-  return reach(projection, []) === 'out'
+/** The projected subtree value; null when the selection excludes the subtree itself. */
+export function projectRoot(selection: Selection, value: unknown): unknown {
+  return reach(selection, []) === 'out'
     ? null
-    : projectValue(projection, [], value)
+    : projectValue(selection, [], value)
 }
 
 /** Restricts operations already scoped to the subtree, as the server's `Projection` does. */
 export function projectOperations(
   patch: Operation<unknown>[],
-  projection: Projection | null,
+  selection: Selection,
 ): Operation<unknown>[] {
-  if (!projection) return patch
+  if (!selection.length) return patch
   return patch.flatMap((op): Operation<unknown>[] => {
     const path = arrayFromPath(op.path)
-    if (reach(projection, path) === 'out') return []
+    if (reach(selection, path) === 'out') return []
     if (op.op === PatchOp.REMOVE) return [op]
-    return [{ ...op, value: projectValue(projection, path, op.value) }]
+    return [{ ...op, value: projectValue(selection, path, op.value) }]
   })
 }
 
+function gains(held: Selection, wider: Selection, path: string[]): boolean {
+  const before = reach(held, path)
+  const after = reach(wider, path)
+  return (
+    (before === 'out' && after !== 'out') || (after === 'in' && before !== 'in')
+  )
+}
+
 /**
- * Combines a projected value with the document's current value at the same path.
- * Paths outside the projection keep their current value.
+ * Operations that take a replica holding one selection's projection, re-projected to the
+ * wider selection, to the wider selection's projection; mirrors `Projection::extension`.
  */
-export function mergeProjected(
-  projection: Projection | null,
-  path: readonly string[],
-  current: unknown,
-  projected: unknown,
-): unknown {
-  if (!projection) return projected
-  const here = reach(projection, path)
-  if (here === 'out') return current
-  if (here === 'in' && wholeBelow(projection, path)) return projected
-  if (Array.isArray(projected)) {
-    const elementsOut = reach(projection, [...path, '*']) === 'out'
-    if (elementsOut) return Array.isArray(current) ? current : projected
-    return projected.map((child, i) =>
-      mergeProjected(
-        projection,
-        [...path, String(i)],
-        Array.isArray(current) ? current[i] : undefined,
-        child,
-      ),
-    )
+export function extension(
+  held: Selection,
+  wider: Selection,
+  value: unknown,
+): Operation<unknown>[] {
+  const ops: Operation<unknown>[] = []
+  const set = (path: string[], inArray: boolean, value: unknown) =>
+    ops.push({
+      op: inArray || !path.length ? PatchOp.REPLACE : PatchOp.ADD,
+      path: pathFromArray(path),
+      value: projectValue(wider, path, value),
+    } as Operation<unknown>)
+  const walk = (path: string[], inArray: boolean, value: unknown) => {
+    if (gains(held, wider, path)) return set(path, inArray, value)
+    if (wholeBelow(held, path)) return
+    if (Array.isArray(value)) {
+      const shifted = value.some(
+        (_, i) =>
+          reach(held, [...path, String(i)]) === 'out' &&
+          reach(wider, [...path, String(i)]) !== 'out',
+      )
+      if (shifted) return set(path, inArray, value)
+      value.forEach((child, i) => {
+        if (reach(wider, [...path, String(i)]) !== 'out')
+          walk([...path, String(i)], true, child)
+      })
+    } else if (isObject(value)) {
+      Object.entries(value).forEach(([key, child]) => {
+        if (reach(wider, [...path, key]) !== 'out')
+          walk([...path, key], false, child)
+      })
+    }
   }
-  if (isObject(projected)) {
-    const base = isObject(current) ? current : {}
-    const merged: Record<string, unknown> = {}
-    Object.entries(base).forEach(([key, child]) => {
-      if (reach(projection, [...path, key]) === 'out') merged[key] = child
-    })
-    Object.entries(projected).forEach(([key, child]) => {
-      merged[key] = mergeProjected(projection, [...path, key], base[key], child)
-    })
-    return merged
-  }
-  return projected
+  if (reach(wider, []) !== 'out') walk([], false, value)
+  return ops
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-type Scoped = {
-  path: string[]
-  depth: number | null
-  include: string[][]
-  exclude: string[][]
-}
-
-/** A subscription key's projection, as patterns relative to an ancestor pointer. */
-function scopedTo(base: string[], key: string): Scoped {
-  const { pointer, projection } = parseSubscriptionKey(key)
-  const path = arrayFromPath(pointer)
-  const offset = path.slice(base.length)
-  const include = (projection?.include ?? []).map(p => [
-    ...offset,
-    ...arrayFromPath(p),
-  ])
-  return {
-    path,
-    depth:
-      projection?.depth === null || projection?.depth === undefined
-        ? null
-        : offset.length + projection.depth,
-    include: include.length ? include : [offset],
-    exclude: (projection?.exclude ?? []).map(p => [
-      ...offset,
-      ...arrayFromPath(p),
-    ]),
-  }
-}
-
-/** Whether every path the specific pattern matches, the general one matches too. */
 function subsumes(general: string[], specific: string[]): boolean {
   return (
     general.length <= specific.length &&
@@ -263,79 +318,62 @@ function subsumes(general: string[], specific: string[]): boolean {
   )
 }
 
-/** Whether two patterns can match a common path. */
 function compatible(a: string[], b: string[]): boolean {
   return a.every(
     (s, i) => i >= b.length || s === '*' || b[i] === '*' || s === b[i],
   )
 }
 
-function startsWithPath(path: string[], prefix: string[]): boolean {
-  return prefix.length <= path.length && prefix.every((s, i) => s === path[i])
-}
-
-/**
- * Whether one subscription's data includes everything another's does. Conservative:
- * an unprovable containment is false.
- */
-export function contains(server: string, served: string): boolean {
-  if (server === served) return true
-  const { pointer, projection } = parseSubscriptionKey(server)
-  const base = arrayFromPath(pointer)
-  const inner = scopedTo(base, served)
-  if (!startsWithPath(inner.path, base)) return false
-  if (!projection) return true
-  const outer = scopedTo(base, server)
-  const offset = inner.path.slice(base.length)
-  if (outer.depth !== null && (inner.depth === null || inner.depth > outer.depth))
-    return false
-  if (!inner.include.every(i => outer.include.some(o => subsumes(o, i))))
-    return false
-  return outer.exclude.every(e => {
-    if (!compatible(e, offset)) return true
-    if (inner.depth !== null && e.length > inner.depth) return true
-    if (e.length <= offset.length)
-      return inner.exclude.some(x => x.length === offset.length)
-    const below = e.slice(offset.length)
-    return inner.exclude.some(x => subsumes(x.slice(offset.length), below))
-  })
-}
-
-/** Whether two subscriptions' subtrees share any path. */
-export function overlaps(a: string, b: string): boolean {
-  const p = arrayFromPath(parseSubscriptionKey(a).pointer)
-  const q = arrayFromPath(parseSubscriptionKey(b).pointer)
-  return startsWithPath(p, q) || startsWithPath(q, p)
-}
-
-/**
- * One subscription containing every given subscription, at their common ancestor. A
- * member pointer with an array-position segment widens it to the whole subtree.
- */
-export function covering(keys: readonly string[]): string {
-  const pointers = keys.map(key => arrayFromPath(parseSubscriptionKey(key).pointer))
-  const base = pointers.reduce((a, b) => {
-    const differs = a.findIndex((s, i) => s !== b[i])
-    return differs < 0 ? a.slice(0, b.length) : a.slice(0, differs)
-  })
-  const scoped = keys.map(key => scopedTo(base, key))
-  const include = scoped.some(s => s.include.some(p => !p.length))
-    ? []
-    : scoped.flatMap(s => s.include)
-  const [first, ...rest] = scoped
-  const exclude = first!.exclude.filter(e =>
-    rest.every(s =>
-      s.exclude.some(x => pathFromArray(x) === pathFromArray(e)),
-    ),
+/** Whether one selector keeps everything another does. Conservative: unprovable is false. */
+export function selectorContains(server: Selector, served: Selector): boolean {
+  const outer = parse(server)
+  const inner = parse(served)
+  if (!subsumes(outer.include, inner.include)) return false
+  if (
+    outer.depth !== null &&
+    (inner.depth === null || inner.depth > outer.depth)
   )
-  const depth = scoped.every(s => s.depth !== null)
-    ? Math.max(...scoped.map(s => s.depth!))
-    : null
-  if ([...include, ...exclude].some(p => p.some(isPositional)))
-    return pathFromArray(base)
-  return subscriptionKey(pathFromArray(base), {
-    depth,
-    include: include.map(pathFromArray),
-    exclude: exclude.map(pathFromArray),
-  })
+    return false
+  return outer.exclude.every(
+    e =>
+      !compatible(e, inner.include) ||
+      (inner.depth !== null && e.length > inner.depth) ||
+      inner.exclude.some(x => subsumes(x, e)),
+  )
+}
+
+/** Whether a selection keeps everything a selector does. */
+export function selectionContains(
+  selection: Selection,
+  selector: Selector,
+): boolean {
+  return (
+    !selection.length || selection.some(s => selectorContains(s, selector))
+  )
+}
+
+/** The selectors no other one contains, keyed for comparison. */
+export function minimalSelection(selectors: readonly Selector[]): Selection {
+  const unique = [
+    ...new Map(selectors.map(s => [selectorKey(s), normalizeSelector(s)])),
+  ].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return unique
+    .filter(
+      ([key, selector]) =>
+        !unique.some(
+          ([other, s]) =>
+            other !== key &&
+            selectorContains(s, selector) &&
+            (!selectorContains(selector, s) || other < key),
+        ),
+    )
+    .map(([, selector]) => selector)
+}
+
+export function selectionKey(selection: Selection): string {
+  return JSON.stringify(selection.map(selectorKey).sort())
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

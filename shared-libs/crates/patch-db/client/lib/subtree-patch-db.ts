@@ -19,83 +19,97 @@ import {
 } from './json-patch-lib'
 import { PatchDB } from './patch-db'
 import {
-  contains,
-  covering,
-  mergeProjected,
-  overlaps,
+  minimalSelection,
+  NOTHING,
+  parseSelectorKey,
   parseSubscriptionKey,
   Projection,
+  projectOperations,
   projectRoot,
+  Selection,
+  selectionContains,
+  selectionKey,
+  selectorKey,
   subscriptionKey,
+  watchSelection,
+  watchSelectors,
 } from './projection'
-import { Dump, PatchOp, Revision } from './types'
+import { Dump, Revision } from './types'
 
 /** A revision's place in one server process's history. */
 export type Cursor = { epoch: string; id: number }
 
-/** The first event of a subtree stream: its value, or the revisions after the requested cursor. */
-export type SubtreeStart = { epoch?: string | null; id: number } & (
-  { value: unknown; revisions?: null } | { value?: null; revisions: Revision[] }
+/**
+ * The first event of the subscription: its value, or the revisions after the requested
+ * cursor, and the name `SubtreeSource.update` takes.
+ */
+export type SubtreeStart = {
+  epoch?: string | null
+  id: number
+  subscription?: string | null
+} & (
+  | { value: unknown; revisions?: null }
+  | { value?: null; revisions: Revision[] }
 )
 
-export type SubtreeEvent = SubtreeStart | Revision
+/** A projected revision; with `extend`, what the latest selection change added. */
+export type SubtreeRevision = Revision & { extend?: boolean | null }
+
+export type SubtreeEvent = SubtreeStart | SubtreeRevision
 
 export interface SubtreeSource {
-  /** Streams the projected subtree at `path`: a start, then revisions scoped to `path`. */
+  /** Streams the selection of the subtree at `path`: a start, then revisions. */
   subscribe(
     path: string[],
     since: Cursor | null,
-    projection: Projection | null,
+    selection: Selection,
   ): Observable<SubtreeEvent>
+  /**
+   * Replaces the subscription's selection; the stream then sends one `extend` revision with
+   * what it adds, before any later revision.
+   */
+  update(subscription: string, selection: Selection): Promise<void>
 }
 
 export type SubtreeOptions = {
-  /** How long a path stays subscribed after its last watcher leaves. */
+  /** How long a watch's data stays subscribed after its last watcher leaves. */
   releaseDelay?: number
-  /** How long revisions from different subscriptions are collected before applying them in id order. */
+  /** How long revisions are collected before they apply together. */
   batch?: number
 }
 
-type Active = {
-  path: string[]
-  projection: Projection | null
-  subscription: Subscription
-  cursor: Cursor | null
-}
-
 /**
- * A {@link PatchDB} whose `watch$` subscriptions are server subscriptions.
+ * A {@link PatchDB} whose `watch$` calls select what one server subscription sends.
  *
- * Each watched path and projection is reference-counted and released a short
- * delay after its last watcher leaves. A watch another watch's data contains
- * opens no subscription of its own.
- *
- * Invariant: live server subscriptions never overlap, so exactly one stream
- * patches each region's structure. Watches whose subtrees overlap are served by
- * one covering subscription, which replaces their own once it is live. A
- * projected subscription writes the shared document only at paths it keeps.
- * Every subscription keeps its own cursor so it fast-forwards on reconnect, and
- * data from a released subscription stays readable until it is subscribed again.
- * The document cursor follows the lowest live subscription, including handovers.
- * A failed subscription stops them all and is reported on {@link failures$};
- * {@link start} resumes them.
+ * Each watch is reference-counted and released a short delay after its last watcher
+ * leaves. The document is a replica of the server's under the requested selection, which
+ * is the union of the watches' selectors. A selection change prunes the replica at once
+ * and fills it from the stream's `extend` revision, which also confirms the change; a watch
+ * is served once the confirmed selection covers it. The document cursor is the
+ * subscription's. A failed subscription is reported on {@link failures$}; {@link start}
+ * resumes it from the cursor.
  */
 export class SubtreePatchDB<
   T extends { [key: string]: any },
 > extends PatchDB<T> {
   private readonly watchers = new Map<string, number>()
   private readonly releases = new Map<string, ReturnType<typeof setTimeout>>()
-  private readonly active = new Map<string, Active>()
-  private readonly cursors = new Map<string, Cursor>()
-  private readonly loaded = new Set<string>()
   private readonly changes$ = new BehaviorSubject<void>(undefined)
-  private pending: { key: string; revision: Revision }[] = []
+  private stream?: Subscription
+  private subscription: string | null = null
+  private cursor: Cursor | null = null
+  /** The selection the document holds. */
+  private held: Selection | null = null
+  /** The selection the server has confirmed sending, within `held`. */
+  private confirmed: Selection | null = null
+  private updating: Selection | null = null
+  private pending: Revision[] = []
   private flush?: ReturnType<typeof setTimeout>
   private running = false
   private readonly releaseDelay: number
   private readonly batch: number
 
-  /** Errors that stopped every subscription. */
+  /** Errors that stopped the subscription. */
   readonly failures$ = new Subject<unknown>()
 
   constructor(
@@ -108,34 +122,46 @@ export class SubtreePatchDB<
     this.batch = batch
   }
 
-  /** Loads a persisted snapshot whose subscriptions resume from their cursors. */
+  /** Loads a persisted snapshot: the selection it holds, keyed with its cursor. */
   restore(dump: Dump<T>, cursors: Record<string, Cursor>) {
+    const entries = Object.entries(cursors)
+    const [first] = entries
+    const agreed =
+      !!first &&
+      entries.every(
+        ([, c]) => c.epoch === first[1].epoch && c.id === first[1].id,
+      )
     this.cache$.next({ id: dump.id, value: { ...dump.value } })
-    Object.entries(cursors).forEach(([key, cursor]) => {
-      this.cursors.set(key, cursor)
-      this.loaded.add(key)
-    })
+    if (agreed) {
+      this.held = minimalSelection(entries.map(([key]) => parseSelectorKey(key)))
+      this.confirmed = this.held
+      this.cursor = first[1]
+    }
     Object.keys(this.watchedNodes).forEach(key =>
       this.updateWatchedNode(key, this.cache$.value.value),
     )
     this.changes$.next()
   }
 
-  /** Cursors of every subscription whose data this document holds, by subscription key. */
+  /** The cursor of each selector the document holds, all one cursor. */
   snapshotCursors(): Record<string, Cursor> {
-    return Object.fromEntries(this.cursors)
+    const { cursor, confirmed } = this
+    return cursor && confirmed
+      ? Object.fromEntries(confirmed.map(s => [selectorKey(s), cursor]))
+      : {}
   }
 
   override start() {
     if (this.running) return
     this.running = true
-    this.reconcile()
+    this.open()
   }
 
   override stop() {
     this.suspend()
-    this.cursors.clear()
-    this.loaded.clear()
+    this.cursor = null
+    this.held = null
+    this.confirmed = null
     Object.values(this.watchedNodes).forEach(node => node.subject.complete())
     this.watchedNodes = {}
     this.releases.forEach(timer => clearTimeout(timer))
@@ -147,11 +173,16 @@ export class SubtreePatchDB<
     this.changes$.next()
   }
 
-  /** True while every path is covered by a live server subscription. */
+  /** True while the live subscription covers every path. */
   live$(...paths: (readonly string[])[]): Observable<boolean> {
     const keys = paths.map(path => pathFromArray([...path]))
     return this.changes$.pipe(
-      map(() => this.running && keys.every(key => this.isLive(key))),
+      map(
+        () =>
+          this.running &&
+          !!this.subscription &&
+          keys.every(key => this.covered(key)),
+      ),
       distinctUntilChanged(),
     )
   }
@@ -160,7 +191,7 @@ export class SubtreePatchDB<
     return this.watchKey$(pathFromArray(args))
   }
 
-  /** The projection of the value at a path, from a subscription narrowed to that projection. */
+  /** The projection of the value at a path, subscribing to that projection only. */
   watchProjection$(
     projection: Projection,
     ...args: (string | number)[]
@@ -199,7 +230,7 @@ export class SubtreePatchDB<
     clearTimeout(this.releases.get(key))
     this.releases.delete(key)
     this.watchers.set(key, (this.watchers.get(key) ?? 0) + 1)
-    this.reconcile()
+    this.reselect()
     let released = false
     return () => {
       if (released) return
@@ -212,98 +243,128 @@ export class SubtreePatchDB<
         setTimeout(() => {
           this.releases.delete(key)
           if (!this.watchers.get(key)) this.watchers.delete(key)
-          this.reconcile()
+          this.reselect()
         }, this.releaseDelay),
       )
     }
   }
 
-  /** Non-overlapping subscriptions containing every watch. */
-  private roots(): string[] {
-    const watched = [...this.watchers.keys()]
-    const uncontained = watched.filter(
-      key =>
-        !watched.some(
-          other =>
-            other !== key &&
-            contains(other, key) &&
-            (!contains(key, other) || other < key),
-        ),
+  /** The union of every watch's selectors; nothing without watches. */
+  private desired(): Selection {
+    const selection = minimalSelection(
+      [...this.watchers.keys()].flatMap(watchSelectors),
     )
-    const clusters: string[][] = []
-    uncontained.forEach(key => {
-      const joined = clusters.filter(c => c.some(other => overlaps(other, key)))
-      joined.forEach(c => clusters.splice(clusters.indexOf(c), 1))
-      clusters.push([key, ...joined.flat()])
+    return selection.length ? selection : NOTHING
+  }
+
+  private open() {
+    const selection = this.held ?? this.desired()
+    const since = this.held ? this.cursor : null
+    this.held = selection
+    this.stream = this.source.subscribe([], since, selection).subscribe({
+      next: event => this.receive(event, selection),
+      error: error => this.fail(error),
+      complete: () => this.fail(new Error('Database subscription ended')),
     })
-    return clusters.map(c => (c.length === 1 ? c[0]! : covering(c)))
   }
 
-  private reconcile() {
-    if (!this.running) return
-    const roots = this.roots()
-    roots.filter(key => !this.active.has(key)).forEach(key => this.open(key))
-    ;[...this.active.keys()]
-      .filter(key => !roots.includes(key))
-      .forEach(key => {
-        const server = roots.find(root => contains(root, key))
-        if (server && !this.active.get(server)?.cursor) return
-        this.close(key)
-      })
-  }
-
-  /**
-   * The newest cursor among this subscription's and those containing it. Null while
-   * another held subscription overlaps without containing it, so a replay never
-   * re-applies revisions over newer data.
-   */
-  private sinceFor(key: string): Cursor | null {
-    const overlapping = [...this.active.keys(), ...this.cursors.keys()].some(
-      other => other !== key && overlaps(other, key) && !contains(other, key),
+  /** Requests the desired selection once the previous request is confirmed. */
+  private reselect() {
+    const subscription = this.subscription
+    if (!this.running || !subscription || this.updating || !this.held) return
+    const desired = this.desired()
+    if (selectionKey(desired) === selectionKey(this.held)) return
+    this.applyPending()
+    this.held = desired
+    this.confirmed =
+      this.confirmed?.filter(s => selectionContains(desired, s)) ?? null
+    this.updating = desired
+    const cache = this.cache$.value
+    this.handleDump(
+      { id: cache.id, value: projectRoot(desired, cache.value) as T },
+      cache,
     )
-    if (overlapping) return null
-    const [newest] = [...this.cursors.entries()]
-      .filter(([other]) => contains(other, key))
-      .map(([, cursor]) => cursor)
-      .sort((a, b) => b.id - a.id)
-    return newest ?? null
+    this.emit(cache)
+    this.source.update(subscription, desired).catch(error => this.fail(error))
   }
 
-  private open(key: string) {
-    const { pointer, projection } = parseSubscriptionKey(key)
-    const path = arrayFromPath(pointer)
-    const since = this.sinceFor(key)
-    const entry: Active = {
-      path,
-      projection,
-      cursor: null,
-      subscription: new Subscription(),
+  private receive(event: SubtreeEvent, selection: Selection) {
+    if (!('patch' in event)) {
+      const cache = this.cache$.value
+      if (event.revisions) {
+        event.revisions.forEach(revision => this.apply(cache, revision))
+      } else {
+        this.handleDump(
+          { id: event.id, value: (event.value ?? {}) as T },
+          cache,
+        )
+      }
+      this.cursor = {
+        epoch: event.epoch ?? this.cursor?.epoch ?? '',
+        id: event.id,
+      }
+      this.subscription = event.subscription ?? null
+      this.confirmed = selection
+      this.emit(cache)
+      this.reselect()
+      return
     }
-    this.active.set(key, entry)
-    entry.subscription.add(
-      this.source.subscribe(path, since, projection).subscribe({
-        next: event => this.receive(key, event),
-        error: error => this.fail(error),
-        complete: () =>
-          this.fail(new Error(`Subscription to ${pointer || '/'} ended`)),
-      }),
-    )
+    if (event.extend) {
+      this.applyPending()
+      const cache = this.cache$.value
+      this.apply(cache, event, false)
+      this.confirmed = this.updating
+      this.updating = null
+      this.emit(cache)
+      this.reselect()
+      return
+    }
+    this.pending.push(event)
+    this.flush ??= setTimeout(() => {
+      this.flush = undefined
+      this.applyPending()
+    }, this.batch)
   }
 
-  private close(key: string) {
-    const entry = this.active.get(key)
-    if (!entry) return
-    this.active.delete(key)
-    entry.subscription.unsubscribe()
-    this.emit(this.cache$.value)
+  private applyPending() {
+    clearTimeout(this.flush)
+    this.flush = undefined
+    if (!this.pending.length) return
+    const cache = this.cache$.value
+    this.pending.splice(0).forEach(revision => this.apply(cache, revision))
+    this.emit(cache)
+  }
+
+  /** Applies a revision as the document holds it; an extension is already projected. */
+  private apply(cache: Dump<T>, revision: Revision, project = true) {
+    if (this.cursor && revision.id > this.cursor.id)
+      this.cursor = { ...this.cursor, id: revision.id }
+    const patch =
+      project && this.held
+        ? projectOperations(revision.patch, this.held)
+        : revision.patch
+    patch.forEach(op => applyOperation(cache, op as Operation<unknown>))
+    this.publishRevision({ id: revision.id, patch }, cache)
   }
 
   private suspend() {
     this.running = false
-    clearTimeout(this.flush)
-    this.flush = undefined
     this.applyPending()
-    ;[...this.active.keys()].forEach(key => this.close(key))
+    this.stream?.unsubscribe()
+    this.stream = undefined
+    this.subscription = null
+    if (this.updating) {
+      this.updating = null
+      this.held = this.confirmed
+      const cache = this.cache$.value
+      if (this.held)
+        this.handleDump(
+          { id: cache.id, value: projectRoot(this.held, cache.value) as T },
+          cache,
+        )
+      this.cache$.next(cache)
+    }
+    this.changes$.next()
   }
 
   private fail(error: unknown) {
@@ -312,162 +373,26 @@ export class SubtreePatchDB<
     this.failures$.next(error)
   }
 
-  private receive(key: string, event: SubtreeEvent) {
-    const entry = this.active.get(key)
-    if (!entry) return
-    if ('patch' in event) {
-      this.pending.push({ key, revision: event })
-      this.flush ??= setTimeout(() => {
-        this.flush = undefined
-        this.applyPending()
-      }, this.batch)
-      return
-    }
-    const epoch = event.epoch ?? entry.cursor?.epoch ?? ''
-    const cache = this.cache$.value
-    if (event.revisions) {
-      event.revisions.forEach(revision =>
-        this.applyRevision(cache, entry, revision),
-      )
-    } else {
-      this.applyAt(
-        cache,
-        entry.path,
-        mergeProjected(
-          entry.projection,
-          [],
-          getValueByPointer(cache.value, pathFromArray(entry.path)),
-          event.value,
-        ),
-      )
-    }
-    entry.cursor = { epoch, id: event.id }
-    ;[...this.cursors.keys()]
-      .filter(other => other !== key && contains(key, other))
-      .forEach(other => {
-        this.cursors.delete(other)
-        this.loaded.delete(other)
-      })
-    this.cursors.set(key, entry.cursor)
-    this.loaded.add(key)
-    this.emit(cache)
-    this.reconcile()
-  }
-
-  private applyPending() {
-    if (!this.pending.length) return
-    const cache = this.cache$.value
-    this.pending
-      .splice(0)
-      .sort((a, b) => a.revision.id - b.revision.id)
-      .forEach(({ key, revision }) => {
-        const entry = this.active.get(key)
-        if (!entry?.cursor || revision.id <= entry.cursor.id) return
-        this.applyRevision(cache, entry, revision)
-        entry.cursor = { epoch: entry.cursor.epoch, id: revision.id }
-        this.cursors.set(key, entry.cursor)
-      })
-    this.emit(cache)
-  }
-
-  /** Localizes each operation against the document as the previous one left it. */
-  private applyRevision(cache: Dump<T>, entry: Active, revision: Revision) {
-    const pointer = pathFromArray(entry.path)
-    const patch = revision.patch.map(op => {
-      const localized = this.localize(cache, entry, pointer, op)
-      applyOperation(cache, localized)
-      return localized
-    })
-    this.publishRevision({ id: revision.id, patch }, cache)
-  }
-
-  private localize(
-    cache: Dump<T>,
-    { projection }: Active,
-    pointer: string,
-    op: Operation<unknown>,
-  ): Operation<unknown> {
-    const path = pointer + op.path
-    if (op.op === PatchOp.REMOVE) return { ...op, path }
-    if (!projection) {
-      return op.path === ''
-        ? this.replacementAt(cache, arrayFromPath(path), op.value)
-        : { ...op, path }
-    }
-    const segments = arrayFromPath(path)
-    const parent = getValueByPointer(
-      cache.value,
-      pathFromArray(segments.slice(0, -1)),
-    )
-    if (op.op === PatchOp.ADD && Array.isArray(parent)) return { ...op, path }
-    return this.replacementAt(
-      cache,
-      segments,
-      mergeProjected(
-        projection,
-        arrayFromPath(op.path),
-        getValueByPointer(cache.value, path),
-        op.value,
-      ),
-    )
-  }
-
-  private applyAt(cache: Dump<T>, path: string[], value: unknown) {
-    if (!path.length) {
-      this.handleDump({ id: cache.id, value: value as T }, cache)
-      return
-    }
-    this.handleRevision(
-      { id: cache.id, patch: [this.replacementAt(cache, path, value)] },
-      cache,
-    )
-  }
-
-  private replacementAt(
-    cache: Dump<T>,
-    path: string[],
-    value: unknown,
-  ): Operation<unknown> {
-    const parents = path.slice(0, -1)
-    const missing = parents.findIndex(
-      (_, i) =>
-        getValueByPointer(
-          cache.value,
-          pathFromArray(parents.slice(0, i + 1)),
-        ) == null,
-    )
-    if (missing >= 0) {
-      const at = parents.slice(0, missing + 1)
-      const nested = path
-        .slice(missing + 1)
-        .reduceRight<unknown>((child, key) => ({ [key]: child }), value)
-      return { op: PatchOp.REPLACE, path: pathFromArray(at), value: nested }
-    }
-    return { op: PatchOp.REPLACE, path: pathFromArray(path), value }
-  }
-
   private emit(cache: Dump<T>) {
-    const ids = [...this.active.values()].flatMap(({ cursor }) =>
-      cursor ? [cursor.id] : [],
-    )
-    if (ids.length) cache.id = Math.min(...ids)
+    if (this.cursor) cache.id = this.cursor.id
     this.cache$.next(cache)
     this.changes$.next()
   }
 
   private covered(key: string): boolean {
-    return [...this.loaded].some(other => contains(other, key))
-  }
-
-  private isLive(key: string): boolean {
-    return [...this.active.entries()].some(
-      ([other, { cursor }]) => !!cursor && contains(other, key),
+    const confirmed = this.confirmed
+    return (
+      !!confirmed &&
+      watchSelectors(key).every(s => selectionContains(confirmed, s))
     )
   }
 }
 
-/** The watched value of a subscription key: its projection of the document at its pointer. */
+/** The watched value of a watch key: its projection of the document at its pointer. */
 function read(key: string, data: unknown): unknown {
   const { pointer, projection } = parseSubscriptionKey(key)
-  return projectRoot(projection, getValueByPointer(data as any, pointer))
+  return projectRoot(
+    watchSelection(projection),
+    getValueByPointer(data as any, pointer),
+  )
 }

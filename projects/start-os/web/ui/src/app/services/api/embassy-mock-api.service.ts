@@ -31,11 +31,12 @@ import {
   getValueByPointer,
   Operation,
   PatchOp,
-  normalizeProjection,
+  extension,
+  normalizeSelector,
   pathFromArray,
   projectOperations,
-  Projection,
   projectRoot,
+  Selection,
   scopeOperations,
   RemoveOperation,
   ReplaceOperation,
@@ -98,6 +99,7 @@ import {
   mockOsUpdateCache,
   mockPatchData,
   mockRegistryCache,
+  mockRegistryIndex,
 } from './mock-patch'
 
 import markdown from './md-sample.md'
@@ -236,6 +238,11 @@ export class MockApiService extends ApiService implements StartupApiService {
           mockRegistryCache(url, this.mockRegistryInfo(url)),
         ]),
       )
+      mockPatchData.registryIndexes = Object.fromEntries(
+        Object.entries(mockPatchData.registryCache)
+          .filter(([, entry]) => entry.status !== 'error')
+          .map(([url, entry]) => [url, mockRegistryIndex(entry.info)]),
+      )
       mockPatchData.serverInfo.gitHash = this.gitHash
       mockPatchData.osUpdateCache = mockOsUpdateCache(
         mockPatchData.serverInfo.osRegistry,
@@ -359,6 +366,7 @@ export class MockApiService extends ApiService implements StartupApiService {
         normalized,
         info,
       )
+      mockPatchData.registryIndexes[normalized] = mockRegistryIndex(info)
       const { added } = this.importRegistryKeys(normalized, info)
       for (const id of added)
         mockPatchData.serverInfo.trustedKeys[id]!.marketplace = true
@@ -386,18 +394,10 @@ export class MockApiService extends ApiService implements StartupApiService {
         normalized,
         info,
       )
+      mockPatchData.registryIndexes[normalized] = mockRegistryIndex(info)
       this.importRegistryKeys(normalized, info)
       await this.publishTrust()
       return null
-    },
-    'server.registries.package': async ({ id, targetVersion }) => {
-      await pauseFor(500)
-      const pkg = Mock.RegistryPackages[id]
-      if (!pkg) return { categories: [], best: {}, otherVersions: {} }
-      const exact = targetVersion
-        ? Mock.OtherPackageVersions[id]?.[targetVersion]
-        : undefined
-      return exact ? { ...pkg, best: exact.best } : pkg
     },
     'server.registries.remove': async ({ url }) => {
       await pauseFor(2000)
@@ -408,6 +408,9 @@ export class MockApiService extends ApiService implements StartupApiService {
       const offered = this.offeredKeys(url)
       for (const saved of Object.keys(mockPatchData.registryCache)) {
         if (sameUrl(saved, url)) delete mockPatchData.registryCache[saved]
+      }
+      for (const saved of Object.keys(mockPatchData.registryIndexes)) {
+        if (sameUrl(saved, url)) delete mockPatchData.registryIndexes[saved]
       }
       for (const saved of Object.keys(mockPatchData.serverInfo.registries)) {
         if (sameUrl(saved, url))
@@ -2101,13 +2104,6 @@ export class MockApiService extends ApiService implements StartupApiService {
           return this.initSubscriptionStream(options)
         case 'diagnostic.update':
           return this.diagnosticUpdateStream(options)
-        case 'server.registries.package':
-          return {
-            initial: await this.handlers['server.registries.package']!(
-              params as Params<'server.registries.package'>,
-            ),
-            items: this.idle(options?.signal),
-          }
         default:
           throw new Error(`No mock stream for ${method}`)
       }
@@ -3320,14 +3316,24 @@ export class MockApiService extends ApiService implements StartupApiService {
     return getValueByPointer(this.document.value as any, path)
   }
 
+  private mockSubscriptionCount = 0
+  private readonly mockSubscriptions = new Map<
+    string,
+    {
+      pointer: string
+      selection: Selection
+      out: Subject<DatabaseUpdate<unknown>>
+    }
+  >()
+
   override watchDb$(
     path: string[],
     _since: DatabaseCursor | null,
-    projection: Projection | null = null,
+    selection: Selection | null = null,
   ): Observable<DatabaseUpdate<unknown>> {
     const pointer = pathFromArray(path)
     return defer(() => {
-      normalizeProjection(projection)
+      selection?.forEach(normalizeSelector)
       return (this.mockDocument ??= this.handlers['db.subscribe']!({}).then(
         result => {
           const { value } = (result as { dump: Dump<DataModel> }).dump
@@ -3346,25 +3352,62 @@ export class MockApiService extends ApiService implements StartupApiService {
         },
       ))
     }).pipe(
-      switchMap(document =>
-        this.mockWsSource$.pipe(
-          map(({ id, patch }) => ({
-            id,
-            patch: projectOperations(
-              scopeOperations(patch, pointer),
-              projection,
-            ),
-          })),
-          startWith({
-            id: document.id,
-            value: projectRoot(
-              projection,
-              getValueByPointer(document.value as any, pointer) ?? null,
-            ),
+      switchMap(
+        document =>
+          new Observable<DatabaseUpdate<unknown>>(subscriber => {
+            const subscription = `mock-${++this.mockSubscriptionCount}`
+            const entry = {
+              pointer,
+              selection: selection ?? [],
+              out: new Subject<DatabaseUpdate<unknown>>(),
+            }
+            this.mockSubscriptions.set(subscription, entry)
+            const forward = entry.out.subscribe(subscriber)
+            subscriber.next({
+              id: document.id,
+              subscription,
+              value: projectRoot(
+                entry.selection,
+                getValueByPointer(document.value as any, pointer) ?? null,
+              ),
+            })
+            const revisions = this.mockWsSource$.subscribe(({ id, patch }) =>
+              entry.out.next({
+                id,
+                patch: projectOperations(
+                  scopeOperations(patch, pointer),
+                  entry.selection,
+                ),
+              }),
+            )
+            return () => {
+              revisions.unsubscribe()
+              forward.unsubscribe()
+              this.mockSubscriptions.delete(subscription)
+            }
           }),
-        ),
       ),
     )
+  }
+
+  override async updateDbSubscription(
+    subscription: string,
+    selection: Selection,
+  ): Promise<void> {
+    selection.forEach(normalizeSelector)
+    const entry = this.mockSubscriptions.get(subscription)
+    if (!entry) throw new Error(`Database subscription ${subscription} ended`)
+    const document = this.document
+    entry.out.next({
+      id: document.id,
+      extend: true,
+      patch: extension(
+        entry.selection,
+        selection,
+        getValueByPointer(document.value as any, entry.pointer) ?? null,
+      ),
+    })
+    entry.selection = selection
   }
 
   private async mockRevision<T>(patch: Operation<T>[]): Promise<void> {
