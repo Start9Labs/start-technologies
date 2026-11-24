@@ -11,6 +11,7 @@ import {
   take,
 } from 'rxjs'
 import {
+  applyOperation,
   arrayFromPath,
   getValueByPointer,
   Operation,
@@ -18,7 +19,10 @@ import {
 } from './json-patch-lib'
 import { PatchDB } from './patch-db'
 import {
+  contains,
+  covering,
   mergeProjected,
+  overlaps,
   parseSubscriptionKey,
   Projection,
   projectRoot,
@@ -63,10 +67,13 @@ type Active = {
  * A {@link PatchDB} whose `watch$` subscriptions are server subscriptions.
  *
  * Each watched path and projection is reference-counted and released a short
- * delay after its last watcher leaves. An unprojected path serves every watch at
- * or below it, and a projected one serves only watches of the same projection;
- * only subscriptions no other watch serves are opened on the server. A projected
- * subscription writes the shared document only at paths its projection keeps.
+ * delay after its last watcher leaves. A watch another watch's data contains
+ * opens no subscription of its own.
+ *
+ * Invariant: live server subscriptions never overlap, so exactly one stream
+ * patches each region's structure. Watches whose subtrees overlap are served by
+ * one covering subscription, which replaces their own once it is live. A
+ * projected subscription writes the shared document only at paths it keeps.
  * Every subscription keeps its own cursor so it fast-forwards on reconnect, and
  * data from a released subscription stays readable until it is subscribed again.
  * The document cursor follows the lowest live subscription, including handovers.
@@ -211,11 +218,25 @@ export class SubtreePatchDB<
     }
   }
 
+  /** Non-overlapping subscriptions containing every watch. */
   private roots(): string[] {
     const watched = [...this.watchers.keys()]
-    return watched.filter(
-      key => !watched.some(other => other !== key && serves(other, key)),
+    const uncontained = watched.filter(
+      key =>
+        !watched.some(
+          other =>
+            other !== key &&
+            contains(other, key) &&
+            (!contains(key, other) || other < key),
+        ),
     )
+    const clusters: string[][] = []
+    uncontained.forEach(key => {
+      const joined = clusters.filter(c => c.some(other => overlaps(other, key)))
+      joined.forEach(c => clusters.splice(clusters.indexOf(c), 1))
+      clusters.push([key, ...joined.flat()])
+    })
+    return clusters.map(c => (c.length === 1 ? c[0]! : covering(c)))
   }
 
   private reconcile() {
@@ -225,27 +246,27 @@ export class SubtreePatchDB<
     ;[...this.active.keys()]
       .filter(key => !roots.includes(key))
       .forEach(key => {
-        const server = roots.find(root => serves(root, key))
+        const server = roots.find(root => contains(root, key))
         if (server && !this.active.get(server)?.cursor) return
         this.close(key)
       })
   }
 
   /**
-   * Replays from a cursor only when no other held subscription overlaps the data,
-   * so a replay never re-applies revisions over newer data.
+   * The newest cursor among this subscription's and those containing it. Null while
+   * another held subscription overlaps without containing it, so a replay never
+   * re-applies revisions over newer data.
    */
   private sinceFor(key: string): Cursor | null {
     const overlapping = [...this.active.keys(), ...this.cursors.keys()].some(
-      other => other !== key && overlaps(other, key) && !serves(other, key),
+      other => other !== key && overlaps(other, key) && !contains(other, key),
     )
     if (overlapping) return null
-    const own = this.cursors.get(key)
-    if (own) return own
-    const ancestors = [...this.cursors.keys()]
-      .filter(other => other !== key && serves(other, key))
-      .sort((a, b) => b.length - a.length)
-    return ancestors.length ? this.cursors.get(ancestors[0]!)! : null
+    const [newest] = [...this.cursors.entries()]
+      .filter(([other]) => contains(other, key))
+      .map(([, cursor]) => cursor)
+      .sort((a, b) => b.id - a.id)
+    return newest ?? null
   }
 
   private open(key: string) {
@@ -322,7 +343,7 @@ export class SubtreePatchDB<
     }
     entry.cursor = { epoch, id: event.id }
     ;[...this.cursors.keys()]
-      .filter(other => other !== key && serves(key, other))
+      .filter(other => other !== key && contains(key, other))
       .forEach(other => {
         this.cursors.delete(other)
         this.loaded.delete(other)
@@ -349,15 +370,15 @@ export class SubtreePatchDB<
     this.emit(cache)
   }
 
-  /** Applies each operation against the document as the previous one left it. */
+  /** Localizes each operation against the document as the previous one left it. */
   private applyRevision(cache: Dump<T>, entry: Active, revision: Revision) {
     const pointer = pathFromArray(entry.path)
-    revision.patch.forEach(op => {
-      this.handleRevision(
-        { id: revision.id, patch: [this.localize(cache, entry, pointer, op)] },
-        cache,
-      )
+    const patch = revision.patch.map(op => {
+      const localized = this.localize(cache, entry, pointer, op)
+      applyOperation(cache, localized)
+      return localized
     })
+    this.publishRevision({ id: revision.id, patch }, cache)
   }
 
   private localize(
@@ -435,12 +456,12 @@ export class SubtreePatchDB<
   }
 
   private covered(key: string): boolean {
-    return [...this.loaded].some(other => serves(other, key))
+    return [...this.loaded].some(other => contains(other, key))
   }
 
   private isLive(key: string): boolean {
     return [...this.active.entries()].some(
-      ([other, { cursor }]) => !!cursor && serves(other, key),
+      ([other, { cursor }]) => !!cursor && contains(other, key),
     )
   }
 }
@@ -449,28 +470,4 @@ export class SubtreePatchDB<
 function read(key: string, data: unknown): unknown {
   const { pointer, projection } = parseSubscriptionKey(key)
   return projectRoot(projection, getValueByPointer(data as any, pointer))
-}
-
-/**
- * Whether a subscription's data includes everything another subscription receives.
- * An unprojected subscription serves its subtree; a projected one only itself.
- */
-function serves(server: string, served: string): boolean {
-  if (server === served) return true
-  const a = parseSubscriptionKey(server)
-  if (a.projection) return false
-  const b = parseSubscriptionKey(served)
-  return a.pointer === b.pointer || isAncestor(a.pointer, b.pointer)
-}
-
-/** Whether two subscriptions' subtrees share any path. */
-function overlaps(a: string, b: string): boolean {
-  const p = parseSubscriptionKey(a).pointer
-  const q = parseSubscriptionKey(b).pointer
-  return p === q || isAncestor(p, q) || isAncestor(q, p)
-}
-
-/** True when `ancestor` is a proper ancestor of `pointer`. */
-function isAncestor(ancestor: string, pointer: string): boolean {
-  return ancestor === '' ? pointer !== '' : pointer.startsWith(ancestor + '/')
 }

@@ -96,7 +96,7 @@ pub struct ProjectionParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub depth: Option<usize>,
     /// Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
-    /// Empty keeps everything. Array elements are addressed only by `*`.
+    /// Empty keeps everything. Segments that are array positions (digits or `-`) are rejected.
     #[arg(long, help = "help.arg.db-include")]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<JsonPointer>,
@@ -108,19 +108,28 @@ pub struct ProjectionParams {
 
 rpc_toolkit::reflect_ts!(ProjectionParams);
 
-impl From<ProjectionParams> for Projection {
-    fn from(
+impl TryFrom<ProjectionParams> for Projection {
+    type Error = Error;
+    fn try_from(
         ProjectionParams {
             depth,
             include,
             exclude,
         }: ProjectionParams,
-    ) -> Self {
-        Projection {
-            depth,
-            include,
-            exclude,
-        }
+    ) -> Result<Self, Error> {
+        Projection::new(depth, include, exclude).map_err(|e| match e {
+            patch_db::Error::PositionalPattern(pattern) => Error::new(
+                eyre!(
+                    "{}",
+                    t!(
+                        "db.projection-array-position",
+                        pattern = pattern.to_string()
+                    )
+                ),
+                ErrorKind::InvalidRequest,
+            ),
+            e => e.into(),
+        })
     }
 }
 
@@ -161,7 +170,7 @@ async fn cli_dump(
     let dump = if let Some(path) = path {
         PatchDb::open(path)
             .await?
-            .dump_projected(&ROOT, &projection.into())
+            .dump_projected(&ROOT, &projection.try_into()?)
             .await
     } else {
         let method = parent_method.into_iter().chain(method).join(".");
@@ -205,7 +214,10 @@ pub async fn dump(
 ) -> Result<Dump, Error> {
     Ok(ctx
         .db
-        .dump_projected(pointer.as_ref().unwrap_or(&*PUBLIC), &projection.into())
+        .dump_projected(
+            pointer.as_ref().unwrap_or(&*PUBLIC),
+            &projection.try_into()?,
+        )
         .await)
 }
 
@@ -361,7 +373,7 @@ pub async fn subscribe(
     let pointer = pointer.unwrap_or_else(|| PUBLIC.clone());
     if let Some(stream) = rpc_stream {
         let (start, sub) =
-            subscribe_start(&ctx.db, pointer, projection.into(), since.as_ref()).await;
+            subscribe_start(&ctx.db, pointer, projection.try_into()?, since.as_ref()).await;
         let sub = DbSubscriber {
             rev: start.id,
             sub,
@@ -379,7 +391,7 @@ pub async fn subscribe(
     }
     let (dump, sub) = ctx
         .db
-        .dump_and_sub_projected(pointer, projection.into())
+        .dump_and_sub_projected(pointer, projection.try_into()?)
         .await;
     let mut sub = DbSubscriber {
         rev: dump.id,

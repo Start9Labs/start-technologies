@@ -436,7 +436,6 @@ impl PatchDb {
         ptr: JsonPointer,
         projection: Projection,
     ) -> (Dump, Subscriber) {
-        let projection = projection.normalized();
         let mut store = self.store.write().await;
         (
             projection.project_dump(store.dump(&ptr)),
@@ -461,7 +460,6 @@ impl PatchDb {
         projection: Projection,
         since: Option<(&str, u64)>,
     ) -> (InternedString, Catchup, Subscriber) {
-        let projection = projection.normalized();
         let mut store = self.store.write().await;
         let epoch = store.broadcast.epoch().clone();
         let catchup = since

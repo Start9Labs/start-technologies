@@ -31,6 +31,7 @@ import {
   getValueByPointer,
   Operation,
   PatchOp,
+  normalizeProjection,
   pathFromArray,
   projectOperations,
   Projection,
@@ -3325,26 +3326,26 @@ export class MockApiService extends ApiService implements StartupApiService {
     projection: Projection | null = null,
   ): Observable<DatabaseUpdate<unknown>> {
     const pointer = pathFromArray(path)
-    return defer(
-      () =>
-        (this.mockDocument ??= this.handlers['db.subscribe']!({}).then(
-          result => {
-            const { value } = (result as { dump: Dump<DataModel> }).dump
-            const document = this.document
-            document.value = {
-              ...document.value,
-              ui: value.ui,
-              registryCache: value.registryCache,
-              osUpdateCache: value.osUpdateCache,
-              serverInfo: {
-                ...document.value.serverInfo,
-                gitHash: value.serverInfo.gitHash,
-              },
-            }
-            return document
-          },
-        )),
-    ).pipe(
+    return defer(() => {
+      normalizeProjection(projection)
+      return (this.mockDocument ??= this.handlers['db.subscribe']!({}).then(
+        result => {
+          const { value } = (result as { dump: Dump<DataModel> }).dump
+          const document = this.document
+          document.value = {
+            ...document.value,
+            ui: value.ui,
+            registryCache: value.registryCache,
+            osUpdateCache: value.osUpdateCache,
+            serverInfo: {
+              ...document.value.serverInfo,
+              gitHash: value.serverInfo.gitHash,
+            },
+          }
+          return document
+        },
+      ))
+    }).pipe(
       switchMap(document =>
         this.mockWsSource$.pipe(
           map(({ id, patch }) => ({

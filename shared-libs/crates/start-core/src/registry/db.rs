@@ -106,7 +106,7 @@ async fn cli_dump(
             .await?
             .dump_projected(
                 &pointer.as_ref().map_or(ROOT, |p| p.borrowed()),
-                &projection.into(),
+                &projection.try_into()?,
             )
             .await
     } else {
@@ -138,7 +138,7 @@ pub async fn dump(
         .db
         .dump_projected(
             &pointer.as_ref().map_or(ROOT, |p| p.borrowed()),
-            &projection.into(),
+            &projection.try_into()?,
         )
         .await)
 }

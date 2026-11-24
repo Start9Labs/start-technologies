@@ -1,9 +1,8 @@
 use imbl_value::{InOMap, Value};
 use json_patch::{AddOperation, Patch, PatchOperation, ReplaceOperation};
 use json_ptr::JsonPointer;
-use serde::{Deserialize, Serialize};
 
-use crate::{DiffPatch, Dump, Revision};
+use crate::{DiffPatch, Dump, Error, Revision};
 
 #[cfg(test)]
 mod tests;
@@ -11,21 +10,15 @@ mod tests;
 /// The part of a subscribed subtree a subscriber receives, applied alike to dumps and revisions.
 ///
 /// Patterns are pointers relative to the subscribed subtree, and a `*` segment matches any
-/// single key or index. Array elements must be addressed by `*`: an index segment selects a
-/// position, which insertions and removals shift. Projection is a pure function of the value
-/// or revision, so equal projections share one listener and no per-subscriber state.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// single key or index. [`Projection::new`] rejects segments that are array positions (digits
+/// or `-`): insertions and removals shift positions, which a stateless projection cannot follow.
+/// Projection is a pure function of the value or revision, so equal projections share one
+/// listener and no per-subscriber state.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Projection {
-    /// Levels kept below the subtree; deeper objects and arrays become empty.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub depth: Option<usize>,
-    /// Subtrees kept; empty keeps everything.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub include: Vec<JsonPointer>,
-    /// Subtrees removed from what `include` keeps.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exclude: Vec<JsonPointer>,
+    depth: Option<usize>,
+    include: Vec<JsonPointer>,
+    exclude: Vec<JsonPointer>,
 }
 
 /// How a path relates to a projection.
@@ -39,14 +32,35 @@ pub enum Reach {
     In,
 }
 
+/// Whether a pattern segment would select an array position.
+pub fn is_positional(segment: &str) -> bool {
+    segment == "-" || (!segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit()))
+}
+
 impl Projection {
-    /// Orders and deduplicates patterns so equivalent projections compare equal.
-    pub fn normalized(mut self) -> Self {
-        self.include.sort();
-        self.include.dedup();
-        self.exclude.sort();
-        self.exclude.dedup();
-        self
+    /// Keeps `depth` levels and the `include` subtrees minus the `exclude` subtrees; an empty
+    /// `include` keeps everything. Equivalent projections compare equal.
+    pub fn new(
+        depth: Option<usize>,
+        mut include: Vec<JsonPointer>,
+        mut exclude: Vec<JsonPointer>,
+    ) -> Result<Self, Error> {
+        if let Some(pattern) = include
+            .iter()
+            .chain(&exclude)
+            .find(|p| p.iter().any(is_positional))
+        {
+            return Err(Error::PositionalPattern(pattern.clone()));
+        }
+        include.sort();
+        include.dedup();
+        exclude.sort();
+        exclude.dedup();
+        Ok(Self {
+            depth,
+            include,
+            exclude,
+        })
     }
 
     pub fn is_identity(&self) -> bool {

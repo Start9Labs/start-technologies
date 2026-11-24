@@ -5,12 +5,12 @@ use proptest::prelude::*;
 use super::*;
 use crate::patch::diff;
 
+fn patterns(patterns: &[&str]) -> Vec<JsonPointer> {
+    patterns.iter().map(|p| p.parse().unwrap()).collect()
+}
+
 fn projection(depth: Option<usize>, include: &[&str], exclude: &[&str]) -> Projection {
-    Projection {
-        depth,
-        include: include.iter().map(|p| p.parse().unwrap()).collect(),
-        exclude: exclude.iter().map(|p| p.parse().unwrap()).collect(),
-    }
+    Projection::new(depth, patterns(include), patterns(exclude)).unwrap()
 }
 
 fn projections() -> Vec<Projection> {
@@ -105,8 +105,8 @@ fn revisions_drop_operations_outside_the_projection() {
 #[test]
 fn equivalent_projections_share_a_key() {
     assert_eq!(
-        projection(None, &["/b", "/a", "/a"], &[]).normalized(),
-        projection(None, &["/a", "/b"], &[]).normalized(),
+        projection(None, &["/b", "/a", "/a"], &[]),
+        projection(None, &["/a", "/b"], &[]),
     );
 }
 
@@ -183,4 +183,16 @@ fn subtree_scoping_composes_with_projection() {
     );
     json_patch::patch(&mut applied, &projected.patch.0).unwrap();
     assert_eq!(applied, json!({ "x": { "b": 2 }, "y": { "b": 3 } }));
+}
+
+#[test]
+fn array_position_patterns_are_rejected() {
+    for pattern in ["/arr/1", "/arr/-", "/*/0/a"] {
+        assert!(matches!(
+            Projection::new(None, patterns(&[pattern]), vec![]),
+            Err(crate::Error::PositionalPattern(p)) if p.to_string() == pattern
+        ));
+        assert!(Projection::new(None, vec![], patterns(&[pattern])).is_err());
+    }
+    assert!(Projection::new(None, patterns(&["/arr/*/a", "/v1", "/-x"]), vec![]).is_ok());
 }

@@ -1,11 +1,12 @@
-import { arrayFromPath, Operation } from './json-patch-lib'
+import { arrayFromPath, Operation, pathFromArray } from './json-patch-lib'
 import { PatchOp } from './types'
 
 /**
  * The part of a subscribed subtree a subscriber receives, mirroring the server's `Projection`.
  *
  * Patterns are pointers relative to the subtree, and a `*` segment matches any single key or
- * index. Array elements must be addressed by `*`. An empty `include` keeps everything.
+ * index. An empty `include` keeps everything. Segments that are array positions (digits or
+ * `-`) are rejected, so array elements are addressed only by `*`.
  */
 export type Projection = {
   /** Levels kept below the subtree; deeper objects and arrays become empty. */
@@ -23,13 +24,28 @@ export type NormalizedProjection = {
   exclude?: string[]
 }
 
-/** Null for a projection that keeps everything; patterns sorted and deduplicated otherwise. */
+/** Whether a pattern segment would select an array position. */
+export function isPositional(segment: string): boolean {
+  return segment === '-' || /^[0-9]+$/.test(segment)
+}
+
+/**
+ * Null for a projection that keeps everything; patterns sorted and deduplicated otherwise.
+ * Throws for a positional pattern segment, as the server rejects it.
+ */
 export function normalizeProjection(
   projection: Projection | null | undefined,
 ): NormalizedProjection | null {
   const depth = projection?.depth ?? null
   const include = [...new Set(projection?.include ?? [])].sort()
   const exclude = [...new Set(projection?.exclude ?? [])].sort()
+  const positional = [...include, ...exclude].find(p =>
+    arrayFromPath(p).some(isPositional),
+  )
+  if (positional !== undefined)
+    throw new Error(
+      `Projection pattern ${positional} addresses an array position; use *`,
+    )
   if (depth === null && !include.length && !exclude.length) return null
   return {
     ...(depth === null ? {} : { depth }),
@@ -207,4 +223,119 @@ export function mergeProjected(
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+type Scoped = {
+  path: string[]
+  depth: number | null
+  include: string[][]
+  exclude: string[][]
+}
+
+/** A subscription key's projection, as patterns relative to an ancestor pointer. */
+function scopedTo(base: string[], key: string): Scoped {
+  const { pointer, projection } = parseSubscriptionKey(key)
+  const path = arrayFromPath(pointer)
+  const offset = path.slice(base.length)
+  const include = (projection?.include ?? []).map(p => [
+    ...offset,
+    ...arrayFromPath(p),
+  ])
+  return {
+    path,
+    depth:
+      projection?.depth === null || projection?.depth === undefined
+        ? null
+        : offset.length + projection.depth,
+    include: include.length ? include : [offset],
+    exclude: (projection?.exclude ?? []).map(p => [
+      ...offset,
+      ...arrayFromPath(p),
+    ]),
+  }
+}
+
+/** Whether every path the specific pattern matches, the general one matches too. */
+function subsumes(general: string[], specific: string[]): boolean {
+  return (
+    general.length <= specific.length &&
+    general.every((g, i) => g === '*' || g === specific[i])
+  )
+}
+
+/** Whether two patterns can match a common path. */
+function compatible(a: string[], b: string[]): boolean {
+  return a.every(
+    (s, i) => i >= b.length || s === '*' || b[i] === '*' || s === b[i],
+  )
+}
+
+function startsWithPath(path: string[], prefix: string[]): boolean {
+  return prefix.length <= path.length && prefix.every((s, i) => s === path[i])
+}
+
+/**
+ * Whether one subscription's data includes everything another's does. Conservative:
+ * an unprovable containment is false.
+ */
+export function contains(server: string, served: string): boolean {
+  if (server === served) return true
+  const { pointer, projection } = parseSubscriptionKey(server)
+  const base = arrayFromPath(pointer)
+  const inner = scopedTo(base, served)
+  if (!startsWithPath(inner.path, base)) return false
+  if (!projection) return true
+  const outer = scopedTo(base, server)
+  const offset = inner.path.slice(base.length)
+  if (outer.depth !== null && (inner.depth === null || inner.depth > outer.depth))
+    return false
+  if (!inner.include.every(i => outer.include.some(o => subsumes(o, i))))
+    return false
+  return outer.exclude.every(e => {
+    if (!compatible(e, offset)) return true
+    if (inner.depth !== null && e.length > inner.depth) return true
+    if (e.length <= offset.length)
+      return inner.exclude.some(x => x.length === offset.length)
+    const below = e.slice(offset.length)
+    return inner.exclude.some(x => subsumes(x.slice(offset.length), below))
+  })
+}
+
+/** Whether two subscriptions' subtrees share any path. */
+export function overlaps(a: string, b: string): boolean {
+  const p = arrayFromPath(parseSubscriptionKey(a).pointer)
+  const q = arrayFromPath(parseSubscriptionKey(b).pointer)
+  return startsWithPath(p, q) || startsWithPath(q, p)
+}
+
+/**
+ * One subscription containing every given subscription, at their common ancestor. A
+ * member pointer with an array-position segment widens it to the whole subtree.
+ */
+export function covering(keys: readonly string[]): string {
+  const pointers = keys.map(key => arrayFromPath(parseSubscriptionKey(key).pointer))
+  const base = pointers.reduce((a, b) => {
+    const differs = a.findIndex((s, i) => s !== b[i])
+    return differs < 0 ? a.slice(0, b.length) : a.slice(0, differs)
+  })
+  const scoped = keys.map(key => scopedTo(base, key))
+  const include = scoped.some(s => s.include.some(p => !p.length))
+    ? []
+    : scoped.flatMap(s => s.include)
+  const [first, ...rest] = scoped
+  const exclude = first!.exclude.filter(e =>
+    rest.every(s =>
+      s.exclude.some(x => pathFromArray(x) === pathFromArray(e)),
+    ),
+  )
+  const depth = scoped.every(s => s.depth !== null)
+    ? Math.max(...scoped.map(s => s.depth!))
+    : null
+  if ([...include, ...exclude].some(p => p.some(isPositional)))
+    return pathFromArray(base)
+  return subscriptionKey(pathFromArray(base), {
+    depth,
+    include: include.map(pathFromArray),
+    exclude: exclude.map(pathFromArray),
+  })
 }

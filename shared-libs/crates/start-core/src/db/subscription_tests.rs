@@ -108,8 +108,13 @@ async fn projected_stream_start_dumps_and_replays_only_the_projection() {
     }))
     .unwrap();
     let pointer = params.pointer.unwrap();
-    let (start, _) =
-        subscribe_start(&db, pointer.clone(), params.projection.clone().into(), None).await;
+    let (start, _) = subscribe_start(
+        &db,
+        pointer.clone(),
+        params.projection.clone().try_into().unwrap(),
+        None,
+    )
+    .await;
     assert_eq!(
         start.value,
         Some(imbl_value::json!({ "x": { "state": 1 } }))
@@ -132,7 +137,13 @@ async fn projected_stream_start_dumps_and_replays_only_the_projection() {
         epoch: start.epoch.clone(),
         id: start.id,
     };
-    let (resumed, _) = subscribe_start(&db, pointer, params.projection.into(), Some(&cursor)).await;
+    let (resumed, _) = subscribe_start(
+        &db,
+        pointer,
+        params.projection.try_into().unwrap(),
+        Some(&cursor),
+    )
+    .await;
     assert_eq!(
         serde_json::to_value(&resumed.revisions).unwrap(),
         serde_json::json!([{
@@ -140,4 +151,12 @@ async fn projected_stream_start_dumps_and_replays_only_the_projection() {
             "patch": [{ "op": "replace", "path": "/x/state", "value": 2 }],
         }])
     );
+}
+
+#[test]
+fn projection_params_reject_array_positions() {
+    let params: ProjectionParams =
+        serde_json::from_value(serde_json::json!({ "include": ["/arr/1"] })).unwrap();
+    let error = Projection::try_from(params).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidRequest);
 }

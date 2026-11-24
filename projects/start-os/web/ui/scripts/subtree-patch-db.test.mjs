@@ -3,9 +3,13 @@ import test from 'node:test'
 import { BehaviorSubject, Observable, Subject } from 'rxjs'
 import {
   applyOperation,
+  contains,
+  covering,
+  normalizeProjection,
   projectOperations,
   projectRoot,
   scopeOperations,
+  subscriptionKey,
   SubtreePatchDB,
 } from 'patch-db-client'
 
@@ -274,6 +278,29 @@ test('stop clears the document, cursors and subscriptions', t => {
   assert.deepEqual(f.db.snapshotCursors(), {})
 })
 
+test('watchers observe the complete package-state transition', t => {
+  const f = fixture(t)
+  f.db.start()
+  const watched = f.watch('packageData', 'x')
+  const before = {
+    stateInfo: {
+      state: 'updating',
+      manifest: { id: 'x' },
+      installingInfo: { newManifest: { id: 'x' } },
+    },
+  }
+  const after = {
+    stateInfo: { state: 'installed', manifest: { id: 'x' } },
+  }
+  f.start(f.calls[0], 1, before)
+  f.revision(f.calls[0], 2, [
+    { op: 'remove', path: '/stateInfo/installingInfo' },
+    { op: 'replace', path: '/stateInfo/state', value: 'installed' },
+  ])
+  t.mock.timers.tick(250)
+  assert.deepEqual(watched.values, [before, after])
+})
+
 const PROJECTIONS = [
   null,
   { depth: 0 },
@@ -344,6 +371,8 @@ test('a projected subscription opens with its projection and writes only what it
   f.db.start()
   const full = f.watch('packageData', 'x')
   f.start(f.calls[0], 3, { state: 1, icon: 'big' })
+  full.subscription.unsubscribe()
+  t.mock.timers.tick(5000)
   const listing = f.project({ exclude: ['/*/icon'] }, 'packageData')
   const call = f.calls[1]
   assert.equal(call.path, '/packageData')
@@ -354,18 +383,14 @@ test('a projected subscription opens with its projection and writes only what it
     x: { state: 2 },
     y: { state: 1 },
   })
-  assert.deepEqual(full.values.at(-1), { state: 2, icon: 'big' })
-  assert.equal(f.calls[0].closed, false)
-
   f.revision(call, 5, [{ op: 'replace', path: '/x', value: { state: 3 } }])
   f.revision(call, 6, [{ op: 'remove', path: '/y' }])
-  f.revision(f.calls[0], 5, [{ op: 'replace', path: '/state', value: 3 }])
   t.mock.timers.tick(250)
   assert.deepEqual(f.cache.value.value.packageData, {
     x: { state: 3, icon: 'big' },
   })
   assert.deepEqual(listing.values.at(-1), { x: { state: 3 } })
-  assert.equal(f.cache.value.id, 5)
+  assert.equal(f.cache.value.id, 6)
 })
 
 test('an unprojected ancestor serves a projected watch', t => {
@@ -378,53 +403,114 @@ test('an unprojected ancestor serves a projected watch', t => {
   assert.deepEqual(projected.values, [{ x: { state: 1 } }])
 })
 
-test('a projection serves only watches of the same projection', t => {
+test('overlapping projections share one covering subscription that owns their structure', t => {
+  const f = fixture(t)
+  f.db.start()
+  const a = f.project({ include: ['/*/a'] }, 'rows')
+  f.start(f.calls[0], 1, [{ a: 1 }])
+  const b = f.project({ include: ['/*/b'] }, 'rows')
+  assert.equal(f.calls.length, 2)
+  const cover = f.calls[1]
+  assert.deepEqual(
+    [cover.path, cover.projection, cover.since],
+    ['/rows', { include: ['/*/a', '/*/b'] }, null],
+  )
+  assert.equal(f.calls[0].closed, false)
+  assert.deepEqual(b.values, [])
+  f.start(cover, 1, [{ a: 1, b: 2 }])
+  assert.equal(f.calls[0].closed, true)
+  f.revision(cover, 2, [{ op: 'add', path: '/0', value: { a: 3, b: 4 } }])
+  t.mock.timers.tick(250)
+  assert.deepEqual(f.cache.value.value.rows, [
+    { a: 3, b: 4 },
+    { a: 1, b: 2 },
+  ])
+  assert.deepEqual(a.values.at(-1), [{ a: 3 }, { a: 1 }])
+  assert.deepEqual(b.values.at(-1), [{ b: 4 }, { b: 2 }])
+  f.revision(cover, 3, [{ op: 'remove', path: '/0' }])
+  t.mock.timers.tick(250)
+  assert.deepEqual(f.cache.value.value.rows, [{ a: 1, b: 2 }])
+})
+
+test('a projected parent and a full child share one covering subscription', t => {
   const f = fixture(t)
   f.db.start()
   f.project({ include: ['/*/state'] }, 'packageData')
-  f.start(f.calls[0], 3, { x: { state: 1 } })
   const child = f.watch('packageData', 'x')
   assert.deepEqual(
     f.calls.map(c => [c.path, c.projection]),
     [
       ['/packageData', { include: ['/*/state'] }],
-      ['/packageData/x', null],
+      ['/packageData', { include: ['/*/state', '/x'] }],
     ],
   )
-  assert.equal(f.calls[1].since, null)
-  assert.deepEqual(child.values, [])
-  f.start(f.calls[1], 4, { state: 2, icon: 'big' })
-  assert.deepEqual(child.values, [{ state: 2, icon: 'big' }])
+  f.start(f.calls[1], 1, { x: { state: 1, icon: 'big' }, y: { state: 2 } })
+  assert.equal(f.calls[0].closed, true)
+  assert.deepEqual(child.values, [{ state: 1, icon: 'big' }])
+  f.revision(f.calls[1], 2, [{ op: 'remove', path: '/x' }])
+  t.mock.timers.tick(250)
+  assert.deepEqual(f.cache.value.value.packageData, { y: { state: 2 } })
+  assert.equal(child.values.at(-1), undefined)
 })
 
-test('a projected subscription resumes from its own cursor only without overlapping data', t => {
+test('a released covering subscription closes and what remains resumes from its cursor', t => {
   const f = fixture(t)
   f.db.start()
   const projection = { include: ['/*/state'] }
-  const listing = f.project(projection, 'packageData')
-  f.start(f.calls[0], 3, { x: { state: 1 } })
-  assert.deepEqual(f.db.snapshotCursors(), {
-    '["/packageData",{"include":["/*/state"]}]': { epoch: 'boot', id: 3 },
-  })
-  listing.subscription.unsubscribe()
-  t.mock.timers.tick(5000)
   f.project(projection, 'packageData')
-  assert.deepEqual(f.calls[1].since, { epoch: 'boot', id: 3 })
-
   const child = f.watch('packageData', 'x')
-  f.start(f.calls[2], 4, { state: 2, icon: 'big' })
+  f.start(f.calls[1], 3, { x: { state: 1, icon: 'big' } })
   child.subscription.unsubscribe()
-  f.calls[1].events.next({ epoch: 'boot', id: 4, revisions: [] })
   t.mock.timers.tick(5000)
-  f.db.stop()
+  const reopened = f.calls.at(-1)
+  assert.deepEqual(
+    [reopened.path, reopened.projection, reopened.since],
+    ['/packageData', projection, { epoch: 'boot', id: 3 }],
+  )
+  assert.equal(f.calls[1].closed, true)
+})
+
+test('a subscription dumps rather than replaying under another overlapping cursor', t => {
+  const f = fixture(t)
+  const projection = { include: ['/*/state'] }
   f.db.restore(
     { id: 4, value: { packageData: { x: { state: 2, icon: 'big' } } } },
     {
-      '["/packageData",{"include":["/*/state"]}]': { epoch: 'boot', id: 4 },
-      '/packageData/x': { epoch: 'boot', id: 4 },
+      [subscriptionKey('/packageData', projection)]: { epoch: 'boot', id: 4 },
+      '/packageData/x': { epoch: 'boot', id: 3 },
     },
   )
   f.db.start()
   f.project(projection, 'packageData')
   assert.equal(f.calls.at(-1).since, null)
+})
+
+test('covering subscriptions contain each subscription they replace', () => {
+  const keys = [
+    ['/rows', { include: ['/*/a'] }],
+    ['/rows', { include: ['/*/b'] }],
+    ['/rows/x', null],
+    ['/rows', { exclude: ['/*/icon'] }],
+    ['/rows/x', { depth: 1 }],
+    ['/rows', { depth: 2, include: ['/*/a'] }],
+    ['/rows/y', { exclude: ['/icon'] }],
+  ].map(([pointer, projection]) => subscriptionKey(pointer, projection))
+  for (let mask = 1; mask < 1 << keys.length; mask++) {
+    const subset = keys.filter((_, i) => mask & (1 << i))
+    const cover = covering(subset)
+    subset.forEach(key => assert.ok(contains(cover, key), `${cover} ⊇ ${key}`))
+  }
+  assert.ok(!contains(keys[0], keys[1]))
+  assert.ok(!contains(keys[3], keys[2]))
+  assert.ok(
+    contains(keys[3], subscriptionKey('/rows/x', { exclude: ['/icon'] })),
+  )
+  assert.ok(!contains(keys[4], keys[2]))
+  assert.ok(contains(keys[2], keys[4]))
+  assert.equal(
+    covering([subscriptionKey('/rows', { include: ['/*/a'] }), '/rows/80']),
+    '/rows',
+  )
+  assert.throws(() => normalizeProjection({ include: ['/arr/1'] }))
+  assert.throws(() => normalizeProjection({ exclude: ['/arr/-'] }))
 })

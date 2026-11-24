@@ -1176,6 +1176,14 @@ error.backup-password-mismatch:
   fr_FR: "Mot de Passe de Sauvegarde Non Concordant"
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
+# db/mod.rs
+db.projection-array-position:
+  en_US: "Projection pattern %{pattern} addresses an array position; use * for array elements"
+  de_DE: "Projektionsmuster %{pattern} adressiert eine Array-Position; verwenden Sie * für Array-Elemente"
+  es_ES: "El patrón de proyección %{pattern} se refiere a una posición de arreglo; use * para los elementos de arreglos"
+  fr_FR: "Le motif de projection %{pattern} désigne une position de tableau ; utilisez * pour les éléments de tableau"
+  pl_PL: "Wzorzec projekcji %{pattern} wskazuje pozycję w tablicy; dla elementów tablicy użyj *"
+
 # disk/main.rs
 disk.main.defrag-failed:
   en_US: "Filesystem optimization failed; continuing with the converted filesystem."

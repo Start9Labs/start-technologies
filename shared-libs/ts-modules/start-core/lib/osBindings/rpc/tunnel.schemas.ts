@@ -480,7 +480,7 @@ export const ProjectionParams: z.ZodObject<{
   depth: z.ZodOptional<z.ZodNullable<z.ZodInt>>
   /**
    * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
-   * Empty keeps everything. Array elements are addressed only by `*`.
+   * Empty keeps everything. Segments that are array positions (digits or `-`) are rejected.
    */
   include: z.ZodOptional<z.ZodArray<z.ZodString>>
   /**
@@ -497,11 +497,11 @@ export const ProjectionParams: z.ZodObject<{
   }),
   /**
    * Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
-   * Empty keeps everything. Array elements are addressed only by `*`.
+   * Empty keeps everything. Segments that are array positions (digits or `-`) are rejected.
    */
   include: z.array(z.string()).optional().meta({
     description:
-      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. Array elements are addressed only by `*`.',
+      'Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. Segments that are array positions (digits or `-`) are rejected.',
   }),
   /**
    * Subtrees removed from what `include` keeps, in the same form.

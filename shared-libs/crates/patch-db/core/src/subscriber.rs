@@ -166,7 +166,7 @@ impl Broadcast {
         });
         let (send, recv) = mpsc::unbounded_channel();
         self.listeners
-            .entry((ptr, projection.normalized()))
+            .entry((ptr, projection))
             .or_default()
             .unbounded
             .push(send);

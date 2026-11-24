@@ -503,7 +503,7 @@ async fn cli_dump(
             .await?
             .dump_projected(
                 &pointer.as_ref().map_or(ROOT, |p| p.borrowed()),
-                &projection.into(),
+                &projection.try_into()?,
             )
             .await
     } else {
@@ -535,7 +535,7 @@ pub async fn dump(
         .db
         .dump_projected(
             &pointer.as_ref().map_or(ROOT, |p| p.borrowed()),
-            &projection.into(),
+            &projection.try_into()?,
         )
         .await)
 }
@@ -644,7 +644,7 @@ pub async fn subscribe(
     let pointer = pointer.unwrap_or_else(|| ROOT.to_owned());
     if let Some(stream) = rpc_stream {
         let (start, sub) =
-            subscribe_start(&ctx.db, pointer, projection.into(), since.as_ref()).await;
+            subscribe_start(&ctx.db, pointer, projection.try_into()?, since.as_ref()).await;
         crate::auth::continuation_subscription(&ctx, signer)
             .await?
             .forward_stream(
@@ -657,7 +657,7 @@ pub async fn subscribe(
     }
     let (dump, mut sub) = ctx
         .db
-        .dump_and_sub_projected(pointer, projection.into())
+        .dump_and_sub_projected(pointer, projection.try_into()?)
         .await;
     let guid = Guid::new();
     ctx.rpc_continuations

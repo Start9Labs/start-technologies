@@ -4,21 +4,21 @@ patch-db is a JSON Patch–based database with a Rust backend and a TypeScript c
 
 ## Layout
 
-| Area          | Path                                                                                    |
-| ------------- | --------------------------------------------------------------------------------------- |
-| Core API      | `core/src/store.rs` — `PatchDb`, `TypedPatchDb`, `Store`, `MutateResult`                |
-| Types         | `core/src/patch.rs` — `Revision`, `Dump`, `DiffPatch`, `diff()`                         |
-| Subscriptions | `core/src/subscriber.rs` — `DbWatch`, `TypedDbWatch`, `Subscriber`, `Broadcast`         |
-| Projections   | `core/src/projection.rs` — `Projection`: depth/include/exclude over dumps and revisions |
-| Model system  | `core/src/model.rs` — `HasModel`, `Model`, `ModelExt`, `Pointer`                        |
-| Derive macro  | `macro-internals/src/lib.rs` — `HasModel` derive implementation                         |
-| Error types   | `core/src/lib.rs` — `Error` enum, re-exports                                            |
-| JSON Pointer  | `json-ptr/src/lib.rs` — `JsonPointer`, `ROOT`, path navigation                          |
-| JSON Patch    | `json-patch/src/lib.rs` — `Patch`, `PatchOperation`, `diff()`, `patch()`                |
-| TS client     | `client/lib/patch-db.ts` — `PatchDB<T>` class                                           |
-| TS subtrees   | `client/lib/subtree-patch-db.ts` — `SubtreePatchDB<T>`: per-path server subscriptions   |
-| TS patch lib  | `client/lib/json-patch-lib.ts` — client-side patch application                          |
-| TS types      | `client/lib/types.ts` — `Revision`, `Dump`, `Update`, `PatchOp`                         |
+| Area          | Path                                                                                                              |
+| ------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Core API      | `core/src/store.rs` — `PatchDb`, `TypedPatchDb`, `Store`, `MutateResult`                                          |
+| Types         | `core/src/patch.rs` — `Revision`, `Dump`, `DiffPatch`, `diff()`                                                   |
+| Subscriptions | `core/src/subscriber.rs` — `DbWatch`, `TypedDbWatch`, `Subscriber`, `Broadcast`                                   |
+| Projections   | `core/src/projection.rs` — `Projection`: depth/include/exclude over dumps and revisions                           |
+| Model system  | `core/src/model.rs` — `HasModel`, `Model`, `ModelExt`, `Pointer`                                                  |
+| Derive macro  | `macro-internals/src/lib.rs` — `HasModel` derive implementation                                                   |
+| Error types   | `core/src/lib.rs` — `Error` enum, re-exports                                                                      |
+| JSON Pointer  | `json-ptr/src/lib.rs` — `JsonPointer`, `ROOT`, path navigation                                                    |
+| JSON Patch    | `json-patch/src/lib.rs` — `Patch`, `PatchOperation`, `diff()`, `patch()`                                          |
+| TS client     | `client/lib/patch-db.ts` — `PatchDB<T>` class                                                                     |
+| TS subtrees   | `client/lib/subtree-patch-db.ts` — `SubtreePatchDB<T>`: non-overlapping server subscriptions covering every watch |
+| TS patch lib  | `client/lib/json-patch-lib.ts` — client-side patch application                                                    |
+| TS types      | `client/lib/types.ts` — `Revision`, `Dump`, `Update`, `PatchOp`                                                   |
 
 Workspace members (`Cargo.toml`): `patch-db` (`core/`), `json-patch`, `json-ptr`, `patch-db-macro` (`macro/`), `patch-db-macro-internals` (`macro-internals/`), `patch-db-util` (`util/`).
 
