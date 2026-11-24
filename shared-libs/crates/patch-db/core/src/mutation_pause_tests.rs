@@ -8,7 +8,7 @@ use json_ptr::ROOT;
 
 use super::{cleanup_db, unique_db_path};
 use crate::patch::diff;
-use crate::PatchDb;
+use crate::{PatchDb, Projection, Update};
 
 #[tokio::test]
 async fn pause_mutations_keeps_readers_and_subscriptions_live_behind_a_queued_writer() {
@@ -27,15 +27,27 @@ async fn pause_mutations_keeps_readers_and_subscriptions_live_behind_a_queued_wr
         db.dump_and_sub_json(ROOT.to_owned(), NonZeroUsize::new(1).unwrap())
             .await
             .unwrap();
-        db.subscribe(ROOT.to_owned()).await
+        let (_, _, mut projected) = db
+            .catch_up_and_sub_mutable(ROOT.to_owned(), Projection::default(), None)
+            .await;
+        assert!(db.reproject(projected.id, Projection::default()).await);
+        let Update::Extend(extension) = projected.receiver.try_recv().unwrap() else {
+            panic!("expected a projection acknowledgement")
+        };
+        assert_eq!(extension.id, 1);
+        (db.subscribe(ROOT.to_owned()).await, projected)
     });
-    let Poll::Ready(mut subscriber) = poll!(&mut read) else {
+    let Poll::Ready((mut subscriber, mut projected)) = poll!(&mut read) else {
         panic!("queued mutations must not exclude readers or subscriptions");
     };
     assert!(subscriber.try_recv().is_err());
     drop(pause);
     write.await.unwrap();
     assert_eq!(subscriber.try_recv().unwrap().id, 2);
+    let Update::Revision(revision) = projected.receiver.try_recv().unwrap() else {
+        panic!("expected a resumed mutation")
+    };
+    assert_eq!(revision.id, 2);
     assert_eq!(db.get_value(&ROOT).await, json!(2));
 }
 

@@ -1,7 +1,7 @@
 import { Component, inject } from '@angular/core'
 import { i18nPipe } from '@start9labs/shared'
 import { TuiIcon } from '@taiga-ui/core'
-import { STATUS } from 'src/app/services/status.service'
+import { LAST_SYNCED, STATUS } from 'src/app/services/status.service'
 
 @Component({
   selector: 'header-status',
@@ -15,7 +15,12 @@ import { STATUS } from 'src/app/services/status.service'
         [attr.data-status]="status().status"
       />
     </span>
-    <span>{{ status().message | i18n }}</span>
+    <span class="message">
+      {{ status().message | i18n }}
+      @if (status().status !== 'success' && lastSynced(); as synced) {
+        <span class="synced">· {{ synced }}</span>
+      }
+    </span>
   `,
   styles: `
     @use '@taiga-ui/styles/utils' as taiga;
@@ -39,6 +44,15 @@ import { STATUS } from 'src/app/services/status.service'
       }
     }
 
+    .message {
+      white-space: nowrap;
+    }
+
+    .synced {
+      font: var(--tui-font-text-s);
+      color: var(--tui-text-secondary);
+    }
+
     :host-context(tui-root._mobile) {
       display: none;
     }
@@ -48,4 +62,5 @@ import { STATUS } from 'src/app/services/status.service'
 })
 export class HeaderStatusComponent {
   readonly status = inject(STATUS)
+  readonly lastSynced = inject(LAST_SYNCED)
 }

@@ -1127,4 +1127,6 @@ export default {
   1332: 'Iniciar sesión desde la línea de comandos',
   1333: 'Registrar este navegador',
   1334: 'Obtener ayuda',
+  1335: 'Última sincronización',
+  1336: 'justo ahora',
 } satisfies i18n

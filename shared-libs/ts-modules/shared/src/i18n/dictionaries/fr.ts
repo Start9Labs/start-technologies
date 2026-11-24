@@ -1127,4 +1127,6 @@ export default {
   1332: 'Se connecter depuis la ligne de commande',
   1333: 'Enregistrer ce navigateur',
   1334: "Obtenir de l'aide",
+  1335: 'Dernière synchronisation',
+  1336: "à l'instant",
 } satisfies i18n

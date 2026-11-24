@@ -4,7 +4,10 @@ import { GetPackageRes, MarketplacePkgBase } from '../types'
 
 export type Release = T.PackageInfoShort & { version: string }
 
-type ReleasesOf = MarketplacePkgBase &
+type ReleasesOf = Pick<
+  MarketplacePkgBase,
+  'version' | 'flavor' | 'releaseNotes' | 'defaultLocale'
+> &
   Partial<Pick<GetPackageRes, 'otherVersions'>>
 
 /** The target, then same-flavor intervening releases, newest first. */
@@ -16,7 +19,9 @@ export function pendingReleases(
   const pending =
     installed && exver.getFlavor(installed) === pkg.flavor
       ? Object.entries(pkg.otherVersions || {})
-          .map(([version, info]) => ({ ...info, version }))
+          .flatMap(([version, { releaseNotes, ...info }]) =>
+            releaseNotes ? [{ ...info, releaseNotes, version }] : [],
+          )
           .filter(
             ({ version }) =>
               exver.getFlavor(version) === pkg.flavor &&

@@ -1127,4 +1127,6 @@ export default {
   1332: 'Zaloguj się z wiersza poleceń',
   1333: 'Zarejestruj tę przeglądarkę',
   1334: 'Uzyskaj pomoc',
+  1335: 'Ostatnia synchronizacja',
+  1336: 'przed chwilą',
 } satisfies i18n

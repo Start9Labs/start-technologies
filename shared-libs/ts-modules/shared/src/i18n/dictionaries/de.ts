@@ -1127,4 +1127,6 @@ export default {
   1332: 'Über die Befehlszeile anmelden',
   1333: 'Diesen Browser registrieren',
   1334: 'Hilfe erhalten',
+  1335: 'Zuletzt synchronisiert',
+  1336: 'gerade eben',
 } satisfies i18n
