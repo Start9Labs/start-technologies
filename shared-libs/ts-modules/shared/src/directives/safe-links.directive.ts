@@ -24,8 +24,7 @@ export class SafeLinksDirective {
       Array.from(this.doc.links)
         .filter(
           link =>
-            link.origin !== this.doc.location.origin &&
-            this.el.contains(link),
+            link.origin !== this.doc.location.origin && this.el.contains(link),
         )
         .forEach(link => {
           link.target = '_blank'

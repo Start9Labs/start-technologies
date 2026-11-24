@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import '@angular/compiler'
-import { DOCUMENT, ElementRef, Injector, runInInjectionContext } from '@angular/core'
+import {
+  DOCUMENT,
+  ElementRef,
+  Injector,
+  runInInjectionContext,
+} from '@angular/core'
 import { WaMutationObserverService } from '@ng-web-apis/mutation-observer'
 import { Subject } from 'rxjs'
 import './typescript-loader.mjs'
