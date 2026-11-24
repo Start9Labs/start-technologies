@@ -165,7 +165,7 @@ impl Broadcast {
     }
 
     /// Sends a revision, given the database after it, to every listener.
-    pub fn send(&mut self, value: &Arc<Revision>, after: &Value) {
+    pub fn send(&mut self, value: &Arc<Revision>, after: &OrdValue) {
         self.prune();
         while self.history.len() >= HISTORY_LEN {
             self.history.pop_front();
