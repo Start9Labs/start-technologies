@@ -655,9 +655,6 @@ An HTTP-proxied binding, with or without `addSsl`, reaches your container over I
 
 Gate an HTTP-proxied binding with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and are not forwarded. You do **not** need to build auth into the service or run a sidecar proxy to gate the addresses StartOS publishes.
 
-> [!WARNING]
-> The gate guards the proxy, not your container. Every service on the server shares one bridge, so another service can still dial your container's own IP and reach the port directly, ungated. Treat `proxy.auth` as protection from the network, not from other services: where the app holds something worth stealing (keys, funds, admin over another service), keep the app's own login on as well. Bind listeners used only by your own daemons to loopback; ports consumed by other services or off-server clients must listen on the container's bridge addresses, including raw TCP, UDP and TLS-passthrough ports without an HTTP proxy (see [Service-to-Service Networking](service-to-service.md)).
-
 `auth` takes a `ProxyAuth`, which is one of two shapes:
 
 ```typescript
