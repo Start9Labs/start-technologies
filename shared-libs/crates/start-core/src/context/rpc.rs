@@ -46,7 +46,7 @@ use crate::net::web_server::WebServerAcceptorSetter;
 use crate::net::wifi::WpaCli;
 use crate::prelude::*;
 use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle};
-use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
+use crate::rpc_continuations::{Guid, OpenAuthedContinuations, RpcContinuations};
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::DynFileSource;
 use crate::service::ServiceMap;
@@ -128,6 +128,8 @@ pub struct RpcContextSeed {
     pub auth_sig_nonce_cache: SyncMutex<NonceCache>,
     pub db: TypedPatchDb<Database>,
     pub sync_db: watch::Sender<u64>,
+    /// The patch-db subscription behind each `db.subscribe` stream, for `db.subscription.update`.
+    pub db_subscriptions: SyncMutex<BTreeMap<Guid, u64>>,
     registry_refresh: mpsc::Sender<Url>,
     pub disk_updates: watch::Sender<()>,
     pub account: SyncRwLock<AccountInfo>,
@@ -541,6 +543,7 @@ impl RpcContext {
             ephemeral_auth_keys: SyncMutex::new(AuthKeys::new()),
             auth_sig_nonce_cache: SyncMutex::new(Default::default()),
             sync_db: watch::Sender::new(db.sequence().await),
+            db_subscriptions: SyncMutex::new(BTreeMap::new()),
             registry_refresh,
             disk_updates: watch::Sender::new(()),
             db,

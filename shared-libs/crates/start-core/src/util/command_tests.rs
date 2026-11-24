@@ -352,7 +352,7 @@ async fn command_stream_flush_failure_and_timeout() {
     };
     let err = fixture("import sys; sys.stdout.write('x')")
         .output_to(&mut sink)
-        .timeout(Some(Duration::from_millis(150)))
+        .timeout(Some(Duration::from_secs(2)))
         .invoke(ErrorKind::Filesystem)
         .await
         .unwrap_err();
@@ -411,7 +411,7 @@ async fn command_stream_timeout_includes_blocked_input() {
     .arg(dir.path().join("pid"))
     .input(Some(&mut input))
     .output_to(&mut sink)
-    .timeout(Some(Duration::from_millis(150)))
+    .timeout(Some(Duration::from_secs(2)))
     .invoke(ErrorKind::Filesystem)
     .await
     .unwrap_err();

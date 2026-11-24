@@ -387,10 +387,11 @@ pub(super) async fn restore_volume<G: GenericMountGuard>(
         |id, volume| async move {
             ctx.db
                 .mutate(|db| {
-                    db.as_public_mut()
-                        .as_shared_volumes_mut()
-                        .insert(&id, &volume)?;
-                    Ok(())
+                    crate::shared_volumes::insert_with_unused_name(
+                        db.as_public_mut().as_shared_volumes_mut(),
+                        &id,
+                        volume.clone(),
+                    )
                 })
                 .await
                 .result

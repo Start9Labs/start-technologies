@@ -42,7 +42,8 @@ export function localizePackageRes(
       res.otherVersions &&
       mapValues(res.otherVersions, v => ({
         ...v,
-        releaseNotes: localize(v.releaseNotes, v.defaultLocale),
+        releaseNotes:
+          v.releaseNotes && localize(v.releaseNotes, v.defaultLocale),
       })),
   }
 }

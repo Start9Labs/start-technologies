@@ -204,7 +204,7 @@ impl UiContext for DiagnosticContext {
     fn middleware(server: Server<Self>) -> HttpServer<Self> {
         server
             .middleware(RequireJson)
-            .middleware(Auth::new().with_local_auth())
+            .middleware(Auth::new().with_local_auth().with_shadow_password_auth())
     }
     fn apply_outer_layers(self, router: Router) -> Router {
         local_hosts_only(router)

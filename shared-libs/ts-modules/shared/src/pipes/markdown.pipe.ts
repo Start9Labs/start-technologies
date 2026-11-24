@@ -5,7 +5,10 @@ import { marked } from 'marked'
   name: 'markdown',
 })
 export class MarkdownPipe implements PipeTransform {
-  transform(value: string, options?: marked.MarkedOptions): string {
+  transform(
+    value: string | null | undefined,
+    options?: marked.MarkedOptions,
+  ): string {
     return value?.length ? marked(value, options) : ''
   }
 }

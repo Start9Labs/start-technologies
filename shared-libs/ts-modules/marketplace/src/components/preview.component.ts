@@ -217,11 +217,18 @@ export class MarketplacePreviewComponent {
     const { packages } = await firstValueFrom(
       this.marketplaceService.currentRegistry$,
     )
-    const match = packages.find(
-      p =>
-        p.id === this.pkgId() &&
-        p.flavor !== current &&
-        !!compatibleVersions(this.exver, p, range).length,
+    const flavors = packages.filter(
+      p => p.id === this.pkgId() && p.flavor !== current,
+    )
+    const resolved = await Promise.all(
+      flavors.map(p =>
+        firstValueFrom(
+          this.marketplaceService.getPackage$(p.id, null, p.flavor),
+        ),
+      ),
+    )
+    const match = resolved.find(
+      p => !!p && !!compatibleVersions(this.exver, p, range).length,
     )
 
     if (match) {

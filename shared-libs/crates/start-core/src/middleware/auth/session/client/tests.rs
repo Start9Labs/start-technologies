@@ -64,7 +64,7 @@ async fn actual_cli_reuses_connections_after_application_errors_and_scopes_heade
         assert_eq!(result.is_err(), method == "registry.missing-method");
     }
     assert_eq!(upgrades.load(Ordering::SeqCst), 1);
-    let ws = super::RpcSessionUpgrader::url(url).unwrap();
+    let ws = RpcSessionUpgrader::url(url).unwrap();
     let mut headers = HeaderMap::new();
     headers.insert("x-instance", "other".parse().unwrap());
     ctx.rpc_client
@@ -95,19 +95,19 @@ async fn actual_cli_reuses_connections_after_application_errors_and_scopes_heade
 }
 
 #[test]
-fn rpc_endpoint_replacement_retains_prefix_query_and_ipv6() {
-    for (source, expected) in [
+fn session_endpoint_retains_prefix_query_and_ipv6() {
+    for (base, expected) in [
         (
-            "https://registry.test/prefix/rpc/v0?keep=value",
+            "https://registry.test/prefix?keep=value",
             "wss://registry.test/prefix/rpc/v2?keep=value",
         ),
         (
-            "http://[2001:db8::1]:5959/rpc/v1",
+            "http://[2001:db8::1]:5959/",
             "ws://[2001:db8::1]:5959/rpc/v2",
         ),
     ] {
         assert_eq!(
-            super::websocket_url(source.parse().unwrap())
+            RpcSessionUpgrader::url(base.parse().unwrap())
                 .unwrap()
                 .as_str(),
             expected
@@ -134,11 +134,16 @@ fn http_rpc_urls_share_versioned_prefix_and_query_normalization() {
         })
         .unwrap();
         assert_eq!(
-            ctx.rpc_url().unwrap().as_str(),
+            crate::util::net::rpc_url(
+                ctx.base_url.get().unwrap(),
+                crate::context::cli::SERVER_HTTP_RPC_VERSION
+            )
+            .unwrap()
+            .as_str(),
             "https://registry.test/prefix/rpc/v1?keep=value"
         );
         assert_eq!(
-            super::RpcSessionUpgrader::url(url).unwrap().as_str(),
+            RpcSessionUpgrader::url(url).unwrap().as_str(),
             "wss://registry.test/prefix/rpc/v2?keep=value"
         );
     }
@@ -404,7 +409,7 @@ async fn diagnostic_recovery_without_a_persistent_key_is_encrypted_and_advertise
     let (peer, mut socket) = super::connect(
         &reqwest::Client::new(),
         &signer,
-        super::RpcSessionUpgrader::url(url.clone()).unwrap(),
+        RpcSessionUpgrader::url(url.clone()).unwrap(),
         "127.0.0.1",
         crate::sign::session::Target::Rpc,
         HeaderMap::new(),
@@ -454,7 +459,7 @@ async fn actual_registry_cli_dispatch_and_promotion_use_encrypted_admission() {
     assert_eq!(result.as_object().map(|r| r.len()), Some(1));
     let result = crate::registry::package::promote::call_registry(
         &ctx,
-        crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
+        url.clone(),
         "admin.reader.list",
         imbl_value::json!({}),
     )
@@ -651,7 +656,7 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     assert!(
         crate::registry::package::promote::call_registry(
             &rejected,
-            crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
+            url.clone(),
             "admin.reader.list",
             imbl_value::json!({}),
         )
@@ -673,7 +678,7 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     trusted.id_key.set(admin.clone()).unwrap();
     let result = crate::registry::package::promote::call_registry(
         &trusted,
-        crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
+        url.clone(),
         "admin.reader.list",
         imbl_value::json!({}),
     )
@@ -739,7 +744,7 @@ async fn websocket_client_retains_ca_and_insecure_policy_without_altering_ordina
     insecure.id_key.set(admin).unwrap();
     let result = crate::registry::package::promote::call_registry(
         &insecure,
-        crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
+        url.clone(),
         "admin.reader.list",
         imbl_value::json!({}),
     )
@@ -784,7 +789,7 @@ async fn secure_registry_refusal_never_sends_a_plaintext_rpc() {
     let (ctx, _identity) = cli(&url, admin);
     let result = crate::registry::package::promote::call_registry(
         &ctx,
-        crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
+        url.clone(),
         "package.index",
         imbl_value::json!({}),
     )
@@ -1162,10 +1167,9 @@ async fn missing_identity_keeps_public_http_but_malformed_identity_fails_closed(
         ctx.id_key().unwrap_err().kind,
         crate::ErrorKind::Uninitialized
     );
-    let endpoint = crate::registry::package::promote::registry_rpc_url(&url).unwrap();
     let result = crate::registry::context::call_cli(
         &ctx,
-        endpoint.clone(),
+        &url,
         HeaderMap::new(),
         "127.0.0.1",
         "package.index",
@@ -1178,7 +1182,7 @@ async fn missing_identity_keeps_public_http_but_malformed_identity_fails_closed(
     assert!(
         crate::registry::context::call_cli(
             &ctx,
-            endpoint,
+            &url,
             HeaderMap::new(),
             "127.0.0.1",
             "package.index",
@@ -1212,7 +1216,7 @@ async fn local_bearer_keeps_the_http_and_exact_header_contract() {
     );
     let result = crate::registry::context::call_cli(
         &ctx,
-        crate::registry::package::promote::registry_rpc_url(&url).unwrap(),
+        &url,
         headers,
         "127.0.0.1",
         "package.index",

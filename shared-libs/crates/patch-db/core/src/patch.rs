@@ -38,6 +38,13 @@ pub enum Catchup {
     Replay { id: u64, revisions: Vec<Revision> },
 }
 
+/// [`Catchup`] whose dump is the shared serialized JSON of a [`Dump`].
+#[derive(Debug, Clone)]
+pub enum JsonCatchup {
+    Dump(bytes::Bytes),
+    Replay { id: u64, revisions: Vec<Revision> },
+}
+
 /// Database-generated patches contain only add, remove and replace operations.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
@@ -246,6 +253,16 @@ impl DiffPatch {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// The location each operation writes.
+    pub fn paths(&self) -> impl Iterator<Item = &JsonPointer<String>> {
+        (self.0).0.iter().map(|op| match op {
+            PatchOperation::Add(op) => &op.path,
+            PatchOperation::Replace(op) => &op.path,
+            PatchOperation::Remove(op) => &op.path,
+            _ => unreachable!(),
+        })
     }
 }
 impl Default for DiffPatch {

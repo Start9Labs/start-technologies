@@ -1686,14 +1686,78 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$defs": {
         "DumpParams": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": { "pointer": { "type": ["string", "null"] } },
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/ProjectionParams" }
+          ]
+        },
+        "ProjectionParams": {
+          "type": "object",
+          "properties": {
+            "depth": {
+              "description": "Levels kept below the pointer; deeper objects and arrays become empty.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "include": {
+              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "exclude": {
+              "description": "Subtrees removed from what `include` keeps, in the same form.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "selectors": {
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/SelectorParams" }
+            }
+          },
+          "additionalProperties": true,
+          "description": "Narrows a dumped or subscribed subtree; omitted fields narrow nothing."
+        },
+        "SelectorParams": {
+          "type": "object",
+          "properties": {
+            "include": { "type": "string" },
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["include"],
+          "additionalProperties": true,
+          "description": "One subtree kept, with patterns and depth relative to the dumped or subscribed subtree."
+        }
+      },
+      "allOf": [
+        {
           "type": "object",
           "properties": { "pointer": { "type": ["string", "null"] } },
           "additionalProperties": true
-        }
-      },
-      "type": "object",
-      "properties": { "pointer": { "type": ["string", "null"] } },
-      "additionalProperties": true
+        },
+        { "$ref": "#/$defs/ProjectionParams" }
+      ],
+      "type": "object"
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1763,15 +1827,20 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$defs": {
         "SubscribeParams": {
-          "type": "object",
-          "properties": {
-            "pointer": { "type": ["string", "null"] },
-            "since": {
-              "description": "The subscriber's last revision; resumes only within the epoch that reported it.",
-              "anyOf": [{ "$ref": "#/$defs/DbCursor" }, { "type": "null" }]
-            }
-          },
-          "additionalProperties": true
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "pointer": { "type": ["string", "null"] },
+                "since": {
+                  "description": "The subscriber's last revision; resumes only within the epoch that reported it.",
+                  "anyOf": [{ "$ref": "#/$defs/DbCursor" }, { "type": "null" }]
+                }
+              },
+              "additionalProperties": true
+            },
+            { "$ref": "#/$defs/ProjectionParams" }
+          ]
         },
         "DbCursor": {
           "type": "object",
@@ -1785,17 +1854,175 @@
           },
           "required": ["epoch", "id"],
           "additionalProperties": true
+        },
+        "ProjectionParams": {
+          "type": "object",
+          "properties": {
+            "depth": {
+              "description": "Levels kept below the pointer; deeper objects and arrays become empty.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "include": {
+              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "exclude": {
+              "description": "Subtrees removed from what `include` keeps, in the same form.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "selectors": {
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/SelectorParams" }
+            }
+          },
+          "additionalProperties": true,
+          "description": "Narrows a dumped or subscribed subtree; omitted fields narrow nothing."
+        },
+        "SelectorParams": {
+          "type": "object",
+          "properties": {
+            "include": { "type": "string" },
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["include"],
+          "additionalProperties": true,
+          "description": "One subtree kept, with patterns and depth relative to the dumped or subscribed subtree."
         }
       },
-      "type": "object",
-      "properties": {
-        "pointer": { "type": ["string", "null"] },
-        "since": {
-          "description": "The subscriber's last revision; resumes only within the epoch that reported it.",
-          "anyOf": [{ "$ref": "#/$defs/DbCursor" }, { "type": "null" }]
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "pointer": { "type": ["string", "null"] },
+            "since": {
+              "description": "The subscriber's last revision; resumes only within the epoch that reported it.",
+              "anyOf": [{ "$ref": "#/$defs/DbCursor" }, { "type": "null" }]
+            }
+          },
+          "additionalProperties": true
+        },
+        { "$ref": "#/$defs/ProjectionParams" }
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "db.subscription.update",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateSubscriptionParams": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "subscription": {
+                  "description": "The `subscription` of the stream's start.",
+                  "$ref": "#/$defs/Guid"
+                }
+              },
+              "required": ["subscription"],
+              "additionalProperties": true
+            },
+            {
+              "description": "The stream's new projection, replacing the previous one.",
+              "$ref": "#/$defs/ProjectionParams"
+            }
+          ]
+        },
+        "Guid": { "type": "string" },
+        "SelectorParams": {
+          "type": "object",
+          "properties": {
+            "include": { "type": "string" },
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["include"],
+          "additionalProperties": true,
+          "description": "One subtree kept, with patterns and depth relative to the dumped or subscribed subtree."
+        },
+        "ProjectionParams": {
+          "type": "object",
+          "properties": {
+            "depth": {
+              "description": "Levels kept below the pointer; deeper objects and arrays become empty.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "include": {
+              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. A numeric segment matches that key or array position.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "exclude": {
+              "description": "Subtrees removed from what `include` keeps, in the same form.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "selectors": {
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/SelectorParams" }
+            }
+          },
+          "additionalProperties": true,
+          "description": "Narrows a dumped or subscribed subtree; omitted fields narrow nothing."
         }
       },
-      "additionalProperties": true
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "subscription": {
+              "description": "The `subscription` of the stream's start.",
+              "$ref": "#/$defs/Guid"
+            }
+          },
+          "required": ["subscription"],
+          "additionalProperties": true
+        },
+        {
+          "description": "The stream's new projection, replacing the previous one.",
+          "$ref": "#/$defs/ProjectionParams"
+        }
+      ],
+      "type": "object"
     }
   },
   {
@@ -9323,7 +9550,10 @@
             {
               "type": "object",
               "properties": {
-                "name": { "type": "string" },
+                "name": {
+                  "type": "string",
+                  "description": "A unique single folder name; services mount a volume at a path matching it."
+                },
                 "source": { "$ref": "#/$defs/SharedVolumeSource" },
                 "grants": {
                   "type": "object",
