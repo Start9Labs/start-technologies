@@ -35,13 +35,15 @@ pub struct CliPromoteParams {
     pub version: VersionString,
 }
 
+/// Legacy HTTP RPC endpoint under a registry base URL.
 pub fn registry_rpc_url(url: &Url) -> Result<Url, Error> {
     crate::util::net::rpc_url(url, 0)
 }
 
+/// The selected registry's base URL.
 pub fn resolve_registry_url(explicit: Option<&str>, ctx: &CliContext) -> Result<Url, Error> {
     if let Some(target) = explicit {
-        registry_rpc_url(&resolve_profile(ctx.registry_profiles.as_ref(), target)?)
+        resolve_profile(ctx.registry_profiles.as_ref(), target)
     } else if let Some(url) = &ctx.registry_url {
         Ok(url.get()?.clone())
     } else {
@@ -72,7 +74,7 @@ async fn call_registry_rpc(
     let sig_context = url.host().as_ref().map(InternedString::from_display);
     crate::registry::context::call_cli(
         ctx,
-        url,
+        &url,
         HeaderMap::new(),
         sig_context.as_deref().or_not_found("registry hostname")?,
         method,
@@ -292,7 +294,6 @@ mod tests {
         })
         .unwrap();
         cli.id_key.set(Signer::from(key)).unwrap();
-        let url = registry_rpc_url(&url).unwrap();
         let missing_method = call_registry_rpc(
             &cli,
             url.clone(),
@@ -337,16 +338,16 @@ mod tests {
                 resolve_registry_url(from.as_deref(), &ctx)
                     .unwrap()
                     .as_str(),
-                "https://alpha/registry/rpc/v0",
+                "https://alpha/registry",
             );
             assert_eq!(
                 resolve_registry_url(to.as_deref(), &ctx).unwrap().as_str(),
-                "https://production/registry/rpc/v0",
+                "https://production/registry",
             );
         }
         assert_eq!(
             resolve_registry_url(None, &ctx).unwrap().as_str(),
-            "https://fallback/rpc/v0",
+            "https://fallback/",
         );
     }
 
@@ -355,20 +356,20 @@ mod tests {
         let ctx = context("registry:\n  alpha: https://alpha/");
         assert_eq!(
             resolve_registry_url(Some("alpha"), &ctx).unwrap().as_str(),
-            "https://alpha/rpc/v0",
+            "https://alpha/",
         );
         assert_eq!(
             resolve_registry_url(Some("https://literal/base"), &ctx)
                 .unwrap()
                 .as_str(),
-            "https://literal/base/rpc/v0",
+            "https://literal/base",
         );
         assert!(resolve_registry_url(None, &ctx).is_err());
         assert_eq!(
             resolve_registry_url(Some("https://literal/"), &context("{}"))
                 .unwrap()
                 .as_str(),
-            "https://literal/rpc/v0",
+            "https://literal/",
         );
     }
 

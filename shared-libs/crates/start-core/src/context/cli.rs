@@ -23,10 +23,10 @@ use crate::developer::{
     OS_ID_KEY_PATH, default_id_key_path, load_signing_key, migrate_legacy_key_file,
 };
 use crate::middleware::auth::local::local_auth_header_for_url;
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::middleware::auth::signature::SigningContext;
 use crate::net::mdns::pin_mdns_host;
 use crate::prelude::*;
-use crate::registry::package::promote::registry_rpc_url;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::init::{
     BUILD_KEY_FILE, STARTOS_DIR, complete_signing_workspace, find_signing_workspace,
@@ -41,6 +41,9 @@ mod progress_tests;
 mod registry_tests;
 pub use continuation::CliWebSocketContext;
 
+/// Legacy HTTP RPC version a StartOS server serves.
+pub(crate) const SERVER_HTTP_RPC_VERSION: u8 = 1;
+
 /// A configured target whose `.local` host is resolved on first use, so an
 /// unreachable one never fails a command that doesn't contact it.
 #[derive(Debug)]
@@ -49,6 +52,11 @@ pub struct LazyUrl {
     pinned: OnceCell<Url>,
 }
 impl LazyUrl {
+    /// The target as configured, before `.local` resolution.
+    pub(crate) fn unpinned(&self) -> &Url {
+        &self.unpinned
+    }
+
     pub(crate) fn selected_host(&self) -> Option<&str> {
         self.unpinned.host_str()
     }
@@ -78,8 +86,6 @@ pub struct CliContextSeed {
     /// Selected server name before `.local` resolution changes the dial address.
     pub host_identity: Option<InternedString>,
     pub registry_url: Option<LazyUrl>,
-    /// The selected registry as a server saves it, without the RPC path or `.local` resolution.
-    pub registry_base_url: Option<Url>,
     pub registry_profiles: Option<Profiles>,
     pub registry_hostname: Vec<InternedString>,
     pub registry_listen: Option<SocketAddr>,
@@ -164,11 +170,7 @@ impl CliContext {
         Ok(CliContext(Arc::new(CliContextSeed {
             runtime: OnceCell::new(),
             base_url: url.into(),
-            registry_url: registry
-                .as_ref()
-                .map(|registry| registry_rpc_url(registry).map(LazyUrl::from))
-                .transpose()?,
-            registry_base_url: registry,
+            registry_url: registry.map(LazyUrl::from),
             registry_profiles: config.registry,
             registry_hostname: config.registry_hostname.unwrap_or_default(),
             registry_listen: config.registry_listen,
@@ -236,11 +238,6 @@ impl CliContext {
         load_signing_key(root.join(STARTOS_DIR).join(BUILD_KEY_FILE))
     }
 
-    /// BLOCKING
-    pub fn rpc_url(&self) -> Result<Url, Error> {
-        crate::util::net::rpc_url(self.base_url.get()?, 1)
-    }
-
     pub async fn rest_continuation(
         &self,
         guid: Guid,
@@ -264,9 +261,11 @@ impl CliContext {
             .with_kind(ErrorKind::Network)
     }
 
+    /// Unsigned calls fall back to HTTP at the versioned endpoint under the base.
     pub(crate) async fn call_rpc(
         &self,
-        url: Url,
+        base: &Url,
+        http_version: u8,
         headers: HeaderMap,
         address: &str,
         method: &str,
@@ -277,7 +276,7 @@ impl CliContext {
                 .rpc_client
                 .call(
                     &signer,
-                    crate::middleware::auth::session::client::websocket_url(url)?,
+                    RpcSessionUpgrader::url(base.clone())?,
                     address,
                     headers,
                     method,
@@ -287,7 +286,7 @@ impl CliContext {
         }
         crate::middleware::auth::signature::call_http(
             self.client.clone(),
-            url,
+            crate::util::net::rpc_url(base, http_version)?,
             headers,
             method,
             params,
@@ -304,14 +303,14 @@ impl CliContext {
         method: &str,
         params: Value,
     ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error> {
-        let url = self.rpc_url()?;
+        let base = self.base_url.get()?;
         let mut headers = HeaderMap::new();
-        if let Some(auth) = local_auth_header_for_url::<RpcContext>(&url).await {
+        if let Some(auth) = local_auth_header_for_url::<RpcContext>(base).await {
             headers.insert(AUTHORIZATION, auth);
         }
-        let call = || self.stream_rpc(url.clone(), headers.clone(), method, params.clone());
+        let call = || self.stream_rpc(base, headers.clone(), method, params.clone());
         let result = match call().await {
-            Err(error) if self.login_on_rejection(&error, method, &url).await? => call().await,
+            Err(error) if self.login_on_rejection(&error, method, base).await? => call().await,
             result => result,
         };
         result
@@ -324,7 +323,7 @@ impl CliContext {
         Final: serde::de::DeserializeOwned,
     >(
         &self,
-        url: Url,
+        base: &Url,
         headers: HeaderMap,
         method: &str,
         params: Value,
@@ -336,12 +335,12 @@ impl CliContext {
         let address = self
             .host_identity
             .as_deref()
-            .or_else(|| url.host_str())
+            .or_else(|| base.host_str())
             .or_not_found("server hostname")?;
         self.rpc_client
             .stream(
                 signer,
-                crate::middleware::auth::session::client::websocket_url(url.clone())?,
+                RpcSessionUpgrader::url(base.clone())?,
                 address,
                 headers,
                 method,
@@ -386,7 +385,7 @@ impl CliContext {
         self.rpc_client
             .call(
                 self.rpc_client.ephemeral_signer(),
-                crate::middleware::auth::session::client::websocket_url(self.rpc_url()?)?,
+                RpcSessionUpgrader::url(self.base_url.get()?.clone())?,
                 self.host_identity.as_deref().unwrap_or_default(),
                 headers,
                 method,
@@ -407,7 +406,7 @@ impl CliContext {
         self.rpc_client
             .stream(
                 self.rpc_client.ephemeral_signer(),
-                crate::middleware::auth::session::client::websocket_url(self.rpc_url()?)?,
+                RpcSessionUpgrader::url(self.base_url.get()?.clone())?,
                 self.host_identity.as_deref().unwrap_or_default(),
                 headers,
                 method,
@@ -424,9 +423,10 @@ impl CliContext {
         method: &str,
         params: Value,
     ) -> Result<crate::util::rpc_client::RpcResponseStream<Value, Item, Final>, Error> {
-        let url = self.rpc_url()?;
         let mut headers = HeaderMap::new();
-        if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&url).await {
+        if let Some(auth) =
+            local_auth_header_for_url::<DiagnosticContext>(self.base_url.get()?).await
+        {
             headers.insert(AUTHORIZATION, auth);
         }
         self.call_startup_stream(method, params, headers)
@@ -526,14 +526,15 @@ impl CallRemote<RpcContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        let rpc_url = self.rpc_url()?;
+        let base = self.base_url.get()?;
         let mut headers = HeaderMap::new();
-        if let Some(auth) = local_auth_header_for_url::<RpcContext>(&rpc_url).await {
+        if let Some(auth) = local_auth_header_for_url::<RpcContext>(base).await {
             headers.insert(AUTHORIZATION, auth);
         }
         let call = || {
             self.call_rpc(
-                rpc_url.clone(),
+                base,
+                SERVER_HTTP_RPC_VERSION,
                 headers.clone(),
                 self.host_identity.as_deref().unwrap_or_default(),
                 method,
@@ -541,7 +542,7 @@ impl CallRemote<RpcContext> for CliContext {
             )
         };
         match call().await {
-            Err(error) if self.login_on_rejection(&error, method, &rpc_url).await? => call().await,
+            Err(error) if self.login_on_rejection(&error, method, base).await? => call().await,
             res => res,
         }
     }
@@ -554,9 +555,10 @@ impl CallRemote<DiagnosticContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        let rpc_url = self.rpc_url()?;
         let mut headers = HeaderMap::new();
-        if let Some(auth) = local_auth_header_for_url::<DiagnosticContext>(&rpc_url).await {
+        if let Some(auth) =
+            local_auth_header_for_url::<DiagnosticContext>(self.base_url.get()?).await
+        {
             headers.insert(AUTHORIZATION, auth);
         }
         self.call_startup_rpc(method, params, headers).await
