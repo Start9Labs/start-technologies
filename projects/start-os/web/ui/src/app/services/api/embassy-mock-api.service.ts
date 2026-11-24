@@ -66,6 +66,7 @@ import {
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { ConfigService } from 'src/app/services/config.service'
+import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
 import { getDriveName } from 'src/app/utils/get-drive-name'
@@ -155,6 +156,7 @@ export class MockApiService extends ApiService implements StartupApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
+  private readonly cache = inject(PATCH_CACHE)
   private mockDocument?: Promise<Dump<DataModel>>
   private mockDoc?: Dump<DataModel>
 

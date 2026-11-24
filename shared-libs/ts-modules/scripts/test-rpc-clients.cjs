@@ -1626,6 +1626,7 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
   )
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ id: 0 }))
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
