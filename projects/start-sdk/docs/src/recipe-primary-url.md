@@ -1,6 +1,6 @@
 # Set a Primary URL
 
-Some services need to know which URL they're hosted at — for generating links, sending invites, federating with other servers, or embedding in emails. Since StartOS services can be reached via multiple addresses (LAN, Tor, clearnet), the user must choose which URL the service treats as primary.
+Some services need to know which URL they're hosted at — for generating links, sending invites, federating with other servers, or embedding in emails. Any upstream setting that names the service's own address (an external, base, root, public or site URL) is one of these, even when it only builds the links in its UI, alerts or notifications: left unset, those links name the container and open nowhere. Since StartOS services can be reached via multiple addresses (LAN, Tor, clearnet), the user must choose which URL the service treats as primary.
 
 ## Solution
 
