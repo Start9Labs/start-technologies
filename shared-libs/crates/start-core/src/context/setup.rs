@@ -8,7 +8,7 @@ use futures::{Future, FutureExt};
 use imbl_value::InternedString;
 use josekit::jwk::Jwk;
 use openssl::x509::X509;
-use patch_db::PatchDb;
+use patch_db::{PatchDb, WeakPatchDb};
 use rpc_toolkit::Context;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
@@ -54,7 +54,15 @@ pub struct SetupResult {
 rpc_toolkit::reflect_ts!(SetupResult);
 rpc_toolkit::ts_export!(SetupResult, namespaces = [""]);
 
+const DB_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
 type SetupTask = Shared<BoxFuture<'static, Result<(), Arc<tokio::task::JoinError>>>>;
+
+enum SetupTaskSlot {
+    Idle,
+    Running(tokio::task::AbortHandle, SetupTask),
+    ShuttingDown,
+}
 
 pub struct SetupContextSeed {
     pub(crate) startup_rpc: StartupRpc,
@@ -63,7 +71,9 @@ pub struct SetupContextSeed {
     pub config: SyncMutex<ServerConfig>,
     pub disable_encryption: bool,
     pub progress: FullProgressTracker,
-    task: SyncMutex<Option<SetupTask>>,
+    task: SyncMutex<SetupTaskSlot>,
+    db: SyncMutex<Option<WeakPatchDb>>,
+    db_open: SyncMutex<Option<tokio::sync::watch::Receiver<bool>>>,
     pub result: OnceCell<Result<(SetupResult, RpcContext), Error>>,
     pub disk_guid: OnceCell<InternedString>,
     pub shutdown: Sender<Option<Shutdown>>,
@@ -125,7 +135,9 @@ impl SetupContext {
                 disable_encryption: config.disable_encryption.unwrap_or(false),
                 config: SyncMutex::new(config),
                 progress,
-                task: SyncMutex::new(None),
+                task: SyncMutex::new(SetupTaskSlot::Idle),
+                db: SyncMutex::new(None),
+                db_open: SyncMutex::new(None),
                 result: OnceCell::new(),
                 disk_guid: OnceCell::new(),
                 shutdown,
@@ -140,15 +152,114 @@ impl SetupContext {
     }
     #[instrument(skip_all)]
     pub async fn db(&self) -> Result<PatchDb, Error> {
-        let db_path = Path::new(MAIN_DATA).join("embassy.db");
-        let db = PatchDb::open(&db_path)
-            .await
-            .with_ctx(|_| (crate::ErrorKind::Filesystem, db_path.display().to_string()))?;
-        Ok(db)
+        self.open_db(&Path::new(MAIN_DATA).join("embassy.db")).await
+    }
+
+    async fn open_db(&self, db_path: &Path) -> Result<PatchDb, Error> {
+        self.open_db_with(db_path, PatchDb::open).await
+    }
+
+    async fn open_db_with<F, Fut>(&self, db_path: &Path, open: F) -> Result<PatchDb, Error>
+    where
+        F: FnOnce(std::path::PathBuf) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<PatchDb, patch_db::Error>> + Send,
+    {
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let registered = self.task.peek(|slot| {
+            if matches!(slot, SetupTaskSlot::ShuttingDown) {
+                false
+            } else {
+                self.db_open.replace(Some(done_rx));
+                true
+            }
+        });
+        if !registered {
+            return Err(Error::new(
+                eyre!("{}", t!("error.cancelled")),
+                ErrorKind::Cancelled,
+            ));
+        }
+        let path = db_path.to_path_buf();
+        let seed = Arc::downgrade(&self.0);
+        let handle = tokio::spawn(async move {
+            let res = open(path).await;
+            if let Ok(ref db) = res {
+                let close = if let Some(seed) = seed.upgrade() {
+                    seed.task.peek(|slot| {
+                        if matches!(slot, SetupTaskSlot::ShuttingDown) {
+                            true
+                        } else {
+                            seed.db.replace(Some(db.downgrade()));
+                            false
+                        }
+                    })
+                } else {
+                    true
+                };
+                if close {
+                    if let Err(e) = db.close_storage().await {
+                        tracing::error!("Error closing setup database storage: {e}");
+                        tracing::debug!("{e:?}");
+                    }
+                }
+            }
+            let _ = done_tx.send(true);
+            res
+        });
+        let res = handle.await;
+        self.db_open.replace(None);
+        res.map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Unknown))?
+            .with_ctx(|_| (crate::ErrorKind::Filesystem, db_path.display().to_string()))
+    }
+
+    pub(crate) async fn shutdown(&self) -> bool {
+        self.shutdown_with_timeout(DB_CLOSE_TIMEOUT).await
+    }
+
+    async fn shutdown_with_timeout(&self, timeout: Duration) -> bool {
+        let running =
+            self.task.mutate(
+                |slot| match std::mem::replace(slot, SetupTaskSlot::ShuttingDown) {
+                    SetupTaskSlot::Running(abort, task) => Some((abort, task)),
+                    SetupTaskSlot::Idle | SetupTaskSlot::ShuttingDown => None,
+                },
+            );
+        let tracked_db = self.db.mutate(Option::take).and_then(|db| db.upgrade());
+        if let Some((abort, task)) = running {
+            abort.abort();
+            let _ = task.await;
+        }
+        let result_db = if let Some(Ok((_, rpc))) = self.result.get() {
+            let db = (*rpc.db).clone();
+            rpc.clone().shutdown().await;
+            Some(db)
+        } else {
+            None
+        };
+        let close_dbs = async {
+            if let Some(db) = result_db.or(tracked_db) {
+                if let Err(e) = db.close_storage().await {
+                    tracing::error!("Error closing setup database storage: {e}");
+                    tracing::debug!("{e:?}");
+                }
+            }
+            let db_open = self.db_open.peek(Clone::clone);
+            if let Some(mut db_open) = db_open {
+                let _ = db_open.wait_for(|done| *done).await;
+                self.db_open.replace(None);
+            }
+        };
+        if tokio::time::timeout(timeout, close_dbs).await.is_err() {
+            tracing::error!("Timed out closing setup database storage");
+            false
+        } else {
+            true
+        }
     }
 
     pub(crate) fn setup_started(&self) -> bool {
-        self.task.peek(Option::is_some)
+        self.task
+            .peek(|slot| matches!(slot, SetupTaskSlot::Running(_, _)))
     }
 
     /// Reserves execution before starting work; observation never owns the task.
@@ -158,18 +269,27 @@ impl SetupContext {
         Fut: Future<Output = Result<(SetupResult, RpcContext), Error>> + Send,
     {
         self.task.mutate(|slot| {
-            if slot.is_some() {
-                return Err(if self.result.initialized() {
-                    Error::new(
-                        eyre!("{}", t!("context.setup.setup-already-complete")),
-                        ErrorKind::InvalidRequest,
-                    )
-                } else {
-                    Error::new(
-                        eyre!("{}", t!("context.setup.setup-already-in-progress")),
-                        ErrorKind::InvalidRequest,
-                    )
-                });
+            match slot {
+                SetupTaskSlot::Idle => {}
+                SetupTaskSlot::Running(_, _) => {
+                    return Err(if self.result.initialized() {
+                        Error::new(
+                            eyre!("{}", t!("context.setup.setup-already-complete")),
+                            ErrorKind::InvalidRequest,
+                        )
+                    } else {
+                        Error::new(
+                            eyre!("{}", t!("context.setup.setup-already-in-progress")),
+                            ErrorKind::InvalidRequest,
+                        )
+                    });
+                }
+                SetupTaskSlot::ShuttingDown => {
+                    return Err(Error::new(
+                        eyre!("{}", t!("error.cancelled")),
+                        ErrorKind::Cancelled,
+                    ));
+                }
             }
             let local_ctx = self.clone();
             let task: NonDetachingJoinHandle<()> = tokio::spawn(async move {
@@ -194,7 +314,11 @@ impl SetupContext {
                 }
             })
             .into();
-            *slot = Some(task.map(|result| result.map_err(Arc::new)).boxed().shared());
+            let abort = task.abort_handle();
+            *slot = SetupTaskSlot::Running(
+                abort,
+                task.map(|result| result.map_err(Arc::new)).boxed().shared(),
+            );
             Ok(())
         })
     }
@@ -203,9 +327,15 @@ impl SetupContext {
         &self,
     ) -> impl futures::Stream<Item = Result<crate::progress::FullProgress, Error>> + Send + 'static
     {
-        let task = self.task.peek(|task| task.as_ref().unwrap().clone());
+        let task = self.task.peek(|slot| match slot {
+            SetupTaskSlot::Running(_, task) => Some(task.clone()),
+            SetupTaskSlot::Idle | SetupTaskSlot::ShuttingDown => None,
+        });
         let owner = Arc::downgrade(&self.0);
         crate::progress::progress_until_complete(self.progress.clone(), async move {
+            let task = task.ok_or_else(|| {
+                Error::new(eyre!("{}", t!("error.cancelled")), ErrorKind::Cancelled)
+            })?;
             task.await.with_kind(ErrorKind::Unknown)?;
             let owner = owner.upgrade().ok_or_else(|| {
                 Error::new(eyre!("{}", t!("error.cancelled")), ErrorKind::Cancelled)

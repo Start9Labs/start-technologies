@@ -35,7 +35,7 @@ use crate::net::utils::{bind_tokio_listener_reuse_port, ipv6_is_link_local};
 use crate::prelude::*;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
-use crate::util::sync::{SyncRwLock, Watch};
+use crate::util::sync::{SyncMutex, SyncRwLock, Watch};
 use crate::{GatewayId, HOST_IP, OptionExt, PackageId};
 
 pub(crate) mod upstream;
@@ -378,8 +378,7 @@ impl DnsAuthority {
 pub struct DnsController {
     resolve: Weak<SyncRwLock<ResolveMap>>,
     authority: Watch<DnsAuthority>,
-    #[allow(dead_code)]
-    dns_server: NonDetachingJoinHandle<()>,
+    dns_server: SyncMutex<Option<NonDetachingJoinHandle<()>>>,
 }
 
 lazy_static::lazy_static! {
@@ -982,10 +981,12 @@ impl DnsController {
         let resolve = Arc::new(SyncRwLock::new(ResolveMap::default()));
         let weak = Arc::downgrade(&resolve);
         let authority = Watch::new(DnsAuthority::Bootstrap(interfaces));
-        let dns_server = tokio::spawn(run_dns_servers(authority.clone(), resolve).map(|r| {
-            r.log_err();
-        }))
-        .into();
+        let dns_server = SyncMutex::new(Some(
+            tokio::spawn(run_dns_servers(authority.clone(), resolve).map(|r| {
+                r.log_err();
+            }))
+            .into(),
+        ));
         Self {
             resolve: weak,
             authority,
@@ -995,6 +996,21 @@ impl DnsController {
 
     pub(crate) fn activate(&self, network: Arc<NetworkInterfaceController>) {
         self.authority.send_replace(DnsAuthority::Runtime(network));
+    }
+
+    /// Stops the DNS server and returns the runtime network controller it held.
+    pub(crate) async fn shutdown(&self) -> Option<Arc<NetworkInterfaceController>> {
+        let network = match self
+            .authority
+            .send_replace(DnsAuthority::Bootstrap(Watch::new(OrdMap::new())))
+        {
+            DnsAuthority::Runtime(network) => Some(network),
+            DnsAuthority::Bootstrap(_) => None,
+        };
+        if let Some(server) = self.dns_server.mutate(Option::take) {
+            let _ = server.wait_for_abort().await;
+        }
+        network
     }
 
     pub fn status(&self) -> DnsStatus {
@@ -1152,7 +1168,7 @@ mod tests {
             DnsController {
                 resolve: Arc::downgrade(&self.resolve),
                 authority: self.authority.clone(),
-                dns_server: tokio::spawn(async {}).into(),
+                dns_server: SyncMutex::new(Some(tokio::spawn(async {}).into())),
             }
         }
 
