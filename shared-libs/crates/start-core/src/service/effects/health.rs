@@ -40,13 +40,28 @@ pub async fn set_health(
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 #[visit(ts(
     type = "z.union([z.object({ only: z.array(z.string()) }), z.object({ except: z.array(z.string()) })])"
 ))]
 pub struct ClearHealth {
+    #[arg(
+        long,
+        num_args = 0..,
+        conflicts_with = "except",
+        required_unless_present = "except",
+        help = "help.arg.only-health-checks"
+    )]
     pub only: Option<Vec<HealthCheckId>>,
+    #[arg(
+        long,
+        num_args = 0..,
+        conflicts_with = "only",
+        required_unless_present = "only",
+        help = "help.arg.except-health-checks"
+    )]
     pub except: Option<Vec<HealthCheckId>>,
 }
 
@@ -279,5 +294,74 @@ mod tests {
         )
         .unwrap();
         assert_eq!(except_with_event, except);
+    }
+
+    #[test]
+    fn clear_health_cli_parses_only_and_except_and_round_trips_wire() {
+        let pkg: PackageId = "pkg".parse().unwrap();
+
+        let parsed_only =
+            ClearHealth::try_parse_from(["clear-health", "--only", "worker-a", "worker-b"])
+                .unwrap();
+        assert_eq!(
+            parsed_only,
+            ClearHealth {
+                only: Some(vec![
+                    "worker-a".parse().unwrap(),
+                    "worker-b".parse().unwrap(),
+                ]),
+                except: None,
+            }
+        );
+        let repeated_only = ClearHealth::try_parse_from([
+            "clear-health",
+            "--only",
+            "worker-a",
+            "--only",
+            "worker-b",
+        ])
+        .unwrap();
+        assert_eq!(repeated_only, parsed_only);
+
+        let wire_only: ClearHealth =
+            serde_json::from_value(serde_json::to_value(&parsed_only).unwrap()).unwrap();
+        let mut db = health_db();
+        apply_clear_health(&mut db, &pkg, wire_only).unwrap();
+        assert_eq!(health_ids(&db), vec!["worker-c"]);
+
+        let parsed_except_all = ClearHealth::try_parse_from(["clear-health", "--except"]).unwrap();
+        assert_eq!(
+            parsed_except_all,
+            ClearHealth {
+                only: None,
+                except: Some(vec![]),
+            }
+        );
+        let wire_except_all: ClearHealth =
+            serde_json::from_value(serde_json::to_value(&parsed_except_all).unwrap()).unwrap();
+        apply_clear_health(&mut db, &pkg, wire_except_all).unwrap();
+        assert!(health_ids(&db).is_empty());
+
+        let parsed_only_empty = ClearHealth::try_parse_from(["clear-health", "--only"]).unwrap();
+        assert_eq!(
+            parsed_only_empty,
+            ClearHealth {
+                only: Some(vec![]),
+                except: None,
+            }
+        );
+
+        assert!(ClearHealth::try_parse_from(["clear-health"]).is_err());
+        assert!(
+            ClearHealth::try_parse_from([
+                "clear-health",
+                "--only",
+                "worker-a",
+                "--except",
+                "worker-b"
+            ])
+            .is_err()
+        );
+        assert!(ClearHealth::try_parse_from(["clear-health", "--only", "INVALID ID"]).is_err());
     }
 }

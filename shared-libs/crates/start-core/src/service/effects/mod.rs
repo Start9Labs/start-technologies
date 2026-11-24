@@ -224,7 +224,13 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.container-set-health"),
         )
-        .subcommand("clear-health", from_fn_async(health::clear_health).no_cli())
+        .subcommand(
+            "clear-health",
+            from_fn_async(health::clear_health)
+                .no_display()
+                .with_about("about.container-clear-health")
+                .with_call_remote::<ContainerCliContext>(),
+        )
         // notification
         .subcommand(
             "notification",

@@ -98,6 +98,13 @@ about.container-clear-bindings:
   fr_FR: "Supprimer les liaisons de ce service"
   pl_PL: "Usuń powiązania tej usługi"
 
+about.container-clear-health:
+  en_US: "Remove this service's health check results"
+  de_DE: "Die Ergebnisse der Zustandsprüfungen dieses Dienstes entfernen"
+  es_ES: "Eliminar los resultados de las comprobaciones de estado de este servicio"
+  fr_FR: "Supprimer les résultats des vérifications de santé de ce service"
+  pl_PL: "Usuń wyniki kontroli stanu tej usługi"
+
 about.container-clear-service-interfaces:
   en_US: "Remove this service's exported interfaces"
   de_DE: "Die exportierten Schnittstellen dieses Dienstes entfernen"
@@ -5493,6 +5500,13 @@ help.arg.except-callbacks:
   fr_FR: "IDs de callbacks à exclure"
   pl_PL: "Identyfikatory callbacków do wykluczenia"
 
+help.arg.except-health-checks:
+  en_US: "Health check IDs to exclude"
+  de_DE: "Auszuschließende Zustandsprüfungs-IDs"
+  es_ES: "IDs de comprobaciones de estado a excluir"
+  fr_FR: "IDs de vérifications de santé à exclure"
+  pl_PL: "Identyfikatory kontroli stanu do wykluczenia"
+
 help.arg.expected-os-git-hash:
   en_US: "Reject the operation if the indexed OS commit has changed"
   de_DE: "Den Vorgang ablehnen, wenn sich der indexierte OS-Commit geändert hat"
@@ -5961,6 +5975,13 @@ help.arg.only-callbacks:
   es_ES: "Solo borrar estos IDs de callback"
   fr_FR: "Ne supprimer que ces IDs de callback"
   pl_PL: "Wyczyść tylko te identyfikatory callback"
+
+help.arg.only-health-checks:
+  en_US: "Only clear these health check IDs"
+  de_DE: "Nur diese Zustandsprüfungs-IDs löschen"
+  es_ES: "Solo borrar estos IDs de comprobación de estado"
+  fr_FR: "Ne supprimer que ces IDs de vérification de santé"
+  pl_PL: "Wyczyść tylko te identyfikatory kontroli stanu"
 
 help.arg.only-tasks:
   en_US: "Only clear these task IDs"
