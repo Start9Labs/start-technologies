@@ -4184,7 +4184,7 @@ exit 0
         }
         assert_eq!(v4.len(), NON_PUBLIC_V4.len() + 1);
 
-        for (_, info) in OrdMapIterMut::from(&mut ifaces) {
+        for (_, info) in ifaces.iter_mut() {
             info.ip_info = None;
         }
         assert_eq!(

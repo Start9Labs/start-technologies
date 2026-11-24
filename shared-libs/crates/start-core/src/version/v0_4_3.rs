@@ -351,6 +351,62 @@ mod tests {
         assert_eq!(Value::from(db.dump(&ROOT).await.value), migrated);
     }
 
+    #[tokio::test]
+    async fn legacy_duplicate_volume_names_follow_sorted_ids_on_upgrade() {
+        use crate::db::model::Database;
+        use crate::shared_volumes::{SharedVolume, SharedVolumeSource};
+
+        let account =
+            crate::account::AccountInfo::new("password", std::time::SystemTime::now(), None)
+                .unwrap();
+        let mut fixture = to_value(&Database::init(&account, false, None, None).unwrap()).unwrap();
+        let lower_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let higher_id = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ";
+        let volume = to_value(&SharedVolume::new("Photos".into(), SharedVolumeSource::Local))
+            .unwrap();
+        fixture["public"]["sharedVolumes"] = json!({
+            higher_id.to_string(): volume.clone(),
+            lower_id.to_string(): volume,
+        });
+        fixture["public"]["serverInfo"]["latestMigrationRevision"] = json!(3);
+        assert_eq!(
+            fixture["public"]["sharedVolumes"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .next()
+                .unwrap()
+                .as_str(),
+            higher_id
+        );
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy.cbor");
+        let mut encoded = Vec::new();
+        serde_cbor::ser::into_writer(&0u64, &mut encoded).unwrap();
+        serde_cbor::ser::into_writer(&fixture, &mut encoded).unwrap();
+        std::fs::write(&path, encoded).unwrap();
+
+        let db = PatchDb::open(&path).await.unwrap();
+        Version.pre_init(&db).await.unwrap();
+        let migrated = db.dump(&ROOT).await.value;
+        assert_eq!(
+            migrated["public"]["sharedVolumes"][lower_id]["name"].as_str(),
+            Some("Photos")
+        );
+        assert_eq!(
+            migrated["public"]["sharedVolumes"][higher_id]["name"].as_str(),
+            Some("Photos (2)")
+        );
+        Version.pre_init(&db).await.unwrap();
+        assert_eq!(db.dump(&ROOT).await.value, migrated);
+        db.close().await;
+
+        let reopened = PatchDb::open(&path).await.unwrap();
+        assert_eq!(reopened.dump(&ROOT).await.value, migrated);
+        reopened.close().await;
+    }
+
     #[test]
     fn repeated_shared_volume_names_gain_unused_suffixes() {
         let volume = |name: &str| json!({"name": name, "source": {"kind": "local"}, "grants": {}});
