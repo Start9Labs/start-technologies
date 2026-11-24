@@ -164,9 +164,9 @@ impl Broadcast {
                 listeners
                     .unbounded
                     .retain(|sender| sender.send(scoped.clone()).is_ok());
-                listeners.projected.retain(|_, sender| {
-                    sender.send(Update::Revision(scoped.clone())).is_ok()
-                });
+                listeners
+                    .projected
+                    .retain(|_, sender| sender.send(Update::Revision(scoped.clone())).is_ok());
                 if !listeners.json.is_empty() {
                     let json = serde_json::to_vec(&scoped)
                         .map(Bytes::from)
@@ -227,7 +227,13 @@ impl Broadcast {
 
     /// Moves a subscription to another projection, first sending it the extension of the
     /// subtree value as of the revision. False once the subscription has closed.
-    pub fn reproject(&mut self, id: u64, projection: Projection, root: &Value, revision: u64) -> bool {
+    pub fn reproject(
+        &mut self,
+        id: u64,
+        projection: Projection,
+        root: &Value,
+        revision: u64,
+    ) -> bool {
         let Some((ptr, held)) = self.projected.remove(&id) else {
             return false;
         };

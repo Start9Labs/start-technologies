@@ -47,10 +47,7 @@ pub fn is_positional(segment: &str) -> bool {
 }
 
 fn reject_positional<'a>(patterns: impl IntoIterator<Item = &'a JsonPointer>) -> Result<(), Error> {
-    match patterns
-        .into_iter()
-        .find(|p| p.iter().any(is_positional))
-    {
+    match patterns.into_iter().find(|p| p.iter().any(is_positional)) {
         Some(pattern) => Err(Error::PositionalPattern(pattern.clone())),
         None => Ok(()),
     }
@@ -92,7 +89,10 @@ impl Selector {
     fn keeps_whole(&self, path: &[&str]) -> bool {
         self.depth.is_none()
             && covers(&self.include, path)
-            && !self.exclude.iter().any(|p| covers(p, path) || leads_through(p, path))
+            && !self
+                .exclude
+                .iter()
+                .any(|p| covers(p, path) || leads_through(p, path))
     }
 }
 
@@ -135,6 +135,10 @@ impl Projection {
 
     pub fn is_identity(&self) -> bool {
         self.selectors.is_empty()
+    }
+
+    pub fn into_selectors(self) -> Vec<Selector> {
+        self.selectors
     }
 
     pub fn reach(&self, path: &[&str]) -> Reach {
@@ -256,8 +260,7 @@ impl Projection {
 /// Whether the replica lacks data the wider projection keeps at the path.
 fn gains(held: &Projection, wider: &Projection, path: &[&str]) -> bool {
     let (before, after) = (held.reach(path), wider.reach(path));
-    before == Reach::Out && after != Reach::Out
-        || after == Reach::In && before != Reach::In
+    before == Reach::Out && after != Reach::Out || after == Reach::In && before != Reach::In
 }
 
 fn extend(

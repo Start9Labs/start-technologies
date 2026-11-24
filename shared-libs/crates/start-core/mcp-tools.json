@@ -1695,10 +1695,35 @@
               "description": "Subtrees removed from what `include` keeps, in the same form.",
               "type": "array",
               "items": { "type": "string" }
+            },
+            "selectors": {
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/SelectorParams" }
             }
           },
           "additionalProperties": true,
           "description": "Narrows a dumped or subscribed subtree; omitted fields narrow nothing."
+        },
+        "SelectorParams": {
+          "type": "object",
+          "properties": {
+            "include": { "type": "string" },
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["include"],
+          "additionalProperties": true,
+          "description": "One subtree kept, with patterns and depth relative to the dumped or subscribed subtree."
         }
       },
       "allOf": [
@@ -1830,10 +1855,35 @@
               "description": "Subtrees removed from what `include` keeps, in the same form.",
               "type": "array",
               "items": { "type": "string" }
+            },
+            "selectors": {
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/SelectorParams" }
             }
           },
           "additionalProperties": true,
           "description": "Narrows a dumped or subscribed subtree; omitted fields narrow nothing."
+        },
+        "SelectorParams": {
+          "type": "object",
+          "properties": {
+            "include": { "type": "string" },
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["include"],
+          "additionalProperties": true,
+          "description": "One subtree kept, with patterns and depth relative to the dumped or subscribed subtree."
         }
       },
       "allOf": [
@@ -1849,6 +1899,105 @@
           "additionalProperties": true
         },
         { "$ref": "#/$defs/ProjectionParams" }
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "db.subscription.update",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "UpdateSubscriptionParams": {
+          "allOf": [
+            {
+              "type": "object",
+              "properties": {
+                "subscription": {
+                  "description": "The `subscription` of the stream's start.",
+                  "$ref": "#/$defs/Guid"
+                }
+              },
+              "required": ["subscription"],
+              "additionalProperties": true
+            },
+            {
+              "description": "The stream's new projection, replacing the previous one.",
+              "$ref": "#/$defs/ProjectionParams"
+            }
+          ]
+        },
+        "Guid": { "type": "string" },
+        "SelectorParams": {
+          "type": "object",
+          "properties": {
+            "include": { "type": "string" },
+            "exclude": { "type": "array", "items": { "type": "string" } },
+            "depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["include"],
+          "additionalProperties": true,
+          "description": "One subtree kept, with patterns and depth relative to the dumped or subscribed subtree."
+        },
+        "ProjectionParams": {
+          "type": "object",
+          "properties": {
+            "depth": {
+              "description": "Levels kept below the pointer; deeper objects and arrays become empty.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
+            },
+            "include": {
+              "description": "Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.\nEmpty keeps everything. Segments that are array positions (digits or `-`) are rejected.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "exclude": {
+              "description": "Subtrees removed from what `include` keeps, in the same form.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "selectors": {
+              "description": "More subtrees, each with its own exclusions and depth, kept alongside the above.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/SelectorParams" }
+            }
+          },
+          "additionalProperties": true,
+          "description": "Narrows a dumped or subscribed subtree; omitted fields narrow nothing."
+        }
+      },
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "subscription": {
+              "description": "The `subscription` of the stream's start.",
+              "$ref": "#/$defs/Guid"
+            }
+          },
+          "required": ["subscription"],
+          "additionalProperties": true
+        },
+        {
+          "description": "The stream's new projection, replacing the previous one.",
+          "$ref": "#/$defs/ProjectionParams"
+        }
       ],
       "type": "object"
     }

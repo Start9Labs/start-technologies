@@ -192,6 +192,7 @@ async fn subscription_start(
                 id,
                 value: Some(value),
                 revisions: None,
+                subscription: None,
             }
         }
         JsonCatchup::Replay { id, revisions } => SubscribeStart {
@@ -199,6 +200,7 @@ async fn subscription_start(
             id,
             value: None,
             revisions: Some(revisions),
+            subscription: None,
         },
     };
     Ok((start, sub))

@@ -183,11 +183,6 @@ export type PackageIdInput = z.input<typeof schemas.PackageId>
 export type PackageVersionCount = z.output<typeof schemas.PackageVersionCount>
 export type PluginId = z.output<typeof schemas.PluginId>
 export type PreDownloadAlertWhen = z.output<typeof schemas.PreDownloadAlertWhen>
-
-/**
- * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
- */
-export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
 export type ReaderParamsInput = z.input<typeof schemas.ReaderParams>
 
 /**
@@ -213,6 +208,11 @@ export type RemoveVersionParamsInput = z.input<
  * JSON Patch 'replace' operation representation
  */
 export type ReplaceOperation = z.output<typeof schemas.ReplaceOperation>
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export type SelectorParamsInput = z.input<typeof schemas.SelectorParams>
 export type SetDefaultLocaleParamsInput = z.input<
   typeof schemas.SetDefaultLocaleParams
 >
@@ -248,7 +248,6 @@ export type CurrentDependencyKind = z.output<
 >
 export type Description = z.output<typeof schemas.Description>
 export type DownloadsResponse = z.output<typeof schemas.DownloadsResponse>
-export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type EditReaderParamsInput = z.input<typeof schemas.EditReaderParams>
 export type EditSignerParamsInput = z.input<typeof schemas.EditSignerParams>
 
@@ -278,6 +277,11 @@ export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
  */
 export type PatchOperation = z.output<typeof schemas.PatchOperation>
 export type PreDownloadAlert = z.output<typeof schemas.PreDownloadAlert>
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
 
 /**
  * A key allowed to read the private s9pks that list it.
@@ -314,6 +318,7 @@ export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
 >
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
+export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
 
