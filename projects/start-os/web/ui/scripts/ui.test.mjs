@@ -4485,7 +4485,10 @@ const registryEntry = (version = '1.0.0:0', status = 'connected') => ({
     icon: null,
   },
   selections: {
-    example: { best: [version], versions: { [version]: { compatible: true } } },
+    example: {
+      best: [version],
+      versions: { [version]: { s9pks: [0], compatible: true } },
+    },
   },
 })
 
@@ -4498,7 +4501,7 @@ const registryIndex = (versions = ['1.0.0:0', '2.0.0:0', '3.0.0:0']) => ({
         versions: Object.fromEntries(
           versions.map(version => [
             version,
-            { title: version, description: { short: '', long: '' } },
+            { title: version, description: { short: '', long: '' }, s9pks: [] },
           ]),
         ),
       },
@@ -5061,9 +5064,9 @@ test('marketplace tolerates browser snapshots without selections and consumes th
 test('marketplace lists the newest release and the update target from the index without long descriptions', async t => {
   const entry = registryEntry('3.0.0:0')
   entry.selections.example.versions = {
-    '1.0.0:0': { superseded: true, compatible: true },
-    '2.0.0:0': { compatible: true },
-    '3.0.0:0': { compatible: true },
+    '1.0.0:0': { s9pks: [0], superseded: true, compatible: true },
+    '2.0.0:0': { s9pks: [0], compatible: true },
+    '3.0.0:0': { s9pks: [0], compatible: true },
   }
   entry.selections.example.updateTarget = '2.0.0:0'
   const index = registryIndex()
@@ -5099,9 +5102,73 @@ test('marketplace lists the newest release and the update target from the index 
   assert.deepEqual(f.queries, [])
 })
 
+test('registry asset positions keep trust, install pins and static files on the selected hardware', async t => {
+  const entry = registryEntry()
+  entry.selections.example.versions['1.0.0:0'].s9pks = [1]
+  const index = registryIndex(['1.0.0:0'])
+  const arm = [
+    { arch: ['aarch64'] },
+    {
+      signatures: { [untrustedSigner]: 'arm-signature' },
+      urls: ['https://assets.test/arm.s9pk'],
+      commitment: { rootSighash: 'arm-root', rootMaxsize: 10 },
+    },
+  ]
+  const native = [
+    { arch: ['x86_64'] },
+    {
+      signatures: { [OS_UPDATE_SIGNERS[0]]: 'native-signature' },
+      urls: ['https://assets.test/native.s9pk'],
+      commitment: { rootSighash: 'native-root', rootMaxsize: 20 },
+    },
+  ]
+  index.package.packages.example.versions['1.0.0:0'].s9pks = [arm, native]
+  const f = marketplaceFixture(t, { 'https://registry.test/': entry }, index)
+  const api = f.injector.get(ApiService)
+  const submissions = []
+  const files = []
+  api.rpc.package = { install: async params => submissions.push(params) }
+  api.getStatic = async (urls, commitment) => {
+    files.push({ urls, commitment })
+    return 'instructions'
+  }
+  f.replace('/serverInfo/trustedKeys', trustedSigners)
+  await f.service.connect('https://registry.test')
+  const store = await firstValueFrom(f.service.currentRegistry$)
+  assert.deepEqual(store.packages[0].s9pks, [native])
+  const details = await firstValueFrom(
+    f.service.getDetails$('example', '1.0.0:0', 'https://registry.test/'),
+  )
+  assert.deepEqual(details.s9pks, [native])
+  assert.deepEqual(details.best['1.0.0:0'].s9pks, [native])
+  await f.service.installPackage(details, 'https://registry.test')
+  assert.deepEqual(submissions[0].acceptSigners, {
+    any: [{ signer: OS_UPDATE_SIGNERS[0] }],
+  })
+  assert.equal(
+    await firstValueFrom(f.service.fetchStatic$(details, 'instructions.md')),
+    'instructions',
+  )
+  assert.deepEqual(files, [
+    {
+      urls: [
+        '/s9pk/proxy/https%3A%2F%2Fassets.test%2Fnative.s9pk/instructions.md',
+      ],
+      commitment: { rootSighash: 'native-root', rootMaxsize: 20 },
+    },
+  ])
+  assert.deepEqual(index.package.packages.example.versions['1.0.0:0'].s9pks, [
+    arm,
+    native,
+  ])
+})
+
 test("details carry every other version's release notes from the index, which a release alone omits", async t => {
   const entry = registryEntry()
-  entry.selections.example.versions['0.9.0:0'] = { compatible: true }
+  entry.selections.example.versions['0.9.0:0'] = {
+    s9pks: [0],
+    compatible: true,
+  }
   const index = registryIndex(['0.9.0:0', '1.0.0:0'])
   Object.assign(index.package.packages.example.versions['0.9.0:0'], {
     releaseNotes: 'Older notes',
@@ -5127,7 +5194,10 @@ test("details carry every other version's release notes from the index, which a 
 
 test('expanded details follow live index changes to every version', async t => {
   const entry = registryEntry('2.0.0:0')
-  entry.selections.example.versions['1.5.0:0'] = { compatible: true }
+  entry.selections.example.versions['1.5.0:0'] = {
+    s9pks: [0],
+    compatible: true,
+  }
   const index = registryIndex(['1.5.0:0', '2.0.0:0'])
   index.package.packages.example.versions['2.0.0:0'].releaseNotes = 'Before'
   index.package.packages.example.versions['1.5.0:0'].releaseNotes =
@@ -5150,7 +5220,10 @@ test('expanded details follow live index changes to every version', async t => {
 
 test('an unlisted exact version is read from the index and follows its live signatures', async t => {
   const entry = registryEntry('2.0.0:0')
-  entry.selections.example.versions['1.0.0:0'] = { compatible: true }
+  entry.selections.example.versions['1.0.0:0'] = {
+    s9pks: [0],
+    compatible: true,
+  }
   const index = registryIndex(['1.0.0:0', '2.0.0:0'])
   const s9pks = signatures => [[{}, { signatures }]]
   index.package.packages.example.versions['1.0.0:0'].s9pks = s9pks({
@@ -5182,7 +5255,10 @@ test('an exact version resolves while its registry selects it and the index hold
   const values = f.watch(f.service.getPackage$('example', '1.0.0:0', null))
   assert.deepEqual(values, [])
   const entry = registryEntry('2.0.0:0')
-  entry.selections.example.versions['1.0.0:0'] = { compatible: true }
+  entry.selections.example.versions['1.0.0:0'] = {
+    s9pks: [0],
+    compatible: true,
+  }
   f.replace('/registryCache', { 'https://registry.test/': entry })
   assert.equal(values.at(-1).version, '1.0.0:0')
   assert.equal(values.at(-1).title, '1.0.0:0')

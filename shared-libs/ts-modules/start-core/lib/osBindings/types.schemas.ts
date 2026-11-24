@@ -860,6 +860,10 @@ export const ListVersionSignersParams: z.ZodObject<{ version: z.ZodString }> =
   })
 export const ListedVersion: z.ZodObject<{
   /**
+   * Raw `s9pks` positions in the installer's hardware-preference order.
+   */
+  s9pks: z.ZodCodec<z.ZodOptional<z.ZodArray<z.ZodInt>>, z.ZodArray<z.ZodInt>>
+  /**
    * A newer same-flavor revision covers this release's hardware.
    */
   superseded: z.ZodOptional<z.ZodBoolean>
@@ -868,6 +872,13 @@ export const ListedVersion: z.ZodObject<{
    */
   compatible: z.ZodBoolean
 }> = /* @__PURE__ */ object({
+  /**
+   * Raw `s9pks` positions in the installer's hardware-preference order.
+   */
+  s9pks: wire(z.array(z.int()).optional(), z.array(z.int())).meta({
+    description:
+      "Raw `s9pks` positions in the installer's hardware-preference order.",
+  }),
   /**
    * A newer same-flavor revision covers this release's hardware.
    */
@@ -4171,7 +4182,7 @@ export const PackageSelection: z.ZodObject<{
    */
   best: z.ZodArray<typeof Version>
   /**
-   * Every release this server can run.
+   * Every release this server can run, keyed exactly as in the saved index.
    */
   versions: z.ZodRecord<z.ZodString, typeof ListedVersion>
   /**
@@ -4192,10 +4203,11 @@ export const PackageSelection: z.ZodObject<{
       'The newest release of each flavor, preferring releases this StartOS can install.',
   }),
   /**
-   * Every release this server can run.
+   * Every release this server can run, keyed exactly as in the saved index.
    */
   versions: z.record(z.string(), ListedVersion).meta({
-    description: 'Every release this server can run.',
+    description:
+      'Every release this server can run, keyed exactly as in the saved index.',
   }),
   /**
    * When this registry first published any version it still carries.
@@ -8206,6 +8218,7 @@ export const Public: z.ZodObject<{
   sshPubkeys: z.ZodCodec<z.ZodOptional<typeof SshKeys>, typeof SshKeys>
   /**
    * Each saved registry's last synchronized index, in the server's language.
+   * Includes authorized private-asset keystreams from the server identity's registry view.
    */
   registryIndexes: z.ZodCodec<
     z.ZodOptional<z.ZodRecord<z.ZodString, typeof FullIndex>>,
@@ -8241,13 +8254,14 @@ export const Public: z.ZodObject<{
   sshPubkeys: wire(SshKeys.optional(), SshKeys),
   /**
    * Each saved registry's last synchronized index, in the server's language.
+   * Includes authorized private-asset keystreams from the server identity's registry view.
    */
   registryIndexes: wire(
     z.record(z.string(), FullIndex).optional(),
     z.record(z.string(), FullIndex),
   ).meta({
     description:
-      "Each saved registry's last synchronized index, in the server's language.",
+      "Each saved registry's last synchronized index, in the server's language.\nIncludes authorized private-asset keystreams from the server identity's registry view.",
   }),
   registryCache: wire(
     z.record(z.string(), RegistryCache).optional(),

@@ -3011,6 +3011,7 @@ export const ProjectionParams: z.ZodObject<{
   exclude: z.ZodOptional<z.ZodArray<z.ZodString>>
   /**
    * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
    */
   selectors: z.ZodOptional<z.ZodArray<typeof SelectorParams>>
 }> = /* @__PURE__ */ object({
@@ -3038,10 +3039,11 @@ export const ProjectionParams: z.ZodObject<{
   }),
   /**
    * More subtrees, each with its own exclusions and depth, kept alongside the above.
+   * An explicit root inclusion in the simple form keeps the entire subtree.
    */
   selectors: z.array(SelectorParams).optional().meta({
     description:
-      'More subtrees, each with its own exclusions and depth, kept alongside the above.',
+      'More subtrees, each with its own exclusions and depth, kept alongside the above.\nAn explicit root inclusion in the simple form keeps the entire subtree.',
   }),
 }).meta({
   id: 'ProjectionParams',

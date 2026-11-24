@@ -5,6 +5,7 @@ import {
   applyOperation,
   extension,
   minimalSelection,
+  NOTHING,
   normalizeSelector,
   projectOperations,
   projectRoot,
@@ -41,7 +42,10 @@ const shape = selection => selection.map(normalizeSelector)
 const sorted = selection =>
   [...selection].sort((a, b) => (a.include < b.include ? -1 : 1))
 
-function fixture(t, { releaseDelay = 5000 } = {}) {
+function fixture(
+  t,
+  { releaseDelay = 5000, update = () => Promise.resolve() } = {},
+) {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const calls = []
   const updates = []
@@ -66,7 +70,7 @@ function fixture(t, { releaseDelay = 5000 } = {}) {
     },
     update(subscription, selection) {
       updates.push({ subscription, selection: shape(selection) })
-      return Promise.resolve()
+      return update()
     },
   }
   const cache = new BehaviorSubject({ id: 0, value: {} })
@@ -162,6 +166,50 @@ test('a released watch narrows the selection after the delay and prunes its data
   f.extend(f.calls[0], 4)
   assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' } })
   assert.equal(f.cache.value.id, 4)
+})
+
+test('narrowing a whole-document watch retains only confirmed subset coverage', t => {
+  const f = fixture(t)
+  const info = f.watch('serverInfo')
+  const whole = f.watch()
+  f.db.start()
+  f.start(f.calls[0], 3, { serverInfo: { name: 'box' }, ui: { theme: 1 } })
+  whole.subscription.unsubscribe()
+  t.mock.timers.tick(5000)
+  const ui = f.watch('ui')
+  assert.deepEqual(ui.values, [])
+  assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' } })
+  assert.deepEqual(info.values.at(-1), { name: 'box' })
+  f.calls[0].events.error(new Error('closed before confirmation'))
+  assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' } })
+  f.db.start()
+  assert.deepEqual(f.calls[1].since, { epoch: 'boot', id: 3 })
+  assert.deepEqual(f.calls[1].selection, [{ include: '/serverInfo' }])
+  f.calls[1].events.next({
+    epoch: 'boot',
+    id: 3,
+    subscription: 'again',
+    revisions: [],
+  })
+  assert.deepEqual(ui.values, [])
+  f.extend(f.calls[1], 3, [{ op: 'add', path: '/ui', value: { theme: 2 } }])
+  assert.deepEqual(ui.values, [{ theme: 2 }])
+})
+
+test('releasing every watch resumes an empty replica with NOTHING, not universal coverage', t => {
+  const f = fixture(t)
+  const ui = f.watch('ui')
+  f.db.start()
+  f.start(f.calls[0], 3, { ui: { theme: 1 } })
+  ui.subscription.unsubscribe()
+  t.mock.timers.tick(5000)
+  const info = f.watch('serverInfo')
+  assert.deepEqual(info.values, [])
+  f.calls[0].events.error(new Error('closed before confirmation'))
+  f.db.start()
+  assert.deepEqual(f.calls[1].selection, shape(NOTHING))
+  assert.deepEqual(f.calls[1].since, { epoch: 'boot', id: 3 })
+  assert.deepEqual(info.values, [])
 })
 
 test('selection changes wait for the previous extension', t => {
@@ -288,6 +336,37 @@ test('a failure keeps the data and resumes from the cursor with the confirmed se
     { include: '/serverInfo' },
     { include: '/ui' },
   ])
+})
+
+test('a late selection-update failure cannot stop a replacement subscription', async t => {
+  let rejectOld
+  const oldReply = new Promise((_, reject) => {
+    rejectOld = reject
+  })
+  let requests = 0
+  const f = fixture(t, {
+    update: () => (requests++ ? Promise.resolve() : oldReply),
+  })
+  const failures = []
+  f.db.failures$.subscribe(error => failures.push(error))
+  f.watch('serverInfo')
+  f.db.start()
+  f.start(f.calls[0], 3, { serverInfo: { name: 'box' } })
+  f.watch('ui')
+  f.calls[0].events.error(new Error('stream lost'))
+  f.db.start()
+  f.calls[1].events.next({
+    epoch: 'boot',
+    id: 3,
+    subscription: 'again',
+    revisions: [],
+  })
+  rejectOld(new Error('old update failed'))
+  await Promise.resolve()
+  assert.equal(failures.length, 1)
+  assert.equal(f.calls[1].closed, false)
+  f.extend(f.calls[1], 3, [{ op: 'add', path: '/ui', value: {} }])
+  assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' }, ui: {} })
 })
 
 test('a restored snapshot serves its selection offline and resumes it from its cursor', t => {

@@ -61,8 +61,8 @@ The live API reads `meta.patchSequence` — after a mutating call, it waits for 
 
 The backend pushes state diffs to the frontend via WebSocket. This is the primary way components get data.
 
-- **`PatchDbSource`** — Tunnel (`services/patch-db/patch-db-source.ts`) authenticates before subscribing to the whole database; shared `databaseSource` delivers dumps immediately, batches revisions at 250ms and treats subscription termination as recovery, retrying after 500ms. StartOS's `PatchDbSource` is the `SubtreeSource` behind `PATCH_DB`, a `SubtreePatchDB` from `patch-db-client`: each `watch$` path is a reference-counted `db.subscribe` at `/public/<path>` on the one encrypted socket. The outermost watched paths are subscribed and serve their descendants, a path is released five seconds after its last watcher leaves, and revisions from all subscriptions are applied in id order every 250ms. Each path keeps its own `{epoch, id}` cursor and resumes from it; the document id is the lowest live cursor, so PatchDB fences wait for every subscription. A failure stops every subscription; `PatchMonitorService` requests a two-second state refresh, waits for the next running state and resumes each path from its cursor. API/auth owners handle live authorization rejection.
-- **`DataModel`** (`ui/src/app/services/patch-db/data-model.ts`) — TypeScript type for the full database shape (`ui`, `serverInfo`, `packageData`, `registryCache`, `osUpdateCache`).
+- **`PatchDbSource`** — Tunnel (`services/patch-db/patch-db-source.ts`) authenticates before subscribing to the whole database; shared `databaseSource` delivers dumps immediately, batches revisions at 250ms and treats subscription termination as recovery, retrying after 500ms. StartOS's `PatchDbSource` is the `SubtreeSource` behind `PATCH_DB`, a `SubtreePatchDB` from `patch-db-client`: one `db.subscribe` at `/public` carries the union of all reference-counted watches. Each selector has its own inclusion, exclusions and depth. A watch is released five seconds after its last subscriber leaves, and ordinary revisions batch for 250ms. `db.subscription.update` changes the selection; the browser trims its replica immediately, and an ordered extension fills newly selected data and confirms the change. Watches wait for confirmed coverage; an empty retained intersection uses the explicit `NOTHING` selection rather than the identity represented by `[]`. Narrowing retains already confirmed subsets. One `{epoch, id}` cursor drives both replay and PatchDB fences. A failure stops the stream; `PatchMonitorService` requests a two-second state refresh, waits for the next running state and resumes the confirmed selection from its cursor. API/auth owners handle live authorization rejection.
+- **`DataModel`** (`ui/src/app/services/patch-db/data-model.ts`) — TypeScript type for the full public database, including `registryIndexes`. Marketplace combines lightweight `registryCache.selections` with filtered release-body watches; asset indices in selections preserve the installer's hardware preference without changing raw array positions.
 - **`PatchDB<DataModel>`** — Injected service. Use `watch$()` to observe specific paths.
 
 **Watching data in a component:**
@@ -80,7 +80,7 @@ readonly packages = toSignal(this.patch.watch$('packageData'))
 
 ## Stream consumers
 
-1. **PatchDB** — Generated typed `db.subscribe`, one per watched StartOS path (Tunnel: one for the whole database), managed by `PatchDbSource`; ordinary GUID replies remain compatible.
+1. **PatchDB** — Generated typed `db.subscribe`, one mutable selection for StartOS (Tunnel: one for the whole database), managed by `PatchDbSource`; ordinary GUID replies remain compatible.
 2. **Logs** — Portal and init/setup use generated typed follow operations; `LogsPipe` owns portal status/history and `SetupLogsService` owns startup accumulation. Portal batches at 1s, startup at 500ms. Shared `withAbortSignal` owns acquisition/iteration disposal for logs and database observations; each existing source retains its own read-only retry policy. Successful portal termination invalidates its ongoing observation and enters availability recovery. Ordinary/typed mock adapters share initiating and entry producers. Diagnostic historical logs remain finite RPC reads.
 3. **Metrics** — Typed `server.metrics.follow` returns its shared sensor-cache snapshot, same-ID Metrics items and unit terminal; ordinary GUID replies remain compatible. `MetricsService` shares observation while authenticated consumers remain. Final unsubscribe/logout aborts acquisition and iteration and releases recovery; fresh observation/login gets a fresh snapshot. Network errors retain ConnectionService recovery; normal termination retains read-only resubscription. Mock ordinary/typed adapters share their snapshot/item producers.
 
@@ -126,7 +126,7 @@ Services often extend `Observable` and expose reactive streams via DI:
 - **`StateService`** — Polls server availability, manages app state (`running`, `initializing`, etc.)
 - **`AuthService`** — Tracks `isVerified$`, triggers PatchDB start/stop
 - **`PatchMonitorService`** — While verified, restores the IndexedDB snapshot, holds the always-watched paths, starts PatchDB and resumes it after a failure; stops it on logout
-- **`PatchDataService`** — Writes the live document and each path's cursor to the IndexedDB snapshot while connected; `registryCache` and `osUpdateCache` are never persisted, so their pages wait for live data
+- **`PatchDataService`** — Writes the selected document and one cursor under its confirmed selector keys to the IndexedDB snapshot while connected; `registryIndexes`, `registryCache` and `osUpdateCache` are never persisted, so their views wait for live data
 
 ## Frontend conventions
 

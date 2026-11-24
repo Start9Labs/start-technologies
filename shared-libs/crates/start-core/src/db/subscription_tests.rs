@@ -191,6 +191,30 @@ fn selectors_join_the_simple_projection_with_their_own_exclusions() {
 }
 
 #[test]
+fn explicit_root_inclusion_dominates_additional_selectors() {
+    let value = imbl_value::json!({ "a": 1, "b": 2 });
+    for include in [serde_json::json!([""]), serde_json::json!(["", "/a"])] {
+        let params: ProjectionParams = serde_json::from_value(serde_json::json!({
+            "include": include,
+            "selectors": [{ "include": "/a" }],
+        }))
+        .unwrap();
+        assert_eq!(
+            Projection::try_from(params).unwrap().project_root(&value),
+            value
+        );
+    }
+    let params: ProjectionParams = serde_json::from_value(serde_json::json!({
+        "selectors": [{ "include": "/a" }],
+    }))
+    .unwrap();
+    assert_eq!(
+        Projection::try_from(params).unwrap().project_root(&value),
+        imbl_value::json!({ "a": 1 }),
+    );
+}
+
+#[test]
 fn stream_items_mark_extensions() {
     let revision = Revision {
         id: 4,

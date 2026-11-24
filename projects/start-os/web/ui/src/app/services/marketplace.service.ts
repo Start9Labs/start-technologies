@@ -5,7 +5,6 @@ import {
   MarketplacePkg,
   StoreDataWithUrl,
   StoreIdentity,
-  packageResponse,
   packageSignerPolicy,
   registryStatus,
   isRegistryLoading,
@@ -451,14 +450,20 @@ function toPkg(
   release: T.PackageVersionInfo,
   releases: Record<string, Partial<T.PackageVersionInfo>>,
 ): MarketplacePkg {
-  return {
+  const selected = {
     ...release,
+    s9pks: (versions[version]?.s9pks ?? []).flatMap(index =>
+      release.s9pks.slice(index, index + 1),
+    ),
+  }
+  return {
+    ...selected,
     id,
     version,
     flavor: exver.getFlavor(version),
     categories: [...categories],
     firstPublishedAt: firstPublishedAt ?? null,
-    best: { [version]: release },
+    best: { [version]: selected },
     otherVersions: Object.fromEntries(
       Object.entries(versions)
         .filter(([other]) => other !== version)

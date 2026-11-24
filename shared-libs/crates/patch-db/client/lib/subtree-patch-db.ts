@@ -100,7 +100,7 @@ export class SubtreePatchDB<
   private cursor: Cursor | null = null
   /** The selection the document holds. */
   private held: Selection | null = null
-  /** The selection the server has confirmed sending, within `held`. */
+  /** Confirmed coverage within `held`; empty coverage uses `NOTHING`, never `[]`. */
   private confirmed: Selection | null = null
   private updating: Selection | null = null
   private pending: Revision[] = []
@@ -276,8 +276,12 @@ export class SubtreePatchDB<
     if (selectionKey(desired) === selectionKey(this.held)) return
     this.applyPending()
     this.held = desired
-    this.confirmed =
-      this.confirmed?.filter(s => selectionContains(desired, s)) ?? null
+    const confirmed = this.confirmed ?? NOTHING
+    const retained = minimalSelection([
+      ...confirmed.filter(s => selectionContains(desired, s)),
+      ...desired.filter(s => selectionContains(confirmed, s)),
+    ])
+    this.confirmed = retained.length ? retained : NOTHING
     this.updating = desired
     const cache = this.cache$.value
     this.handleDump(
@@ -285,7 +289,9 @@ export class SubtreePatchDB<
       cache,
     )
     this.emit(cache)
-    this.source.update(subscription, desired).catch(error => this.fail(error))
+    this.source.update(subscription, desired).catch(error => {
+      if (this.subscription === subscription) this.fail(error)
+    })
   }
 
   private receive(event: SubtreeEvent, selection: Selection) {
