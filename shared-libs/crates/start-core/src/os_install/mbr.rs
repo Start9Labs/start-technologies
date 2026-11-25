@@ -14,11 +14,41 @@ const BOOT_END_SECTOR: u32 = 4196352;
 const ROOT_TARGET_END_SECTOR: u32 = 33556480;
 /// Floor for elastic-root shrink. 12 GiB of root after boot.
 const ROOT_MIN_END_SECTOR: u32 = BOOT_END_SECTOR + 12 * 1024 * 1024 * 2;
+/// 100 MiB at 512-byte sectors, taken from the end of boot's region.
+const EFI_SECTORS: u32 = 204800;
+
+/// Boot, and for UEFI an EFI system partition after it, together filling
+/// 2048..BOOT_END_SECTOR.
+fn boot_entries(use_efi: bool) -> (MBRPartitionEntry, Option<MBRPartitionEntry>) {
+    let boot_end = if use_efi {
+        BOOT_END_SECTOR - EFI_SECTORS
+    } else {
+        BOOT_END_SECTOR
+    };
+    let boot = MBRPartitionEntry {
+        boot: 0x80,
+        first_chs: CHS::empty(),
+        sys: 0x0b,
+        last_chs: CHS::empty(),
+        starting_lba: 2048,
+        sectors: boot_end - 2048,
+    };
+    let efi = use_efi.then(|| MBRPartitionEntry {
+        boot: 0,
+        first_chs: CHS::empty(),
+        sys: 0xef,
+        last_chs: CHS::empty(),
+        starting_lba: boot_end,
+        sectors: EFI_SECTORS,
+    });
+    (boot, efi)
+}
 
 pub async fn partition(
     disk_path: &Path,
     capacity: u64,
     protect: Option<&Path>,
+    use_efi: bool,
 ) -> Result<OsPartitionInfo, Error> {
     // Guard: cannot protect the whole disk
     if let Some(p) = protect {
@@ -103,14 +133,11 @@ pub async fn partition(
             .open(&disk_path)?;
         let mut mbr = MBR::new_from(&mut file, 512, rand::random())?;
 
-        mbr[1] = MBRPartitionEntry {
-            boot: 0x80,
-            first_chs: CHS::empty(),
-            sys: 0x0b,
-            last_chs: CHS::empty(),
-            starting_lba: 2048,
-            sectors: BOOT_END_SECTOR - 2048,
-        };
+        let (boot, efi) = boot_entries(use_efi);
+        mbr[1] = boot;
+        if let Some(efi) = efi {
+            mbr[4] = efi;
+        }
         mbr[2] = MBRPartitionEntry {
             boot: 0,
             first_chs: CHS::empty(),
@@ -151,11 +178,36 @@ pub async fn partition(
 
     update_partition_table(&disk_path).await?;
 
+    let mut extra_boot = std::collections::BTreeMap::new();
+    if use_efi {
+        extra_boot.insert("efi".to_string(), partition_for(&disk_path, 4));
+    }
     Ok(OsPartitionInfo {
         bios: None,
         boot: partition_for(&disk_path, 1),
         root: partition_for(&disk_path, 2),
-        extra_boot: Default::default(),
+        extra_boot,
         data: data_part,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn efi_partition_fills_the_end_of_the_boot_region() {
+        let (boot, efi) = boot_entries(true);
+        let efi = efi.unwrap();
+        assert_eq!(efi.sys, 0xef);
+        assert_eq!(boot.starting_lba + boot.sectors, efi.starting_lba);
+        assert_eq!(efi.starting_lba + efi.sectors, BOOT_END_SECTOR);
+    }
+
+    #[test]
+    fn legacy_boot_keeps_the_whole_boot_region() {
+        let (boot, efi) = boot_entries(false);
+        assert!(efi.is_none());
+        assert_eq!(boot.starting_lba + boot.sectors, BOOT_END_SECTOR);
+    }
 }

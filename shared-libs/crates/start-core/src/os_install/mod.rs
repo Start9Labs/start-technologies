@@ -105,7 +105,7 @@ async fn partition(
     };
     match partition_type {
         PartitionTable::Gpt => gpt::partition(disk_path, capacity, protect, use_efi).await,
-        PartitionTable::Mbr => mbr::partition(disk_path, capacity, protect).await,
+        PartitionTable::Mbr => mbr::partition(disk_path, capacity, protect, use_efi).await,
     }
 }
 
