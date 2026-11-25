@@ -11,8 +11,9 @@ Zoneless.
 
 ## Theme
 
-Light and dark. Tokens sit under both `[tuiTheme='dark']` and `:root, [tuiTheme='light']`; the
-user picks in Settings › General, which sets the `TUI_DARK_MODE` signal at runtime.
+Light and dark. Tokens in `src/styles.scss` sit under both `[tuiTheme='dark']` and
+`:root, [tuiTheme='light']`; the user picks in Settings › General, which sets the
+`TUI_DARK_MODE` signal at runtime.
 `provideTaiga({ scrollbars: 'native' })`.
 
 ## i18n

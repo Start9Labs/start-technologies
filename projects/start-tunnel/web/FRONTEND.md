@@ -10,7 +10,7 @@ Zoneless.
 
 ## Theme
 
-Dark, `provideTaiga({ mode: 'dark' })`, on the shared brand sheet.
+Dark, `provideTaiga({ mode: 'dark' })`. Theme tokens live in `src/styles.scss`.
 
 ## i18n
 

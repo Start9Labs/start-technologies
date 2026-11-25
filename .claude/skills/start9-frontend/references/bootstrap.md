@@ -74,7 +74,9 @@ Notes, all load-bearing:
   attributes + manual `TUI_VALIDATION_ERRORS`-era wiring. Theme is DI (`mode`), not markup.
 - Option providers with **signals as option values** are normal
   (`tuiTextfieldOptionsProvider({ size: signal('m') })`).
-- A zone-based app lists `"zone.js"` in its `angular.json` `polyfills`; a zoneless one doesn't.
+- A zone-based app opts in with `provideZoneChangeDetection()` and loads `zone.js` through
+  `angular.json`'s `polyfills`. Loading `zone.js` alone does not select zone-based change
+  detection.
 - Build-time config (the mock switch, the git hash) is read **synchronously** at module load,
   never fetched: a gitignored `config.json` through `require`, or `environment.ts`. It feeds the
   Live/Mock DI swap and value tokens (`IS_MOCK`, `GIT_HASH`, `RELATIVE_URL`). `FRONTEND.md`

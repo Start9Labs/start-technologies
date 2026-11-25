@@ -6,7 +6,7 @@ Facts the `start9-frontend` skill needs about the StartOS admin UI. Adds to the
 
 ## Change detection
 
-zone.js (`polyfills` in `angular.json`); zoneless is pending.
+Zone-based: `provideZoneChangeDetection()` with the `zone.js` polyfill; zoneless is pending.
 
 ## Theme
 

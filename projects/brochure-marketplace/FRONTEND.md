@@ -6,7 +6,7 @@ public deploy are in [`AGENTS.md`](AGENTS.md).
 
 ## Change detection
 
-zone.js (`polyfills` in `angular.json`); legacy.
+Zoneless (Angular default). The build also loads the `zone.js` polyfill.
 
 ## Theme
 

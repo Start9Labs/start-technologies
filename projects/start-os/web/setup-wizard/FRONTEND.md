@@ -6,7 +6,7 @@ Facts the `start9-frontend` skill needs about the StartOS setup wizard. Adds to 
 
 ## Change detection
 
-zone.js (`polyfills` in `angular.json`).
+Zone-based: `provideZoneChangeDetection()` with the `zone.js` polyfill.
 
 ## Theme
 
