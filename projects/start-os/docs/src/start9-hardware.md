@@ -17,9 +17,10 @@ Every server Start9 has sold, newest first: the Server One (6600H) — the only 
 - **Dimensions / weight:** 4.5″ × 4.2″ × 1.5″ (11.4 × 10.6 × 3.75 cm), 0.81 lb (0.37 kg)
 - **Warranty:** 1 year
 - **Firmware:** manufacturer BIOS
+- **Enter the BIOS:** Esc
 - **StartOS image:** x86_64, standard
 - **How to identify it:** black chassis with a Start9 logo on top
-- **Known issues:** none
+- **Known issues:** Removing the SSD and putting it back, in the same server or a replacement server, requires reflashing StartOS and selecting **Preserve** at setup — see [Installing StartOS](installing-startos.md).
 
 ## Server One (2026)
 
@@ -36,12 +37,14 @@ Every server Start9 has sold, newest first: the Server One (6600H) — the only 
 - **Dimensions / weight:** 4.5″ × 4.2″ × 1.5″ (11.4 × 10.6 × 3.75 cm), 0.81 lb (0.37 kg)
 - **Warranty:** 1 year
 - **Firmware:** manufacturer BIOS
+- **Enter the BIOS:** Esc
 - **StartOS image:** x86_64, standard
 - **How to identify it:** black chassis with no logo on top; otherwise identical to the Server One (6600H)
 - **Known issues:**
   - The peg that holds the M.2 SSD in place can snap under pressure, loosening the SSD.
   - Some fans are faulty and make a loud whirring sound.
   - Some power supplies are faulty, delivering too little voltage or none at all.
+  - Removing the SSD and putting it back, in the same server or a replacement server, requires reflashing StartOS and selecting **Preserve** at setup — see [Installing StartOS](installing-startos.md).
 
 ## Server Pure (2026)
 
@@ -58,6 +61,7 @@ Every server Start9 has sold, newest first: the Server One (6600H) — the only 
 - **Dimensions / weight:** 5.0″ × 5.0″ × 1.5″ (12.8 × 12.8 × 3.8 cm), 2.2 lb (1 kg)
 - **Warranty:** 2 years
 - **Firmware:** PureBoot — see [Flashing Firmware - Server Pure](firmware-pure.md)
+- **Enter the BIOS:** Esc
 - **StartOS image:** x86_64, slim
 - **How to identify it:** jet-black chassis with black plastic plates on each side
 - **Known issues:**
@@ -79,6 +83,7 @@ Every server Start9 has sold, newest first: the Server One (6600H) — the only 
 - **Dimensions / weight:** 5.0″ × 5.0″ × 1.5″ (12.8 × 12.8 × 3.8 cm), 2.2 lb (1 kg)
 - **Warranty:** 1 year
 - **Firmware:** PureBoot — see [Flashing Firmware - Server Pure](firmware-pure.md)
+- **Enter the BIOS:** Esc
 - **StartOS image:** x86_64, slim
 - **How to identify it:** green-tinted chassis with white plastic plates on each side
 - **Known issues:**
@@ -100,9 +105,10 @@ Every server Start9 has sold, newest first: the Server One (6600H) — the only 
 - **Dimensions / weight:** 4.5″ × 4.2″ × 1.5″ (11.4 × 10.6 × 3.75 cm), 0.81 lb (0.37 kg)
 - **Warranty:** 1 year
 - **Firmware:** manufacturer BIOS
+- **Enter the BIOS:** Esc
 - **StartOS image:** x86_64, standard
 - **How to identify it:** silver chassis
-- **Known issues:** none
+- **Known issues:** Removing the SSD and putting it back, in the same server or a replacement server, requires reflashing StartOS and selecting **Preserve** at setup — see [Installing StartOS](installing-startos.md).
 
 ## Server One (2023)
 
@@ -118,6 +124,7 @@ Every server Start9 has sold, newest first: the Server One (6600H) — the only 
 - **Power:** 19 V DC, 3.2 A minimum; shipped with a 19 V / 3.2 A supply and a C5/C6 mains cord
 - **Warranty:** 1 year
 - **Firmware:** Intel BIOS — see [Flashing Firmware - Server One (2023)](firmware-one-2023.md)
+- **Enter the BIOS:** F2
 - **StartOS image:** x86_64, standard
 - **How to identify it:** black Intel NUC 11 Essential chassis
 - **Known issues:** Intel has discontinued the NUC line, and AT0043 is the last BIOS release it will publish.
@@ -138,6 +145,7 @@ Sold as the Embassy Pro from November 2022, renamed the Server Pro in May 2023 a
 - **Power:** 19 V DC, 3.2 A minimum; shipped with a 19 V / 3.2 A supply and a C5/C6 mains cord
 - **Warranty:** 1 year
 - **Firmware:** PureBoot — see [Flashing Firmware - Server Pure](firmware-pure.md)
+- **Enter the BIOS:** Esc
 - **StartOS image:** x86_64, slim
 - **How to identify it:** slightly green-tinted chassis with black plastic plates on each side
 - **Known issues:** none
