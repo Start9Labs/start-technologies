@@ -13,20 +13,15 @@ import {
   PROBE_TIMEOUT_MS,
 } from './connection.service'
 import { RpcSocketService } from '@start9labs/shared'
+import { WA_SESSION_STORAGE, WA_WINDOW } from '@ng-web-apis/common'
 import { StaleUiService } from './stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
 
 /** sessionStorage: a version an earlier release's update page confirmed before reloading. */
 const UPDATED_TO_KEY = 'startwrt.updated-to'
-/** sessionStorage: a requested version that init() checks against the firmware after a reload. */
+/** sessionStorage: the requested version, settled by the first system info the reloaded interface reads. */
 const UPDATE_TARGET_KEY = 'startwrt.update-target'
-
-function takeSession(key: string): string | null {
-  const value = sessionStorage.getItem(key)
-  sessionStorage.removeItem(key)
-  return value
-}
 
 @Injectable({
   providedIn: 'root',
@@ -39,6 +34,8 @@ export class SystemService {
   private readonly sockets = inject(RpcSocketService)
   private readonly staleUi = inject(StaleUiService)
   private readonly i18n = inject(i18nPipe)
+  private readonly storage = inject(WA_SESSION_STORAGE)
+  private readonly window = inject(WA_WINDOW)
   private targetVersion = ''
 
   readonly info = signal<SystemInfoRes | null>(null)
@@ -64,28 +61,18 @@ export class SystemService {
   }
 
   async init(): Promise<void> {
-    const updatedTo = takeSession(UPDATED_TO_KEY)
-    if (updatedTo) this.announceUpdated(updatedTo)
-
-    const target = takeSession(UPDATE_TARGET_KEY)
-    const running = this.api.systemInfo()
-    if (target) {
-      running.then(
-        ({ version }) =>
-          version === target
-            ? this.announceUpdated(target)
-            : this.announceUpdateFailed(),
-        () => {},
-      )
+    const updatedTo = this.storage?.getItem(UPDATED_TO_KEY)
+    if (updatedTo) {
+      this.storage?.removeItem(UPDATED_TO_KEY)
+      this.announceUpdated(updatedTo)
     }
 
     try {
-      const [info, newerVersions] = await Promise.all([
-        running,
+      const [, newerVersions] = await Promise.all([
+        this.api.systemInfo().then(info => this.setInfo(info)),
         this.api.systemNewerVersions(),
       ])
 
-      this.setInfo(info)
       this.newerVersions.set(newerVersions)
       this.updateAvailable.set(newerVersions.length > 0)
     } catch (e) {
@@ -100,6 +87,12 @@ export class SystemService {
   private setInfo(info: SystemInfoRes): void {
     this.info.set(info)
     this.staleUi.check(info)
+
+    const target = this.storage?.getItem(UPDATE_TARGET_KEY)
+    if (!target) return
+    this.storage?.removeItem(UPDATE_TARGET_KEY)
+    if (info.version === target) this.announceUpdated(target)
+    else this.announceUpdateFailed()
   }
 
   async startUpdate(targetVersion: string): Promise<void> {
@@ -148,9 +141,6 @@ export class SystemService {
   }
 
   private onUpdateFailed(): void {
-    // A clean failure never reboots the device. Clearing `updating` (and
-    // leaving `rebooting` false) lets the progress dialog close without a
-    // spurious "Device is restarting…" flash; surface the error as a toast.
     this.updating.set(false)
     this.connection.resume()
     this.announceUpdateFailed()
@@ -190,23 +180,17 @@ export class SystemService {
             this.onUpdateFailed()
             return
           }
-          // It really rebooted — sysupgrade wiped the session store, so the
-          // user is headed to login either way. If the new firmware ships a
-          // different UI bundle, reload outright to land there on the NEW
-          // bundle (index.html revalidates its ETag, so the reload is
-          // guaranteed fresh); init() confirms the version after the reload.
+          // index.html revalidates its ETag; the reloaded page reports the outcome.
           if (this.staleUi.isStale(info)) {
-            sessionStorage.setItem(UPDATE_TARGET_KEY, this.targetVersion)
-            window.location.reload()
+            this.storage?.setItem(UPDATE_TARGET_KEY, this.targetVersion)
+            this.window.location.reload()
             return
           }
-          // Same-bundle update (e.g. a re-flash): confirm success, then send
-          // the user to login rather than waiting for their next action to 401.
+          // Same UI bundle, as after a re-flash.
           this.announceUpdated(this.targetVersion)
           this.auth.setUnverified()
         } else {
-          // Never lost contact — the update failed before any reboot and the
-          // session is still valid. Just refresh.
+          // Never lost contact; the session is still valid.
           await this.init()
         }
         return
@@ -220,13 +204,13 @@ export class SystemService {
     }
     this.rebooting.set(false)
     this.connection.resume()
-    sessionStorage.setItem(UPDATE_TARGET_KEY, this.targetVersion)
     this.connection.reportUnreachable({
       message: this.i18n.transform(
         'The router has not come back since the update. This page reloads when it does.',
       ),
-      probeUrl: window.location.origin,
+      probeUrl: this.window.location.origin,
       onReconnect: 'reload',
     })
+    this.storage?.setItem(UPDATE_TARGET_KEY, this.targetVersion)
   }
 }

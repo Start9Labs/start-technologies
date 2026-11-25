@@ -3114,11 +3114,9 @@ test('WRT update without a target releases the update state without observing', 
 test('WRT interrupted-update recovery cannot claim the requested version from an old firmware reply', async () => {
   const { load } = wrtFlowHarness({
     setTimeout: callback => queueMicrotask(callback),
-    sessionStorage: { setItem: () => assert.fail('no success confirmation') },
-    window: {
-      location: { reload: () => assert.fail('no successful-update reload') },
-    },
   })
+  const session = sessionStub()
+  let reloads = 0
   const service = Object.create(
     load('projects/start-wrt/web/src/app/services/system.service.ts')
       .SystemService.prototype,
@@ -3150,11 +3148,15 @@ test('WRT interrupted-update recovery cannot claim the requested version from an
       },
     },
     staleUi: { isStale: () => true },
+    storage: session,
+    window: { location: { reload: () => reloads++ } },
   })
   await service.pollForReconnect()
   assert.equal(attempts, 2)
   assert.equal(rebooting, false)
   assert.deepEqual(messages, ['Update failed — check device logs'])
+  assert.equal(session.store.size, 0)
+  assert.equal(reloads, 0)
 })
 
 function sessionStub(entries = {}) {
@@ -3174,6 +3176,13 @@ function wrtConnectionHarness(globals = {}) {
   const probes = []
   const navigation = []
   const session = sessionStub()
+  const win = Object.assign(new EventTarget(), {
+    location: {
+      origin: 'https://router.lan',
+      reload: () => navigation.push('reload'),
+      assign: url => navigation.push(url),
+    },
+  })
   const { load, dependencies, tokens, overrides } = wrtFlowHarness({
     setTimeout: () => 0,
     clearTimeout() {},
@@ -3184,14 +3193,7 @@ function wrtConnectionHarness(globals = {}) {
       probes.push(url)
       if (!routerAnswers) throw new TypeError('Failed to fetch')
     },
-    sessionStorage: session,
-    window: Object.assign(new EventTarget(), {
-      location: {
-        origin: 'https://router.lan',
-        reload: () => navigation.push('reload'),
-        assign: url => navigation.push(url),
-      },
-    }),
+    window: win,
     document: Object.assign(new EventTarget(), { visibilityState: 'visible' }),
     ...globals,
   })
@@ -3227,6 +3229,7 @@ function wrtConnectionHarness(globals = {}) {
     load,
     connection: new ConnectionService(),
     session,
+    win,
     probes,
     navigation,
     infoCalls: () => infoCalls,
@@ -3246,7 +3249,7 @@ function expiredUpdateWait(fixture) {
     fixture.load('projects/start-wrt/web/src/app/services/system.service.ts')
       .SystemService.prototype,
   )
-  const wait = { attempts: 0, rebooting: true }
+  const wait = { attempts: 0, rebooting: true, toasts: 0 }
   Object.assign(service, {
     targetVersion: '1.5.0',
     rebooting: {
@@ -3261,9 +3264,11 @@ function expiredUpdateWait(fixture) {
       },
     },
     connection: fixture.connection,
+    storage: fixture.session,
+    window: fixture.win,
     sockets: { disconnect() {} },
     i18n: { transform: value => value },
-    alerts: { open: () => assert.fail('the indicator owns the message') },
+    alerts: { open: () => wait.toasts++ },
   })
   return { service, wait }
 }
@@ -3281,6 +3286,7 @@ test('WRT update recovery that outlasts its wait keeps its explanation through b
   await service.pollForReconnect()
   assert.equal(wait.attempts, 60)
   assert.equal(wait.rebooting, false)
+  assert.equal(wait.toasts, 0)
   assert.equal(connection.unreachable(), true)
   assert.equal(connection.message(), UPDATE_EXPLANATION)
   assert.equal(fixture.session.store.get('startwrt.update-target'), '1.5.0')
@@ -3346,8 +3352,8 @@ test('WRT address change keeps its reconnect copy through background poller repo
   assert.equal(fixture.infoCalls(), 0)
 })
 
-function wrtUpdateOutcome(session, systemInfo) {
-  const { load, overrides } = wrtFlowHarness({ sessionStorage: session })
+function wrtUpdateOutcome(session, api) {
+  const { load, overrides } = wrtFlowHarness()
   overrides.set('src/app/i18n/validation-errors', {
     fill: (text, { version }) => text.replace('{version}', version),
   })
@@ -3356,13 +3362,14 @@ function wrtUpdateOutcome(session, systemInfo) {
       .SystemService.prototype,
   )
   const messages = []
+  const ignore = { set() {} }
   Object.assign(service, {
-    api: {
-      systemInfo,
-      systemNewerVersions: async () => {
-        throw new Error('registry unreachable')
-      },
-    },
+    api: { systemNewerVersions: async () => [], ...api },
+    storage: session,
+    info: ignore,
+    newerVersions: ignore,
+    updateAvailable: ignore,
+    staleUi: { check() {} },
     i18n: { transform: value => value },
     alerts: {
       open: (message, options) => {
@@ -3397,34 +3404,50 @@ for (const [name, entries, running, expected] of [
 ]) {
   test(`WRT update outcome after a reload ${name}`, async () => {
     const session = sessionStub(entries)
-    const fixture = wrtUpdateOutcome(session, async () => ({
-      version: running,
-    }))
+    const fixture = wrtUpdateOutcome(session, {
+      systemInfo: async () => ({ version: running }),
+    })
     await fixture.service.init()
-    await new Promise(setImmediate)
     assert.deepEqual(fixture.messages, expected)
     assert.equal(session.store.size, 0)
   })
 }
 
-test('WRT update outcome is dropped when the reloaded page cannot read the firmware', async () => {
+test('WRT update outcome waits out a reloaded page that cannot read system info', async () => {
   const session = sessionStub({ 'startwrt.update-target': '1.5.0' })
-  const fixture = wrtUpdateOutcome(session, async () => {
-    throw { code: 0 }
+  const fixture = wrtUpdateOutcome(session, {
+    systemInfo: async () => {
+      throw { code: 0 }
+    },
   })
   await fixture.service.init()
-  await new Promise(setImmediate)
   assert.deepEqual(fixture.messages, [])
+  assert.equal(session.store.get('startwrt.update-target'), '1.5.0')
+
+  fixture.service.api.systemInfo = async () => ({ version: '1.5.0' })
+  await fixture.service.refresh()
+  assert.deepEqual(fixture.messages, [['Updated to v1.5.0', 'positive']])
   assert.equal(session.store.size, 0)
 })
 
-test('WRT update into a new interface reloads with the requested version for init to confirm', async () => {
+test('WRT update outcome does not wait for newer versions', async () => {
+  const session = sessionStub({ 'startwrt.update-target': '1.5.0' })
+  const fixture = wrtUpdateOutcome(session, {
+    systemInfo: async () => ({ version: '1.5.0' }),
+    systemNewerVersions: () => new Promise(() => {}),
+  })
+  void fixture.service.init()
+  await new Promise(setImmediate)
+  assert.deepEqual(fixture.messages, [['Updated to v1.5.0', 'positive']])
+  assert.equal(session.store.size, 0)
+})
+
+test('WRT update into a new interface reloads with the requested version for the reloaded page to settle', async () => {
   const session = sessionStub()
   let reloads = 0
+  let toasts = 0
   const { load } = wrtFlowHarness({
     setTimeout: callback => queueMicrotask(callback),
-    sessionStorage: session,
-    window: { location: { reload: () => reloads++ } },
   })
   const service = Object.create(
     load('projects/start-wrt/web/src/app/services/system.service.ts')
@@ -3443,10 +3466,14 @@ test('WRT update into a new interface reloads with the requested version for ini
     connection: { resume() {} },
     sockets: { disconnect() {} },
     i18n: { transform: value => value },
-    alerts: { open: () => assert.fail('init() confirms after the reload') },
+    alerts: { open: () => toasts++ },
     staleUi: { isStale: () => true },
+    storage: session,
+    window: { location: { reload: () => reloads++ } },
   })
   await service.pollForReconnect()
+  assert.equal(attempts, 2)
+  assert.equal(toasts, 0)
   assert.equal(reloads, 1)
   assert.deepEqual([...session.store], [['startwrt.update-target', '1.5.0']])
 })

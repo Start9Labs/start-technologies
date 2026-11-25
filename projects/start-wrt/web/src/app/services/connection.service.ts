@@ -242,8 +242,7 @@ export class ConnectionService {
 
   /** True once the origin answers at all; an untrusted certificate fails it silently. */
   private async reachable(url: string): Promise<boolean> {
-    // Mock has no real router to probe; treat the destination as reachable so
-    // the flow recovers (recover() skips the actual navigation under mock too).
+    // Mock mode answers every probe; recover() then skips the reload or navigation.
     if (this.isMock) return true
     try {
       await fetch(`${url}/static/local-root-ca.crt?_probe=${Date.now()}`, {
