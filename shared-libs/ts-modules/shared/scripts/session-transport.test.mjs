@@ -13,7 +13,8 @@ registerHooks({
       format: 'module',
       shortCircuit: true,
       source: `
-      export async function prepareSession() {
+      export async function prepareSession(...args) {
+        globalThis.preparedSessions?.push(args)
         return { message: new Uint8Array([1]), async finish(response) {
           return { temporary: response[0] === 2, peer: ${JSON.stringify(auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(7)))}, cipher: {
             async write(bytes) { return bytes.slice() }, async read(bytes) { await globalThis.sessionRecordGate?.(); return bytes.slice() }
@@ -175,6 +176,213 @@ test('plaintext downgrade never opens admission or exposes RPC data', async () =
   assert.equal(url.searchParams.has('secure'), false)
   assert.equal(url.searchParams.has('context'), false)
   assert.equal(url.searchParams.get('existing'), 'kept')
+})
+
+function admissionServer(answers) {
+  return class extends Socket {
+    constructor(url) {
+      super(url)
+      queueMicrotask(() => this.dispatchEvent(new Event('open')))
+    }
+    send(data) {
+      super.send(data)
+      if (this.writes.length !== 1) return
+      const answer = answers.shift()
+      queueMicrotask(() =>
+        answer === undefined ? this.close() : this.receive(record(answer)),
+      )
+    }
+  }
+}
+async function withServerClock(skewMs, run) {
+  const fetch = globalThis.fetch
+  const requests = []
+  globalThis.preparedSessions = []
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url: String(url), method: init.method })
+    return new Response(null, {
+      headers: { date: new Date(Date.now() + skewMs).toUTCString() },
+    })
+  }
+  try {
+    await run(requests, globalThis.preparedSessions)
+  } finally {
+    globalThis.fetch = fetch
+    delete globalThis.preparedSessions
+  }
+}
+function connect(host, Server) {
+  const Constructor = sessionWebSocketConstructor(
+    async () => identity(),
+    'server.test',
+    'rpc',
+    Server,
+  )
+  const socket = new Constructor(`wss://${host}/rpc/v2`)
+  return new Promise(resolve => {
+    socket.addEventListener('open', () => resolve({ socket, opened: true }), {
+      once: true,
+    })
+    socket.addEventListener(
+      'close',
+      event => resolve({ socket, opened: false, event }),
+      { once: true },
+    )
+  })
+}
+
+test('an unanswered admission is re-signed once with the server clock and remembered', async () => {
+  await withServerClock(120_000, async (requests, prepared) => {
+    Socket.instances = []
+    const first = await connect(
+      'skewed.test',
+      admissionServer([undefined, [1]]),
+    )
+    assert.equal(first.opened, true)
+    assert.equal(Socket.instances.length, 2)
+    assert.deepEqual(requests, [
+      { url: 'https://skewed.test/', method: 'HEAD' },
+    ])
+    const [initial, retried] = prepared.map(args => args[3] - Date.now())
+    assert.ok(Math.abs(initial) < 1_000)
+    assert.ok(Math.abs(retried - 120_000) < 2_000)
+    first.socket.close()
+
+    const second = await connect('skewed.test', admissionServer([[1]]))
+    assert.equal(second.opened, true)
+    assert.equal(requests.length, 1)
+    assert.ok(Math.abs(prepared.at(-1)[3] - Date.now() - 120_000) < 2_000)
+    second.socket.close()
+  })
+})
+
+test('an unanswered admission within the signing tolerance is not retried', async () => {
+  await withServerClock(5_000, async (requests, prepared) => {
+    Socket.instances = []
+    const result = await connect(
+      'synced.test',
+      admissionServer([undefined, [1]]),
+    )
+    assert.equal(result.opened, false)
+    assert.equal(result.event.code, profile.abnormalCloseCode)
+    assert.equal(Socket.instances.length, 1)
+    assert.equal(requests.length, 1)
+    assert.equal(prepared.length, 1)
+  })
+})
+
+test('a socket that never opens never consults the server clock', async () => {
+  class Unreachable extends Socket {
+    constructor(url) {
+      super(url)
+      queueMicrotask(() => this.close())
+    }
+  }
+  await withServerClock(120_000, async (requests, prepared) => {
+    Socket.instances = []
+    const result = await connect('unreachable.test', Unreachable)
+    assert.equal(result.opened, false)
+    assert.equal(Socket.instances.length, 1)
+    assert.equal(requests.length, 0)
+    assert.equal(prepared.length, 1)
+  })
+})
+
+test('an answered admission failure never consults the server clock', async () => {
+  await withServerClock(120_000, async (requests, prepared) => {
+    Socket.instances = []
+    const result = await connect('answered.test', admissionServer([[2], [1]]))
+    assert.equal(result.opened, false)
+    assert.equal(Socket.instances.length, 1)
+    assert.equal(requests.length, 0)
+    assert.equal(prepared.length, 1)
+  })
+})
+
+test('a re-signed admission the server still drops is not remembered', async () => {
+  await withServerClock(120_000, async (requests, prepared) => {
+    Socket.instances = []
+    const first = await connect(
+      'disputed.test',
+      admissionServer([undefined, undefined]),
+    )
+    assert.equal(first.opened, false)
+    assert.equal(Socket.instances.length, 2)
+    assert.equal(requests.length, 1)
+
+    const second = await connect('disputed.test', admissionServer([[1]]))
+    assert.equal(second.opened, true)
+    assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
+    second.socket.close()
+  })
+})
+
+test('a remembered offset follows a corrected device clock', async () => {
+  await withServerClock(120_000, async () => {
+    const skewed = await connect(
+      'corrected.test',
+      admissionServer([undefined, [1]]),
+    )
+    assert.equal(skewed.opened, true)
+    skewed.socket.close()
+  })
+  await withServerClock(0, async (requests, prepared) => {
+    Socket.instances = []
+    const corrected = await connect(
+      'corrected.test',
+      admissionServer([undefined, [1]]),
+    )
+    assert.equal(corrected.opened, true)
+    assert.equal(Socket.instances.length, 2)
+    assert.equal(requests.length, 1)
+    const [stale, fresh] = prepared.map(args => args[3] - Date.now())
+    assert.ok(Math.abs(stale - 120_000) < 2_000)
+    assert.ok(Math.abs(fresh) < 1_000)
+    corrected.socket.close()
+
+    const next = await connect('corrected.test', admissionServer([[1]]))
+    assert.equal(next.opened, true)
+    assert.equal(requests.length, 1)
+    assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
+    next.socket.close()
+  })
+})
+
+test('closing while the server clock is read opens no second connection', async () => {
+  const fetch = globalThis.fetch
+  globalThis.preparedSessions = []
+  let reading
+  const started = new Promise(resolve => (reading = resolve))
+  globalThis.fetch = (_url, init) =>
+    new Promise((_, reject) => {
+      reading()
+      init.signal.addEventListener('abort', () => reject(init.signal.reason), {
+        once: true,
+      })
+    })
+  try {
+    Socket.instances = []
+    const Constructor = sessionWebSocketConstructor(
+      async () => identity(),
+      'server.test',
+      'rpc',
+      admissionServer([undefined, [1]]),
+    )
+    const socket = new Constructor('wss://closing.test/rpc/v2')
+    const events = []
+    for (const type of ['open', 'error', 'close'])
+      socket.addEventListener(type, () => events.push(type))
+    await started
+    socket.close()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    assert.deepEqual(events, ['close'])
+    assert.equal(socket.readyState, socket.CLOSED)
+    assert.equal(Socket.instances.length, 1)
+    assert.equal(globalThis.preparedSessions.length, 1)
+  } finally {
+    globalThis.fetch = fetch
+    delete globalThis.preparedSessions
+  }
 })
 
 for (const [name, bytes] of [

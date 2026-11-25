@@ -44,6 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let mut signature_profile = start_core::sign::browser_profile();
     signature_profile["http"] = start_core::middleware::auth::signature::wire_profile();
+    signature_profile["timestampToleranceSecs"] =
+        start_core::middleware::auth::signature::TIMESTAMP_TOLERANCE_SECS.into();
     std::fs::write(
         directory.join("signature-profile.ts"),
         format!(

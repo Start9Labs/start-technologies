@@ -28,4 +28,5 @@ export const SIGNATURE_PROFILE = {
     ],
     header: 'X-Start-Auth-Sig',
   },
+  timestampToleranceSecs: 30,
 } as const

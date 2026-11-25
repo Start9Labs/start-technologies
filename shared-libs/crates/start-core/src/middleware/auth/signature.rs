@@ -435,6 +435,9 @@ impl SignatureAuth {
 
 const SIG_TIME_GRACE_PERIOD_SECS: u64 = 60;
 
+/// Largest difference between a signed timestamp and this server's synchronized clock.
+pub const TIMESTAMP_TOLERANCE_SECS: u64 = SIG_TIME_GRACE_PERIOD_SECS / 2;
+
 const MAX_UNTIMED_NONCES: usize = 1024 * 1024;
 
 /// Retains nonces for 60 seconds with a trusted clock.
@@ -597,7 +600,7 @@ async fn accept_nonce<C: SignatureAuthContext>(
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
-        if now.abs_diff(commitment.timestamp) > SIG_TIME_GRACE_PERIOD_SECS / 2 {
+        if now.abs_diff(commitment.timestamp) > TIMESTAMP_TOLERANCE_SECS {
             return Err(Error::new(
                 eyre!("{}", t!("middleware.auth.timestamp-not-within-30s")),
                 ErrorKind::InvalidSignature,

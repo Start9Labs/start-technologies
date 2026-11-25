@@ -89,6 +89,7 @@ export async function prepareSession(
   signer: auth.RequestSigner,
   context: string,
   target: Target,
+  time?: number,
 ) {
   const dh = x25519.utils.randomPrivateKey()
   const ephemeral = new Uint8Array(x25519.getPublicKey(dh))
@@ -98,7 +99,7 @@ export async function prepareSession(
     hello: { role: 'client', ephemeral, target },
   }
   const payload = encode(body)
-  const proof = await signer.sign(context, payload)
+  const proof = await signer.sign(context, payload, time)
   const wire = new Uint8Array(payload.length + proof.length)
   wire.set(payload)
   wire.set(proof, payload.length)

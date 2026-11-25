@@ -1,6 +1,7 @@
 import { auth } from '@start9labs/start-core'
 import type { Target } from '@start9labs/start-core/osBindings/session'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
+import { SIGNATURE_PROFILE } from '@start9labs/start-core/osBindings/signature-profile'
 import { pEvent } from 'p-event'
 
 import type { SessionCipher } from './session-identity'
@@ -9,6 +10,29 @@ import { SessionWebSocketStream } from './session-stream'
 const profile = SESSION_PROFILE.transport
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+const RETRYABLE_SKEW_MS = (SIGNATURE_PROFILE.timestampToleranceSecs * 1000) / 2
+const serverClockOffsets = new Map<string, number>()
+
+async function measureServerClockOffset(
+  url: string,
+  signal: AbortSignal,
+): Promise<number | undefined> {
+  const origin = new URL('/', url)
+  origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:'
+  const sent = Date.now()
+  const response = await fetch(origin, {
+    method: 'HEAD',
+    cache: 'no-store',
+    signal: AbortSignal.any([
+      signal,
+      AbortSignal.timeout(profile.handshakeTimeoutMs),
+    ]),
+  }).catch(() => undefined)
+  const date = Date.parse(response?.headers.get('date') ?? '')
+  if (Number.isNaN(date)) return undefined
+  // Date truncates to the second.
+  return date + 500 - (sent + Date.now()) / 2
+}
 
 export interface SessionSocketIdentity {
   readonly signer: auth.RequestSigner
@@ -100,6 +124,7 @@ export function sessionWebSocketConstructor(
     private offset = 0
     private writer = Promise.resolve()
     private queuedBytes = 0
+    private handshake: 'connecting' | 'open' | 'answered' = 'connecting'
 
     constructor(url: string | URL, protocols?: string | string[]) {
       super()
@@ -134,38 +159,29 @@ export function sessionWebSocketConstructor(
         () => this.fail(identity.signal.reason),
         { once: true, signal: this.lifetime.signal },
       )
-      const { prepareSession } = await import('./session-identity')
-      const prepared = await prepareSession(identity.signer, context, target)
-      if (this.readyState !== this.CONNECTING) return
-      identity.signal.throwIfAborted()
-      const signal = AbortSignal.any([
-        identity.signal,
-        this.lifetime.signal,
-        AbortSignal.timeout(profile.handshakeTimeoutMs),
-      ])
-      const socket = (this.socket = new Socket(this.url, protocols))
-      const raw = (this.raw = new SessionWebSocketStream(socket))
+      const host = new URL(this.url).host
+      const offset = serverClockOffsets.get(host) ?? 0
+      const admitted = await this.admit(identity, protocols, offset).catch(
+        async (error: unknown) => {
+          if (this.handshake !== 'open' || this.readyState !== this.CONNECTING)
+            throw error
+          const measured = await measureServerClockOffset(
+            this.url,
+            AbortSignal.any([identity.signal, this.lifetime.signal]),
+          )
+          if (
+            measured === undefined ||
+            Math.abs(measured - offset) <= RETRYABLE_SKEW_MS
+          )
+            throw error
+          const retried = await this.admit(identity, protocols, measured)
+          if (retried) serverClockOffsets.set(host, measured)
+          return retried
+        },
+      )
+      if (!admitted) return
+      const { opened, raw } = admitted
       const abort = () => raw.abort(new Error('Encrypted WebSocket aborted'))
-      signal.addEventListener('abort', abort, { once: true })
-      let opened: SessionOpenEvent
-      try {
-        await pEvent(socket, 'open', {
-          signal,
-          rejectionEvents: ['error', 'close'],
-        })
-        await raw.writeRecord(prepared.message, signal)
-        const response = await raw.readRecord(
-          profile.maxHandshakeRecordBytes,
-          signal,
-        )
-        const secured = await prepared.finish(response)
-        signal.throwIfAborted()
-        assertServerIdentity(secured, allowTemporaryIdentity)
-        opened = new SessionOpenEvent(secured.peer, secured.temporary)
-        this.cipher = secured.cipher
-      } finally {
-        signal.removeEventListener('abort', abort)
-      }
       this.lifetime.signal.addEventListener('abort', abort, { once: true })
       this.readyState = this.OPEN
       this.dispatchEvent(opened)
@@ -202,6 +218,56 @@ export function sessionWebSocketConstructor(
               : new Uint8Array(payload).buffer
         else throw new Error('Invalid encrypted WebSocket message kind')
         this.dispatchEvent(new MessageEvent('message', { data }))
+      }
+    }
+
+    private async admit(
+      identity: SessionSocketIdentity,
+      protocols: string | string[] | undefined,
+      offset: number,
+    ) {
+      this.handshake = 'connecting'
+      const { prepareSession } = await import('./session-identity')
+      const prepared = await prepareSession(
+        identity.signer,
+        context,
+        target,
+        Date.now() + offset,
+      )
+      if (this.readyState !== this.CONNECTING) return
+      identity.signal.throwIfAborted()
+      const signal = AbortSignal.any([
+        identity.signal,
+        this.lifetime.signal,
+        AbortSignal.timeout(profile.handshakeTimeoutMs),
+      ])
+      this.raw?.abort(new Error('Encrypted WebSocket retried'))
+      const socket = (this.socket = new Socket(this.url, protocols))
+      const raw = (this.raw = new SessionWebSocketStream(socket))
+      const abort = () => raw.abort(new Error('Encrypted WebSocket aborted'))
+      signal.addEventListener('abort', abort, { once: true })
+      try {
+        await pEvent(socket, 'open', {
+          signal,
+          rejectionEvents: ['error', 'close'],
+        })
+        this.handshake = 'open'
+        await raw.writeRecord(prepared.message, signal)
+        const response = await raw.readRecord(
+          profile.maxHandshakeRecordBytes,
+          signal,
+        )
+        this.handshake = 'answered'
+        const secured = await prepared.finish(response)
+        signal.throwIfAborted()
+        assertServerIdentity(secured, allowTemporaryIdentity)
+        this.cipher = secured.cipher
+        return {
+          opened: new SessionOpenEvent(secured.peer, secured.temporary),
+          raw,
+        }
+      } finally {
+        signal.removeEventListener('abort', abort)
       }
     }
 

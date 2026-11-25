@@ -23,7 +23,12 @@ export interface AuthKey {
 
 /** Signs captured body bytes and returns a binary CBOR request proof without exporting private keys. */
 export interface RequestSigner {
-  sign(context: string, body: Uint8Array): Promise<Uint8Array<ArrayBuffer>>
+  /** Stamps the proof with the given epoch-millisecond time, else the local clock. */
+  sign(
+    context: string,
+    body: Uint8Array,
+    time?: number,
+  ): Promise<Uint8Array<ArrayBuffer>>
 }
 
 interface SigningIdentity {
@@ -43,10 +48,10 @@ function webCryptoIdentity(key: AuthKey): SigningIdentity {
 
 function commitmentSigner(identity: SigningIdentity): RequestSigner {
   return {
-    sign: async (context, body) => {
+    sign: async (context, body, time) => {
       const { encode } = await import('./cbor')
       return encode(
-        await signTaggedRequest(identity, context, body, COMMITMENT_TAG),
+        await signTaggedRequest(identity, context, body, COMMITMENT_TAG, time),
       )
     },
   }
@@ -129,8 +134,9 @@ async function signTaggedRequest(
   context: string,
   body: Uint8Array,
   tag: Uint8Array,
+  time = Date.now(),
 ): Promise<BinaryRequestProof> {
-  const timestamp = BigInt(Math.floor(Date.now() / 1000))
+  const timestamp = BigInt(Math.floor(time / 1000))
   const nonce = crypto.getRandomValues(new BigUint64Array(1))[0]
   const size = BigInt(body.length)
   const hash = blake3(body)

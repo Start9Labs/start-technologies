@@ -81,8 +81,13 @@ connection. No callback receives unauthenticated plaintext as an admitted reques
 Each physical connection gets fresh DH keys, commitment and nonce. Client signing
 finishes before the 30-second network/admission deadline; provider handles may be
 reused, prepared hellos may not. The existing signed-timestamp freshness policy still
-applies while signing and connecting. There is no relaxed clock policy or hidden
-signing retry. The server signs only after validating the initiation.
+applies while signing and connecting, and the server never relaxes it. When the server
+closes an opened browser connection without answering, the browser reads the server's
+`Date` header. If that time differs from the one it signed with by more than half the
+tolerance, it signs one fresh hello on a new connection with the server's time. Once that
+admission succeeds, later connections to that host start from the same offset. Native
+clients and the browser's signed HTTP requests sign with the local clock. The server
+signs only after validating the initiation.
 
 The first message exposes the client's public identity on `ws://`; `wss://` protects
 it. Private signing keys never travel. Identity proof is separate from enrollment,
