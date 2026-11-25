@@ -85,9 +85,11 @@ applies while signing and connecting, and the server never relaxes it. When the 
 closes an opened browser connection without answering, the browser reads the server's
 `Date` header. If that time differs from the one it signed with by more than half the
 tolerance, it signs one fresh hello on a new connection with the server's time. Once that
-admission succeeds, later connections to that host start from the same offset. Native
-clients and the browser's signed HTTP requests sign with the local clock. The server
-signs only after validating the initiation.
+admission succeeds, later connections to that host start from the same offset. A device-clock
+change greater than half the tolerance refreshes the offset before opening another
+connection. GUID continuations are single-use even when admission fails. Native clients
+and the browser's signed HTTP requests sign with the local clock. The server signs only
+after validating the initiation.
 
 The first message exposes the client's public identity on `ws://`; `wss://` protects
 it. Private signing keys never travel. Identity proof is separate from enrollment,

@@ -3,6 +3,7 @@ import test from 'node:test'
 import { registerHooks } from 'node:module'
 import { auth } from '@start9labs/start-core'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
+import { SIGNATURE_PROFILE } from '@start9labs/start-core/osBindings/signature-profile'
 import './typescript-loader.mjs'
 
 // Framing/lifecycle tests replace crypto; real signed-DH interoperability has separate coverage.
@@ -218,7 +219,9 @@ function connect(host, Server) {
     'rpc',
     Server,
   )
-  const socket = new Constructor(`wss://${host}/rpc/v2`)
+  return connectionResult(new Constructor(`wss://${host}/rpc/v2`))
+}
+function connectionResult(socket) {
   return new Promise(resolve => {
     socket.addEventListener('open', () => resolve({ socket, opened: true }), {
       once: true,
@@ -317,7 +320,7 @@ test('a re-signed admission the server still drops is not remembered', async () 
   })
 })
 
-test('a remembered offset follows a corrected device clock', async () => {
+test('a remembered offset follows a corrected server clock', async () => {
   await withServerClock(120_000, async () => {
     const skewed = await connect(
       'corrected.test',
@@ -347,6 +350,71 @@ test('a remembered offset follows a corrected device clock', async () => {
     next.socket.close()
   })
 })
+
+for (const skew of [-120_000, 120_000])
+  test(`correcting a ${skew} ms device clock refreshes before single-use admission`, async () => {
+    const now = Date.now
+    let deviceSkew = skew
+    Date.now = () => now() + deviceSkew
+    const host = `corrected-device-${skew}.test`
+    try {
+      await withServerClock(-skew, async () => {
+        const initial = await connect(host, admissionServer([undefined, [1]]))
+        assert.equal(initial.opened, true)
+        initial.socket.close()
+      })
+      deviceSkew = 0
+      await withServerClock(0, async (requests, prepared) => {
+        Socket.instances = []
+        let available = true
+        class SingleUse extends Socket {
+          constructor(url) {
+            super(url)
+            const found = available
+            available = false
+            queueMicrotask(() =>
+              found ? this.dispatchEvent(new Event('open')) : this.close(),
+            )
+          }
+          send(data) {
+            super.send(data)
+            if (this.writes.length !== 1) return
+            const timely =
+              Math.abs(prepared.at(-1)[3] - Date.now()) <=
+              SIGNATURE_PROFILE.timestampToleranceSecs * 1000
+            queueMicrotask(() =>
+              timely ? this.receive(record([1])) : this.close(),
+            )
+          }
+        }
+        const guid = 'A'.repeat(32)
+        const Constructor = sessionWebSocketConstructor(
+          async () => identity(),
+          'server.test',
+          { continuation: guid },
+          SingleUse,
+        )
+        const result = await connectionResult(
+          new Constructor(`wss://${host}/rpc/v2/${guid}`),
+        )
+        assert.equal(result.opened, true)
+        assert.equal(Socket.instances.length, 1)
+        assert.equal(prepared.length, 1)
+        assert.deepEqual(requests, [
+          { url: `https://${host}/`, method: 'HEAD' },
+        ])
+        result.socket.close()
+
+        const next = await connect(host, admissionServer([[1]]))
+        assert.equal(next.opened, true)
+        assert.equal(requests.length, 1)
+        assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
+        next.socket.close()
+      })
+    } finally {
+      Date.now = now
+    }
+  })
 
 test('closing while the server clock is read opens no second connection', async () => {
   const fetch = globalThis.fetch

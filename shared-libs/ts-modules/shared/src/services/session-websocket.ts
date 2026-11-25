@@ -11,15 +11,22 @@ const profile = SESSION_PROFILE.transport
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 const RETRYABLE_SKEW_MS = (SIGNATURE_PROFILE.timestampToleranceSecs * 1000) / 2
-const serverClockOffsets = new Map<string, number>()
+
+interface ServerClockOffset {
+  offset: number
+  localTime: number
+  monotonicTime: number
+}
+
+const serverClockOffsets = new Map<string, ServerClockOffset>()
 
 async function measureServerClockOffset(
   url: string,
   signal: AbortSignal,
-): Promise<number | undefined> {
+): Promise<ServerClockOffset | undefined> {
   const origin = new URL('/', url)
   origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:'
-  const sent = Date.now()
+  const sent = performance.now()
   const response = await fetch(origin, {
     method: 'HEAD',
     cache: 'no-store',
@@ -30,8 +37,14 @@ async function measureServerClockOffset(
   }).catch(() => undefined)
   const date = Date.parse(response?.headers.get('date') ?? '')
   if (Number.isNaN(date)) return undefined
+  const monotonicTime = performance.now()
+  const localTime = Date.now()
   // Date truncates to the second.
-  return date + 500 - (sent + Date.now()) / 2
+  return {
+    offset: date + 500 + (monotonicTime - sent) / 2 - localTime,
+    localTime,
+    monotonicTime,
+  }
 }
 
 export interface SessionSocketIdentity {
@@ -160,26 +173,37 @@ export function sessionWebSocketConstructor(
         { once: true, signal: this.lifetime.signal },
       )
       const host = new URL(this.url).host
-      const offset = serverClockOffsets.get(host) ?? 0
+      const cached = serverClockOffsets.get(host)
+      const signal = AbortSignal.any([identity.signal, this.lifetime.signal])
+      let measured: ServerClockOffset | undefined
+      if (
+        cached &&
+        Math.abs(
+          Date.now() -
+            cached.localTime -
+            (performance.now() - cached.monotonicTime),
+        ) > RETRYABLE_SKEW_MS
+      ) {
+        measured = await measureServerClockOffset(this.url, signal)
+        if (measured === undefined)
+          throw new Error('Server clock is unavailable')
+      }
+      const offset = measured?.offset ?? cached?.offset ?? 0
       const admitted = await this.admit(identity, protocols, offset).catch(
         async (error: unknown) => {
           if (this.handshake !== 'open' || this.readyState !== this.CONNECTING)
             throw error
-          const measured = await measureServerClockOffset(
-            this.url,
-            AbortSignal.any([identity.signal, this.lifetime.signal]),
-          )
+          measured = await measureServerClockOffset(this.url, signal)
           if (
             measured === undefined ||
-            Math.abs(measured - offset) <= RETRYABLE_SKEW_MS
+            Math.abs(measured.offset - offset) <= RETRYABLE_SKEW_MS
           )
             throw error
-          const retried = await this.admit(identity, protocols, measured)
-          if (retried) serverClockOffsets.set(host, measured)
-          return retried
+          return this.admit(identity, protocols, measured.offset)
         },
       )
       if (!admitted) return
+      if (measured) serverClockOffsets.set(host, measured)
       const { opened, raw } = admitted
       const abort = () => raw.abort(new Error('Encrypted WebSocket aborted'))
       this.lifetime.signal.addEventListener('abort', abort, { once: true })
