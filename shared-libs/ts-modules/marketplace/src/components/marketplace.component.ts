@@ -176,7 +176,7 @@ const ICONS: Record<string, string> = {
               @if (!loading()) {
                 @for (
                   $implicit of packages();
-                  track $implicit.id + '#' + $implicit.flavor
+                  track $implicit.id + '#' + ($implicit.flavor ?? '')
                 ) {
                   <ng-container
                     *ngTemplateOutlet="template(); context: { $implicit }"

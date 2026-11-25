@@ -91,9 +91,8 @@ export class PatchDB<T extends { [key: string]: any }> {
   /**
    * Returns an observable of the value at the given path within the document.
    *
-   * Overloaded for 0–6 path segments with full type safety. The returned
-   * observable emits whenever a patch touches the watched path (or any
-   * ancestor/descendant of it).
+   * Overloaded for 0–6 path segments with full type safety.
+   * After the initial value, emits only when `value !== previousValue`.
    *
    * The observable waits for the first non-zero revision (i.e. a real dump)
    * before emitting, so subscribers won't see the empty initial state.
