@@ -1,10 +1,13 @@
-use std::collections::BTreeSet;
-use std::net::IpAddr;
+use std::collections::{BTreeSet, VecDeque};
+use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::time::Duration;
 
 use bytes::Bytes;
-use http_body_util::BodyExt;
+use http_body_util::{BodyExt, Full};
+use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::{Connect, HttpConnector};
+use hyper_util::rt::TokioExecutor;
 use instant_acme::{
     Account, AuthorizationStatus, BodyWrapper, BytesResponse, ChallengeStatus, ChallengeType,
     CryptoProvider as AcmeCryptoProvider, Error as AcmeError, HttpClient, Identifier, Key,
@@ -18,25 +21,50 @@ use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs
 use tokio_rustls::rustls::sign::CertifiedKey;
 
 use super::{AcmeCert, AcmeCertCache, AcmeCertStore, certified_key};
+use crate::GatewayId;
 use crate::db::DbAccessMut;
+use crate::error::ErrorData;
+use crate::net::dns::GatewayDns;
+use crate::net::gateway::gateway_connector;
 use crate::prelude::*;
 use crate::util::serde::{Der64, Pem};
 
-pub(super) struct AcmeHttpClient(reqwest::Client);
+type AcmeConnector<R> = hyper_tls::HttpsConnector<HttpConnector<R>>;
+
+pub(super) struct AcmeHttpClient<R = GatewayDns>(Client<AcmeConnector<R>, Full<Bytes>>);
 
 impl AcmeHttpClient {
-    pub(super) fn new() -> Result<Self, AcmeError> {
-        reqwest::Client::builder()
-            .use_native_tls()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map(Self)
-            .map_err(other_error)
+    /// Every lookup and request leaves through the gateway, or fails.
+    pub(super) fn via_gateway(
+        gateway: &GatewayId,
+        index: u32,
+        dns_servers: &VecDeque<SocketAddr>,
+    ) -> Result<Self, AcmeError> {
+        let dns = GatewayDns::new(gateway.clone(), index, dns_servers)
+            .map_err(|e| other_error(ErrorData::from(e)))?;
+        Self::new(
+            gateway_connector(gateway.as_str(), dns)
+                .map_err(|e| other_error(ErrorData::from(e)))?,
+            native_tls::TlsConnector::new().map_err(other_error)?,
+        )
     }
 }
 
-impl HttpClient for AcmeHttpClient {
+impl<R> AcmeHttpClient<R>
+where
+    AcmeConnector<R>: Connect + Clone + Send + Sync + 'static,
+{
+    fn new(connector: HttpConnector<R>, tls: native_tls::TlsConnector) -> Result<Self, AcmeError> {
+        Ok(Self(Client::builder(TokioExecutor::new()).build(
+            hyper_tls::HttpsConnector::from((connector, tls.into())),
+        )))
+    }
+}
+
+impl<R> HttpClient for AcmeHttpClient<R>
+where
+    AcmeConnector<R>: Connect + Clone + Send + Sync + 'static,
+{
     fn request(
         &self,
         request: http::Request<BodyWrapper<Bytes>>,
@@ -49,20 +77,13 @@ impl HttpClient for AcmeHttpClient {
                 .await
                 .expect("infallible ACME request body")
                 .to_bytes();
-            let response = client
-                .request(parts.method, parts.uri.to_string())
-                .headers(parts.headers)
-                .body(body)
-                .send()
+            let (parts, body) = client
+                .request(http::Request::from_parts(parts, Full::new(body)))
                 .await
-                .map_err(other_error)?;
-            let mut result = http::Response::builder().status(response.status());
-            *result.headers_mut().unwrap() = response.headers().clone();
-            Ok(result
-                .body(http_body_util::Full::new(
-                    response.bytes().await.map_err(other_error)?,
-                ))?
-                .into())
+                .map_err(other_error)?
+                .into_parts();
+            let body = body.collect().await.map_err(other_error)?.to_bytes();
+            Ok(http::Response::from_parts(parts, Full::new(body)).into())
         })
     }
 }
