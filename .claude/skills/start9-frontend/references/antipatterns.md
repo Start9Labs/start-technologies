@@ -147,4 +147,4 @@ for proper nouns and page titles.
    `provideTaiga({ mode })`.
 5. **Adopt new primitives as they ship**: `linkedSignal`, `@let`, `TUI_BREAKPOINT`,
    `@Service()`, `text-wrap: balance`.
-6. Version pinning and the fleet table's update are in SKILL.md, The fleet.
+6. Version pinning is in SKILL.md, Stack; each repo records its own versions.

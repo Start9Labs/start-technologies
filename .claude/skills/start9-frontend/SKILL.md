@@ -6,7 +6,7 @@ description: Start9 house style for every Angular + Taiga UI web frontend whose 
 # Start9 Frontend — Angular + Taiga UI house style
 
 Canonical for **every Angular + Taiga web UI whose source Start9 controls**, whether or not
-the fleet table below lists it, distilled from the fleet's codebases and from the
+`references/repos.md` names it, distilled from the fleet's codebases and from the
 refactor and review history that shaped them. A new Start9 web UI is Angular + Taiga
 unless someone specifies otherwise. Follow it and new code matches the fleet;
 deviate and expect it to be rewritten in review.
@@ -39,28 +39,15 @@ unrelated redesigns in a separate PR; do not turn touching a component into a st
 | `references/recipes.md`      | step-by-step: new page, dialog, form, table, control component, endpoint                                  |
 | `references/repos.md`        | repo-specific rules and build/verify commands                                                             |
 
-## The fleet
+## Stack
 
-| App                    | Location                                        | Angular | Taiga | Zone                       | Theme                                | i18n               | Backend                                             |
-| ---------------------- | ----------------------------------------------- | ------- | ----- | -------------------------- | ------------------------------------ | ------------------ | --------------------------------------------------- |
-| StartOS `ui`           | `start-technologies` `projects/start-os/web/ui` | 22      | 5.29  | zone.js (zoneless pending) | dark, `provideTaiga({mode})`         | yes (shared dicts) | JSON-RPC + PatchDB push                             |
-| `setup-wizard`         | `projects/start-os/web/setup-wizard`            | 22      | 5.29  | zone.js                    | dark                                 | yes (shared)       | JSON-RPC                                            |
-| `start-tunnel`         | `projects/start-tunnel/web`                     | 22      | 5.29  | **zoneless**               | dark                                 | yes (local dicts)  | JSON-RPC + PatchDB                                  |
-| `start-wrt`            | `projects/start-wrt/web`                        | 22      | 5.29  | **zoneless**               | dual (`TUI_DARK_MODE`)               | yes (local dicts)  | Signed-DH RPC + bootstrap possession, 5s polling    |
-| `brochure-marketplace` | `projects/brochure-marketplace`                 | 22      | 5.29  | zone.js (legacy)           | dark                                 | yes (shared)       | registry RPC direct                                 |
-| `start9-store`         | `ops/start9-store/web`                          | 22      | 5.32  | **zoneless**               | light                                | no                 | REST + Zod via `/api` BFF, **SSR**                  |
-| `ops-server`           | `ops/ops-server/web`                            | 22      | 5.29  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                   |
-| `support-server`       | `ops/support-server/portal/web`                 | 22      | 5.34  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | RPC `/api` + socket.io, same-origin; `mock/` in dev |
-| `start-equity`         | `ops/start-equity/web`                          | 22      | 5.29  | **zoneless**               | dual (OS, `TUI_DARK_MODE` toggle)    | no                 | REST `/_api`, same-origin Express; `MockApiService` |
-| Helix console          | `helix-startos-internal` `app/web`              | 22      | 5.28  | **zoneless**               | dual (OS)                            | no                 | REST `/_api` + WebSocket push, same-origin Express  |
-
-TypeScript ~6.0, rxjs ~7.8 everywhere. Taiga is **pinned exact** — bump only with the
-maintainer's blessing. Monorepo apps share **one Angular workspace rooted at the repo root**;
-ops repos are standalone. Zoneless is the target state — write all new code zoneless-safe.
-This table is the **only** place in the fleet where stack versions are written down — update
-it with every Angular/Taiga bump (other repos' docs deliberately carry no version specifics).
-It records stacks, not scope: an app missing from it is still governed by this skill — add
-its row.
+Each repo records its own versions: its `package.json` is the record of its Angular, Taiga,
+TypeScript and rxjs versions, and its own `AGENTS.md` carries any version fact agents need
+beyond that. Read them before relying on a version-specific API. Taiga is **pinned exact** —
+bump only with the maintainer's blessing. Monorepo apps share **one Angular workspace rooted
+at the repo root**; other repos are standalone. Zoneless is the target state — write all new
+code zoneless-safe. What each app's rules need beyond that (zone mode, theme, i18n, backend)
+is in `references/repos.md`; an app missing there is still governed by this skill — add it.
 
 ## Doctrine
 
@@ -92,10 +79,10 @@ its row.
    the plain class and wired into `check`; never for a template, a style or what a component
    renders. No test framework; don't claim "tests pass" in a repo that has none.
 10. **The docs ship with the change — this skill first.** This skill is the fleet-wide
-    frontend source of truth: the ops repos reach it through committed symlinks, and stack
-    versions live only in its fleet table. When frontend conventions, versions, or idioms
-    change, update `SKILL.md` and the affected `references/*.md` in the same change; other
-    repos' docs carry only project-specific facts.
+    frontend source of truth: the ops repos reach it through committed symlinks. When
+    frontend conventions or idioms change, update `SKILL.md` and the affected
+    `references/*.md` in the same change; each repo's own docs carry its project facts,
+    stack versions included.
 
 ## If you learned Angular anywhere else — the surprise index
 
