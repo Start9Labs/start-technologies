@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
 use crate::context::CliContext;
+use crate::mcp::{EFFECT, Effect};
 #[allow(unused_imports)]
 use crate::prelude::*;
 use crate::util::serde::HandlerExtSerde;
@@ -76,6 +77,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "create",
             from_fn_async(backup_bulk::backup_all)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.create-backup-all-packages")
                 .with_call_remote::<CliContext>(),
@@ -86,6 +88,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
                 .subcommand(
                     "restore",
                     from_fn_async(volume::restore_volumes_rpc)
+                        .with_metadata(EFFECT, Effect::Destructive.into())
                         .with_metadata("sync_db", Value::Bool(true))
                         .with_about("about.restore-volumes-from-backup")
                         .no_cli(),
@@ -109,7 +112,9 @@ pub fn package_backup<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "restore",
-            from_fn_async(restore::restore_packages_rpc).no_cli(),
+            from_fn_async(restore::restore_packages_rpc)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
         )
         .subcommand(
             "restore",

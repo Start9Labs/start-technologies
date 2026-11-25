@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::{CliContext, DiagnosticContext, RpcContext};
 use crate::disk::repair;
 use crate::init::SYSTEM_REBUILD_PATH;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
 use crate::update::diagnostic as update;
@@ -174,7 +175,12 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
                 .with_metadata("authenticated", Value::Bool(true))
                 .no_cli(),
         )
-        .subcommand("forget", from_fn_async(forget_disk::<RpcContext>).no_cli())
+        .subcommand(
+            "forget",
+            from_fn_async(forget_disk::<RpcContext>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "forget",
             CallRemoteHandler::<CliContext, _, _>::new(
@@ -189,7 +195,12 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
                 .with_metadata("authenticated", Value::Bool(true))
                 .no_cli(),
         )
-        .subcommand("repair", from_fn_async(|_: RpcContext| repair()).no_cli())
+        .subcommand(
+            "repair",
+            from_fn_async(|_: RpcContext| repair())
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "repair",
             CallRemoteHandler::<CliContext, _, _>::new(
