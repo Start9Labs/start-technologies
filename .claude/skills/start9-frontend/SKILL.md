@@ -1,17 +1,18 @@
 ---
 name: start9-frontend
-description: Start9 house style for every Angular + Taiga UI web frontend whose source Start9 controls, listed or not (StartOS ui/setup-wizard, StartWRT, StartTunnel, brochure-marketplace, start9-store, ops-server, support-server, start-equity, Helix's console, …); a new Start9 web UI is Angular + Taiga unless someone specifies otherwise. Use BEFORE writing or reviewing any frontend code in these apps — components, templates, styles/CSS, forms, dialogs/toasts, routing, state, DI, i18n — and when bootstrapping a new Start9 web UI or upgrading Angular/Taiga. Includes doctrine, recipes, an antipattern catalog distilled from the fleet's refactor history, and a verified Taiga 5 API reference.
+description: Start9 house style for every Angular + Taiga UI web frontend whose source Start9 controls; a new Start9 web UI is Angular + Taiga unless someone specifies otherwise. Use BEFORE writing or reviewing any frontend code in these apps — components, templates, styles/CSS, forms, dialogs/toasts, routing, state, DI, i18n — and when bootstrapping a new Start9 web UI or upgrading Angular/Taiga. Includes doctrine, recipes, an antipattern catalog distilled from the fleet's refactor history, a verified Taiga 5 API reference, and the spec of the FRONTEND.md file each app keeps for its own facts.
 ---
 
 # Start9 Frontend — Angular + Taiga UI house style
 
-Canonical for **every Angular + Taiga web UI whose source Start9 controls**, whether or not
-`references/repos.md` names it, distilled from the fleet's codebases and from the
-refactor and review history that shaped them. A new Start9 web UI is Angular + Taiga
-unless someone specifies otherwise. Follow it and new code matches the fleet;
-deviate and expect it to be rewritten in review.
+Canonical for **every Angular + Taiga web UI whose source Start9 controls**, distilled from
+the fleet's codebases and from the refactor and review history that shaped them. A new Start9
+web UI is Angular + Taiga unless someone specifies otherwise. Follow it and new code matches
+the fleet; deviate and expect it to be rewritten in review. The skill holds no app's facts:
+each app records them in its `FRONTEND.md` (below).
 
-**Authority order: Taiga UI docs > this skill > neighboring code.** The codebases are
+**Authority order: Taiga UI docs > this skill > neighboring code**, except where an app's
+`FRONTEND.md` records a sanctioned divergence. The codebases are
 mid-migration — _"matches existing repo patterns" is not a quality bar_; old code is often
 exactly what this skill exists to eliminate. Never guess a Taiga API: verify against the
 `taiga-ui-mcp` MCP server or `https://taiga-ui.dev/llms-full.txt`.
@@ -22,32 +23,80 @@ unrelated redesigns in a separate PR; do not turn touching a component into a st
 
 ## Reference files (read on demand — don't preload)
 
-| File                         | Read when                                                                                                 |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `references/bootstrap.md`    | creating/touching app.config, main.ts, angular.json, icons, theming, or a new app/repo                    |
-| `references/components.md`   | writing any component or template (selectors, hostDirectives, signal APIs, control flow)                  |
-| `references/styling.md`      | about to write ANY CSS (the escalation ladder, breakpoints, tokens)                                       |
-| `references/di.md`           | providers, tokens, inject patterns                                                                        |
-| `references/state.md`        | services, data flow, loading/error UX, API/RPC integration                                                |
-| `references/forms.md`        | any form, validation, or submit flow                                                                      |
-| `references/overlays.md`     | dialogs, confirms, toasts, dropdowns, hints, drawers                                                      |
-| `references/routing.md`      | route files, guards, navigation, URL state                                                                |
-| `references/conventions.md`  | i18n strings, file naming, folder structure, import order                                                 |
-| `references/shared-libs.md`  | before writing ANY utility/component in monorepo apps — it may exist in @start9labs/shared or marketplace |
-| `references/antipatterns.md` | reviewing code, refactoring, or upgrading Angular/Taiga (before→after catalog + verbatim review quotes)   |
-| `references/taiga.md`        | unsure of a Taiga 5 API; v4→v5 renames; need→primitive lookup table                                       |
-| `references/recipes.md`      | step-by-step: new page, dialog, form, table, control component, endpoint                                  |
-| `references/repos.md`        | repo-specific rules and build/verify commands                                                             |
+| File                         | Read when                                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `references/bootstrap.md`    | creating/touching app.config, main.ts, angular.json, icons, theming, or a new app/repo                  |
+| `references/components.md`   | writing any component or template (selectors, hostDirectives, signal APIs, control flow)                |
+| `references/styling.md`      | about to write ANY CSS (the escalation ladder, breakpoints, tokens)                                     |
+| `references/di.md`           | providers, tokens, inject patterns, shared-library authoring                                            |
+| `references/state.md`        | services, data flow, loading/error UX, API/RPC integration                                              |
+| `references/forms.md`        | any form, validation, or submit flow                                                                    |
+| `references/overlays.md`     | dialogs, confirms, toasts, dropdowns, hints, drawers                                                    |
+| `references/routing.md`      | route files, guards, navigation, URL state                                                              |
+| `references/conventions.md`  | i18n strings, file naming, folder structure, import order                                               |
+| `references/antipatterns.md` | reviewing code, refactoring, or upgrading Angular/Taiga (before→after catalog + verbatim review quotes) |
+| `references/taiga.md`        | unsure of a Taiga 5 API; v4→v5 renames; need→primitive lookup table                                     |
+| `references/recipes.md`      | step-by-step: new page, dialog, form, table, control component, endpoint                                |
+
+Before writing a utility or component, check the shared libraries the app's `FRONTEND.md`
+lists; it may already exist there.
+
+## Per-app facts: `FRONTEND.md`
+
+An Angular + Taiga app keeps a `FRONTEND.md` at its project root, beside its `src/`. A
+repo-root `FRONTEND.md` holds what every app in that repo shares; an app's file adds to it and
+wins where they differ. A single-app repo keeps one file, at the repo root. Read the repo-root
+file and the app's file before working on the app. An app without one is still governed by
+this skill; add the file in the first change that needs one of its facts.
+
+It carries these sections, in this order, each only where the app has something to say:
+
+- **Workspace** — install and prebuild steps, build-time config, how a new app joins, the
+  icon setup; usually only in a repo-root file.
+- **Change detection** — zone.js or zoneless.
+- **Theme** — light, dark or both; what selects it; where the token sheet lives.
+- **i18n** — whether the app translates; its dictionaries; the check command.
+- **Backend** — transport, the API service and its error types, the action wrapper, the
+  dev/mock backend and how to switch to it. Link the `ARCHITECTURE.md` that owns the transport.
+- **Shared libraries** — what the app may consume and what to look for there first.
+- **Verify** — the commands that make up the bar in doctrine 9.
+- **Rules** — app-specific frontend rules and sanctioned divergences from this skill.
+
+Stack versions are not repeated there: `package.json` is their record. Nor is anything the
+app's `AGENTS.md` or a parent `FRONTEND.md` already says; link it.
+
+```markdown
+# FRONTEND.md — <app>
+
+Facts the `start9-frontend` skill needs about <app>. Adds to <parent FRONTEND.md, if any>.
+
+## Change detection
+
+Zoneless.
+
+## Theme
+
+Dark, `provideTaiga({ mode: 'dark' })`. Tokens: `src/styles.scss`.
+
+## i18n
+
+None; strings are English literals.
+
+## Backend
+
+REST `/_api` on the same origin through `ApiService`; `MockApiService` when `useMocks`.
+
+## Verify
+
+`npm run check`, `npm run build`.
+```
 
 ## Stack
 
-Each repo records its own versions: its `package.json` is the record of its Angular, Taiga,
-TypeScript and rxjs versions, and its own `AGENTS.md` carries any version fact agents need
-beyond that. Read them before relying on a version-specific API. Taiga is **pinned exact** —
-bump only with the maintainer's blessing. Monorepo apps share **one Angular workspace rooted
-at the repo root**; other repos are standalone. Zoneless is the target state — write all new
-code zoneless-safe. What each app's rules need beyond that (zone mode, theme, i18n, backend)
-is in `references/repos.md`; an app missing there is still governed by this skill — add it.
+`package.json` is the record of an app's Angular, Taiga, TypeScript and rxjs versions; read it
+before relying on a version-specific API. Taiga is **pinned exact** — bump only with the
+maintainer's blessing. Zoneless is the target state — write all new code zoneless-safe,
+whatever mode the app's `FRONTEND.md` records.
 
 ## Doctrine
 
@@ -70,19 +119,20 @@ is in `references/repos.md`; an app missing there is still governed by this skil
    provider map; sizes in option providers; colors in the theme sheet.
 7. **Everything host-related goes in the decorator.** `host: {}` for classes/attrs/listeners/
    style bindings, `hostDirectives` for composition. `@HostBinding`/`@HostListener` are dead.
-8. **English strings are i18n keys** (monorepo apps): every user-facing string goes through
-   `| i18n` and exists in all five dictionaries; `tsc` enforces via the `i18nKey` type.
-9. **Verification is `npm run check` + a manual pass; a test only where logic earns it.**
-   `check` (strict + `strictTemplates`), the i18n check, a prod build and clicking through the
-   app are the bar. A test is for state machinery a manual pass can't drive deterministically
+8. **English strings are i18n keys** (apps whose `FRONTEND.md` lists i18n): every user-facing
+   string goes through `| i18n` and exists in every dictionary; `tsc` enforces via the
+   `i18nKey` type.
+9. **Verification is the type check + a manual pass; a test only where logic earns it.**
+   The app's check command (strict + `strictTemplates`), its i18n check, a prod build and
+   clicking through the app are the bar; `FRONTEND.md` names the commands. A test is for state machinery a manual pass can't drive deterministically
    — request sequencing, a store's transitions, merge order — written with `node:test` against
    the plain class and wired into `check`; never for a template, a style or what a component
    renders. No test framework; don't claim "tests pass" in a repo that has none.
 10. **The docs ship with the change — this skill first.** This skill is the fleet-wide
-    frontend source of truth: the ops repos reach it through committed symlinks. When
+    frontend source of truth: sibling repos reach it through committed symlinks. When
     frontend conventions or idioms change, update `SKILL.md` and the affected
-    `references/*.md` in the same change; each repo's own docs carry its project facts,
-    stack versions included.
+    `references/*.md` in the same change; when an app's facts change, update its
+    `FRONTEND.md`. A fact about one app never goes into the skill.
 
 ## If you learned Angular anywhere else — the surprise index
 

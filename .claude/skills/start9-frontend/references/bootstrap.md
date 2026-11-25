@@ -27,8 +27,8 @@ export class App {}
 Shell chrome (nav, header, footer) is either inside the root template as **attribute-selector
 components on semantic elements** (`<header appHeader></header> <main><router-outlet /></main>
 
-<footer appFooter></footer>` — start9-store) or a `TuiNavigation` shell
-(`tuiNavigationHeader`/`tuiNavigationAside`/`tuiAsideItem` — start-wrt, start-tunnel).
+<footer appFooter></footer>`, a public site) or a `TuiNavigation` shell
+(`tuiNavigationHeader`/`tuiNavigationAside`/`tuiAsideItem`, an admin UI).
 
 In a `TuiNavigation` shell the scroll area must end exactly at `main[tuiNavigationMain]`'s
 content box: its `tui-scrollbar` is `100%` tall less its own block padding
@@ -75,28 +75,28 @@ Notes, all load-bearing:
 - Option providers with **signals as option values** are normal
   (`tuiTextfieldOptionsProvider({ size: signal('m') })`).
 - A zone-based app lists `"zone.js"` in its `angular.json` `polyfills`; a zoneless one doesn't.
-- Monorepo apps read the gitignored workspace `config.json` **synchronously via `require`**:
-  `const { useMocks, gitHash } = require('../../config.json') as WorkspaceConfig` — this feeds
-  the Live/Mock DI swap and value tokens (`IS_MOCK`, `GIT_HASH`, `RELATIVE_URL`).
+- Build-time config (the mock switch, the git hash) is read **synchronously** at module load,
+  never fetched: a gitignored `config.json` through `require`, or `environment.ts`. It feeds the
+  Live/Mock DI swap and value tokens (`IS_MOCK`, `GIT_HASH`, `RELATIVE_URL`). `FRONTEND.md`
+  says which file.
 - Router features seen in canon: `withInMemoryScrolling({ scrollPositionRestoration: 'enabled',
-anchorScrolling: 'enabled' })` (store), `withComponentInputBinding()` +
+anchorScrolling: 'enabled' })` (a public site), `withComponentInputBinding()` +
   `withPreloading(PreloadAllModules)` + `withDisabledInitialNavigation()` +
-  `withRouterConfig({ paramsInheritanceStrategy: 'always' })` (StartOS ui — initial navigation
-  deferred until services init inside `provideAppInitializer`). Use what the app needs, nothing
-  prophylactically.
+  `withRouterConfig({ paramsInheritanceStrategy: 'always' })` (an app whose initial navigation
+  waits for services to initialize inside `provideAppInitializer`). Use what the app needs,
+  nothing prophylactically.
 
-### Joining the monorepo vs standing alone
+### Joining a multi-app workspace vs standing alone
 
-**Monorepo app** (default for products): add a project to the root `angular.json` pointing into
-`projects/<product>/web`, wire `package.json` scripts (`start:x`, `build:x`, `check:x`), builder
-`@angular/build:application`, `inlineStyleLanguage: "scss"`, budgets with a **per-component
-style ceiling** (4kB warn / 8kB error — keeps inline styles honest). Styles array layers:
-`@taiga-ui/styles/taiga-ui-theme.less` → (brand apps: `shared-libs/ts-modules/shared/styles/
-taiga.scss` + `shared.scss`) → app `styles.scss`. Consume the libs by tsconfig path alias
-(`@start9labs/shared` → source, no build step); `@start9labs/start-core` is a built `file:` dep —
-run `npm run build:deps` after install or nothing type-checks.
+**Workspace app**: add a project to the workspace's `angular.json`, wire `package.json`
+scripts (`start:x`, `build:x`, `check:x`), builder `@angular/build:application`,
+`inlineStyleLanguage: "scss"`, budgets with a **per-component style ceiling** (4kB warn / 8kB
+error — keeps inline styles honest). Styles array layers: `@taiga-ui/styles/taiga-ui-theme.less`
+→ the shared brand sheets, where the app uses them → app `styles.scss`. Consume shared libraries
+by tsconfig path alias to their source, with no build step. The repo-root `FRONTEND.md` names
+the sheets, the libraries and any prebuilt dependency.
 
-**Standalone repo** (ops tools): copy the start9-store / support-server scaffold — npm
+**Standalone repo**: copy the newest standalone sibling's scaffold — npm
 workspace(s), `@angular/build:application`, strict tsconfig +
 `strictTemplates`/`strictInjectionParameters`/`strictInputAccessModifiers`, the two
 `extendedDiagnostics` suppressions (`nullishCoalescingNotNullable`,
@@ -108,15 +108,15 @@ config as in SKILL.md, husky + lint-staged, `"build": "npm ci && ng build"` for 
 
 Icons are Lucide via `@tui.<name>` (`iconStart="@tui.plus"`, `<tui-icon icon="@tui.check" />`).
 
-| Setup                    | Who                       | How                                                                                                                                                                                                                     |
-| ------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Asset copy** (default) | monorepo apps, dashboards | `angular.json` assets: `node_modules/@taiga-ui/icons/src` → `assets/taiga-ui/icons`                                                                                                                                     |
-| **postinstall copy**     | start9-store              | hoisted npm workspace can't express the asset path — root `postinstall` runs `fs.cpSync` into `web/public/assets/taiga-ui/icons` (gitignored). Don't "simplify" it back into `angular.json`.                            |
-| **Inline registry**      | start-wrt                 | bundle-size-critical (UI embedded in the Rust binary): `angular.json` `loader: { ".svg": "text" }` + `app.icons.ts` importing the used icons from `@taiga-ui/icons/src/*.svg`, registered via `tuiIconsProvider(ICONS)` |
+| Setup                    | When                                                      | How                                                                                                                                                              |
+| ------------------------ | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Asset copy** (default) | `angular.json` can reach the icons package                | `angular.json` assets: `node_modules/@taiga-ui/icons/src` → `assets/taiga-ui/icons`                                                                              |
+| **postinstall copy**     | a hoisted npm workspace that can't express the asset path | root `postinstall` runs `fs.cpSync` into `web/public/assets/taiga-ui/icons` (gitignored). Don't "simplify" it back into `angular.json`.                          |
+| **Inline registry**      | bundle-size-critical, such as a UI embedded in a binary   | `angular.json` `loader: { ".svg": "text" }` + `app.icons.ts` importing the used icons from `@taiga-ui/icons/src/*.svg`, registered via `tuiIconsProvider(ICONS)` |
 
 The failure mode: a **hand-curated partial registry** breaks the icons Taiga components draw
-_internally_ (select chevrons, dropdown arrows). If you inline-register (wrt style), you own
-keeping the set complete; everywhere else, serve the whole directory. Non-Taiga SVGs ship as plain assets
+_internally_ (select chevrons, dropdown arrows). If you inline-register, you own keeping the set
+complete; everywhere else, serve the whole directory. `FRONTEND.md` records a non-default setup. Non-Taiga SVGs ship as plain assets
 and are referenced by path, including in icon slots (`iconStart="/x-logo.svg"`) — that renders
 the file as a `currentColor` mask, so it suits a monochrome logo only. A full-colour raster or
 SVG (a package icon from `icon_url`) goes through the same slot as `iconStart="@img.<url>"`,
@@ -124,18 +124,18 @@ which draws it as a background at the slot's icon size instead of masking it.
 
 ### Theming and branding
 
-All branding is a **`--tui-*` design-token override sheet**, nothing else:
+All branding is a **`--tui-*` design-token override sheet**, nothing else. `FRONTEND.md` says
+where the app's sheet lives and which theme it runs.
 
-- Monorepo brand apps: `shared-libs/ts-modules/shared/styles/taiga.scss` — the Start9 dark theme
-  as a `[tuiTheme='dark']` block (backgrounds, statuses with `color-mix()` pale variants, text
-  tiers), Hanken Grotesk `@font-face` + `--tui-typography-family-*`, a custom
-  `[tuiAppearance][data-appearance='primary-success']` built with Taiga's SCSS mixins
-  (`@use '@taiga-ui/styles/utils'`), and shrinking upstream shims (pruned as Taiga absorbs fixes).
-- start-wrt: dual-theme — tokens under both `[tuiTheme='dark']` and `:root, [tuiTheme='light']`;
-  runtime switch via the `TUI_DARK_MODE` signal (`inject(TUI_DARK_MODE).set(...)`), regional via
+- A sheet holds token overrides (backgrounds, statuses with `color-mix()` pale variants, text
+  tiers), the brand font's `@font-face` + `--tui-typography-family-*`, custom appearances built
+  with Taiga's SCSS mixins (`@use '@taiga-ui/styles/utils'`), and shrinking upstream shims,
+  pruned as Taiga absorbs fixes. A small app's sheet is a dozen or so `:root` overrides and a
+  font, full stop.
+- Single-theme: `provideTaiga({ mode: 'dark' | 'light' })` and the overrides under that theme.
+- Dual-theme: tokens under both `[tuiTheme='dark']` and `:root, [tuiTheme='light']`; runtime
+  switch via the `TUI_DARK_MODE` signal (`inject(TUI_DARK_MODE).set(...)`), regional via
   `[attr.tuiTheme]`.
-- Dashboards: ~15 `:root` token overrides (accent `#07a4ff` family) + Montserrat, full stop.
-- start9-store: stock Taiga light + ~10 token overrides; `provideTaiga({ mode: 'light' })`.
 
 Hex colors live **only** in the theme sheet. Components use `var(--tui-...)` exclusively —
 `--tui-text-secondary`, `--tui-status-negative`, `--tui-background-neutral-1`,
