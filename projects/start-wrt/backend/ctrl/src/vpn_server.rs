@@ -2257,9 +2257,16 @@ fn remove_from_firewall_zones(cfgs: &mut Configs, wg_interface_name: &str) -> Re
     Ok(())
 }
 
+const WIREGUARD_RULE_PREFIX: &str = "Allow-WireGuard-";
+
 /// Firewall rule name for a WireGuard VPN server (used in the 'name' option)
 fn wireguard_rule_name(wg_interface_name: &str) -> String {
-    format!("Allow-WireGuard-{}", wg_interface_name)
+    format!("{WIREGUARD_RULE_PREFIX}{wg_interface_name}")
+}
+
+/// An inbound VPN's WAN admission rule.
+pub(crate) fn is_wireguard_rule(rule: &uciedit::openwrt::FirewallRule) -> bool {
+    rule.name.starts_with(WIREGUARD_RULE_PREFIX)
 }
 
 /// UCI section name for the firewall rule (must be alphanumeric/underscore only)
@@ -2289,6 +2296,7 @@ fn ensure_wireguard_firewall_rule(
             // Update existing rule with new port if changed
             rule.dest_port = Some(port_str.clone());
             section.set(&rule)?;
+            crate::published_ports::sync_hairpin_rules(&mut cfgs["firewall"])?;
             return Ok(());
         }
     }
@@ -2317,6 +2325,7 @@ fn ensure_wireguard_firewall_rule(
     // Use a valid UCI section name (alphanumeric and underscores only)
     let section_name = wireguard_rule_section_name(wg_interface_name);
     cfgs["firewall"].append(&rule, Some(&section_name))?;
+    crate::published_ports::sync_hairpin_rules(&mut cfgs["firewall"])?;
 
     Ok(())
 }
@@ -2336,6 +2345,7 @@ pub(crate) fn remove_wireguard_firewall_rule(
         }
         true
     });
+    crate::published_ports::sync_hairpin_rules(&mut cfgs["firewall"])?;
 
     Ok(())
 }
@@ -3081,6 +3091,30 @@ config dhcp 'guest'
             rules[0].dest_port.as_deref(),
             Some("51821"),
             "port should be updated"
+        );
+
+        let copies: Vec<_> = cfgs["firewall"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<uciedit::openwrt::FirewallRule>().ok())
+            .filter(|r| r.name.starts_with("Allow-WireGuard-wg_guest from "))
+            .collect();
+        assert!(!copies.is_empty(), "every LAN zone gets a copy");
+        assert!(
+            copies
+                .iter()
+                .all(|r| r.src != "wan" && r.dest_port.as_deref() == Some("51821")),
+            "copies follow the port: {copies:?}"
+        );
+
+        remove_wireguard_firewall_rule(&mut cfgs, "wg_guest").unwrap();
+        assert!(
+            !cfgs["firewall"]
+                .sections
+                .iter()
+                .filter_map(|s| s.get::<uciedit::openwrt::FirewallRule>().ok())
+                .any(|r| r.name.starts_with("Allow-WireGuard-wg_guest")),
+            "removing the rule removes its copies"
         );
     }
 

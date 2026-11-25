@@ -106,6 +106,7 @@ use startos::net::port_map::server::igd::{
 };
 use startos::net::port_map::server::{handle, GatewayBackend, MappingEntry, PCP_PORT};
 use startos::net::transport::{Transport, TransportProtocol};
+use startos::net::web_server::{AcceptStream, TcpMetadata};
 use startos::tunnel::forward::sni::{FallbackSource, LocalHandoff, LocalSink, SniDemux, SniRoute};
 use tokio::io::Interest;
 use tokio::net::UdpSocket;
@@ -134,6 +135,7 @@ const CLIENT_CACHE_TTL: Duration = Duration::from_secs(10);
 const MAX_REQUESTED_RANGES: usize = 8;
 const WAN_CACHE_TTL: Duration = Duration::from_secs(30);
 const LAN_CACHE_TTL: Duration = Duration::from_secs(30);
+const UI_FALLBACK_BACKLOG: usize = 128;
 pub(crate) const UCI_RETRIES: usize = 4;
 
 pub const KIND_PCP: &str = "PCP";
@@ -186,11 +188,49 @@ struct LanAddr {
     prefix: u8,
 }
 
+impl LanAddr {
+    fn contains(&self, ip: Ipv4Addr) -> bool {
+        let mask = prefix_mask(self.prefix);
+        u32::from(self.addr) & mask == u32::from(ip) & mask
+    }
+}
+
+/// A peer on no LAN bridge, or on the Admin profile's.
+fn ui_fallback_admits(peer: Ipv4Addr, bridges: &[LanAddr], admin: Option<Ipv4Addr>) -> bool {
+    match bridges.iter().find(|bridge| bridge.contains(peer)) {
+        None => true,
+        Some(bridge) => admin == Some(bridge.addr),
+    }
+}
+
+/// Passes on the Remote Access fallback connections the web interface admits.
+async fn screen_ui_fallback(
+    pc: std::sync::Weak<PortControl>,
+    mut incoming: tokio::sync::mpsc::Receiver<(TcpMetadata, AcceptStream)>,
+    ui: LocalSink,
+) {
+    while let Some((meta, stream)) = incoming.recv().await {
+        let Some(pc) = pc.upgrade() else {
+            return;
+        };
+        let admitted = match meta.peer_addr.ip().to_canonical() {
+            IpAddr::V4(peer) => pc.admits_ui_fallback(peer).await,
+            IpAddr::V6(_) => true,
+        };
+        drop(pc);
+        if admitted && ui.send((meta, stream)).await.is_err() {
+            return;
+        }
+    }
+}
+
 impl PortControl {
-    /// Requires a tokio runtime: the demux's constructor spawns its prune task.
+    /// Requires a tokio runtime: the demux's constructor spawns its prune task,
+    /// and the Remote Access fallback is screened on a task of its own.
     pub fn new(uci_root: PathBuf) -> Arc<Self> {
-        let (ui, ui_handoff) = LocalHandoff::channel();
-        Arc::new_cyclic(|weak: &std::sync::Weak<Self>| {
+        let (screened, ui_handoff) = LocalHandoff::channel();
+        let (ui, fallback) = tokio::sync::mpsc::channel(UI_FALLBACK_BACKLOG);
+        let pc = Arc::new_cyclic(|weak: &std::sync::Weak<Self>| {
             let hairpin_weak = weak.clone();
             let weak = weak.clone();
             Self {
@@ -217,7 +257,29 @@ impl PortControl {
                     })),
                 ),
             }
+        });
+        tokio::spawn(screen_ui_fallback(Arc::downgrade(&pc), fallback, screened));
+        pc
+    }
+
+    /// Reads the Admin profile's address only for a peer on a LAN bridge.
+    async fn admits_ui_fallback(&self, peer: Ipv4Addr) -> bool {
+        let bridges = self.lan_addrs().await;
+        if !bridges.iter().any(|bridge| bridge.contains(peer)) {
+            return true;
+        }
+        let uci_root = self.uci_root.clone();
+        let admin = uci_task(move || async move {
+            let arena = Arena::new();
+            let cfgs = parse_all(&uci_root, &arena, &["network"]).await?;
+            Ok(crate::profiles::get_lan_ip(&cfgs))
         })
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("port-control: reading the Admin profile's address failed: {e}");
+            None
+        });
+        ui_fallback_admits(peer, &bridges, admin)
     }
 
     /// Seconds remaining on a section's lease, if the daemon is tracking one.
@@ -472,10 +534,11 @@ impl PortControl {
 
     /// The router address on the matching bridged subnet.
     async fn lan_addr_for(&self, ip: Ipv4Addr) -> Option<LanAddr> {
-        self.lan_addrs().await.iter().find_map(|a| {
-            let mask = prefix_mask(a.prefix);
-            (u32::from(a.addr) & mask == u32::from(ip) & mask).then(|| a.clone())
-        })
+        self.lan_addrs()
+            .await
+            .iter()
+            .find(|a| a.contains(ip))
+            .cloned()
     }
 
     /// The IGD address advertised to the peer.
@@ -1786,6 +1849,7 @@ async fn reconcile_sni_rules_uci(
             )?;
             changed = true;
         }
+        changed |= crate::published_ports::sync_hairpin_rules(&mut cfgs["firewall"])?;
         if !changed {
             return Ok(false);
         }
@@ -3792,6 +3856,41 @@ config host
             None
         );
         assert_eq!(remote_access_fallback_source(Err(()), private_wan), None);
+    }
+
+    #[test]
+    fn ui_fallback_admits_peers_off_the_lan_and_on_admin() {
+        let bridges = [
+            LanAddr {
+                addr: Ipv4Addr::new(192, 168, 0, 1),
+                prefix: 24,
+            },
+            LanAddr {
+                addr: Ipv4Addr::new(192, 168, 1, 1),
+                prefix: 24,
+            },
+        ];
+        let admin = Some(Ipv4Addr::new(192, 168, 0, 1));
+        assert!(ui_fallback_admits(
+            Ipv4Addr::new(192, 168, 2, 20),
+            &bridges,
+            admin
+        ));
+        assert!(ui_fallback_admits(
+            Ipv4Addr::new(192, 168, 0, 50),
+            &bridges,
+            admin
+        ));
+        assert!(!ui_fallback_admits(
+            Ipv4Addr::new(192, 168, 1, 50),
+            &bridges,
+            admin
+        ));
+        assert!(!ui_fallback_admits(
+            Ipv4Addr::new(192, 168, 0, 50),
+            &bridges,
+            None
+        ));
     }
 
     #[tokio::test]

@@ -46,6 +46,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::TurnOffRemoteAccess,
     Migration::SplitAutomaticForwardTransports,
     Migration::RankWanBehindProfiles,
+    Migration::RestrictProfileRouterAccess,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -88,6 +89,8 @@ enum Migration {
     SplitAutomaticForwardTransports,
     /// Earlier images left the WAN's routes at metric 0, tied with every profile's.
     RankWanBehindProfiles,
+    /// Earlier releases let every profile reach every router service.
+    RestrictProfileRouterAccess,
 }
 
 impl Migration {
@@ -115,6 +118,7 @@ impl Migration {
                     .map(|_| ())
             }
             Migration::RankWanBehindProfiles => rank_wan_behind_profiles(root).await,
+            Migration::RestrictProfileRouterAccess => restrict_profile_router_access(root).await,
         }
     }
 
@@ -156,6 +160,9 @@ impl Migration {
             Migration::SplitAutomaticForwardTransports => "track automatic TCP and UDP mappings independently",
             Migration::RankWanBehindProfiles => {
                 "keep devices able to reach the router when a profile shares the upstream network"
+            }
+            Migration::RestrictProfileRouterAccess => {
+                "let only Admin devices open the web interface or connect over SSH"
             }
         }
     }
@@ -571,6 +578,15 @@ async fn rank_wan_behind_profiles(root: &Path) -> Result<(), Error> {
         break;
     }
     if changed {
+        dump_all(uci_root(root), cfgs).await?;
+    }
+    Ok(())
+}
+
+async fn restrict_profile_router_access(root: &Path) -> Result<(), Error> {
+    let arena = Arena::new();
+    let mut cfgs = parse_all(uci_root(root), &arena, &["firewall", "startwrt"]).await?;
+    if crate::profiles::restrict_router_access(&mut cfgs)? {
         dump_all(uci_root(root), cfgs).await?;
     }
     Ok(())

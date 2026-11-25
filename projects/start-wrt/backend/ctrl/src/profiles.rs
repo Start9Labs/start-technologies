@@ -624,6 +624,96 @@ fn owned_name(interface: &str, role: &str) -> String {
     format!("{}{role}", owned_prefix(interface))
 }
 
+/// The Admin profile's zone alone reaches every router service.
+fn zone_input(owns_lan: bool) -> FirewallTarget {
+    if owns_lan {
+        FirewallTarget::ACCEPT
+    } else {
+        FirewallTarget::REJECT
+    }
+}
+
+/// The router services a profile's devices reach whatever the zone's input
+/// policy: addresses, name resolution and automatic port forwarding.
+fn router_service_rules(
+    interface: &str,
+    fullname: &str,
+    zone: &str,
+) -> [(String, FirewallRule); 2] {
+    use startos::net::port_map::server::igd::{IGD_HTTP_PORT, SSDP_PORT};
+    use startos::net::port_map::server::PCP_PORT;
+
+    use crate::dns_inject::{DNS_UPDATE_PORT_LAN, DNS_UPDATE_PORT_WG};
+
+    let fullname = fullname.replace(" ", "-");
+    [
+        (
+            owned_name(interface, "dhcp_dns"),
+            FirewallRule {
+                name: format!("Allow-DHCP-DNS-{fullname}"),
+                src: zone.to_string(),
+                dest_port: Some(format!(
+                    "53 67 68 547 5353 {DNS_UPDATE_PORT_LAN} {DNS_UPDATE_PORT_WG}"
+                )),
+                proto: vec!["tcp".into(), "udp".into(), "icmp".into()],
+                target: FirewallTarget::ACCEPT,
+                ..Default::default()
+            },
+        ),
+        (
+            owned_name(interface, "port_control"),
+            FirewallRule {
+                name: format!("Allow-Port-Control-{fullname}"),
+                src: zone.to_string(),
+                dest_port: Some(format!("{SSDP_PORT} {PCP_PORT} {IGD_HTTP_PORT}")),
+                proto: vec!["tcp".into(), "udp".into()],
+                target: FirewallTarget::ACCEPT,
+                ..Default::default()
+            },
+        ),
+    ]
+}
+
+/// Gives each profile's zone its input policy and router service rules.
+/// A zone input other than `ACCEPT` is a later choice and stays.
+pub(crate) fn restrict_router_access(cfgs: &mut Configs) -> Result<bool, Error> {
+    let mut profiles = Vec::new();
+    for section in &cfgs["startwrt"].sections {
+        if let Some(profile) = section.get_typed::<UciProfile>()? {
+            profiles.push(profile);
+        }
+    }
+    let mut changed = false;
+    for profile in profiles {
+        let Some(index) = cfgs["firewall"].sections.iter().position(|s| {
+            s.get::<FirewallZone>()
+                .is_ok_and(|zone| zone.network.contains(&profile.interface))
+        }) else {
+            continue;
+        };
+        let mut zone = cfgs["firewall"].sections[index].get::<FirewallZone>()?;
+        let input = zone_input(profile.interface == crate::lan::LAN_INTERFACE);
+        if zone.input == FirewallTarget::ACCEPT && input != FirewallTarget::ACCEPT {
+            zone.input = input;
+            cfgs["firewall"].sections[index].set(&zone)?;
+            changed = true;
+        }
+        for (name, rule) in router_service_rules(&profile.interface, &profile.fullname, &zone.name)
+        {
+            let current = cfgs["firewall"].sections.iter().find_map(|s| {
+                (s.name().as_deref() == Some(name.as_str()))
+                    .then(|| s.get::<FirewallRule>().ok())
+                    .flatten()
+            });
+            if current.as_ref() != Some(&rule) {
+                reconcile_owned(&mut cfgs["firewall"], &name.clone(), &[(name, rule)])?;
+                changed = true;
+            }
+        }
+    }
+    Ok(changed)
+}
+
 fn zone_of<'z>(
     all_zones: &'z BTreeMap<String, String>,
     interface: &str,
@@ -2189,7 +2279,7 @@ fn rewrite_firewall(
         cfgs["firewall"].append(
             &FirewallZone {
                 name: this_zone_name.clone(),
-                input: FirewallTarget::ACCEPT,
+                input: zone_input(profile.owns_lan),
                 output: FirewallTarget::ACCEPT,
                 forward: FirewallTarget::ACCEPT,
                 network: vec![profile.id.interface.clone()],
@@ -2217,22 +2307,9 @@ fn rewrite_firewall(
         .sections
         .retain(|s| s.name().as_deref() != Some(schedule_rule.as_str()));
 
-    let dhcp_dns = owned_name(interface, "dhcp_dns");
-    reconcile_owned(
-        &mut cfgs["firewall"],
-        &dhcp_dns,
-        &[(
-            dhcp_dns.clone(),
-            FirewallRule {
-                name: format!("Allow-DHCP-DNS-{fullname}"),
-                src: this_zone_name.clone(),
-                dest_port: Some("53 67 68".into()),
-                proto: vec!["tcp".into(), "udp".into(), "icmp".into()],
-                target: FirewallTarget::ACCEPT,
-                ..Default::default()
-            },
-        )],
-    )?;
+    for rule in router_service_rules(interface, &profile.id.fullname, &this_zone_name) {
+        reconcile_owned(&mut cfgs["firewall"], &rule.0.clone(), &[rule])?;
+    }
 
     // DNS hijacking: redirect all port 53 traffic to the profile's gateway,
     // where per-profile dnsmasq handles .lan locally and forwards the rest
@@ -8148,6 +8225,127 @@ config dhcp 'guest'
         assert_eq!(members.unwrap(), vec!["eth0:t".to_string()]);
     }
 
+    fn zone_input_of(cfgs: &Configs, name: &str) -> FirewallTarget {
+        cfgs["firewall"]
+            .sections
+            .iter()
+            .filter_map(|s| s.get::<FirewallZone>().ok())
+            .find(|zone| zone.name == name)
+            .unwrap()
+            .input
+    }
+
+    fn rule_named(cfgs: &Configs, name: &str) -> Option<FirewallRule> {
+        cfgs["firewall"].sections.iter().find_map(|s| {
+            (s.name().as_deref() == Some(name))
+                .then(|| s.get::<FirewallRule>().ok())
+                .flatten()
+        })
+    }
+
+    #[tokio::test]
+    async fn a_created_profile_reaches_only_the_router_services() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        let arena = Arena::new();
+        let mut cfgs = parse_all(
+            ctx.uci_root(),
+            &arena,
+            &["startwrt", "network", "firewall", "dhcp", "wireless"],
+        )
+        .await
+        .unwrap();
+        let third = Profile {
+            id: ProfileIdOpt {
+                fullname: Some("Third Floor".into()),
+                interface: None,
+                vlan_tag: None,
+            },
+            gateway_ip: Ipv4Addr::new(192, 168, 102, 1),
+            outbound: "wan".into(),
+            lan_access: LanAccess::All,
+            wan_access: WanAccess::All,
+            dns_override: Vec::new(),
+            dns_source: String::new(),
+            access_to_new_profiles: false,
+            owns_lan: false,
+        };
+        create_config(ctx.clone(), &mut cfgs, &third, Some("third".into())).unwrap();
+
+        assert_eq!(zone_input_of(&cfgs, "vlan_third"), FirewallTarget::REJECT);
+        assert_eq!(zone_input_of(&cfgs, "lan"), FirewallTarget::ACCEPT);
+        let dhcp_dns = rule_named(&cfgs, "profile_third_dhcp_dns").unwrap();
+        assert_eq!(dhcp_dns.name, "Allow-DHCP-DNS-Third-Floor");
+        assert_eq!(dhcp_dns.src, "vlan_third");
+        assert_eq!(
+            dhcp_dns.dest_port.as_deref(),
+            Some("53 67 68 547 5353 9553 9554")
+        );
+        let port_control = rule_named(&cfgs, "profile_third_port_control").unwrap();
+        assert_eq!(port_control.name, "Allow-Port-Control-Third-Floor");
+        assert_eq!(port_control.src, "vlan_third");
+        assert_eq!(port_control.dest_port.as_deref(), Some("1900 5351 49001"));
+        assert_eq!(port_control.proto, vec!["tcp", "udp"]);
+        assert_eq!(port_control.target, FirewallTarget::ACCEPT);
+    }
+
+    #[tokio::test]
+    async fn restrict_router_access_rejects_input_from_every_profile_but_admin() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_configs(dir.path());
+        let firewall = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        std::fs::write(
+            dir.path().join("firewall"),
+            format!(
+                "{firewall}
+config zone
+\toption name 'vlan_lab'
+\tlist network 'lab'
+\toption input 'DROP'
+\toption output 'ACCEPT'
+\toption forward 'ACCEPT'
+"
+            ),
+        )
+        .unwrap();
+        let startwrt = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        std::fs::write(
+            dir.path().join("startwrt"),
+            format!(
+                "{startwrt}
+config profile lab
+\toption fullname 'Lab'
+\toption interface 'lab'
+\toption vlan_tag '102'
+"
+            ),
+        )
+        .unwrap();
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["startwrt", "firewall"])
+            .await
+            .unwrap();
+
+        assert!(restrict_router_access(&mut cfgs).unwrap());
+
+        assert_eq!(zone_input_of(&cfgs, "vlan_guest"), FirewallTarget::REJECT);
+        assert_eq!(zone_input_of(&cfgs, "lan"), FirewallTarget::ACCEPT);
+        assert_eq!(zone_input_of(&cfgs, "vlan_lab"), FirewallTarget::DROP);
+        for (interface, zone) in [("lan", "lan"), ("guest", "vlan_guest"), ("lab", "vlan_lab")] {
+            let dhcp_dns = rule_named(&cfgs, &format!("profile_{interface}_dhcp_dns")).unwrap();
+            assert_eq!(dhcp_dns.src, zone);
+            assert_eq!(
+                dhcp_dns.dest_port.as_deref(),
+                Some("53 67 68 547 5353 9553 9554")
+            );
+            let port_control =
+                rule_named(&cfgs, &format!("profile_{interface}_port_control")).unwrap();
+            assert_eq!(port_control.src, zone);
+        }
+        assert!(!restrict_router_access(&mut cfgs).unwrap());
+    }
+
     #[tokio::test]
     async fn create_tags_a_trunk_untagged_in_a_vlan_of_no_profile() {
         // VLAN 4000 belongs to no profile. eth0 sends it untagged and is still
@@ -9346,9 +9544,13 @@ config rule 'sched_guest'
                 None,
             ]
         );
-        let migrated = cfgs["firewall"].dump_str();
+        let named_only = cfgs["firewall"].dump_str();
         assert!(!name_profile_firewall_sections(&mut cfgs).unwrap());
-        assert_eq!(cfgs["firewall"].dump_str(), migrated);
+        assert_eq!(cfgs["firewall"].dump_str(), named_only);
+
+        // The later migration brings the router service rules up to date.
+        assert!(restrict_router_access(&mut cfgs).unwrap());
+        let migrated = cfgs["firewall"].dump_str();
 
         set_config(
             ctx.clone(),

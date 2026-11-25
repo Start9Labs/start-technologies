@@ -15,6 +15,8 @@ Behind the scenes, each Security Profile creates an isolated network environment
 
 You do not need to configure any of these individually. When you create a profile, StartWRT sets up all the underlying networking automatically.
 
+Only devices on the Admin profile can manage the router: open its web interface or connect over [SSH](ssh.md). Devices on every other profile get their addresses and DNS from the router and can use [automatic port forwarding](published-ports.md#automatic-port-forwarding). At the router's public address they reach published ports, hostname routes, and Inbound VPNs as they would from the Internet.
+
 ## How Devices Get Profiles
 
 A device's Security Profile is determined by its **point of entry** — how it connects to the network:
