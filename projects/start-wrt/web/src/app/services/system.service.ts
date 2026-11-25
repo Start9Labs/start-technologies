@@ -18,10 +18,9 @@ import { StaleUiService } from './stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
 
-/** sessionStorage: a version an earlier release's update page confirmed before reloading. */
+// sessionStorage key carrying the "Updated to vX" confirmation across the
+// post-update reload (the reload discards the JS context that owns the toast).
 const UPDATED_TO_KEY = 'startwrt.updated-to'
-/** sessionStorage: the requested version, settled by the first system info the reloaded interface reads. */
-const UPDATE_TARGET_KEY = 'startwrt.update-target'
 
 @Injectable({
   providedIn: 'root',
@@ -61,18 +60,27 @@ export class SystemService {
   }
 
   async init(): Promise<void> {
+    // Confirmation deferred across the post-update reload in pollForReconnect.
     const updatedTo = this.storage?.getItem(UPDATED_TO_KEY)
     if (updatedTo) {
       this.storage?.removeItem(UPDATED_TO_KEY)
-      this.announceUpdated(updatedTo)
+      this.alerts
+        .open(
+          fill(this.i18n.transform('Updated to v{version}'), {
+            version: updatedTo,
+          }),
+          { appearance: 'positive' },
+        )
+        .subscribe()
     }
 
     try {
-      const [, newerVersions] = await Promise.all([
-        this.api.systemInfo().then(info => this.setInfo(info)),
+      const [info, newerVersions] = await Promise.all([
+        this.api.systemInfo(),
         this.api.systemNewerVersions(),
       ])
 
+      this.setInfo(info)
       this.newerVersions.set(newerVersions)
       this.updateAvailable.set(newerVersions.length > 0)
     } catch (e) {
@@ -87,12 +95,6 @@ export class SystemService {
   private setInfo(info: SystemInfoRes): void {
     this.info.set(info)
     this.staleUi.check(info)
-
-    const target = this.storage?.getItem(UPDATE_TARGET_KEY)
-    if (!target) return
-    this.storage?.removeItem(UPDATE_TARGET_KEY)
-    if (info.version === target) this.announceUpdated(target)
-    else this.announceUpdateFailed()
   }
 
   async startUpdate(targetVersion: string): Promise<void> {
@@ -143,18 +145,6 @@ export class SystemService {
   private onUpdateFailed(): void {
     this.updating.set(false)
     this.connection.resume()
-    this.announceUpdateFailed()
-  }
-
-  private announceUpdated(version: string): void {
-    this.alerts
-      .open(fill(this.i18n.transform('Updated to v{version}'), { version }), {
-        appearance: 'positive',
-      })
-      .subscribe()
-  }
-
-  private announceUpdateFailed(): void {
     this.alerts
       .open(this.i18n.transform('Update failed — check device logs'), {
         appearance: 'negative',
@@ -164,9 +154,7 @@ export class SystemService {
 
   private async pollForReconnect(): Promise<void> {
     const maxAttempts = 60
-    // A successful update reboots the device, so a poll throws a network
-    // error before it comes back; a failed update reaches here via
-    // a dropped progress stream without the device ever going unreachable.
+    // Set once a poll fails at the network level, as a reboot makes it.
     let wentOffline = false
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 5000))
@@ -180,14 +168,22 @@ export class SystemService {
             this.onUpdateFailed()
             return
           }
-          // index.html revalidates its ETag; the reloaded page reports the outcome.
+          // index.html revalidates its ETag; init() shows the confirmation
+          // after the reload.
           if (this.staleUi.isStale(info)) {
-            this.storage?.setItem(UPDATE_TARGET_KEY, this.targetVersion)
+            this.storage?.setItem(UPDATED_TO_KEY, this.targetVersion)
             this.window.location.reload()
             return
           }
           // Same UI bundle, as after a re-flash.
-          this.announceUpdated(this.targetVersion)
+          this.alerts
+            .open(
+              fill(this.i18n.transform('Updated to v{version}'), {
+                version: this.targetVersion,
+              }),
+              { appearance: 'positive' },
+            )
+            .subscribe()
           this.auth.setUnverified()
         } else {
           // Never lost contact; the session is still valid.
@@ -211,6 +207,5 @@ export class SystemService {
       probeUrl: this.window.location.origin,
       onReconnect: 'reload',
     })
-    this.storage?.setItem(UPDATE_TARGET_KEY, this.targetVersion)
   }
 }
