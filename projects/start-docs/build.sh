@@ -71,6 +71,9 @@ for book in "${books[@]}"; do
   title="$(book_title "$book")"
   landing_versions+="s|<!--version:$book-->|v$cur|;"
   links=""
+  release_re="github\.com/Start9Labs/start-technologies/releases/tag/$book/v[0-9][^])\"' #]*"
+  release="$(grep -rhoE "$release_re" "$REPO/$(book_path "$book")/src" | sort -u)"
+  [ "$(wc -l <<< "$release")" = 1 ] || release=""
 
   for version in ${archives[$book]}; do
     t="${tag[$book/$version]}"
@@ -79,6 +82,9 @@ for book in "${books[@]}"; do
     mkdir -p "$ARCHIVE/$book/$version"
     git -C "$REPO" archive "$t" "$(book_path "$book")" projects/start-docs/theme |
       tar -x -C "$ARCHIVE/$book/$version"
+    [ -z "$release" ] ||
+      grep -rlZE "$release_re" "$ARCHIVE/$book/$version/$(book_path "$book")/src" |
+      xargs -0 -r sed -i -E "s|$release_re|$release|g"
     build_book "$book" "$version" "$ARCHIVE/$book/$version/$(book_path "$book")"
 
     for file in $(cd "$OUT/$book/$version" && find . -name '*.html' | sed 's|^\./||'); do
