@@ -3157,23 +3157,78 @@ test('WRT interrupted-update recovery cannot claim the requested version from an
   assert.deepEqual(messages, ['Update failed — check device logs'])
 })
 
-test('WRT update recovery that outlasts its wait hands the page to the reconnect indicator', async () => {
-  const { load } = wrtFlowHarness({
-    setTimeout: callback => queueMicrotask(callback),
-    window: {
+function wrtConnectionHarness(globals = {}) {
+  let routerAnswers = false
+  const polls = []
+  const probes = []
+  const navigation = []
+  const { load, dependencies, tokens, overrides } = wrtFlowHarness({
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: callback => polls.push(callback),
+    clearInterval() {},
+    fetch: async (url, init) => {
+      assert.equal(init.mode, 'no-cors')
+      probes.push(url)
+      if (!routerAnswers) throw new TypeError('Failed to fetch')
+    },
+    window: Object.assign(new EventTarget(), {
       location: {
         origin: 'https://router.lan',
-        reload: () => assert.fail('the indicator owns the reload'),
+        reload: () => navigation.push('reload'),
+        assign: url => navigation.push(url),
       },
-    },
+    }),
+    document: Object.assign(new EventTarget(), { visibilityState: 'visible' }),
+    ...globals,
   })
+  const { ConnectionService } = load(
+    'projects/start-wrt/web/src/app/services/connection.service.ts',
+  )
+  dependencies.set(overrides.get('@taiga-ui/core').TuiNotificationService, {
+    open: () => of(null),
+  })
+  dependencies.set(
+    load('projects/start-wrt/web/src/app/services/api/api.service.ts')
+      .ApiService,
+    { systemInfo: () => assert.fail('an armed probe replaces system.info') },
+  )
+  dependencies.set(overrides.get('src/app/i18n/i18n.pipe').i18nPipe, {
+    transform: value => value,
+  })
+  dependencies.set(
+    overrides.get('src/app/utils/workspace-config').IS_MOCK,
+    false,
+  )
+  dependencies.set(tokens.RpcSocketService, { disconnect() {} })
+  dependencies.set(
+    overrides.get('src/app/services/network.service').NetworkService,
+    new BehaviorSubject(true),
+  )
+  return {
+    load,
+    connection: new ConnectionService(),
+    probes,
+    navigation,
+    answer: () => (routerAnswers = true),
+    tick: async () => {
+      assert.equal(polls.length, 1)
+      await polls[0]()
+    },
+  }
+}
+
+test('WRT update recovery that outlasts its wait keeps its explanation through background poller reports', async () => {
+  const fixture = wrtConnectionHarness({
+    setTimeout: callback => queueMicrotask(callback),
+  })
+  const { connection } = fixture
   const service = Object.create(
-    load('projects/start-wrt/web/src/app/services/system.service.ts')
+    fixture.load('projects/start-wrt/web/src/app/services/system.service.ts')
       .SystemService.prototype,
   )
   let attempts = 0
   let rebooting = true
-  const calls = []
   Object.assign(service, {
     targetVersion: '1.5.0',
     rebooting: {
@@ -3187,26 +3242,56 @@ test('WRT update recovery that outlasts its wait hands the page to the reconnect
         throw { code: 0 }
       },
     },
-    connection: {
-      resume: () => calls.push('resume'),
-      reportUnreachable: options => calls.push({ ...options }),
-    },
+    connection,
     sockets: { disconnect() {} },
     i18n: { transform: value => value },
     alerts: { open: () => assert.fail('the indicator owns the message') },
   })
+  connection.suppress()
+  connection.reportUnreachable()
+  assert.equal(connection.unreachable(), false)
+
   await service.pollForReconnect()
   assert.equal(attempts, 60)
   assert.equal(rebooting, false)
-  assert.deepEqual(calls, [
-    'resume',
-    {
-      message:
-        'The router has not come back since the update. This page reloads when it does.',
-      probeUrl: 'https://router.lan',
-      onReconnect: 'reload',
-    },
-  ])
+  const explanation =
+    'The router has not come back since the update. This page reloads when it does.'
+  assert.equal(connection.unreachable(), true)
+  assert.equal(connection.message(), explanation)
+
+  connection.reportUnreachable()
+  assert.equal(connection.message(), explanation)
+  await fixture.tick()
+  assert.deepEqual(fixture.navigation, [])
+
+  fixture.answer()
+  await fixture.tick()
+  assert.equal(connection.unreachable(), false)
+  assert.deepEqual(fixture.navigation, ['reload'])
+  assert.equal(fixture.probes.length, 3)
+  for (const url of fixture.probes) {
+    assert.match(
+      url,
+      /^https:\/\/router\.lan\/static\/local-root-ca\.crt\?_probe=/,
+    )
+  }
+})
+
+test('WRT address change keeps its reconnect copy through background poller reports', async () => {
+  const fixture = wrtConnectionHarness()
+  const { connection } = fixture
+  connection.suppress()
+  connection.reportUnreachable()
+  connection.reconnectAt(
+    'https://192.168.5.1',
+    'Reconnecting to the new address…',
+  )
+  connection.reportUnreachable()
+  assert.equal(connection.message(), 'Reconnecting to the new address…')
+
+  fixture.answer()
+  await fixture.tick()
+  assert.deepEqual(fixture.navigation, ['https://192.168.5.1'])
 })
 
 test('diagnostic mock reuses its initiating result and progress producer for typed terminals', async () => {
