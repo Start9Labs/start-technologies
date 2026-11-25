@@ -12,6 +12,7 @@ use crate::db::model::Database;
 use crate::db::model::public::{
     GatewayType, IpInfo, NetworkInfo, NetworkInterfaceInfo, NetworkInterfaceType,
 };
+use crate::mcp::{EFFECT, Effect};
 use crate::net::host::all_hosts;
 use crate::prelude::*;
 
@@ -22,12 +23,14 @@ pub fn tunnel_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add_tunnel)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_about("about.add-new-tunnel")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "remove",
             from_fn_async(remove_tunnel)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-tunnel")
                 .with_call_remote::<CliContext>(),
@@ -35,6 +38,7 @@ pub fn tunnel_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "update",
             from_fn_async(update_tunnel)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.update-tunnel")
                 .with_call_remote::<CliContext>(),

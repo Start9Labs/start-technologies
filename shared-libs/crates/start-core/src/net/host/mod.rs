@@ -15,6 +15,7 @@ use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::db::model::public::{GatewayType, NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::hostname::ServerHostname;
+use crate::mcp::{EFFECT, Effect};
 use crate::net::forward::{AvailablePorts, START9_BRIDGE_HOSTNAME, START9_BRIDGE_IFACE};
 use crate::net::host::address::{HostAddress, PublicDomainConfig, address_api};
 use crate::net::host::binding::{
@@ -1013,6 +1014,7 @@ pub fn host_api<C: Context>() -> ParentHandler<C, RequiresPackageId> {
         .subcommand(
             "list",
             from_fn_async(list_hosts)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_inherited(|RequiresPackageId { package }, _| package)
                 .with_custom_display_fn(|_, ids| {
                     for id in ids {
