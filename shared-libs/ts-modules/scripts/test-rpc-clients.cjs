@@ -3128,6 +3128,58 @@ test('WRT interrupted-update recovery cannot claim the requested version from an
   assert.deepEqual(messages, ['Update failed — check device logs'])
 })
 
+test('WRT update recovery that outlasts its wait hands the page to the reconnect indicator', async () => {
+  const { load } = wrtFlowHarness({
+    setTimeout: callback => queueMicrotask(callback),
+    window: {
+      location: {
+        origin: 'https://router.lan',
+        reload: () => assert.fail('the indicator owns the reload'),
+      },
+    },
+  })
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/system.service.ts')
+      .SystemService.prototype,
+  )
+  let attempts = 0
+  let rebooting = true
+  const calls = []
+  Object.assign(service, {
+    targetVersion: '1.5.0',
+    rebooting: {
+      set: value => {
+        rebooting = value
+      },
+    },
+    api: {
+      systemInfo: async () => {
+        attempts++
+        throw { code: 0 }
+      },
+    },
+    connection: {
+      resume: () => calls.push('resume'),
+      reportUnreachable: options => calls.push({ ...options }),
+    },
+    sockets: { disconnect() {} },
+    i18n: { transform: value => value },
+    alerts: { open: () => assert.fail('the indicator owns the message') },
+  })
+  await service.pollForReconnect()
+  assert.equal(attempts, 60)
+  assert.equal(rebooting, false)
+  assert.deepEqual(calls, [
+    'resume',
+    {
+      message:
+        'The router has not come back since the update. This page reloads when it does.',
+      probeUrl: 'https://router.lan',
+      onReconnect: 'reload',
+    },
+  ])
+})
+
 test('diagnostic mock reuses its initiating result and progress producer for typed terminals', async () => {
   const { load } = harness(
     new Map([

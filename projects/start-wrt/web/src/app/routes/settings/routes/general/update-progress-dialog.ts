@@ -11,10 +11,9 @@ import { SystemService } from 'src/app/services/system.service'
 /**
  * Blocking progress dialog for a system update. Owns the update lifecycle:
  * kicks off `SystemService.startUpdate` on open, shows a spinner through the
- * update and reboot, and closes itself once the device reconnects (or the
- * update fails to start). The OS-update flow owns its own reconnect handling
- * (see SystemService.pollForReconnect) rather than the global
- * ConnectionService indicator used by other network-disrupting actions.
+ * update and reboot, and closes itself when the device reconnects, the update
+ * fails, or SystemService.pollForReconnect hands an unfinished wait to the
+ * global ConnectionService indicator.
  */
 @Component({
   template: `

@@ -40,12 +40,7 @@ export interface DisruptionOptions {
    * router answers again rather than the moment it dropped.
    */
   successMessage?: string
-  /**
-   * Poll THIS absolute URL (cross-origin, no-cors) instead of systemInfo on the
-   * current origin. Used when the current origin is gone for good (a bare-IP
-   * address that the router is moving away from), so the systemInfo poll could
-   * never recover.
-   */
+  /** Origin polled with a no-cors fetch instead of systemInfo; any HTTP answer counts. */
   probeUrl?: string
   /** Where to send the browser on recovery when onReconnect === 'navigate'. */
   navigateTo?: string

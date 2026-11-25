@@ -206,8 +206,14 @@ export class SystemService {
         // A non-network error means the device responded — keep polling.
       }
     }
-    // Timed out — user will need to refresh manually
     this.rebooting.set(false)
     this.connection.resume()
+    this.connection.reportUnreachable({
+      message: this.i18n.transform(
+        'The router has not come back since the update. This page reloads when it does.',
+      ),
+      probeUrl: window.location.origin,
+      onReconnect: 'reload',
+    })
   }
 }
