@@ -9,23 +9,15 @@ A [StartOS backup](/start-os/backups.html) is taken by hand and holds each servi
 - **LND.** Your seed recovers on-chain funds only. Funds in channels come back through the **static channel backup**, `channel.backup`, which LND rewrites whenever a channel opens or closes, and which a restore uses to ask your peers to close your channels and return the funds. A StartOS backup holds that file as it was when you took it, so a channel opened since is missing from it, and its funds are not recovered.
 - **Bark Wallet.** Every Ark or Lightning payment advances the wallet state, and restoring an older copy of the wallet database rolls it back past payments it has already made, which loses funds. The database is therefore left out of the StartOS backup entirely. A local copy on the server always runs, but it survives only inside a StartOS backup, so it is likely stale exactly when you need it.
 
-A continuous backup closes that gap. The copy is encrypted before it leaves your server, so the provider only ever holds ciphertext, and a StartOS restore is what uses it: you restore as usual, and the service fetches the copy itself.
-
-|                | LND                                                                  | Bark Wallet                                                              |
-| -------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| What is copied | `channel.backup`, the static channel backup                          | The wallet database, as an encrypted snapshot                            |
-| When           | Whenever your channels change, and once a day regardless             | Within seconds of every change to the wallet                             |
-| Encrypted with | A key LND derives from the wallet seed                               | A key derived from the recovery phrase                                   |
-| With no target | The copy inside your last StartOS backup                             | A local copy on the server, reported as a failing health check           |
-| On restore     | Closes channels from every copy found, the StartOS backup's included | Loads the freshest snapshot, and refuses one older than the last it sent |
+A continuous backup closes that gap. The copy is encrypted before it leaves your server, so the provider only ever holds ciphertext. A StartOS restore uses the copies on storage targets automatically; LND's Email target requires you to supply the attachment yourself.
 
 ## Setting Up
 
 Both services keep the feature under **Actions → Continuous Backups**, and both raise a task at install that points you at it.
 
-1. Run **Configure Continuous Backups**. Fill in any combination of Google Drive, Dropbox, Nextcloud and SFTP — see [Targets](#targets) — and turn on each one's **Enabled** toggle. Entries are saved even for a target you leave disabled, and turning one off later keeps its credentials. In LND, **Forget saved credentials** removes a target for good; turn it off first.
+1. Run **Configure Continuous Backups**. Fill in one or more targets — see [Targets](#targets) — and turn on each one's **Enabled** toggle. Entries are saved even for a target you leave disabled, and turning one off later keeps its credentials.
 
-1. Run **Back Up Channels Now** (LND) or **Back Up Now** (Bark Wallet). Both need the service running. It reports what each target said, so a typo surfaces now rather than at restore time. LND has nothing to send until your first channel has opened, which is when it creates `channel.backup`.
+1. Run **Back Up Channels Now** (LND) or **Back Up Now** (Bark Wallet). Both need the service running. It reports what each target said, so a typo surfaces now rather than at restore time.
 
 1. Take a StartOS backup. The targets and their credentials are stored with the service, and a StartOS backup made before you configured them does not know where the copies are.
 
@@ -33,12 +25,14 @@ From then on the **Continuous Backup** health check shows how long ago each enab
 
 ### Where the Copies Go
 
-Each target holds a folder you name — `lnd-channel-backups` or `bark-backups` by default — and inside it a folder whose name is derived from the node's identity or the wallet's seed, so several nodes or wallets can share one account without overwriting each other. LND keeps a single `channel.backup` there, replaced on every successful upload; Bark Wallet keeps the current snapshot and a freshness marker.
+Each of the four storage targets below holds a folder you name — `lnd-channel-backups` or `bark-backups` by default — and inside it a folder whose name is derived from the node's identity or the wallet's seed, so several nodes or wallets can share one account without overwriting each other. LND's Email target sends an attachment instead.
 
 > [!WARNING]
-> Choose a target on a different machine. A copy kept on this same server — on its disk, or in a Nextcloud or SFTP server running on this StartOS — dies with it. LND refuses a loopback address; a folder elsewhere on the same disk cannot be told apart from a real target. Prefer two independent targets. Tor `.onion` targets are not supported yet.
+> Choose a target on a different machine. A copy kept on this same server — on its disk, or in a Nextcloud or SFTP server running on this StartOS — dies with it. A folder elsewhere on the same disk cannot be told apart from a real target, so nothing stops you choosing one. Prefer two independent targets.
 
 ## Targets
+
+Each service's own instructions in StartOS list the targets it offers — LND can also email its channel backup — and what it does with each. The four below are common to both, and setting them up is the same.
 
 ### Google Drive
 
@@ -85,16 +79,12 @@ sftp user@host
 sftp> pwd
 ```
 
-The directory it prints is the one the path is relative to. LND refuses a path that starts with `/` or contains `..`.
+The directory it prints is the one the path is relative to.
 
-**LND checks the server's identity before sending anything.** Saving the target records the host keys the server presents and shows their fingerprints. Compare them with the fingerprint your server reports — on a Linux server, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` — then save again with **Host key verified** turned on. Nothing is sent until you do, and the health check says so in the meantime. Changing the host or port clears the recorded key; after the server is reinstalled and its key changes, save with **Record a new host key** turned on. Bark Wallet trusts the key the server presents.
+**Check the server's host key.** Saving the target shows the fingerprint of the host key the server presents. Compare it with the one your server reports — on a Linux server, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. From then on backups go only to a server presenting that key, so if the server is reinstalled and its key changes, they stop until you save the target again. The service's instructions say what else it asks of you before it sends anything.
 
 ## Restoring
 
-Restore your StartOS backup as usual — nothing has to be fetched from a provider by hand. The backup carries the targets and their credentials, and the service fetches the copies itself.
-
-- **LND** hands the `channel.backup` inside the StartOS backup to LND, then fetches the copy from every target with saved credentials, disabled ones included, and hands those over too. Channels are recovered from all of them together, so a channel opened after the StartOS backup was taken is recovered from the target that has it. The restore waits for a target it cannot reach — the restore notice names it — and clearing that target's saved credentials in **Configure Continuous Backups** is how to stop waiting. Nothing is sent to the targets again until the restore has finished. Recovery force-closes every channel and returns the funds on-chain, and Lightning Labs strongly recommends against continuing to use a restored node: sweep the funds to another wallet, then uninstall and reinstall LND fresh.
-
-- **Bark Wallet** fetches the freshest snapshot from your targets on the first start after the restore, decrypts it with your seed and loads it before the wallet opens, so you come back to your most recent state. If the newest copy it finds is older than the last one it sent — a target restored from an old backup, say — it refuses to load it rather than roll the wallet back, and asks for a current copy; with two targets, a rolled-back one is outvoted. With no target configured, or none reachable, the wallet starts from the seed alone: on-chain funds, plus whatever Ark balance the server's recovery mailbox can rebuild.
+Restore your StartOS backup as usual. The backup carries the targets and their credentials, and the service fetches the copies from storage targets itself. For LND's Email target, keep the newest attachment and follow **Restore Channels from File** in LND's instructions. What each service recovers, what it waits for, and what it refuses is in its own instructions in StartOS.
 
 Two things must both be kept: your seed or recovery phrase, which decrypts every copy and cannot be recovered from anything else, and a current StartOS backup, which holds where the copies live and the credentials to fetch them.
