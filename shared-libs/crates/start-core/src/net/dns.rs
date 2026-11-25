@@ -13,7 +13,7 @@ use hickory_server::net::runtime::Time;
 use hickory_server::proto::op::{Header, HeaderCounts, Metadata, ResponseCode};
 use hickory_server::proto::rr::{Name, Record, RecordType};
 use hickory_server::resolver::config::{
-    ConnectionConfig, NameServerConfig, ResolverConfig, ResolverOpts,
+    ConnectionConfig, LookupIpStrategy, NameServerConfig, ResolverConfig, ResolverOpts,
 };
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo, Server};
 use hickory_server::store::forwarder::{ForwardConfig, ForwardZoneHandler};
@@ -30,6 +30,7 @@ use tracing::instrument;
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::db::model::Database;
 use crate::db::model::public::{NetworkInterfaceInfo, Public};
+use crate::mcp::{EFFECT, Effect};
 use crate::net::gateway::{GatewayInfo, NetworkInterfaceController};
 use crate::net::utils::{bind_tokio_listener_reuse_port, ipv6_is_link_local};
 use crate::prelude::*;
@@ -62,6 +63,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "status",
             from_fn(|ctx: RpcContext| Ok::<_, Error>(ctx.net_controller.dns.status()))
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.dns-status")
                 .with_call_remote::<CliContext>(),
@@ -69,6 +71,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "query",
             from_fn_blocking(query_dns::<C>)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
                     if let Some(format) = params.format {
@@ -89,6 +92,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-static",
             from_fn_async(set_static_dns)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.set-static-dns-servers")
                 .with_call_remote::<CliContext>(),
@@ -96,6 +100,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "dump-table",
             from_fn_async(dump_table)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
                     use prettytable::*;
@@ -464,20 +469,24 @@ fn configured_dns_profiles(
     Ok(profiles)
 }
 
+fn forward_options() -> ResolverOpts {
+    let mut options = ResolverOpts::default();
+    options.timeout = Duration::from_secs(5);
+    options
+}
+
 fn gateway_catalog(
     gateway: GatewayId,
     index: u32,
     servers: &VecDeque<SocketAddr>,
 ) -> Result<Arc<Catalog>, Error> {
-    let mut options = ResolverOpts::default();
-    options.timeout = Duration::from_secs(5);
     let forwarder = ForwardZoneHandler::builder_with_config(
         ForwardConfig {
             name_servers: servers
                 .iter()
                 .map(|addr| forward_name_server(*addr))
                 .collect(),
-            options: Some(options),
+            options: Some(forward_options()),
         },
         GatewayRuntime::new(gateway, index),
     )
@@ -490,6 +499,66 @@ fn gateway_catalog(
     );
     Ok(Arc::new(catalog))
 }
+
+/// Resolves names through one gateway's DNS servers, over that gateway alone,
+/// to addresses of both families.
+#[derive(Clone)]
+pub(crate) struct GatewayDns(Arc<hickory_server::resolver::Resolver<GatewayRuntime>>);
+
+impl GatewayDns {
+    pub(crate) fn new(
+        gateway: GatewayId,
+        index: u32,
+        servers: &VecDeque<SocketAddr>,
+    ) -> Result<Self, Error> {
+        let mut options = forward_options();
+        options.ip_strategy = LookupIpStrategy::Ipv6AndIpv4;
+        hickory_server::resolver::Resolver::builder_with_config(
+            ResolverConfig::from_name_servers(
+                servers
+                    .iter()
+                    .map(|addr| forward_name_server(*addr))
+                    .collect(),
+            ),
+            GatewayRuntime::new(gateway, index),
+        )
+        .with_options(options)
+        .build()
+        .map(|resolver| Self(Arc::new(resolver)))
+        .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Network))
+    }
+}
+
+impl tower_service::Service<hyper_util::client::legacy::connect::dns::Name> for GatewayDns {
+    type Response = std::vec::IntoIter<SocketAddr>;
+    type Error = std::io::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, name: hyper_util::client::legacy::connect::dns::Name) -> Self::Future {
+        let resolver = self.0.clone();
+        Box::pin(async move {
+            let lookup = resolver
+                .lookup_ip(name.as_str())
+                .await
+                .map_err(std::io::Error::other)?;
+            Ok(lookup
+                .iter()
+                .map(|ip| SocketAddr::new(ip, 0))
+                .collect::<Vec<_>>()
+                .into_iter())
+        })
+    }
+}
+
 /// How a query should be answered.
 enum Resolution {
     /// Answers locally; an absent address family returns NODATA.

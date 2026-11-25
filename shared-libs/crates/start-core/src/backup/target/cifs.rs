@@ -13,6 +13,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::disk::mount::filesystem::ReadOnly;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::shared_volumes::{CreateSharedVolumeParams, CreateSharedVolumeSource};
 use crate::util::serde::KeyVal;
@@ -37,7 +38,12 @@ impl Map for CifsTargets {
 
 pub fn cifs<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("add", from_fn_async(add).no_cli())
+        .subcommand(
+            "add",
+            from_fn_async(add)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
         .subcommand(
             "add",
             from_fn_async(cli_add)
@@ -45,7 +51,12 @@ pub fn cifs<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.add-new-backup-target"),
         )
-        .subcommand("update", from_fn_async(update).no_cli())
+        .subcommand(
+            "update",
+            from_fn_async(update)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "update",
             from_fn_async(cli_update)
@@ -56,6 +67,7 @@ pub fn cifs<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-existing-backup-target")
                 .with_call_remote::<CliContext>(),
