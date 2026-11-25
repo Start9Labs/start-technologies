@@ -17,9 +17,16 @@ import { StaleUiService } from './stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
 
-// sessionStorage key carrying the "Updated to vX" confirmation across the
-// post-update reload (the reload discards the JS context that owns the toast).
+/** sessionStorage: a version an earlier release's update page confirmed before reloading. */
 const UPDATED_TO_KEY = 'startwrt.updated-to'
+/** sessionStorage: a requested version that init() checks against the firmware after a reload. */
+const UPDATE_TARGET_KEY = 'startwrt.update-target'
+
+function takeSession(key: string): string | null {
+  const value = sessionStorage.getItem(key)
+  sessionStorage.removeItem(key)
+  return value
+}
 
 @Injectable({
   providedIn: 'root',
@@ -57,23 +64,24 @@ export class SystemService {
   }
 
   async init(): Promise<void> {
-    // Confirmation deferred across the post-update reload in pollForReconnect.
-    const updatedTo = sessionStorage.getItem(UPDATED_TO_KEY)
-    if (updatedTo) {
-      sessionStorage.removeItem(UPDATED_TO_KEY)
-      this.alerts
-        .open(
-          fill(this.i18n.transform('Updated to v{version}'), {
-            version: updatedTo,
-          }),
-          { appearance: 'positive' },
-        )
-        .subscribe()
+    const updatedTo = takeSession(UPDATED_TO_KEY)
+    if (updatedTo) this.announceUpdated(updatedTo)
+
+    const target = takeSession(UPDATE_TARGET_KEY)
+    const running = this.api.systemInfo()
+    if (target) {
+      running.then(
+        ({ version }) =>
+          version === target
+            ? this.announceUpdated(target)
+            : this.announceUpdateFailed(),
+        () => {},
+      )
     }
 
     try {
       const [info, newerVersions] = await Promise.all([
-        this.api.systemInfo(),
+        running,
         this.api.systemNewerVersions(),
       ])
 
@@ -145,6 +153,18 @@ export class SystemService {
     // spurious "Device is restarting…" flash; surface the error as a toast.
     this.updating.set(false)
     this.connection.resume()
+    this.announceUpdateFailed()
+  }
+
+  private announceUpdated(version: string): void {
+    this.alerts
+      .open(fill(this.i18n.transform('Updated to v{version}'), { version }), {
+        appearance: 'positive',
+      })
+      .subscribe()
+  }
+
+  private announceUpdateFailed(): void {
     this.alerts
       .open(this.i18n.transform('Update failed — check device logs'), {
         appearance: 'negative',
@@ -174,23 +194,15 @@ export class SystemService {
           // user is headed to login either way. If the new firmware ships a
           // different UI bundle, reload outright to land there on the NEW
           // bundle (index.html revalidates its ETag, so the reload is
-          // guaranteed fresh); the confirmation toast rides sessionStorage
-          // across the reload and init() shows it after login.
+          // guaranteed fresh); init() confirms the version after the reload.
           if (this.staleUi.isStale(info)) {
-            sessionStorage.setItem(UPDATED_TO_KEY, this.targetVersion)
+            sessionStorage.setItem(UPDATE_TARGET_KEY, this.targetVersion)
             window.location.reload()
             return
           }
           // Same-bundle update (e.g. a re-flash): confirm success, then send
           // the user to login rather than waiting for their next action to 401.
-          this.alerts
-            .open(
-              fill(this.i18n.transform('Updated to v{version}'), {
-                version: this.targetVersion,
-              }),
-              { appearance: 'positive' },
-            )
-            .subscribe()
+          this.announceUpdated(this.targetVersion)
           this.auth.setUnverified()
         } else {
           // Never lost contact — the update failed before any reboot and the
@@ -208,6 +220,7 @@ export class SystemService {
     }
     this.rebooting.set(false)
     this.connection.resume()
+    sessionStorage.setItem(UPDATE_TARGET_KEY, this.targetVersion)
     this.connection.reportUnreachable({
       message: this.i18n.transform(
         'The router has not come back since the update. This page reloads when it does.',
