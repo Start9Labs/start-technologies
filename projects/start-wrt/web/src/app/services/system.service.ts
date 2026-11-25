@@ -97,9 +97,13 @@ export class SystemService {
     this.staleUi.check(info)
   }
 
+  canStartUpdate(): boolean {
+    return !this.updating() && !this.connection.unreachable()
+  }
+
   async startUpdate(targetVersion: string): Promise<void> {
-    if (this.connection.unreachable()) {
-      throw new Error(this.i18n.transform('Trying to reach the router'))
+    if (!this.canStartUpdate()) {
+      throw new Error(this.i18n.transform('Failed to start update'))
     }
     this.targetVersion = targetVersion
     this.updating.set(true)
@@ -157,13 +161,11 @@ export class SystemService {
 
   private async pollForReconnect(): Promise<void> {
     const maxAttempts = 60
-    // Set once a poll fails at the network level, as a reboot makes it.
     let wentOffline = false
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 5000))
       try {
         const info = await this.api.systemInfo(PROBE_TIMEOUT_MS)
-        // Device is reachable again.
         this.rebooting.set(false)
         this.connection.resume()
         if (wentOffline) {

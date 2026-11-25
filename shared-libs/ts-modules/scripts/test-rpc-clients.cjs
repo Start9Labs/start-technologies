@@ -3127,12 +3127,44 @@ test('WRT update refuses to start while the reconnect indicator is up', async ()
     },
     i18n: { transform: value => value },
   })
+  assert.equal(service.canStartUpdate(), false)
   await assert.rejects(service.startUpdate('1.5.1'), {
-    message: 'Trying to reach the router',
+    message: 'Failed to start update',
   })
   assert.equal(requested, 0)
   assert.equal(suppressed, 0)
   assert.equal(updating, false)
+})
+
+test('WRT update progress dialog closes when the update cannot start', async () => {
+  const { load } = wrtFlowHarness()
+  const dialog = Object.create(
+    load(
+      'projects/start-wrt/web/src/app/routes/settings/routes/general/update-progress-dialog.ts',
+    ).UpdateProgressDialog.prototype,
+  )
+  let completed = 0
+  const toasts = []
+  Object.assign(dialog, {
+    system: {
+      startUpdate: async version => {
+        assert.equal(version, '1.5.1')
+        throw new Error('Failed to start update')
+      },
+    },
+    context: { data: '1.5.1', completeWith: () => completed++ },
+    alerts: {
+      open: message => {
+        toasts.push(message)
+        return of(null)
+      },
+    },
+    i18n: { transform: value => value },
+  })
+  dialog.ngOnInit()
+  await new Promise(setImmediate)
+  assert.equal(completed, 1)
+  assert.deepEqual(toasts, ['Failed to start update'])
 })
 
 test('WRT update without a target releases the update state without observing', async () => {

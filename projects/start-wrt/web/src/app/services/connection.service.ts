@@ -48,7 +48,7 @@ export interface DisruptionOptions {
 /**
  * The single sticky toast shown while the router is unreachable. Its subtitle
  * tracks {@link ConnectionService.message} so callers can tailor the copy (e.g.
- * the SSID to rejoin) without spawning a second toast.
+ * the address being moved to) without spawning a second toast.
  */
 @Component({
   template: `
@@ -222,7 +222,7 @@ export class ConnectionService {
     }
     try {
       // Fallback stale-UI check after a reboot; every RPC response carries
-      // the primary one. system.info needs no session.
+      // the primary one. system.info needs no sign-in.
       this.staleUi.check(await this.api.systemInfo(PROBE_TIMEOUT_MS))
     } catch (e) {
       // Still unreachable only on a network-level failure; any RPC/HTTP
