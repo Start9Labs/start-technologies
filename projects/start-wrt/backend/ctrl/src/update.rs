@@ -366,7 +366,7 @@ async fn do_update(
     verify_phase: &mut crate::progress::PhaseProgressTrackerHandle,
     apply_phase: &mut crate::progress::PhaseProgressTrackerHandle,
 ) -> Result<(), Error> {
-    // Only the daemon writes this path; sysupgrade flashes it in place.
+    // Handed-off firmware stays immutable until procd rejects it or stops the daemon.
     let firmware_path = Path::new("/tmp/startwrt-update.bin");
 
     download_firmware(client, &asset, firmware_path, |bytes_written| {
