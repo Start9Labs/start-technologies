@@ -9,11 +9,8 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { SystemService } from 'src/app/services/system.service'
 
 /**
- * Blocking progress dialog for a system update. Owns the update lifecycle:
- * kicks off `SystemService.startUpdate` on open, shows a spinner through the
- * update and reboot, and closes itself when the device reconnects, the update
- * fails, or SystemService.pollForReconnect hands an unfinished wait to the
- * global ConnectionService indicator.
+ * Blocking progress dialog for a system update. Starts the update on open and
+ * closes once SystemService is neither updating nor rebooting.
  */
 @Component({
   template: `

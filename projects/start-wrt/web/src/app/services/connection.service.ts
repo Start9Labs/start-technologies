@@ -15,8 +15,7 @@ export { isNetworkError }
 const POLL_INTERVAL_MS = 3000
 /** Bounds recovery probes before their owner discards a stalled transport. */
 export const PROBE_TIMEOUT_MS = 5000
-// How long a declared disruption's context (message / recovery intent) stays
-// armed waiting for the connection to actually drop.
+/** How long a declared disruption's message waits for the drop. */
 const CONTEXT_TTL_MS = 30_000
 // Generous upper bound on how long we show "Reconnecting" before force-navigating
 // to the new address regardless of the probe (reconnectAt only). Covers what the
@@ -73,15 +72,9 @@ class DisconnectedToast {
 }
 
 /**
- * Global owner of "router is unreachable" UX. Replaces the per-flow
- * RECONNECTING_DIALOG / ReconnectDialog modals and the old
- * NetworkRestartService.suppress() plumbing.
- *
- * Any network-level error (transport code 0) anywhere funnels here via
- * {@link reportUnreachable}; the first caller shows ONE sticky toast and starts
- * ONE cancelling poll loop, and concurrent callers (the ~15 background form
- * pollers) collapse into it. On recovery it dismisses the toast, confirms with
- * a single "Connection restored" toast, and runs the recovery intent.
+ * Owns the "Reconnecting" indicator. The first {@link reportUnreachable} of an
+ * outage opens one sticky toast and one poll loop; recovery closes both and
+ * runs the outage's recovery intent.
  */
 @Injectable({ providedIn: 'root' })
 export class ConnectionService {
@@ -136,18 +129,7 @@ export class ConnectionService {
     })
   }
 
-  /**
-   * Declare that an in-flight action is about to restart the network. Pre-seeds
-   * the indicator's (cosmetic) message so that whichever path next observes the
-   * drop — the action's own error or a background poller — shows the right copy.
-   * Shows nothing if connectivity survives the restart.
-   *
-   * Note: only the message is stashed, NOT the recovery intent. onReconnect is
-   * honored solely from the reportUnreachable() call that observes the drop, so
-   * a stale context can't trigger an unexpected reload (see reportUnreachable).
-   * The stash lives at most CONTEXT_TTL_MS; worst case is a slightly stale
-   * message on an unrelated blip in that window — harmless, clears on recover.
-   */
+  /** Supplies the message for an outage that starts within CONTEXT_TTL_MS. */
   expectDisruption(opts: DisruptionOptions = {}): void {
     this.pending = { message: opts.message }
     clearTimeout(this.pendingId)
@@ -157,7 +139,7 @@ export class ConnectionService {
     )
   }
 
-  /** Unlabelled reports retain the active outage's message and recovery intent. */
+  /** Options a report leaves unset keep the active outage's values. */
   reportUnreachable(opts: DisruptionOptions = {}): void {
     if (this.suppressed) return
 
@@ -258,22 +240,7 @@ export class ConnectionService {
     this.recover()
   }
 
-  /**
-   * Reachable = the router answered at all. A no-cors fetch resolves on ANY
-   * response (opaque) and rejects only on a DNS/TLS/connection failure, which
-   * is exactly the signal we want; we never read the body. The probe preserves
-   * the page's scheme (no mixed-content block) and the cert is reissued for the
-   * new IP and router.lan, so https validates once the router is back.
-   *
-   * Probes the tiny no-auth /static/local-root-ca.crt rather than the ~100KB SPA index
-   * so a 3s poll stays cheap.
-   *
-   * Edge case: an untrusted self-signed HTTPS target (a client that hasn't
-   * trusted this device's root CA) fails the background TLS handshake silently,
-   * so this never resolves for that target — handled by reconnectAt's fallback
-   * force-redirect (a top-level nav surfaces the cert prompt). http and
-   * root-CA-trusting clients recover here directly.
-   */
+  /** True once the origin answers at all; an untrusted certificate fails it silently. */
   private async reachable(url: string): Promise<boolean> {
     // Mock has no real router to probe; treat the destination as reachable so
     // the flow recovers (recover() skips the actual navigation under mock too).
