@@ -362,7 +362,7 @@ rebuilds. Every setup run:
 3. Rsyncs [`openwrt-overlay/`](openwrt-overlay/) over the tree — the _added_ files
    (mirroring upstream layout): `target/linux/spacemit/` (the K1 target, including its
    `patches-6.18/` kernel patches), `package/boot/{opensbi,uboot}-spacemit/`, the generic
-   6.18 kernel stubs, one mac80211 build patch, a wireless-regdb patch, and a ca-certificates patch. Additions live as plain files, not
+   6.18 kernel stubs, one mac80211 build patch, an mt76 patch, a wireless-regdb patch, and a ca-certificates patch. Additions live as plain files, not
    patches, so upstream bumps can never conflict with them. Most of this tree comes from
    SpaceMiT's BSP and from OpenWrt, and it is GPL-2.0-only rather than MIT — see
    [`openwrt-overlay/README.md`](openwrt-overlay/README.md) before editing it.

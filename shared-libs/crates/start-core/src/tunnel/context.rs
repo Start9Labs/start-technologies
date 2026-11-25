@@ -37,6 +37,9 @@ use crate::net::static_server::{EMPTY_DIR, UiContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::tunnel::TUNNEL_DEFAULT_LISTEN;
+
+/// Legacy HTTP RPC version a tunnel serves.
+const TUNNEL_HTTP_RPC_VERSION: u8 = 0;
 use crate::tunnel::api::tunnel_api;
 use crate::tunnel::db::{DnsRecordEntry, DnsRecords, PortForward, PortForwards, TunnelDatabase};
 use crate::tunnel::dns::DnsProxyController;
@@ -965,11 +968,12 @@ impl CallRemote<TunnelContext> for CliContext {
             ("https", Some(url_host_str(tunnel_addr.ip())))
         };
 
-        let url = crate::util::net::rpc_url(&format!("{scheme}://{tunnel_addr}").parse()?, 0)?;
+        let base: url::Url = format!("{scheme}://{tunnel_addr}").parse()?;
         method = method.strip_prefix("tunnel.").unwrap_or(method);
 
         self.call_rpc(
-            url,
+            &base,
+            TUNNEL_HTTP_RPC_VERSION,
             headers,
             sig_ctx.as_deref().unwrap_or_default(),
             method,

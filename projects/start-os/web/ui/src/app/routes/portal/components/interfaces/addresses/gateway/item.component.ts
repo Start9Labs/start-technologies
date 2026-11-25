@@ -109,8 +109,10 @@ import { DomainHealthService } from './domain-health.service'
             <span>••••••••••••••••••••••••••••••••••••••••••••••••••••</span>
           } @else {
             <span [title]="address.url">
-              @if (urlHtml(); as html) {
-                <span [innerHTML]="html"></span>
+              @if (urlParts(); as parts) {
+                <ng-container>{{ parts.prefix }}</ng-container>
+                <b>{{ parts.hostname }}</b>
+                <ng-container>{{ parts.suffix }}</ng-container>
               } @else {
                 {{ address.url }}
               }
@@ -287,14 +289,16 @@ export class GatewayItemComponent {
   readonly guaOpen = signal(false)
   readonly showCert = input(false)
   readonly transportLabel = utils.transportLabel
-  readonly urlHtml = computed(() => {
+  readonly urlParts = computed(() => {
     const { url, hostnameInfo } = this.address()
-    const idx = url.indexOf(hostnameInfo.hostname)
+    const { hostname } = hostnameInfo
+    const idx = url.indexOf(hostname)
     if (idx === -1) return null
-    const prefix = url.slice(0, idx)
-    const hostname = hostnameInfo.hostname
-    const suffix = url.slice(idx + hostname.length)
-    return `${prefix}<b>${hostname}</b>${suffix}`
+    return {
+      prefix: url.slice(0, idx),
+      hostname,
+      suffix: url.slice(idx + hostname.length),
+    }
   })
 
   typeAppearance(kind: string): string {

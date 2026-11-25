@@ -10,7 +10,13 @@ import { ISB } from '@start9labs/start-core'
 import { FormComponent } from 'src/app/routes/portal/components/form.component'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
-import { cifsSource, cifsSpec, Creator, localSpec } from './create'
+import {
+  cifsSource,
+  cifsSpec,
+  Creator,
+  localSpec,
+  namedCifsSpec,
+} from './create'
 import { DriveVolumeForm } from './drive-form'
 import {
   SourcePickerData,
@@ -33,10 +39,14 @@ export class AddSourceService {
         appearance: 'taiga wide',
         data,
       })
-      .subscribe(kind => this.form(kind, create))
+      .subscribe(kind => this.form(kind, data, create))
   }
 
-  async form(kind: VolumeSourceKind, create: Creator) {
+  async form(
+    kind: VolumeSourceKind,
+    { cifsNamedByHost }: SourcePickerData,
+    create: Creator,
+  ) {
     switch (kind) {
       case 'local':
         return this.simple(
@@ -46,12 +56,19 @@ export class AddSourceService {
           create,
         )
       case 'cifs':
-        return this.simple(
-          'Add CIFS share',
-          cifsSpec(this.i18n),
-          value => ({ name: value.hostname, source: cifsSource(value) }),
-          create,
-        )
+        return cifsNamedByHost
+          ? this.simple(
+              'Add CIFS share',
+              cifsSpec(this.i18n),
+              value => ({ name: value.hostname, source: cifsSource(value) }),
+              create,
+            )
+          : this.simple(
+              'Add CIFS share',
+              namedCifsSpec(this.i18n),
+              ({ name, ...value }) => ({ name, source: cifsSource(value) }),
+              create,
+            )
       case 'disk':
         return this.formDialog.open(DriveVolumeForm, {
           label: 'Add external drive',

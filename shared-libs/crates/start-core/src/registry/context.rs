@@ -28,6 +28,7 @@ use crate::middleware::auth::local::{
     LocalAuthContext, LocalAuthMissing, dial_addr, installed_local_service, is_loopback,
     local_auth_header_status, missing_local_auth_error,
 };
+use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::middleware::auth::signature::{
     NonceCache, SignatureAuthContext, SignatureAuthMetadata, SignatureAuthorizationContext,
     SigningContext,
@@ -282,15 +283,15 @@ impl Deref for RegistryContext {
     }
 }
 
+/// Calls the registry at its base URL; unsigned calls fall back to HTTP.
 pub(crate) async fn call_cli(
     ctx: &CliContext,
-    url: Url,
+    registry: &Url,
     headers: HeaderMap,
     address: &str,
     method: &str,
     mut params: Value,
 ) -> Result<Value, RpcError> {
-    use crate::middleware::auth::session::client;
     super::compat::pem_wire(&mut params);
     if let Some(signer) = ctx.rpc_signer(&headers)? {
         let request = ctx.rpc_client.capture(method, params)?;
@@ -298,7 +299,7 @@ pub(crate) async fn call_cli(
             .rpc_client
             .session(
                 &signer,
-                client::websocket_url(url.clone())?,
+                RpcSessionUpgrader::url(registry.clone())?,
                 address,
                 headers,
             )
@@ -312,7 +313,7 @@ pub(crate) async fn call_cli(
         }
         for warning in super::cli_identity::observe(
             &ctx.id_key_path.with_file_name("registry-identities"),
-            &url,
+            registry,
             address,
             &connection.peer,
         )
@@ -324,7 +325,7 @@ pub(crate) async fn call_cli(
     } else {
         crate::middleware::auth::signature::call_http(
             ctx.client.clone(),
-            url,
+            registry_rpc_url(registry)?,
             headers,
             method,
             params,
@@ -347,13 +348,12 @@ fn resolve_registry_target(
         return Ok((url, auth));
     }
     let listen_url = || -> Result<Url, Error> {
-        let url: Url = format!(
+        format!(
             "http://{}",
             dial_addr(registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN))
         )
         .parse()
-        .map_err(Error::from)?;
-        registry_rpc_url(&url)
+        .map_err(Error::from)
     };
     let remote_required = || {
         Error::new(
@@ -420,7 +420,7 @@ impl CallRemote<RegistryContext> for CliContext {
 
         call_cli(
             self,
-            url,
+            &url,
             headers,
             sig_context.as_deref().or_not_found("registry hostname")?,
             method,
@@ -708,9 +708,9 @@ mod tests {
     fn resolve_registry_target_handles_local_auth_and_remote_fallbacks() {
         let token = || HeaderValue::from_static("Bearer registry-token");
         let no_service_check = || panic!("stopped_service should not be queried");
-        let expected_rpc = |base: &str| registry_rpc_url(&base.parse().unwrap()).unwrap();
+        let base_url = |base: &str| base.parse::<Url>().unwrap();
 
-        let explicit_loopback: Url = "http://127.0.0.1:5959/rpc/v0".parse().unwrap();
+        let explicit_loopback = base_url("http://127.0.0.1:5959");
         let (url, auth) = resolve_registry_target(
             Some(explicit_loopback.clone()),
             None,
@@ -743,7 +743,7 @@ mod tests {
             assert_eq!(auth, None);
         }
 
-        let explicit_remote: Url = "https://registry.example.com/rpc/v0".parse().unwrap();
+        let explicit_remote = base_url("https://registry.example.com");
         for status in [
             None,
             Some(Ok(token())),
@@ -765,7 +765,7 @@ mod tests {
         let (url, auth) =
             resolve_registry_target(None, None, false, Some(Ok(token())), no_service_check)
                 .unwrap();
-        assert_eq!(url, expected_rpc("http://127.0.0.1:5959"));
+        assert_eq!(url, base_url("http://127.0.0.1:5959"));
         assert_eq!(auth, Some(token()));
 
         let (url, auth) = resolve_registry_target(
@@ -776,7 +776,7 @@ mod tests {
             no_service_check,
         )
         .unwrap();
-        assert_eq!(url, expected_rpc("http://127.0.0.1:6060"));
+        assert_eq!(url, base_url("http://127.0.0.1:6060"));
         assert_eq!(auth, Some(token()));
 
         let (url, auth) = resolve_registry_target(
@@ -787,7 +787,7 @@ mod tests {
             no_service_check,
         )
         .unwrap();
-        assert_eq!(url, expected_rpc("http://192.168.1.5:6060"));
+        assert_eq!(url, base_url("http://192.168.1.5:6060"));
         assert_eq!(auth, Some(token()));
 
         for status in [
@@ -807,7 +807,7 @@ mod tests {
                 no_service_check,
             )
             .unwrap();
-            assert_eq!(url, expected_rpc("http://127.0.0.1:6060"));
+            assert_eq!(url, base_url("http://127.0.0.1:6060"));
             assert_eq!(auth, None);
         }
 

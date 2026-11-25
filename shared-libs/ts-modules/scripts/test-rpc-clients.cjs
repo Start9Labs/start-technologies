@@ -110,10 +110,10 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       ...load('shared-libs/ts-modules/shared/src/util/with-abort.ts'),
       pauseFor: async (_, signal) => signal?.throwIfAborted(),
       getErrorMessage: load(
-        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+        'shared-libs/ts-modules/shared/src/util/error-message.ts',
       ).getErrorMessage,
       isNetworkError: load(
-        'shared-libs/ts-modules/shared/src/services/error.service.ts',
+        'shared-libs/ts-modules/shared/src/util/error-message.ts',
       ).isNetworkError,
       ...load('shared-libs/ts-modules/shared/src/types/rpc.types.ts'),
       ...load('shared-libs/ts-modules/shared/src/services/rpc-request.ts'),
@@ -195,7 +195,41 @@ function harness(moduleOverrides = new Map(), globals = {}) {
   return { dependencies, tokens, load }
 }
 
+test('prompt submission preserves masked secrets and normalizes ordinary input', () => {
+  const { load } = harness(
+    new Map([
+      ['@angular/forms', {}],
+      ['@taiga-ui/core', {}],
+      ['@taiga-ui/kit', {}],
+      ['@taiga-ui/polymorpheus', { PolymorpheusComponent: class {} }],
+      ['../i18n/i18n.pipe', {}],
+    ]),
+  )
+  const { PromptModal } = load(
+    'shared-libs/ts-modules/shared/src/components/prompt.component.ts',
+  )
+  for (const [options, input, expected] of [
+    [{ useMask: true }, ' secret password ', [' secret password ']],
+    [{ useMask: true }, '\tsecret\t', ['\tsecret\t']],
+    [{ useMask: true }, '            ', ['            ']],
+    [{ useMask: true }, '', []],
+    [{}, ' ordinary input ', ['ordinary input']],
+    [{}, '   ', []],
+    [{ required: false }, '   ', ['']],
+  ]) {
+    const emitted = []
+    const prompt = Object.create(PromptModal.prototype)
+    prompt.context = {
+      data: options,
+      $implicit: { next: value => emitted.push(value) },
+    }
+    prompt.submit(input)
+    assert.deepEqual(emitted, expected)
+  }
+})
+
 function mockPatchFixture(data) {
+  data.registryIndexes ??= {}
   return {
     mockPatchData: data,
     mockRegistryCache: () => ({
@@ -206,9 +240,10 @@ function mockPatchFixture(data) {
         categories: {},
         trustSigners: {},
       },
-      packages: {},
+      selections: {},
       status: 'connected',
     }),
+    mockRegistryIndex: () => ({}),
     mockOsUpdateCache: registry => ({
       registry,
       versions: {},
@@ -660,7 +695,7 @@ test('normal stream cache failure releases an acquired iterator before exposing 
 
 test('shared transport classification accepts numeric zero, not RPC or cancellation codes', () => {
   const { isNetworkError, getErrorMessage } = harness().load(
-    'shared-libs/ts-modules/shared/src/services/error.service.ts',
+    'shared-libs/ts-modules/shared/src/util/error-message.ts',
   )
   assert.equal(isNetworkError({ code: 0 }), true)
   for (const value of [
@@ -688,7 +723,7 @@ function setupObservationHarness(status) {
   })
   overrides.set('@start9labs/shared', {
     ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
-    ...load('shared-libs/ts-modules/shared/src/services/error.service.ts'),
+    ...load('shared-libs/ts-modules/shared/src/util/error-message.ts'),
     pauseFor: load('shared-libs/ts-modules/shared/src/util/misc.util.ts')
       .pauseFor,
   })
@@ -1576,19 +1611,20 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
             osRegistry: 'https://registry.test/',
             trustedKeys: {},
             registryKeys: {},
+            network: {
+              gateways: {
+                wg0: { dns: {}, ipInfo: { dnsServers: ['10.64.0.1'] } },
+                fresh: { dns: {}, ipInfo: null },
+              },
+            },
           },
         }),
       ],
       ['./md-sample.md', ''],
     ]),
   )
-  const gateway = { dns: {}, ipInfo: { dnsServers: ['10.64.0.1'] } }
-  const cache = new BehaviorSubject({
-    value: { serverInfo: { network: { gateways: { wg0: gateway } } } },
-  })
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
-  dependencies.set(tokens.PATCH_CACHE, cache)
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
@@ -1632,10 +1668,6 @@ test('StartOS DNS mock updates the selected gateway using live gateway state', a
     servers: ['10.64.0.1:53'],
     source: 'gateway',
   })
-  cache.value.value.serverInfo.network.gateways.fresh = {
-    dns: {},
-    ipInfo: null,
-  }
   await client.rpc.net.dns.setStatic({ gateway: 'fresh', servers: null })
   assert.deepEqual(JSON.parse(JSON.stringify(patches.pop()[0])), {
     op: 'replace',
@@ -3243,7 +3275,7 @@ for (const pendingInitial of [false, true]) {
   })
 }
 
-function diagnosticUpdateHarness(update) {
+function diagnosticUpdateHarness(update, password) {
   const { dependencies, tokens, load } = harness(new Map(), {
     AbortController,
     Error,
@@ -3251,6 +3283,7 @@ function diagnosticUpdateHarness(update) {
   const errors = []
   const alerts = []
   const checks = []
+  const prompts = []
   const destroy = []
   const { StartupApiService } = load(
     'projects/start-os/web/ui/src/app/services/api/startup-api.service.ts',
@@ -3267,6 +3300,10 @@ function diagnosticUpdateHarness(update) {
       alerts.push(message)
       return of(null)
     },
+    openPrompt: options => {
+      prompts.push(options)
+      return password === undefined ? of() : of(password)
+    },
   })
   dependencies.set(tokens.TaskService, {
     run: async (task, label) => {
@@ -3280,6 +3317,10 @@ function diagnosticUpdateHarness(update) {
       }
     },
   })
+  const { DiagnosticPassword } = load(
+    'projects/start-os/web/ui/src/app/routes/diagnostic/home/password.ts',
+  )
+  dependencies.set(DiagnosticPassword, new DiagnosticPassword())
   const service = new (load(
     'projects/start-os/web/ui/src/app/routes/diagnostic/home/update.service.ts',
   ).DiagnosticUpdate)()
@@ -3288,9 +3329,45 @@ function diagnosticUpdateHarness(update) {
     errors,
     alerts,
     checks,
+    prompts,
     destroy: () => destroy.forEach(callback => callback()),
   }
 }
+
+test('diagnostic update prompts for the password only after the server asks', async () => {
+  const passwords = []
+  const fixture = diagnosticUpdateHarness(async params => {
+    passwords.push(params.password)
+    if (passwords.length === 1)
+      throw Object.assign(new Error('rejected'), { code: 7 })
+    return {
+      initial: { target: null, progress: null },
+      items: (async function* () {})(),
+    }
+  }, ' secret ')
+  await fixture.service.update()
+  assert.deepEqual(passwords, [undefined, ' secret '])
+  assert.equal(fixture.prompts.length, 1)
+  assert.equal(fixture.prompts[0].data.useMask, true)
+  assert.deepEqual(fixture.checks, [
+    'Checking for updates',
+    'Checking for updates',
+  ])
+  assert.deepEqual(fixture.errors, [])
+  assert.deepEqual(fixture.alerts, ['Up to date!'])
+})
+
+test('diagnostic update stops when the password prompt is dismissed', async () => {
+  let calls = 0
+  const fixture = diagnosticUpdateHarness(async () => {
+    calls++
+    throw Object.assign(new Error('rejected'), { code: 7 })
+  })
+  await fixture.service.update()
+  assert.equal(calls, 1)
+  assert.equal(fixture.prompts.length, 1)
+  assert.deepEqual(fixture.errors, [])
+})
 
 for (const failure of [false, true]) {
   test(`diagnostic update requires the terminal after 100 percent: ${failure ? 'late failure' : 'success'}`, async () => {

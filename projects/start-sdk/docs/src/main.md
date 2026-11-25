@@ -395,6 +395,8 @@ The `fn` returns an object with `result` and `message`:
 
 `loading` and `failure` require a `message` string. Other states accept an optional message.
 
+`fn` receives an `AbortSignal` that aborts when the check stops. Stopping never waits for a check in flight, so pass the signal to anything the check could block on, such as `subcontainer.exec(command, { abort: signal })`.
+
 ### Built-in Health Check Helpers
 
 Available on `sdk.healthCheck`:
@@ -543,6 +545,9 @@ import { writeFile } from 'node:fs/promises'
 // Write a generated config to subcontainer rootfs
 await writeFile(`${await appSub.rootfs}/app/config.py`, generateConfig({ secretKey, allowedHosts }))
 ```
+
+> [!WARNING]
+> A file built as a string is only as safe as its escaping. Never interpolate a user's value between bare quotes (`name = "${v}"`): a quote and a newline in it close the string and add keys of their own. Encode each value for the format — `JSON.stringify(v)` is a valid YAML double-quoted scalar and, with DEL escaped, a valid TOML basic string — and for line-based formats (torrc, nginx) refuse control characters and a trailing `\` in the field's `patterns`. A [file model](file-models.md) serializes for you; prefer one wherever the format has a `FileHelper`.
 
 > [!WARNING]
 > If the config file is managed by a FileModel, do NOT read it and write it back to rootfs. Mount it from the volume instead — the file already exists there.

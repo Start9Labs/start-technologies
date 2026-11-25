@@ -2,9 +2,10 @@ import { WA_IS_MOBILE } from '@ng-web-apis/platform'
 import { Component, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Router, RouterLink } from '@angular/router'
-import { invert } from '@start9labs/shared'
+import { invert, MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { TuiDataList, TuiIcon, TuiInput } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import {
   TuiChevron,
   TuiFluidTypography,
@@ -76,12 +77,23 @@ import { HintPipe } from '../pipes/hint.pipe'
         </tui-data-list>
       }
       @if (spec | hint; as hint) {
-        <tui-icon [tuiTooltip]="hint" />
+        <tui-icon [tuiTooltip]="tooltip">
+          <ng-template #tooltip>
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="hint | markdown | dompurify"
+            ></div>
+          </ng-template>
+        </tui-icon>
       }
     </tui-textfield>
   `,
   providers: [tuiFluidTypographyOptionsProvider({ max: 1 })],
   imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
     FormsModule,
     RouterLink,
     TuiInput,

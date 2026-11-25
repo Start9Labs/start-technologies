@@ -58,13 +58,22 @@ function fakeChild(mode = 'fast') {
   return child
 }
 
-function subject(mode = 'fast') {
+// Commands a finished test left running must not spawn a later test's child.
+const spawnFor = new Map<string, () => unknown>()
+;(cp.spawn as unknown as jest.Mock).mockImplementation(
+  (_command: string, args: string[]) =>
+    (args.map(arg => spawnFor.get(arg)).find(Boolean) ?? fakeChild)(),
+)
+let subjects = 0
+
+function subject(mode = 'fast', spawn?: () => unknown) {
   const child = fakeChild(mode)
-  ;(cp.spawn as unknown as jest.Mock).mockReturnValue(child)
+  const rootfs = `/subject-${subjects++}`
+  spawnFor.set(rootfs, spawn ?? (() => child))
   const sub = Object.create(SubContainerEager.prototype)
   Object.assign(sub, {
     imageId: 'test-image',
-    rootfs: '/unused',
+    rootfs,
     waitProc: async () => {},
     fileMounts: { sync: async () => {} },
   })
@@ -100,8 +109,8 @@ test('captures output and completes when exit precedes the stdin callback', asyn
 })
 
 test('health checks can terminate while fast commands finish', async () => {
-  const { sub } = subject()
-  ;(cp.spawn as unknown as jest.Mock).mockImplementation(() => fakeChild())
+  const { sub } = subject('fast', () => fakeChild())
+  let execs!: Promise<unknown>
   let entered!: () => void
   const started = new Promise<void>(resolve => {
     entered = resolve
@@ -116,10 +125,11 @@ test('health checks can terminate while fast commands finish', async () => {
         yield
       },
       fn: async () => {
-        entered()
-        await Promise.all(
+        execs = Promise.all(
           Array.from({ length: 36 }, () => sub.exec(['true'], { timeout: 25 })),
         )
+        entered()
+        await execs
         return { result: 'success', message: 'All folders found' }
       },
     },
@@ -128,6 +138,8 @@ test('health checks can terminate while fast commands finish', async () => {
   await health.updateStatus()
   await started
   await bounded(health.term())
+  // Unsettled commands would spawn the next test's mocked child.
+  await bounded(execs)
 })
 
 test('the deadline covers a stdin callback that never arrives', async () => {

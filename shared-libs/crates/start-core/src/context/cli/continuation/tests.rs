@@ -60,7 +60,7 @@ async fn admission_keeps_the_selected_identity_when_the_dial_host_is_pinned() {
         .as_ref()
         .unwrap()
         .pinned
-        .set(crate::registry::package::promote::registry_rpc_url(&dial).unwrap())
+        .set(dial.clone())
         .unwrap();
     ctx.id_key.set(admin).unwrap();
     let _server: NonDetachingJoinHandle<()> =

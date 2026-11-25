@@ -13,7 +13,7 @@ import { TuiIcon, TuiInput } from '@taiga-ui/core'
 import { TuiPassword, TuiTextarea, TuiTooltip } from '@taiga-ui/kit'
 
 import { ApiClient } from 'src/app/services/api/api.types'
-import { VOLUME_STATUSES, VOLUME_TYPES, volumeName } from './types'
+import { VOLUME_STATUSES, VOLUME_TYPES } from './types'
 
 export type SourceEntry = Pick<
   T.SharedVolume,
@@ -21,20 +21,24 @@ export type SourceEntry = Pick<
 >
 export type SourceClient = Pick<ApiClient['volumes'], 'rename' | 'updateCifs'>
 
-export function sourceEdit(entry: Signal<SourceEntry | undefined>) {
+export function sourceEdit(
+  entry: Signal<SourceEntry | undefined>,
+  { cifsNamedByHost }: { cifsNamedByHost: boolean },
+) {
   const cifs = computed(() => {
     const source = entry()?.source
     return source?.kind === 'cifs' ? source : null
   })
-  const storedName = computed((value = entry()) =>
-    value ? volumeName(value) : '',
+  const hostNamed = computed(() => cifsNamedByHost && !!cifs())
+  const storedName = computed(() =>
+    hostNamed() ? cifs()!.hostname : (entry()?.name ?? ''),
   )
   const name = linkedSignal(storedName)
   const hostname = linkedSignal(() => cifs()?.hostname ?? '')
   const path = linkedSignal(() => cifs()?.path ?? '')
   const username = linkedSignal(() => cifs()?.username ?? '')
   const password = signal('')
-  const newName = computed(() => (cifs() ? hostname().trim() : name().trim()))
+  const newName = computed(() => (hostNamed() ? hostname().trim() : name()))
   const renamed = computed(() => newName() !== storedName())
   const cifsChanged = computed(
     () =>
@@ -47,13 +51,18 @@ export function sourceEdit(entry: Signal<SourceEntry | undefined>) {
 
   return {
     entry,
+    hostNamed,
     name,
     hostname,
     path,
     username,
     password,
     changed: computed(() => renamed() || cifsChanged()),
-    invalid: computed(() => !newName() || (!!cifs() && !path().trim())),
+    invalid: computed(
+      () =>
+        !newName().trim() ||
+        (!!cifs() && (!hostname().trim() || !path().trim())),
+    ),
     async save(id: string, client: SourceClient) {
       if (renamed()) await client.rename({ id, name: newName() })
       if (cifsChanged())
@@ -75,7 +84,7 @@ export type SourceEdit = ReturnType<typeof sourceEdit>
   template: `
     @let state = edit();
     @if (state.entry(); as entry) {
-      @if (entry.source.kind !== 'cifs') {
+      @if (!state.hostNamed()) {
         <tui-textfield>
           <label tuiLabel>{{ 'Name' | i18n }}</label>
           <input

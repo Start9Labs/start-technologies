@@ -13,6 +13,7 @@ use url::Url;
 
 use crate::PackageId;
 use crate::context::RpcContext;
+use crate::db::DbCursor;
 use crate::db::model::package::{ManifestPreference, PackageStateMatchModelRef};
 use crate::db::model::public::ServerInfo;
 use crate::db::model::{Database, DatabaseModel};
@@ -23,8 +24,7 @@ use crate::registry::device_info::DeviceInfo;
 use crate::registry::info::RegistryInfo;
 use crate::registry::os::index::{OsIndex, OsVersionInfo};
 use crate::registry::package::get::{
-    GetPackageParams, GetPackageResponse, PackageDetailLevel, PackageReleases, select_packages,
-    select_releases,
+    GetPackageParams, PackageSelection, select_packages, selection, update_target,
 };
 use crate::registry::package::index::PackageIndex;
 use crate::s9pk::merkle_archive::source::encrypted::KeyStreamInfo;
@@ -49,15 +49,15 @@ pub enum RegistryStatus {
 
 rpc_toolkit::reflect_ts!(RegistryStatus);
 
-/// Last synchronized package listings and registry trust proposals.
+/// A saved registry's synchronization state and what this server can run from its index.
 #[derive(Debug, Deserialize, Serialize, HasModel, VisitFields)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct RegistryCache {
     pub info: RegistryInfo,
-    /// Releases this server can run, read by the UI in place of `package.get`.
+    /// The versions of each package this server can run, in `registryIndexes`.
     #[serde(default)]
-    pub catalog: Catalog,
+    pub selections: BTreeMap<PackageId, PackageSelection>,
     /// Whether the registry offers StartOS releases for this server's platform.
     #[serde(default)]
     pub publishes_os_updates: bool,
@@ -67,8 +67,6 @@ pub struct RegistryCache {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
-
-pub type Catalog = BTreeMap<PackageId, PackageReleases>;
 
 rpc_toolkit::reflect_ts!(RegistryCache);
 
@@ -90,6 +88,33 @@ pub struct OsUpdateCache {
 }
 
 rpc_toolkit::reflect_ts!(OsUpdateCache);
+
+/// What the registry projects an index subscription for.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryView {
+    pub os_version: exver::Version,
+    pub language: Option<InternedString>,
+}
+
+impl RegistryView {
+    pub(crate) fn new(device: &DeviceInfo) -> Self {
+        Self {
+            os_version: device.os.version.clone(),
+            language: device.os.language.clone(),
+        }
+    }
+}
+
+/// The saved index's last registry revision, within the view and epoch it was received in.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryCursor {
+    /// Absent for registries that cannot resume.
+    pub epoch: Option<InternedString>,
+    pub id: u64,
+    pub view: RegistryView,
+}
 
 type ContextProvider = Arc<dyn Fn() -> Option<RpcContext> + Send + Sync>;
 type RegistryTasks = BTreeMap<BTreeSet<Subscription>, NonDetachingJoinHandle<()>>;
@@ -161,6 +186,18 @@ async fn stop_registry_connections(tasks: &mut RegistryTasks, groups: Vec<BTreeS
     }
 }
 
+async fn reconcile_connection_language(
+    tasks: &mut RegistryTasks,
+    previous: &mut Option<Option<InternedString>>,
+    language: &Option<InternedString>,
+) {
+    if previous.as_ref() != Some(language) {
+        let all = tasks.keys().cloned().collect();
+        stop_registry_connections(tasks, all).await;
+        *previous = Some(language.clone());
+    }
+}
+
 async fn cancel_registry_connection(tasks: &mut RegistryTasks, registry: &Url) {
     let groups = tasks
         .keys()
@@ -178,6 +215,7 @@ async fn cancel_registry_connection(tasks: &mut RegistryTasks, registry: &Url) {
 struct RegistrySettingsWatch {
     registries: patch_db::DbWatch,
     os_registry: patch_db::DbWatch,
+    language: patch_db::DbWatch,
 }
 
 impl RegistrySettingsWatch {
@@ -189,6 +227,9 @@ impl RegistrySettingsWatch {
             os_registry: db
                 .watch("/public/serverInfo/osRegistry".parse().unwrap())
                 .await,
+            language: db
+                .watch("/public/serverInfo/language".parse().unwrap())
+                .await,
         }
     }
 
@@ -199,6 +240,9 @@ impl RegistrySettingsWatch {
         self.os_registry
             .peek_and_mark_seen()
             .with_kind(ErrorKind::Database)?;
+        self.language
+            .peek_and_mark_seen()
+            .with_kind(ErrorKind::Database)?;
         db.peek().await.as_public().as_server_info().de()
     }
 
@@ -206,10 +250,12 @@ impl RegistrySettingsWatch {
         tokio::select! {
             changed = self.registries.changed() => changed,
             changed = self.os_registry.changed() => changed,
+            changed = self.language.changed() => changed,
         }
     }
 }
 
+/// Every registry connection follows the saved server language.
 pub async fn watch_registries(
     db: TypedPatchDb<Database>,
     mut refreshes: tokio::sync::mpsc::Receiver<Url>,
@@ -220,10 +266,12 @@ pub async fn watch_registries(
         tokio::spawn(watch_installed_versions(db.clone(), context.clone())).into();
     let mut watch = RegistrySettingsWatch::new(&db).await;
     let mut tasks = RegistryTasks::new();
+    let mut language = None;
     loop {
-        let desired = watch.read(&db).await.map(|info| subscriptions(&info));
-        match desired {
-            Ok(desired) => {
+        match watch.read(&db).await {
+            Ok(info) => {
+                reconcile_connection_language(&mut tasks, &mut language, &info.language).await;
+                let desired = subscriptions(&info);
                 let connections = connections(&desired);
                 let removed = tasks
                     .keys()
@@ -282,38 +330,61 @@ fn reconcile(
     desired: &BTreeSet<Subscription>,
     reset: bool,
 ) -> Result<(), Error> {
-    db.as_public_mut().mutate(|public| {
-        public.registry_cache.retain(|url, cache| {
-            if reset {
-                cache.status = RegistryStatus::Connecting;
+    let caches = db.as_public_mut().as_registry_cache_mut();
+    for url in caches.keys()? {
+        if !desired.contains(&Subscription::Index(url.clone())) {
+            caches.remove(&url)?;
+            continue;
+        }
+        let cache = caches.as_idx_mut(&url).or_not_found(&url)?;
+        if let Some(fields) = cache.as_value_mut().as_object_mut() {
+            for legacy in ["catalog", "packages", "listings"] {
+                fields.remove(legacy);
             }
-            desired.contains(&Subscription::Index(url.clone()))
-        });
-        if public
-            .os_update_cache
-            .as_ref()
-            .is_some_and(|cache| !desired.contains(&Subscription::Os(cache.registry.clone())))
-        {
-            public.os_update_cache = None;
+            if !fields.get("selections").is_some_and(Value::is_object) {
+                fields.insert("selections".into(), Value::Object(Default::default()));
+            }
         }
         if reset {
-            if let Some(cache) = &mut public.os_update_cache {
-                cache.status = RegistryStatus::Connecting;
+            cache.as_status_mut().ser(&RegistryStatus::Connecting)?;
+        }
+    }
+    let os = db.as_public_mut().as_os_update_cache_mut();
+    let selected = os
+        .transpose_ref()
+        .map(|cache| cache.as_registry().de())
+        .transpose()?
+        .map(|registry| desired.contains(&Subscription::Os(registry)));
+    match selected {
+        Some(false) => os.ser(&None)?,
+        Some(true) if reset => {
+            if let Some(cache) = os.transpose_mut() {
+                cache.as_status_mut().ser(&RegistryStatus::Connecting)?;
             }
         }
-        Ok(())
-    })?;
-    let mut indexes = db
-        .as_private()
-        .as_value()
-        .get("registryIndexes")
-        .map(|value| from_value::<BTreeMap<Url, FullIndex>>(value.clone()))
-        .transpose()?
-        .unwrap_or_default();
-    indexes.retain(|url, _| desired.contains(&Subscription::Index(url.clone())));
-    db.as_private_mut()
-        .as_registry_indexes_mut()
-        .ser(&indexes)?;
+        _ => (),
+    }
+    let stale = |url: &Url| !desired.contains(&Subscription::Index(url.clone()));
+    if let Some(private) = db.as_private_mut().as_value_mut().as_object_mut() {
+        private.remove("registryIndexes");
+    }
+    if db.as_public().as_value().get("registryIndexes").is_some() {
+        for url in db.as_public().as_registry_indexes().keys()? {
+            if stale(&url) {
+                db.as_public_mut().as_registry_indexes_mut().remove(&url)?;
+            }
+        }
+    } else {
+        db.as_public_mut()
+            .as_registry_indexes_mut()
+            .ser(&BTreeMap::new())?;
+    }
+    let cursors = registry_cursors_mut(db)?;
+    for url in cursors.keys()? {
+        if stale(&url) {
+            cursors.remove(&url)?;
+        }
+    }
     sync_os_default_locale(db)
 }
 
@@ -426,22 +497,7 @@ fn set_status(
         return Ok(());
     }
     match subscription {
-        Subscription::Index(url) => {
-            db.as_public_mut()
-                .as_registry_cache_mut()
-                .mutate(|caches| {
-                    let cache = caches.entry(url.clone()).or_insert_with(|| RegistryCache {
-                        info: RegistryInfo::default(),
-                        catalog: BTreeMap::new(),
-                        publishes_os_updates: false,
-                        status,
-                        error: None,
-                    });
-                    cache.status = status;
-                    cache.error = error.map(str::to_owned);
-                    Ok(())
-                })?;
-        }
+        Subscription::Index(url) => set_index_status(cache_entry_mut(db, url)?, status, error)?,
         Subscription::Os(url) => {
             db.as_public_mut()
                 .as_os_update_cache_mut()
@@ -479,51 +535,92 @@ fn installed_versions(db: &DatabaseModel) -> Result<BTreeMap<PackageId, VersionS
     Ok(installed)
 }
 
-/// Reachability follows the target's `sourceVersion`, as in `package.get`.
-fn update_targets(
-    index: &Model<PackageIndex>,
-    installed: &BTreeMap<PackageId, VersionString>,
-    device: &DeviceInfo,
-) -> Result<BTreeMap<PackageId, VersionString>, Error> {
-    let mut targets = BTreeMap::new();
-    for (id, version) in installed {
-        let response: GetPackageResponse = from_value(select_packages(
-            index,
-            &GetPackageParams {
-                id: Some(id.clone()),
-                target_version: None,
-                source_version: Some(version.clone()),
-                device_info: Some(device.clone()),
-                other_versions: Some(PackageDetailLevel::None),
-                all_revisions: false,
-                reader: Default::default(),
-            },
-        )?)?;
-        if let Some(target) = response.best.into_keys().find(|target| {
-            target.flavor() == version.flavor()
-                && target.partial_cmp(version) == Some(std::cmp::Ordering::Greater)
-        }) {
-            targets.insert(id.clone(), target);
-        }
+/// The registry's cache entry, created empty and with a `selections` map when missing.
+fn cache_entry_mut<'a>(
+    db: &'a mut DatabaseModel,
+    url: &Url,
+) -> Result<&'a mut Model<RegistryCache>, Error> {
+    let cache = db.as_public_mut().as_registry_cache_mut().upsert(url, || {
+        Ok(RegistryCache {
+            info: RegistryInfo::default(),
+            selections: BTreeMap::new(),
+            publishes_os_updates: false,
+            status: RegistryStatus::Connecting,
+            error: None,
+        })
+    })?;
+    if !cache.as_selections().as_value().is_object() {
+        cache.as_selections_mut().ser(&BTreeMap::new())?;
     }
-    Ok(targets)
+    Ok(cache)
+}
+
+fn set_index_status(
+    cache: &mut Model<RegistryCache>,
+    status: RegistryStatus,
+    error: Option<&str>,
+) -> Result<(), Error> {
+    cache.as_status_mut().ser(&status)?;
+    if let Some(fields) = cache.as_value_mut().as_object_mut() {
+        match error {
+            Some(error) => fields.insert("error".into(), error.into()),
+            None => fields.remove("error"),
+        };
+    }
+    Ok(())
+}
+
+/// Rewrites the named packages' selections from the saved index, in place.
+fn refresh_selections(
+    db: &mut DatabaseModel,
+    url: &Url,
+    ids: BTreeSet<PackageId>,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
+    let Some(index) = db
+        .as_public()
+        .as_registry_indexes()
+        .as_idx(url)
+        .map(|index| index.as_package().clone())
+    else {
+        return Ok(());
+    };
+    let installed = installed_versions(db)?;
+    let mut device = device.clone();
+    device.os.language = None;
+    let selections = ids
+        .into_iter()
+        .map(|id| {
+            let target = installed
+                .get(&id)
+                .map(|version| update_target(&index, &id, version, &device))
+                .transpose()?
+                .flatten();
+            Ok((selection(&index, &id, &device, target.as_ref())?, id))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    let packages = cache_entry_mut(db, url)?.as_selections_mut();
+    for (selected, id) in selections {
+        match selected {
+            Some(selected) => packages.insert(&id, &selected)?,
+            None => packages.remove(&id)?,
+        };
+    }
+    Ok(())
 }
 
 fn refresh_update_targets(db: &mut DatabaseModel, device: &DeviceInfo) -> Result<(), Error> {
     let installed = installed_versions(db)?;
-    let targets = db
-        .as_private()
-        .as_registry_indexes()
-        .as_entries()?
-        .into_iter()
-        .map(|(url, index)| Ok((url, update_targets(index.as_package(), &installed, device)?)))
-        .collect::<Result<Vec<_>, Error>>()?;
-    for (url, mut targets) in targets {
-        if let Some(cache) = db.as_public_mut().as_registry_cache_mut().as_idx_mut(&url) {
-            for (id, package) in cache.as_catalog_mut().as_entries_mut()? {
-                package.as_update_target_mut().ser(&targets.remove(&id))?;
+    for url in db.as_public().as_registry_indexes().keys()? {
+        let mut ids: BTreeSet<PackageId> = installed.keys().cloned().collect();
+        if let Some(cache) = db.as_public().as_registry_cache().as_idx(&url) {
+            for (id, selected) in cache.as_selections().as_entries()? {
+                if selected.as_value().get("updateTarget").is_some() {
+                    ids.insert(id);
+                }
             }
         }
+        refresh_selections(db, &url, ids, device)?;
     }
     Ok(())
 }
@@ -544,8 +641,7 @@ async fn watch_installed_versions(db: TypedPatchDb<Database>, context: ContextPr
             let Some(ctx) = context() else {
                 return Ok(());
             };
-            let mut device = DeviceInfo::load(&ctx).await?;
-            device.os.language = None;
+            let device = DeviceInfo::load(&ctx).await?;
             db.mutate(|db| refresh_update_targets(db, &device))
                 .await
                 .result?;
@@ -560,6 +656,229 @@ async fn watch_installed_versions(db: TypedPatchDb<Database>, context: ContextPr
             return;
         }
     }
+}
+
+/// The cursor to resume an index subscription from, when the saved index came from this view.
+fn resumable_cursor(
+    db: &DatabaseModel,
+    url: &Url,
+    view: &RegistryView,
+) -> Result<Option<DbCursor>, Error> {
+    if db.as_public().as_registry_indexes().as_idx(url).is_none() {
+        return Ok(None);
+    }
+    Ok(db
+        .as_private()
+        .as_registry_cursors()
+        .as_idx(url)
+        .map(|cursor| cursor.de())
+        .transpose()?
+        .filter(|cursor| &cursor.view == view)
+        .and_then(|cursor| {
+            cursor.epoch.map(|epoch| DbCursor {
+                epoch,
+                id: cursor.id,
+            })
+        }))
+}
+
+/// A failed event forgets the cursor, so the next connection starts from a dump.
+async fn ingest(
+    db: &TypedPatchDb<Database>,
+    url: &Url,
+    view: &RegistryView,
+    event: &connection::SubscriptionEvent,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
+    let result = db
+        .mutate(|db| ingest_event(db, url, view, event, device))
+        .await
+        .result;
+    if result.is_err() {
+        let _ = db.mutate(|db| forget_cursor(db, url)).await.result;
+    }
+    result
+}
+
+fn registry_cursors_mut(
+    db: &mut DatabaseModel,
+) -> Result<&mut Model<BTreeMap<Url, RegistryCursor>>, Error> {
+    let cursors = db.as_private_mut().as_registry_cursors_mut();
+    if !matches!(cursors.as_value(), Value::Object(_)) {
+        cursors.ser(&BTreeMap::new())?;
+    }
+    Ok(cursors)
+}
+
+fn forget_cursor(db: &mut DatabaseModel, url: &Url) -> Result<(), Error> {
+    registry_cursors_mut(db)?.remove(url)?;
+    Ok(())
+}
+
+fn saved_cursor(db: &DatabaseModel, url: &Url) -> Result<RegistryCursor, Error> {
+    db.as_private()
+        .as_registry_cursors()
+        .as_idx(url)
+        .or_not_found(lazy_format!("registry cursor for {url}"))?
+        .de()
+}
+
+fn ingest_event(
+    db: &mut DatabaseModel,
+    url: &Url,
+    view: &RegistryView,
+    event: &connection::SubscriptionEvent,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
+    use connection::SubscriptionEvent;
+    if !Subscription::Index(url.clone()).selected(&db.as_public().as_server_info().de()?) {
+        return Ok(());
+    }
+    let (epoch, id, changed) = match event {
+        SubscriptionEvent::Start(start) => match &start.revisions {
+            None => {
+                from_value::<FullIndex>(start.value.clone())?;
+                save_index(db, url, start.value.clone())?;
+                (start.epoch.clone(), start.id, None)
+            }
+            Some(revisions) => {
+                let cursor = saved_cursor(db, url)?;
+                ensure_code!(
+                    cursor.epoch.is_some() && cursor.epoch == start.epoch && &cursor.view == view,
+                    ErrorKind::Network,
+                    "{}",
+                    t!("registry.sync.unrequested-replay")
+                );
+                let changed = apply_revisions(db, url, cursor.id, revisions)?;
+                (start.epoch.clone(), start.id, changed)
+            }
+        },
+        SubscriptionEvent::Revision(revision) => {
+            let cursor = saved_cursor(db, url)?;
+            let changed = apply_revisions(db, url, cursor.id, std::slice::from_ref(revision))?;
+            (cursor.epoch, revision.id, changed)
+        }
+    };
+    registry_cursors_mut(db)?.insert(
+        url,
+        &RegistryCursor {
+            epoch,
+            id,
+            view: view.clone(),
+        },
+    )?;
+    refresh_public(db, url, changed.as_ref(), device)?;
+    sync_os_default_locale(db)
+}
+
+fn save_index(db: &mut DatabaseModel, url: &Url, index: Value) -> Result<(), Error> {
+    db.as_public_mut()
+        .as_registry_indexes_mut()
+        .insert_model(url, Model::from_value(index))?;
+    Ok(())
+}
+
+/// Applies revisions to the saved index; `None` when a revision may change every package.
+fn apply_revisions(
+    db: &mut DatabaseModel,
+    url: &Url,
+    mut last: u64,
+    revisions: &[patch_db::Revision],
+) -> Result<Option<BTreeSet<PackageId>>, Error> {
+    let index = db
+        .as_public_mut()
+        .as_registry_indexes_mut()
+        .as_idx_mut(url)
+        .or_not_found(lazy_format!("registry index for {url}"))?;
+    let mut changed = Some(BTreeSet::new());
+    for revision in revisions {
+        ensure_code!(
+            revision.id > last,
+            ErrorKind::Database,
+            "out-of-order registry revision"
+        );
+        patch_db::json_patch::patch(index.as_value_mut(), &revision.patch)
+            .with_kind(ErrorKind::Database)?;
+        changed = changed
+            .zip(changed_packages(&revision.patch))
+            .map(|(mut all, ids)| {
+                all.extend(ids);
+                all
+            });
+        last = revision.id;
+    }
+    Ok(changed)
+}
+
+/// Packages whose selection a patch to an index may change; `None` for all of them.
+/// StartOS releases change no package.
+pub(crate) fn changed_packages(patch: &patch_db::DiffPatch) -> Option<BTreeSet<PackageId>> {
+    let mut changed = BTreeSet::new();
+    for path in patch.paths() {
+        match (
+            path.get_segment(0),
+            path.get_segment(1),
+            path.get_segment(2),
+        ) {
+            (Some("os"), _, _) => (),
+            (Some("package"), Some("packages"), Some(id)) => {
+                changed.insert(id.parse().ok()?);
+            }
+            _ => return None,
+        }
+    }
+    Some(changed)
+}
+
+/// Updates a registry's public cache entry in place from its saved index.
+/// `changed` names the packages whose selections may differ, `None` meaning all of them;
+/// registry-level fields are always refreshed.
+pub(crate) fn refresh_public(
+    db: &mut DatabaseModel,
+    url: &Url,
+    changed: Option<&BTreeSet<PackageId>>,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
+    let index = db
+        .as_public()
+        .as_registry_indexes()
+        .as_idx(url)
+        .or_not_found(lazy_format!("registry index for {url}"))?
+        .clone();
+    let info = crate::registry::info::info_value(&index)?;
+    let publishes_os_updates = crate::registry::os::version::select_versions(
+        index.as_os(),
+        None,
+        None,
+        Some(&device.os.platform),
+    )?
+    .as_object()
+    .is_some_and(|versions| !versions.is_empty());
+    let cache = cache_entry_mut(db, url)?;
+    let selections = cache.as_selections().as_value().as_object();
+    let full = changed.is_none() || selections.is_none_or(|selections| selections.is_empty());
+    let trust_changed =
+        full || cache.as_info().as_value().get("trustSigners") != info.get("trustSigners");
+    let ids = match changed.filter(|_| !full) {
+        Some(changed) => changed.clone(),
+        None => index
+            .as_package()
+            .as_packages()
+            .keys()?
+            .into_iter()
+            .chain(cache.as_selections().keys()?)
+            .collect(),
+    };
+    *cache.as_info_mut().as_value_mut() = info.clone();
+    cache
+        .as_publishes_os_updates_mut()
+        .ser(&publishes_os_updates)?;
+    set_index_status(cache, RegistryStatus::Connected, None)?;
+    refresh_selections(db, url, ids, device)?;
+    if trust_changed {
+        refresh_registry(db, url, &from_value(info)?)?;
+    }
+    Ok(())
 }
 
 async fn publish(
@@ -584,47 +903,10 @@ fn publish_snapshot(
     }
     match subscription {
         Subscription::Index(url) => {
-            let mut index: FullIndex = from_value(value.clone())?;
-            let publishes_os_updates = !from_value::<BTreeMap<exver::Version, OsVersionInfo>>(
-                crate::registry::os::version::select_versions(
-                    &Model::from_value(to_value(&index.os)?),
-                    None,
-                    None,
-                    Some(&device.os.platform),
-                )?,
-            )?
-            .is_empty();
-            index.os = OsIndex::default();
-            let index = Model::from_value(to_value(&index)?);
-            let info = crate::registry::info::from_index(&index)?;
-            let mut package_device = device.clone();
-            package_device.os.language = None;
-            let mut catalog = select_releases(index.as_package(), &package_device.for_listing())?;
-            let mut targets = update_targets(
-                index.as_package(),
-                &installed_versions(db)?,
-                &package_device,
-            )?;
-            for (id, package) in &mut catalog {
-                package.update_target = targets.remove(id);
-                for release in package.versions.values_mut() {
-                    release.info.strip_access();
-                }
-            }
-            refresh_registry(db, url, &info)?;
-            db.as_private_mut()
-                .as_registry_indexes_mut()
-                .insert(url, &index.de()?)?;
-            db.as_public_mut().as_registry_cache_mut().insert(
-                url,
-                &RegistryCache {
-                    info,
-                    catalog,
-                    publishes_os_updates,
-                    status: RegistryStatus::Connected,
-                    error: None,
-                },
-            )?;
+            let index: FullIndex = from_value(value.clone())?;
+            save_index(db, url, to_value(&index)?)?;
+            forget_cursor(db, url)?;
+            refresh_public(db, url, None, device)?;
         }
         Subscription::Os(url) => {
             let index: Model<OsIndex> = Model::from_value(value.clone());
@@ -686,7 +968,7 @@ pub(crate) fn synced_keystream(
     url: &Url,
     commitment: &MerkleArchiveCommitment,
 ) -> Result<Option<KeyStreamInfo>, Error> {
-    for (_, index) in db.as_private().as_registry_indexes().as_entries()? {
+    for (_, index) in db.as_public().as_registry_indexes().as_entries()? {
         if let Some(asset) = index
             .as_package()
             .s9pks_with(commitment)?
@@ -699,13 +981,10 @@ pub(crate) fn synced_keystream(
     Ok(None)
 }
 
-/// Selects packages from a saved registry's synchronized index.
-/// A registry with no index yet selects nothing unless its synchronization failed.
-pub(crate) fn synced_packages(
-    db: &DatabaseModel,
+fn synced_package_index<'a>(
+    db: &'a DatabaseModel,
     registry: &Url,
-    params: &GetPackageParams,
-) -> Result<Value, Error> {
+) -> Result<Option<&'a Model<PackageIndex>>, Error> {
     let url = registry_url(registry.as_str())?;
     if !is_connected(
         &db.as_public().as_server_info().as_registries().de()?,
@@ -713,23 +992,31 @@ pub(crate) fn synced_packages(
     ) {
         return Err(not_saved(registry));
     }
-    let empty = Model::new(&PackageIndex::default())?;
-    let index = match db.as_private().as_registry_indexes().as_idx(&url) {
-        Some(index) => index.as_package(),
+    match db.as_public().as_registry_indexes().as_idx(&url) {
+        Some(index) => Ok(Some(index.as_package())),
         None => {
-            let cache = db
-                .as_public()
-                .as_registry_cache()
-                .as_idx(&url)
-                .map(|cache| cache.de())
-                .transpose()?;
-            if let Some(cache) = cache.filter(|cache| cache.status == RegistryStatus::Error) {
-                return Err(unreachable(registry, cache.error.as_deref()));
+            if let Some(cache) = db.as_public().as_registry_cache().as_idx(&url) {
+                if cache.as_status().de()? == RegistryStatus::Error {
+                    return Err(unreachable(registry, cache.as_error().de()?.as_deref()));
+                }
             }
-            &empty
+            Ok(None)
         }
-    };
-    select_packages(index, params)
+    }
+}
+
+/// Selects packages from a saved registry's synchronized index.
+/// A registry with no index yet selects nothing unless its synchronization failed.
+pub(crate) fn synced_packages(
+    db: &DatabaseModel,
+    registry: &Url,
+    params: &GetPackageParams,
+) -> Result<Value, Error> {
+    let empty = Model::new(&PackageIndex::default())?;
+    select_packages(
+        synced_package_index(db, registry)?.unwrap_or(&empty),
+        params,
+    )
 }
 
 /// The selected StartOS update source's synchronized releases for this server.
