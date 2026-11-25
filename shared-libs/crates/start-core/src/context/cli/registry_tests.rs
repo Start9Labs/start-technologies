@@ -13,10 +13,7 @@ fn install_names_the_registry_as_the_server_saved_it() {
     .unwrap();
     let saved = Registries::from([("https://registry.example/base".into(), None)]);
 
-    let base = ctx.registry_base_url.as_ref().unwrap();
+    let base = ctx.registry_url.as_ref().unwrap().unpinned();
+    assert_eq!(base.as_str(), "https://registry.example/base/");
     assert!(is_connected(&saved, base.as_str()));
-
-    let rpc = &ctx.registry_url.as_ref().unwrap().unpinned;
-    assert_eq!(rpc.as_str(), "https://registry.example/base/rpc/v0");
-    assert!(!is_connected(&saved, rpc.as_str()));
 }

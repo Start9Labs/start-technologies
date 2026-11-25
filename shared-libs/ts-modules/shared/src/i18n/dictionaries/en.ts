@@ -1106,4 +1106,5 @@ export const ENGLISH: Record<string, number> = {
   'Get help': 1311,
   'Last synced': 1312,
   'just now': 1313,
+  'Enter your master password to continue.': 1314,
 }

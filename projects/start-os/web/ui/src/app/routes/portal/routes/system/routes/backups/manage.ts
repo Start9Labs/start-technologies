@@ -66,7 +66,7 @@ export class BackupTargetManage {
   protected readonly target = computed(
     () => this.service.targets()[this.context.data.id],
   )
-  protected readonly edit = sourceEdit(this.target)
+  protected readonly edit = sourceEdit(this.target, { cifsNamedByHost: true })
 
   constructor() {
     effect(() =>

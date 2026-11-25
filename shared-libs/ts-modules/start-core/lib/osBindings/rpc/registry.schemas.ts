@@ -136,32 +136,29 @@ export const DbCursor: z.ZodObject<{ epoch: z.ZodString; id: z.ZodInt }> =
 export const DeviceFilter: z.ZodObject<{
   description: z.ZodString
   class: typeof literal_2
-  product: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  vendor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  capabilities: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
-  driver: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  product: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  vendor: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  capabilities: z.ZodDefault<z.ZodNullable<z.ZodArray<z.ZodString>>>
+  driver: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   description: z.string(),
   class: literal_2,
-  product: wire(z.string().nullable().optional(), z.string().nullable()),
-  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
-  capabilities: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ),
-  driver: wire(z.string().nullable().optional(), z.string().nullable()),
+  product: z
+    .string()
+    .nullable()
+    .default(() => null),
+  vendor: z
+    .string()
+    .nullable()
+    .default(() => null),
+  capabilities: z
+    .array(z.string())
+    .nullable()
+    .default(() => null),
+  driver: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'DeviceFilter',
 })
@@ -178,27 +175,27 @@ export const GetOsAssetParams: z.ZodObject<{
   },
 )
 export const GetOsVersionParams: z.ZodObject<{
-  sourceVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  targetVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  serverId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  platform: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  sourceVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  targetVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  serverId: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  platform: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  sourceVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  serverId: wire(z.string().nullable().optional(), z.string().nullable()),
-  platform: wire(z.string().nullable().optional(), z.string().nullable()),
+  sourceVersion: z
+    .string()
+    .nullable()
+    .default(() => null),
+  targetVersion: z
+    .string()
+    .nullable()
+    .default(() => null),
+  serverId: z
+    .string()
+    .nullable()
+    .default(() => null),
+  platform: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'GetOsVersionParams',
 })
@@ -225,15 +222,11 @@ export const GpgPublicKeyExport: z.ZodObject<{
   /**
    * Self-certified claims indexed by the signing key's canonical DER encoding.
    */
-  identities: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
-    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
-  >
+  identities: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>
   /**
    * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
    */
-  keyFingerprints: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>,
+  keyFingerprints: z.ZodDefault<
     z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
   >
 }> = /* @__PURE__ */ object({
@@ -260,23 +253,23 @@ export const GpgPublicKeyExport: z.ZodObject<{
   /**
    * Self-certified claims indexed by the signing key's canonical DER encoding.
    */
-  identities: wire(
-    z.record(z.string(), z.array(z.string())).optional(),
-    z.record(z.string(), z.array(z.string())),
-  ).meta({
-    description:
-      "Self-certified claims indexed by the signing key's canonical DER encoding.",
-  }),
+  identities: z
+    .record(z.string(), z.array(z.string()))
+    .default(() => ({}))
+    .meta({
+      description:
+        "Self-certified claims indexed by the signing key's canonical DER encoding.",
+    }),
   /**
    * OpenPGP fingerprints indexed by the signing key's canonical DER encoding.
    */
-  keyFingerprints: wire(
-    z.record(z.string(), z.array(z.string())).optional(),
-    z.record(z.string(), z.array(z.string())),
-  ).meta({
-    description:
-      "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
-  }),
+  keyFingerprints: z
+    .record(z.string(), z.array(z.string()))
+    .default(() => ({}))
+    .meta({
+      description:
+        "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
+    }),
 }).meta({
   id: 'GpgPublicKeyExport',
   description:
@@ -607,20 +600,14 @@ export const AddAssetParams: z.ZodObject<{
   platform: z.ZodString
   url: z.ZodString
   signature: typeof AnySignature
-  signatures: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
-    z.ZodRecord<z.ZodString, typeof AnySignature>
-  >
+  signatures: z.ZodDefault<z.ZodRecord<z.ZodString, typeof AnySignature>>
   commitment: typeof Blake3Commitment
 }> = /* @__PURE__ */ object({
   version: z.string(),
   platform: z.string(),
   url: z.string(),
   signature: AnySignature,
-  signatures: wire(
-    z.record(z.string(), AnySignature).optional(),
-    z.record(z.string(), AnySignature),
-  ),
+  signatures: z.record(z.string(), AnySignature).default(() => ({})),
   commitment: Blake3Commitment,
 }).meta({
   id: 'AddAssetParams',
@@ -635,18 +622,12 @@ export const AddMirrorParams: z.ZodObject<{
   url: z.ZodString
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
-  signatures: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
-    z.ZodRecord<z.ZodString, typeof AnySignature>
-  >
+  signatures: z.ZodDefault<z.ZodRecord<z.ZodString, typeof AnySignature>>
 }> = /* @__PURE__ */ object({
   url: z.string(),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
-  signatures: wire(
-    z.record(z.string(), AnySignature).optional(),
-    z.record(z.string(), AnySignature),
-  ),
+  signatures: z.record(z.string(), AnySignature).default(() => ({})),
 }).meta({
   id: 'AddMirrorParams',
 })
@@ -654,67 +635,54 @@ export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
-  signatures: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof AnySignature>>,
-    z.ZodRecord<z.ZodString, typeof AnySignature>
-  >
+  signatures: z.ZodDefault<z.ZodRecord<z.ZodString, typeof AnySignature>>
   /**
    * Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.
    */
-  private: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof KeyStreamInfo>>,
-    z.ZodNullable<typeof KeyStreamInfo>
-  >
+  private: z.ZodDefault<z.ZodNullable<typeof KeyStreamInfo>>
   /**
    * Keys in the registry's reader directory allowed to see this private s9pk.
    */
-  readers: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof AnyVerifyingKey>>,
-    z.ZodArray<typeof AnyVerifyingKey>
-  >
+  readers: z.ZodDefault<z.ZodArray<typeof AnyVerifyingKey>>
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
-  signatures: wire(
-    z.record(z.string(), AnySignature).optional(),
-    z.record(z.string(), AnySignature),
-  ),
+  signatures: z.record(z.string(), AnySignature).default(() => ({})),
   /**
    * Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.
    */
-  private: wire(
-    KeyStreamInfo.nullable().optional(),
-    KeyStreamInfo.nullable(),
-  ).meta({
-    description:
-      'Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.',
-  }),
+  private: KeyStreamInfo.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.',
+    }),
   /**
    * Keys in the registry's reader directory allowed to see this private s9pk.
    */
-  readers: wire(
-    z.array(AnyVerifyingKey).optional(),
-    z.array(AnyVerifyingKey),
-  ).meta({
-    description:
-      "Keys in the registry's reader directory allowed to see this private s9pk.",
-  }),
+  readers: z
+    .array(AnyVerifyingKey)
+    .default(() => [])
+    .meta({
+      description:
+        "Keys in the registry's reader directory allowed to see this private s9pk.",
+    }),
 }).meta({
   id: 'AddPackageParams',
 })
 export const AddPackageSignerParams: z.ZodObject<{
   id: typeof PackageId
   signer: typeof Guid
-  versions: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  versions: z.ZodDefault<z.ZodNullable<z.ZodString>>
   merge: z.ZodBoolean
 }> = /* @__PURE__ */ object({
   id: PackageId,
   signer: Guid,
-  versions: wire(z.string().nullable().optional(), z.string().nullable()),
+  versions: z
+    .string()
+    .nullable()
+    .default(() => null),
   merge: z.boolean(),
 }).meta({
   id: 'AddPackageSignerParams',
@@ -741,10 +709,7 @@ export const AddSignerParams: z.ZodObject<{
   /**
    * Retained certificates; `keys` determines the selected signing keys.
    */
-  gpgExports: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
-    z.ZodArray<typeof GpgPublicKeyExport>
-  >
+  gpgExports: z.ZodDefault<z.ZodArray<typeof GpgPublicKeyExport>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
@@ -758,13 +723,13 @@ export const AddSignerParams: z.ZodObject<{
   /**
    * Retained certificates; `keys` determines the selected signing keys.
    */
-  gpgExports: wire(
-    z.array(GpgPublicKeyExport).optional(),
-    z.array(GpgPublicKeyExport),
-  ).meta({
-    description:
-      'Retained certificates; `keys` determines the selected signing keys.',
-  }),
+  gpgExports: z
+    .array(GpgPublicKeyExport)
+    .default(() => [])
+    .meta({
+      description:
+        'Retained certificates; `keys` determines the selected signing keys.',
+    }),
 }).meta({
   id: 'AddSignerParams',
 })
@@ -772,37 +737,29 @@ export const AddVersionParams: z.ZodObject<{
   version: z.ZodString
   releaseNotes: typeof LocaleString
   sourceVersion: z.ZodString
-  gitHash: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
-    z.ZodNullable<typeof GitHash>
-  >
-  expectedGitHash: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
-    z.ZodNullable<typeof GitHash>
-  >
-  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
+  expectedGitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
+  security: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
-  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
-  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
-  security: wire(z.boolean().optional(), z.boolean()),
+  gitHash: GitHash.nullable().default(() => null),
+  expectedGitHash: GitHash.nullable().default(() => null),
+  security: z.boolean().default(() => false),
 }).meta({
   id: 'AddVersionParams',
 })
 export const ApplyWithPathParams: z.ZodIntersection<
-  z.ZodObject<{
-    path: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
-  }>,
+  z.ZodObject<{ path: z.ZodDefault<z.ZodNullable<z.ZodString>> }>,
   typeof ApplyParams
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      path: wire(z.string().nullable().optional(), z.string().nullable()),
+      path: z
+        .string()
+        .nullable()
+        .default(() => null),
     }),
     ApplyParams,
   )
@@ -819,10 +776,7 @@ export const CurrentDependencyKind: z.ZodUnion<
     z.ZodIntersection<
       z.ZodObject<{ kind: z.ZodLiteral<'running'> }>,
       z.ZodObject<{
-        healthChecks: z.ZodCodec<
-          z.ZodOptional<z.ZodArray<typeof HealthCheckId>>,
-          z.ZodArray<typeof HealthCheckId>
-        >
+        healthChecks: z.ZodDefault<z.ZodArray<typeof HealthCheckId>>
       }>
     >,
   ]
@@ -831,12 +785,7 @@ export const CurrentDependencyKind: z.ZodUnion<
     object({ kind: z.literal('exists') }),
     z.intersection(
       object({ kind: z.literal('running') }),
-      object({
-        healthChecks: wire(
-          z.array(HealthCheckId).optional(),
-          z.array(HealthCheckId),
-        ),
-      }),
+      object({ healthChecks: z.array(HealthCheckId).default(() => []) }),
     ),
   ])
   .meta({
@@ -869,10 +818,7 @@ export const EditReaderParams: z.ZodObject<{
 })
 export const EditSignerParams: z.ZodObject<{
   id: typeof Guid
-  setName: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  setName: z.ZodDefault<z.ZodNullable<z.ZodString>>
   addContact: z.ZodArray<typeof ContactInfo>
   addKey: z.ZodArray<z.ZodString>
   removeContact: z.ZodArray<typeof ContactInfo>
@@ -880,13 +826,13 @@ export const EditSignerParams: z.ZodObject<{
   /**
    * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
    */
-  removeGpgExport: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
+  removeGpgExport: z.ZodDefault<z.ZodArray<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: Guid,
-  setName: wire(z.string().nullable().optional(), z.string().nullable()),
+  setName: z
+    .string()
+    .nullable()
+    .default(() => null),
   addContact: z.array(ContactInfo),
   addKey: z.array(z.string()),
   removeContact: z.array(ContactInfo),
@@ -894,13 +840,13 @@ export const EditSignerParams: z.ZodObject<{
   /**
    * Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.
    */
-  removeGpgExport: wire(
-    z.array(z.string()).optional(),
-    z.array(z.string()),
-  ).meta({
-    description:
-      'Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.',
-  }),
+  removeGpgExport: z
+    .array(z.string())
+    .default(() => [])
+    .meta({
+      description:
+        'Removes whole exports containing a matching primary-key fingerprint, preserving signing keys.',
+    }),
 }).meta({
   id: 'EditSignerParams',
 })
@@ -910,36 +856,24 @@ export const EditSignerParams: z.ZodObject<{
  */
 export const EditVersionParams: z.ZodObject<{
   version: z.ZodString
-  releaseNotes: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
-    z.ZodNullable<typeof LocaleString>
-  >
-  sourceVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  gitHash: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
-    z.ZodNullable<typeof GitHash>
-  >
-  expectedGitHash: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
-    z.ZodNullable<typeof GitHash>
-  >
-  security: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-    z.ZodNullable<z.ZodBoolean>
-  >
+  releaseNotes: z.ZodDefault<z.ZodNullable<typeof LocaleString>>
+  sourceVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
+  expectedGitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
+  security: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
 }> = /* @__PURE__ */ object({
   version: z.string(),
-  releaseNotes: wire(
-    LocaleString.nullable().optional(),
-    LocaleString.nullable(),
-  ),
-  sourceVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
-  expectedGitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
-  security: wire(z.boolean().nullable().optional(), z.boolean().nullable()),
+  releaseNotes: LocaleString.nullable().default(() => null),
+  sourceVersion: z
+    .string()
+    .nullable()
+    .default(() => null),
+  gitHash: GitHash.nullable().default(() => null),
+  expectedGitHash: GitHash.nullable().default(() => null),
+  security: z
+    .boolean()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'EditVersionParams',
   description:
@@ -957,110 +891,95 @@ export const GetDownloadsParams: z.ZodObject<{
   /**
    * Filter by package ID
    */
-  pkgId: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  pkgId: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Filter by version
    */
-  version: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  version: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Start of time range (RFC 3339)
    */
-  after: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  after: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * End of time range (RFC 3339)
    */
-  before: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  before: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Also report each period in the range
    */
-  interval: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof MetricsInterval>>,
-    z.ZodNullable<typeof MetricsInterval>
-  >
+  interval: z.ZodDefault<z.ZodNullable<typeof MetricsInterval>>
 }> = /* @__PURE__ */ object({
   /**
    * Filter by package ID
    */
-  pkgId: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Filter by package ID',
-  }),
+  pkgId: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Filter by package ID',
+    }),
   /**
    * Filter by version
    */
-  version: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Filter by version',
-  }),
+  version: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Filter by version',
+    }),
   /**
    * Start of time range (RFC 3339)
    */
-  after: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Start of time range (RFC 3339)',
-  }),
+  after: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Start of time range (RFC 3339)',
+    }),
   /**
    * End of time range (RFC 3339)
    */
-  before: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'End of time range (RFC 3339)',
-  }),
+  before: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'End of time range (RFC 3339)',
+    }),
   /**
    * Also report each period in the range
    */
-  interval: wire(
-    MetricsInterval.nullable().optional(),
-    MetricsInterval.nullable(),
-  ).meta({
-    description: 'Also report each period in the range',
-  }),
+  interval: MetricsInterval.nullable()
+    .default(() => null)
+    .meta({
+      description: 'Also report each period in the range',
+    }),
 }).meta({
   id: 'GetDownloadsParams',
 })
 export const GetPackageParams: z.ZodIntersection<
   z.ZodObject<{
-    id: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof PackageId>>,
-      z.ZodNullable<typeof PackageId>
-    >
-    targetVersion: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
-    sourceVersion: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof Version>>,
-      z.ZodNullable<typeof Version>
-    >
-    otherVersions: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof PackageDetailLevel>>,
-      z.ZodNullable<typeof PackageDetailLevel>
-    >
-    allRevisions: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+    id: z.ZodDefault<z.ZodNullable<typeof PackageId>>
+    targetVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
+    sourceVersion: z.ZodDefault<z.ZodNullable<typeof Version>>
+    otherVersions: z.ZodDefault<z.ZodNullable<typeof PackageDetailLevel>>
+    allRevisions: z.ZodDefault<z.ZodBoolean>
   }>,
   typeof ReaderParams
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      id: wire(PackageId.nullable().optional(), PackageId.nullable()),
-      targetVersion: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ),
-      sourceVersion: wire(Version.nullable().optional(), Version.nullable()),
-      otherVersions: wire(
-        PackageDetailLevel.nullable().optional(),
-        PackageDetailLevel.nullable(),
-      ),
-      allRevisions: wire(z.boolean().optional(), z.boolean()),
+      id: PackageId.nullable().default(() => null),
+      targetVersion: z
+        .string()
+        .nullable()
+        .default(() => null),
+      sourceVersion: Version.nullable().default(() => null),
+      otherVersions: PackageDetailLevel.nullable().default(() => null),
+      allRevisions: z.boolean().default(() => false),
     }),
     ReaderParams,
   )
@@ -1071,69 +990,61 @@ export const GetUsersParams: z.ZodObject<{
   /**
    * Start of time range (RFC 3339)
    */
-  after: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  after: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * End of time range (RFC 3339)
    */
-  before: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  before: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Also report each period in the range
    */
-  interval: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof MetricsInterval>>,
-    z.ZodNullable<typeof MetricsInterval>
-  >
+  interval: z.ZodDefault<z.ZodNullable<typeof MetricsInterval>>
 }> = /* @__PURE__ */ object({
   /**
    * Start of time range (RFC 3339)
    */
-  after: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Start of time range (RFC 3339)',
-  }),
+  after: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Start of time range (RFC 3339)',
+    }),
   /**
    * End of time range (RFC 3339)
    */
-  before: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'End of time range (RFC 3339)',
-  }),
+  before: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'End of time range (RFC 3339)',
+    }),
   /**
    * Also report each period in the range
    */
-  interval: wire(
-    MetricsInterval.nullable().optional(),
-    MetricsInterval.nullable(),
-  ).meta({
-    description: 'Also report each period in the range',
-  }),
+  interval: MetricsInterval.nullable()
+    .default(() => null)
+    .meta({
+      description: 'Also report each period in the range',
+    }),
 }).meta({
   id: 'GetUsersParams',
 })
 export const HardwareRequirements: z.ZodObject<{
-  device: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof DeviceFilter>>,
-    z.ZodArray<typeof DeviceFilter>
-  >
-  ram: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  arch: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
+  device: z.ZodDefault<z.ZodArray<typeof DeviceFilter>>
+  ram: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+  arch: z.ZodDefault<z.ZodNullable<z.ZodArray<z.ZodString>>>
 }> = /* @__PURE__ */ object({
-  device: wire(z.array(DeviceFilter).optional(), z.array(DeviceFilter)),
-  ram: wire(z.int().nullable().optional(), z.int().nullable()),
-  arch: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ),
+  device: z.array(DeviceFilter).default(() => []),
+  ram: z
+    .int()
+    .nullable()
+    .default(() => null),
+  arch: z
+    .array(z.string())
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'HardwareRequirements',
 })
@@ -1168,14 +1079,11 @@ export const OsVersionInfo: z.ZodObject<{
   /**
    * Commit that produced the OS image, if recorded at publication.
    */
-  gitHash: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
-    z.ZodNullable<typeof GitHash>
-  >
+  gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
   /**
    * Whether the release includes security fixes.
    */
-  security: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  security: z.ZodDefault<z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -1195,16 +1103,21 @@ export const OsVersionInfo: z.ZodObject<{
   /**
    * Commit that produced the OS image, if recorded at publication.
    */
-  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()).meta({
-    description:
-      'Commit that produced the OS image, if recorded at publication.',
-  }),
+  gitHash: GitHash.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Commit that produced the OS image, if recorded at publication.',
+    }),
   /**
    * Whether the release includes security fixes.
    */
-  security: wire(z.boolean().optional(), z.boolean()).meta({
-    description: 'Whether the release includes security fixes.',
-  }),
+  security: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description: 'Whether the release includes security fixes.',
+    }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
   squashfs: z.record(z.string(), RegistryAsset(Blake3Commitment)),
@@ -1493,20 +1406,14 @@ export const RemovePackageFromCategoryParams: z.ZodObject<{
 })
 export const RemovePackageParams: z.ZodObject<{
   id: typeof PackageId
-  version: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Version>>,
-    z.ZodNullable<typeof Version>
-  >
-  sighash: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof literal_0>>,
-    z.ZodNullable<typeof literal_0>
-  >
-  force: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  version: z.ZodDefault<z.ZodNullable<typeof Version>>
+  sighash: z.ZodDefault<z.ZodNullable<typeof literal_0>>
+  force: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   id: PackageId,
-  version: wire(Version.nullable().optional(), Version.nullable()),
-  sighash: wire(literal_0.nullable().optional(), literal_0.nullable()),
-  force: wire(z.boolean().optional(), z.boolean()),
+  version: Version.nullable().default(() => null),
+  sighash: literal_0.nullable().default(() => null),
+  force: z.boolean().default(() => false),
 }).meta({
   id: 'RemovePackageParams',
 })
@@ -1567,81 +1474,70 @@ export const SignerInfo: z.ZodObject<{
   name: z.ZodString
   contact: z.ZodArray<typeof ContactInfo>
   keys: z.ZodArray<typeof AnyVerifyingKey>
-  gpgExports: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof GpgPublicKeyExport>>,
-    z.ZodArray<typeof GpgPublicKeyExport>
-  >
+  gpgExports: z.ZodDefault<z.ZodArray<typeof GpgPublicKeyExport>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   contact: z.array(ContactInfo),
   keys: z.array(AnyVerifyingKey),
-  gpgExports: wire(
-    z.array(GpgPublicKeyExport).optional(),
-    z.array(GpgPublicKeyExport),
-  ),
+  gpgExports: z.array(GpgPublicKeyExport).default(() => []),
 }).meta({
   id: 'SignerInfo',
 })
 export const SubscribeIndexParams: z.ZodIntersection<
   z.ZodObject<{
-    pointer: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    pointer: z.ZodDefault<z.ZodNullable<z.ZodString>>
     /**
      * Client StartOS version. Omission preserves the canonical index format.
      */
-    osVersion: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    osVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
     /**
      * Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
      */
-    language: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    language: z.ZodDefault<z.ZodNullable<z.ZodString>>
     /**
      * The subscriber's last revision; resumes only within the epoch of the view that reported it.
      */
-    since: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
-      z.ZodNullable<typeof DbCursor>
-    >
+    since: z.ZodDefault<z.ZodNullable<typeof DbCursor>>
   }>,
   typeof ReaderParams
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+      pointer: z
+        .string()
+        .nullable()
+        .default(() => null),
       /**
        * Client StartOS version. Omission preserves the canonical index format.
        */
-      osVersion: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ).meta({
-        description:
-          'Client StartOS version. Omission preserves the canonical index format.',
-      }),
+      osVersion: z
+        .string()
+        .nullable()
+        .default(() => null)
+        .meta({
+          description:
+            'Client StartOS version. Omission preserves the canonical index format.',
+        }),
       /**
        * Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.
        */
-      language: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ).meta({
-        description:
-          'Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.',
-      }),
+      language: z
+        .string()
+        .nullable()
+        .default(() => null)
+        .meta({
+          description:
+            'Locale to resolve localized text to; one the index lacks gets the fallback. Omission keeps every translation.',
+        }),
       /**
        * The subscriber's last revision; resumes only within the epoch of the view that reported it.
        */
-      since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
-        description:
-          "The subscriber's last revision; resumes only within the epoch of the view that reported it.",
-      }),
+      since: DbCursor.nullable()
+        .default(() => null)
+        .meta({
+          description:
+            "The subscriber's last revision; resumes only within the epoch of the view that reported it.",
+        }),
     }),
     ReaderParams,
   )
@@ -1684,20 +1580,11 @@ export const VersionSignerParams: z.ZodObject<{
 })
 export const DependencyMetadata: z.ZodIntersection<
   z.ZodObject<{
-    title: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
-      z.ZodNullable<typeof LocaleString>
-    >
+    title: z.ZodDefault<z.ZodNullable<typeof LocaleString>>
     icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
-    description: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
-      z.ZodNullable<typeof LocaleString>
-    >
+    description: z.ZodDefault<z.ZodNullable<typeof LocaleString>>
     optional: z.ZodBoolean
-    versionRange: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    versionRange: z.ZodDefault<z.ZodNullable<z.ZodString>>
   }>,
   z.ZodUnion<
     readonly [z.ZodNullable<typeof CurrentDependencyKind>, typeof empty]
@@ -1705,17 +1592,14 @@ export const DependencyMetadata: z.ZodIntersection<
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      title: wire(LocaleString.nullable().optional(), LocaleString.nullable()),
+      title: LocaleString.nullable().default(() => null),
       icon: PackageIcon.nullable().optional(),
-      description: wire(
-        LocaleString.nullable().optional(),
-        LocaleString.nullable(),
-      ),
+      description: LocaleString.nullable().default(() => null),
       optional: z.boolean(),
-      versionRange: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ),
+      versionRange: z
+        .string()
+        .nullable()
+        .default(() => null),
     }),
     z.union([CurrentDependencyKind.nullable(), empty]),
   )
@@ -1723,17 +1607,15 @@ export const DependencyMetadata: z.ZodIntersection<
     id: 'DependencyMetadata',
   })
 export const DumpParams: z.ZodIntersection<
-  z.ZodObject<{
-    pointer: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
-  }>,
+  z.ZodObject<{ pointer: z.ZodDefault<z.ZodNullable<z.ZodString>> }>,
   typeof ProjectionParams
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+      pointer: z
+        .string()
+        .nullable()
+        .default(() => null),
     }),
     ProjectionParams,
   )
@@ -1753,47 +1635,29 @@ export const PackageMetadata: z.ZodObject<{
   description: typeof Description
   releaseNotes: typeof LocaleString
   preDownloadAlert: z.ZodOptional<z.ZodNullable<typeof PreDownloadAlert>>
-  gitHash: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof GitHash>>,
-    z.ZodNullable<typeof GitHash>
-  >
+  gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
   license: z.ZodString
   packageRepo: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
   upstreamRepo: z.ZodString
-  marketingUrl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  donationUrl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  marketingUrl: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  donationUrl: z.ZodDefault<z.ZodNullable<z.ZodString>>
   osVersion: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
-  sdkVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  hardwareAcceleration: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  sdkVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  hardwareAcceleration: z.ZodDefault<z.ZodBoolean>
   /**
    * Grants access to `/dev/fuse`.
    */
-  userspaceFilesystems: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  userspaceFilesystems: z.ZodDefault<z.ZodBoolean>
   /**
    * Grants access to `/dev/net/tun`.
    */
-  virtualNetworking: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  virtualNetworking: z.ZodDefault<z.ZodBoolean>
   /**
    * Grants /dev/kvm when present. The opening process must run as container root.
    */
-  hardwareVirtualization: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  plugins: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof PluginId>>,
-    z.ZodArray<typeof PluginId>
-  >
-  satisfies: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof Version>>,
-    z.ZodArray<typeof Version>
-  >
+  hardwareVirtualization: z.ZodDefault<z.ZodBoolean>
+  plugins: z.ZodDefault<z.ZodArray<typeof PluginId>>
+  satisfies: z.ZodDefault<z.ZodArray<typeof Version>>
 }> = /* @__PURE__ */ object({
   title: z.string(),
   /**
@@ -1806,36 +1670,54 @@ export const PackageMetadata: z.ZodObject<{
   description: Description,
   releaseNotes: LocaleString,
   preDownloadAlert: PreDownloadAlert.nullable().optional(),
-  gitHash: wire(GitHash.nullable().optional(), GitHash.nullable()),
+  gitHash: GitHash.nullable().default(() => null),
   license: z.string(),
   packageRepo: wire(z.string().optional(), z.string()),
   upstreamRepo: z.string(),
-  marketingUrl: wire(z.string().nullable().optional(), z.string().nullable()),
-  donationUrl: wire(z.string().nullable().optional(), z.string().nullable()),
+  marketingUrl: z
+    .string()
+    .nullable()
+    .default(() => null),
+  donationUrl: z
+    .string()
+    .nullable()
+    .default(() => null),
   osVersion: wire(z.string().optional(), z.string()),
-  sdkVersion: wire(z.string().nullable().optional(), z.string().nullable()),
-  hardwareAcceleration: wire(z.boolean().optional(), z.boolean()),
+  sdkVersion: z
+    .string()
+    .nullable()
+    .default(() => null),
+  hardwareAcceleration: z.boolean().default(() => false),
   /**
    * Grants access to `/dev/fuse`.
    */
-  userspaceFilesystems: wire(z.boolean().optional(), z.boolean()).meta({
-    description: 'Grants access to `/dev/fuse`.',
-  }),
+  userspaceFilesystems: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description: 'Grants access to `/dev/fuse`.',
+    }),
   /**
    * Grants access to `/dev/net/tun`.
    */
-  virtualNetworking: wire(z.boolean().optional(), z.boolean()).meta({
-    description: 'Grants access to `/dev/net/tun`.',
-  }),
+  virtualNetworking: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description: 'Grants access to `/dev/net/tun`.',
+    }),
   /**
    * Grants /dev/kvm when present. The opening process must run as container root.
    */
-  hardwareVirtualization: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Grants /dev/kvm when present. The opening process must run as container root.',
-  }),
-  plugins: wire(z.array(PluginId).optional(), z.array(PluginId)),
-  satisfies: wire(z.array(Version).optional(), z.array(Version)),
+  hardwareVirtualization: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Grants /dev/kvm when present. The opening process must run as container root.',
+    }),
+  plugins: z.array(PluginId).default(() => []),
+  satisfies: z.array(Version).default(() => []),
 }).meta({
   id: 'PackageMetadata',
 })
@@ -1850,67 +1732,55 @@ export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
     description: 'Representation of JSON Patch (list of patch operations)',
   })
 export const RegistryInfo: z.ZodObject<{
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  icon: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
-    z.ZodNullable<typeof DataUrl>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  icon: z.ZodDefault<z.ZodNullable<typeof DataUrl>>
   /**
    * Markdown, shown above the registry's services.
    */
-  description: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
-    z.ZodNullable<typeof LocaleString>
-  >
+  description: z.ZodDefault<z.ZodNullable<typeof LocaleString>>
   /**
    * `FullIndex::default_locale`.
    */
-  defaultLocale: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  defaultLocale: z.ZodDefault<z.ZodNullable<z.ZodString>>
   categories: z.ZodRecord<z.ZodString, typeof Category>
   /**
    * Registry-selected signers, not an assertion of trust.
    */
-  trustSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof SignerInfo>>,
-    z.ZodRecord<z.ZodString, typeof SignerInfo>
-  >
+  trustSigners: z.ZodDefault<z.ZodRecord<z.ZodString, typeof SignerInfo>>
 }> = /* @__PURE__ */ object({
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  icon: DataUrl.nullable().default(() => null),
   /**
    * Markdown, shown above the registry's services.
    */
-  description: wire(
-    LocaleString.nullable().optional(),
-    LocaleString.nullable(),
-  ).meta({
-    description: "Markdown, shown above the registry's services.",
-  }),
+  description: LocaleString.nullable()
+    .default(() => null)
+    .meta({
+      description: "Markdown, shown above the registry's services.",
+    }),
   /**
    * `FullIndex::default_locale`.
    */
-  defaultLocale: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description: '`FullIndex::default_locale`.',
-  }),
+  defaultLocale: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: '`FullIndex::default_locale`.',
+    }),
   categories: z.record(z.string(), Category),
   /**
    * Registry-selected signers, not an assertion of trust.
    */
-  trustSigners: wire(
-    z.record(z.string(), SignerInfo).optional(),
-    z.record(z.string(), SignerInfo),
-  ).meta({
-    description: 'Registry-selected signers, not an assertion of trust.',
-  }),
+  trustSigners: z
+    .record(z.string(), SignerInfo)
+    .default(() => ({}))
+    .meta({
+      description: 'Registry-selected signers, not an assertion of trust.',
+    }),
 }).meta({
   id: 'RegistryInfo',
 })
@@ -1931,10 +1801,7 @@ export const PackageVersionInfo: z.ZodIntersection<
   z.ZodObject<{
     icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
     dependencyMetadata: z.ZodRecord<z.ZodString, typeof DependencyMetadata>
-    sourceVersion: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    sourceVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
     s9pks: z.ZodArray<
       z.ZodTuple<
         [
@@ -1951,10 +1818,10 @@ export const PackageVersionInfo: z.ZodIntersection<
     object({
       icon: PackageIcon.nullable().optional(),
       dependencyMetadata: z.record(z.string(), DependencyMetadata),
-      sourceVersion: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ),
+      sourceVersion: z
+        .string()
+        .nullable()
+        .default(() => null),
       s9pks: z.array(
         z.tuple([HardwareRequirements, RegistryAsset(MerkleArchiveCommitment)]),
       ),
@@ -2035,8 +1902,7 @@ export const PackageVersionExport: z.ZodObject<{
    * The reader directory entries the s9pks list. Null for requesters who cannot see reader
    * lists.
    */
-  readers: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, typeof ReaderKey>>>,
+  readers: z.ZodDefault<
     z.ZodNullable<z.ZodRecord<z.ZodString, typeof ReaderKey>>
   >
 }> = /* @__PURE__ */ object({
@@ -2052,13 +1918,14 @@ export const PackageVersionExport: z.ZodObject<{
    * The reader directory entries the s9pks list. Null for requesters who cannot see reader
    * lists.
    */
-  readers: wire(
-    z.record(z.string(), ReaderKey).nullable().optional(),
-    z.record(z.string(), ReaderKey).nullable(),
-  ).meta({
-    description:
-      'The reader directory entries the s9pks list. Null for requesters who cannot see reader\nlists.',
-  }),
+  readers: z
+    .record(z.string(), ReaderKey)
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'The reader directory entries the s9pks list. Null for requesters who cannot see reader\nlists.',
+    }),
 }).meta({
   id: 'PackageVersionExport',
   description:
@@ -2101,14 +1968,8 @@ export const PackageIndex: z.ZodObject<{
 export const SubscribeStart: z.ZodObject<{
   epoch: z.ZodString
   id: z.ZodInt
-  value: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
-    z.ZodNullable<z.ZodUnknown>
-  >
-  revisions: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
-    z.ZodNullable<z.ZodArray<typeof Revision>>
-  >
+  value: z.ZodDefault<z.ZodNullable<z.ZodUnknown>>
+  revisions: z.ZodDefault<z.ZodNullable<z.ZodArray<typeof Revision>>>
   /**
    * Names the stream to `db.subscription.update`; absent where its projection is fixed.
    */
@@ -2116,11 +1977,14 @@ export const SubscribeStart: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   epoch: z.string(),
   id: z.int(),
-  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
-  revisions: wire(
-    z.array(Revision).nullable().optional(),
-    z.array(Revision).nullable(),
-  ),
+  value: z
+    .unknown()
+    .nullable()
+    .default(() => null),
+  revisions: z
+    .array(Revision)
+    .nullable()
+    .default(() => null),
   /**
    * Names the stream to `db.subscription.update`; absent where its projection is fixed.
    */
@@ -2134,70 +1998,53 @@ export const SubscribeStart: z.ZodObject<{
     'A dump when `revisions` is null; otherwise the revisions since the cursor, current as of `id`.',
 })
 export const FullIndex: z.ZodObject<{
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  icon: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof DataUrl>>,
-    z.ZodNullable<typeof DataUrl>
-  >
-  description: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof LocaleString>>,
-    z.ZodNullable<typeof LocaleString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  icon: z.ZodDefault<z.ZodNullable<typeof DataUrl>>
+  description: z.ZodDefault<z.ZodNullable<typeof LocaleString>>
   /**
    * Locale registry-owned `LocaleString`s fall back to when a requested one is missing.
    */
-  defaultLocale: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  defaultLocale: z.ZodDefault<z.ZodNullable<z.ZodString>>
   package: typeof PackageIndex
   os: typeof OsIndex
   signers: z.ZodRecord<z.ZodString, typeof SignerInfo>
-  trustSigners: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<typeof Guid>>,
-    z.ZodArray<typeof Guid>
-  >
+  trustSigners: z.ZodDefault<z.ZodArray<typeof Guid>>
   /**
    * Keys allowed to read the private s9pks that list them. Admin-only.
    */
-  readers: z.ZodCodec<
-    z.ZodOptional<z.ZodRecord<z.ZodString, typeof ReaderKey>>,
-    z.ZodRecord<z.ZodString, typeof ReaderKey>
-  >
+  readers: z.ZodDefault<z.ZodRecord<z.ZodString, typeof ReaderKey>>
 }> = /* @__PURE__ */ object({
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  icon: wire(DataUrl.nullable().optional(), DataUrl.nullable()),
-  description: wire(
-    LocaleString.nullable().optional(),
-    LocaleString.nullable(),
-  ),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  icon: DataUrl.nullable().default(() => null),
+  description: LocaleString.nullable().default(() => null),
   /**
    * Locale registry-owned `LocaleString`s fall back to when a requested one is missing.
    */
-  defaultLocale: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description:
-      'Locale registry-owned `LocaleString`s fall back to when a requested one is missing.',
-  }),
+  defaultLocale: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Locale registry-owned `LocaleString`s fall back to when a requested one is missing.',
+    }),
   package: PackageIndex,
   os: OsIndex,
   signers: z.record(z.string(), SignerInfo),
-  trustSigners: wire(z.array(Guid).optional(), z.array(Guid)),
+  trustSigners: z.array(Guid).default(() => []),
   /**
    * Keys allowed to read the private s9pks that list them. Admin-only.
    */
-  readers: wire(
-    z.record(z.string(), ReaderKey).optional(),
-    z.record(z.string(), ReaderKey),
-  ).meta({
-    description:
-      'Keys allowed to read the private s9pks that list them. Admin-only.',
-  }),
+  readers: z
+    .record(z.string(), ReaderKey)
+    .default(() => ({}))
+    .meta({
+      description:
+        'Keys allowed to read the private s9pks that list them. Admin-only.',
+    }),
 }).meta({
   id: 'FullIndex',
 })
@@ -2227,12 +2074,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -2247,12 +2089,7 @@ export const Api = {
             add: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 AddReaderParams,
@@ -2270,12 +2107,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -2316,12 +2148,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -2366,9 +2193,7 @@ export const Api = {
     index: {
       _PARAMS: /* @__PURE__ */ z.intersection(
         z.intersection(
-          object({
-            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
-          }),
+          object({ format: IoFormat.nullable().default(() => null) }),
           empty,
         ),
         ReaderParams,
@@ -2379,9 +2204,7 @@ export const Api = {
     },
     info: {
       _PARAMS: /* @__PURE__ */ z.intersection(
-        object({
-          format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
-        }),
+        object({ format: IoFormat.nullable().default(() => null) }),
         empty,
       ),
       _RETURN: /* @__PURE__ */ RegistryInfo,
@@ -2391,12 +2214,7 @@ export const Api = {
         'set-default-locale': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SetDefaultLocaleParams,
@@ -2408,12 +2226,7 @@ export const Api = {
         'set-description': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SetDescriptionParams,
@@ -2425,12 +2238,7 @@ export const Api = {
         'set-icon': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SetIconParams,
@@ -2442,12 +2250,7 @@ export const Api = {
         'set-name': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SetNameParams,
@@ -2459,12 +2262,7 @@ export const Api = {
         'set-trust-signers': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SetTrustSignersParams,
@@ -2481,12 +2279,7 @@ export const Api = {
         downloads: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             GetDownloadsParams,
@@ -2498,12 +2291,7 @@ export const Api = {
         subscriptions: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             GetUsersParams,
@@ -2515,12 +2303,7 @@ export const Api = {
         summary: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -2532,12 +2315,7 @@ export const Api = {
         users: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             GetUsersParams,
@@ -2651,12 +2429,7 @@ export const Api = {
         index: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -2683,12 +2456,7 @@ export const Api = {
             get: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 GetOsVersionParams,
@@ -2716,10 +2484,7 @@ export const Api = {
                   _PARAMS: /* @__PURE__ */ z.intersection(
                     z.intersection(
                       object({
-                        format: wire(
-                          IoFormat.nullable().optional(),
-                          IoFormat.nullable(),
-                        ),
+                        format: IoFormat.nullable().default(() => null),
                       }),
                       empty,
                     ),
@@ -2774,12 +2539,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -2805,12 +2565,7 @@ export const Api = {
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             GetPackageParams,
@@ -2822,12 +2577,7 @@ export const Api = {
         index: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ReaderParams,
@@ -2866,12 +2616,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 ListPackageSignersParams,
@@ -2897,12 +2642,7 @@ export const Api = {
             export: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 ExportPackageVersionParams,
