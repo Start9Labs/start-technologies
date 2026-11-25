@@ -17,7 +17,7 @@ use tracing::instrument;
 use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
-use crate::net::dns::{DnsController, OS_HOSTNAME};
+use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
     ForwardRequirements, InterfacePortForwardController, START9_BRIDGE_IFACE, nft_rule, nft_rule_v6,
@@ -639,25 +639,6 @@ impl NetServiceData {
                             public_v6: server_public_v6,
                             public_v6_gateways: BTreeSet::new(),
                             private: server_private_ips,
-                            acme: None,
-                            ..target.clone()
-                        },
-                    );
-                }
-
-                let internal = ssl_vhost_internal_ips(enabled_addresses.iter().copied());
-                if !internal.is_empty() {
-                    vhosts.insert(
-                        (
-                            Some(InternedString::from_static(OS_HOSTNAME)),
-                            assigned_ssl_port,
-                            false,
-                        ),
-                        ProxyTarget {
-                            public_v4: BTreeSet::new(),
-                            public_v6: BTreeSet::new(),
-                            public_v6_gateways: BTreeSet::new(),
-                            private: internal,
                             acme: None,
                             ..target.clone()
                         },
@@ -2011,6 +1992,49 @@ mod tests {
         );
     }
 
+    fn bridge_name(gateways: &[&str]) -> HostnameInfo {
+        HostnameInfo {
+            ssl: true,
+            public: false,
+            hostname: InternedString::intern(crate::net::forward::START9_BRIDGE_HOSTNAME),
+            port: Some(8443),
+            metadata: HostnameMetadata::PrivateDomain {
+                gateways: gateways.iter().map(|g| gw(g)).collect(),
+            },
+        }
+    }
+
+    #[test]
+    fn the_bridge_name_routes_bridge_and_loopback_traffic_by_sni() {
+        let ifaces = OrdMap::from_iter([(
+            gw("lxcbr0"),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    subnets: ["10.0.3.1/24".parse::<IpNet>().unwrap()]
+                        .into_iter()
+                        .collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        )]);
+        let name = bridge_name(&["lxcbr0"]);
+        let bridge = lan_ip("10.0.3.1", true, 8443, "lxcbr0");
+        let loopback = lan_ip("127.0.0.1", true, 8443, "lo");
+        let enabled = BTreeSet::from([&name, &bridge, &loopback]);
+        let mut vhosts = BTreeMap::new();
+        add_named_vhosts(&mut vhosts, &enabled, 8443, &ifaces, |_, _| {
+            proxy_target(&[])
+        });
+        let target = &vhosts[&(Some(name.hostname.clone()), 8443, false)];
+        assert_eq!(
+            target.private,
+            BTreeSet::from([ip("10.0.3.1"), ip("127.0.0.1")]),
+        );
+        assert!(target.public_v4.is_empty());
+        assert!(target.public_v6.is_empty());
+    }
+
     #[test]
     fn a_forwarded_port_admits_its_enabled_lan_ips_alone() {
         let eth = GatewayId::from(InternedString::intern("eth0"));
@@ -2243,6 +2267,9 @@ mod tests {
         assert!(lan_ip("fd00:3::1", true, 443, "lxcbr0").is_internal());
         assert!(lan_ip("127.0.0.1", true, 443, "lo").is_internal());
         assert!(lan_ip("::1", true, 443, "lo").is_internal());
+        assert!(bridge_name(&["lxcbr0"]).is_internal());
+        assert!(!bridge_name(&["lxcbr0", "eth0"]).is_internal());
+        assert!(!bridge_name(&[]).is_internal());
 
         assert!(!lan_ip("192.168.1.5", true, 443, "eth0").is_internal());
         assert!(

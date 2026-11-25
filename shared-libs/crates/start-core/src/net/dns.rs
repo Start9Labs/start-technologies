@@ -61,7 +61,10 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "status",
-            from_fn(|ctx: RpcContext| Ok::<_, Error>(ctx.net_controller.dns.status())).no_cli(),
+            from_fn(|ctx: RpcContext| Ok::<_, Error>(ctx.net_controller.dns.status()))
+                .with_display_serializable()
+                .with_about("about.dns-status")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "query",
@@ -298,7 +301,7 @@ pub async fn dump_table(
                         .map(|(ip, _)| {
                             (
                                 svc.as_ref().map_or(
-                                    InternedString::from_static(OS_HOSTNAME),
+                                    InternedString::from_static("startos"),
                                     |svc| {
                                         InternedString::from_display(&lazy_format!("{svc}.startos"))
                                     },
@@ -378,9 +381,6 @@ pub struct DnsController {
     #[allow(dead_code)]
     dns_server: NonDetachingJoinHandle<()>,
 }
-
-/// The name containers reach the server by on the bridge.
-pub const OS_HOSTNAME: &str = "startos.internal";
 
 lazy_static::lazy_static! {
     static ref LOCALHOST: Name = Name::from_ascii("localhost").unwrap();
@@ -706,9 +706,7 @@ impl Resolver {
                     }
                 }
             }
-            let service = if domain == OS_HOSTNAME {
-                None
-            } else if STARTOS.zone_of(name) || EMBASSY.zone_of(name) {
+            if STARTOS.zone_of(name) || EMBASSY.zone_of(name) {
                 let Ok(pkg) = name
                     .iter()
                     .rev()
@@ -721,23 +719,20 @@ impl Resolver {
                 else {
                     return Resolution::NxDomain;
                 };
-                if pkg.is_none() && STARTOS.zone_of(name) {
-                    return Resolution::NxDomain;
+                // start-os.startos aliases the server's startos record.
+                let pkg = pkg.filter(|p| !p.is_start_os());
+                if let Some(ip) = r.services.get(&pkg) {
+                    Resolution::Answer(
+                        ip.iter()
+                            .filter(|(_, registration)| registration.lifetime.strong_count() > 0)
+                            .map(|(ip, _)| (*ip).into())
+                            .collect(),
+                    )
+                } else {
+                    Resolution::NxDomain
                 }
-                // start-os.startos aliases the server's own record.
-                pkg.filter(|p| !p.is_start_os())
             } else {
-                return Resolution::Forward;
-            };
-            if let Some(ip) = r.services.get(&service) {
-                Resolution::Answer(
-                    ip.iter()
-                        .filter(|(_, registration)| registration.lifetime.strong_count() > 0)
-                        .map(|(ip, _)| (*ip).into())
-                        .collect(),
-                )
-            } else {
-                Resolution::NxDomain
+                Resolution::Forward
             }
         })
     }
@@ -1985,44 +1980,6 @@ mod tests {
             ),
             Resolution::NxDomain
         ));
-    }
-
-    #[tokio::test]
-    async fn the_server_answers_as_startos_internal_and_not_as_bare_startos() {
-        let (_temp, resolver) = resolver_fixture().await;
-        let controller = resolver.controller();
-        let _os = controller
-            .add_service(None, "10.0.3.1".parse().unwrap(), None)
-            .unwrap();
-        let _lnd = controller
-            .add_service(
-                Some("lnd".parse().unwrap()),
-                "10.0.3.5".parse().unwrap(),
-                None,
-            )
-            .unwrap();
-        let resolve = |name: &str| {
-            resolver.resolve(
-                &Name::from_ascii(name).unwrap(),
-                "10.0.3.2".parse().unwrap(),
-            )
-        };
-        let os: IpAddr = "10.0.3.1".parse().unwrap();
-        for name in [
-            "startos.internal.",
-            "StartOS.Internal.",
-            "start-os.startos.",
-        ] {
-            assert!(
-                matches!(resolve(name), Resolution::Answer(a) if a == [os]),
-                "{name}"
-            );
-        }
-        assert!(matches!(
-            resolve("lnd.startos."),
-            Resolution::Answer(a) if a == ["10.0.3.5".parse::<IpAddr>().unwrap()]
-        ));
-        assert!(matches!(resolve("startos."), Resolution::NxDomain));
     }
 
     #[tokio::test]

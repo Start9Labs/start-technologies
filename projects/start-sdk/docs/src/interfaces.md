@@ -554,7 +554,7 @@ const origin = await multi.bindPort(10009, {
 
 StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address when StartOS routes its replies. The listener routes on the client's TLS ClientHello, so the first bytes a client sends must be one: a protocol that opens in plaintext and upgrades in-band is dropped here, and its port is `ssl: false`.
 
-The listener routes by the name the client asks for (its TLS SNI). It answers for the names enabled on the binding — its domains and the server's `.local` — for `startos.internal` on the bridge and loopback, and for a client that asks for no name or an IP address. It refuses every other name before the connection reaches your container. A daemon whose certificate carries a fixed name that its clients ask for binds the port `secure: { ssl: false }` instead: StartOS forwards the TCP stream untouched, whatever the name, and the daemon's TLS still runs end to end.
+The listener routes by the name the client asks for (its TLS SNI). It answers for the names enabled on the binding — its domains, the server's `.local` and `startos.internal` — and for a client that asks for no name or an IP address. It refuses every other name before the connection reaches your container. A daemon whose certificate carries a fixed name that its clients ask for binds the port `secure: { ssl: false }` instead: StartOS forwards the TCP stream untouched, whatever the name, and the daemon's TLS still runs end to end.
 
 ### When to use it
 

@@ -128,12 +128,12 @@ const torSocks = await sdk.host
     packageId: 'tor',
     hostId: socksHostId,
     internalPort: socksPort, // 9050
-    fallbackPort: socksPort, // keeps the value at `startos.internal:9050` when Tor is absent
+    fallbackPort: socksPort, // keeps the value at `${osIp}:9050` when Tor is absent
   })
   .const()
 ```
 
-Tor's SOCKS port (9050) is the one external port StartOS guarantees is claimable, so `startos.internal:9050` is always valid. This is not a license to fabricate addresses generally (see rule 3 above) — it applies to Tor's SOCKS proxy, whose address is fixed and whose flag is inert when unreachable.
+Tor's SOCKS port (9050) is the one external port StartOS guarantees is claimable, so `${osIp}:9050` is always valid. This is not a license to fabricate addresses generally (see rule 3 above) — it applies to Tor's SOCKS proxy, whose address is fixed and whose flag is inert when unreachable.
 
 Track a dependency's _presence_ (for a health check, say) with `sdk.getStatus(effects, { packageId }).onChange(...)`, registered **unconditionally** — it returns `null` when the dependency is uninstalled and re-fires when it's installed. Never gate the watch itself behind a startup-time presence check.
 

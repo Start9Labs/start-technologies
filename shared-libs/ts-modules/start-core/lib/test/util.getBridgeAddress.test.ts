@@ -2,12 +2,20 @@ import { Effects } from '../Effects'
 import { Host } from '../osBindings'
 import { getBridgeAddress } from '../util/GetHostInfo'
 
-const bridgeRow = (ssl: boolean, port: number) => ({
+const ipRow = (ssl: boolean, port: number) => ({
   ssl,
   public: false,
   hostname: '10.0.3.1',
   port,
   metadata: { kind: 'ipv4', gateway: 'lxcbr0' },
+})
+
+const nameRow = (ssl: boolean, port: number, gateways = ['lxcbr0']) => ({
+  ssl,
+  public: false,
+  hostname: 'startos.internal',
+  port,
+  metadata: { kind: 'private-domain', gateways },
 })
 
 const host = {
@@ -17,7 +25,13 @@ const host = {
       options: {},
       net: { assignedPort: 8332, assignedSslPort: 54404 },
       addresses: {
-        effective: [bridgeRow(false, 8332), bridgeRow(true, 54404)],
+        effective: [
+          ipRow(false, 8332),
+          ipRow(true, 54404),
+          nameRow(true, 443, ['lxcbr0', 'eth0']),
+          nameRow(false, 8332),
+          nameRow(true, 54404),
+        ],
         available: [],
       },
       interfaces: {},
@@ -48,7 +62,7 @@ describe('getBridgeAddress', () => {
     expect(await at(true)).toBe('startos.internal:54404')
   })
 
-  test('an absent dependency falls back to the server name', async () => {
+  test('an absent dependency falls back to the server IP', async () => {
     const opts = { hostId: 'socks', packageId: 'tor', internalPort: 9050 }
     expect(await getBridgeAddress(effects(null), opts).once()).toBeNull()
     expect(
@@ -56,6 +70,6 @@ describe('getBridgeAddress', () => {
         ...opts,
         fallbackPort: 9050,
       }).once(),
-    ).toBe('startos.internal:9050')
+    ).toBe('10.0.3.1:9050')
   })
 })
