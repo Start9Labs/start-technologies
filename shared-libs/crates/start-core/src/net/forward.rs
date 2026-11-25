@@ -26,6 +26,8 @@ use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::Watch;
 
 pub const START9_BRIDGE_IFACE: &str = "lxcbr0";
+/// The name containers reach the server by on the bridge.
+pub const START9_BRIDGE_HOSTNAME: &str = "startos.internal";
 /// The host's `ip_local_port_range` ends below this; see `projects/start-os/debian/postinst`.
 const DYNAMIC_PORT_START: u16 = 49152;
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
