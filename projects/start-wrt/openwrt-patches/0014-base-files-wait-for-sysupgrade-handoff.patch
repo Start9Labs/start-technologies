@@ -1,0 +1,23 @@
+Subject: base-files: wait for procd's sysupgrade result without a deadline
+
+The ubus client's default 30-second timeout does not cancel procd's
+sysupgrade handler. If validation takes longer, sysupgrade exits while
+procd is still using the image. The daemon then releases its update gate
+and a retry can overwrite that image before procd flashes it.
+
+Wait without a client deadline. Procd returns an error on rejection; a
+successful handoff stops the daemon before flashing the image in place.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/package/base-files/files/sbin/sysupgrade
++++ b/package/base-files/files/sbin/sysupgrade
+@@ -448,5 +448,6 @@
+ 	[ $USE_CURR_PART -eq 1 ] && json_add_boolean use_curr_part 1
+ 	json_close_object
+ 
+-	ubus call system sysupgrade "$(json_dump)"
++	# A client timeout does not cancel procd's pending flash.
++	ubus -t 0 call system sysupgrade "$(json_dump)"
+ fi
