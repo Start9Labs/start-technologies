@@ -61,6 +61,11 @@ const bookInfo: Record<string, { label: string; description: string }> = {
     description:
       'Guides for running Bitcoin, Lightning and related services on StartOS.',
   },
+  'email-guides': {
+    label: 'Email Guides',
+    description:
+      'How email works, deliverability, privacy, and choosing and setting up hosted or self-hosted email, including SMTP credentials for StartOS.',
+  },
   support: {
     label: 'Start9 Support',
     description:

@@ -1,7 +1,9 @@
 import { Component } from '@angular/core'
 import { FormsModule } from '@angular/forms'
+import { MarkdownPipe, SafeLinksDirective } from '@start9labs/shared'
 import { IST } from '@start9labs/start-core'
 import { TuiIcon } from '@taiga-ui/core'
+import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiInputColor, TuiTooltip } from '@taiga-ui/kit'
 import { HintPipe } from '../pipes/hint.pipe'
 import { Control } from './control'
@@ -31,7 +33,15 @@ import { Control } from './control'
         (blur)="control.onTouched()"
       />
       @if (spec | hint; as hint) {
-        <tui-icon [tuiTooltip]="hint" />
+        <tui-icon [tuiTooltip]="tooltip">
+          <ng-template #tooltip>
+            <div
+              class="g-markdown"
+              safeLinks
+              [innerHTML]="hint | markdown | dompurify"
+            ></div>
+          </ng-template>
+        </tui-icon>
       }
     </tui-textfield>
   `,
@@ -41,6 +51,15 @@ import { Control } from './control'
       z-index: 2;
     }
   `,
-  imports: [FormsModule, TuiInputColor, TuiIcon, TuiTooltip, HintPipe],
+  imports: [
+    MarkdownPipe,
+    NgDompurifyPipe,
+    SafeLinksDirective,
+    FormsModule,
+    TuiInputColor,
+    TuiIcon,
+    TuiTooltip,
+    HintPipe,
+  ],
 })
 export class FormColorComponent extends Control<IST.ValueSpecColor, string> {}

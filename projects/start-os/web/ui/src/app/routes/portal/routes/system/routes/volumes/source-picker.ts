@@ -15,6 +15,7 @@ export type VolumeSourceKind = 'local' | 'disk' | 'cifs'
 
 export interface SourcePickerData {
   intro: i18nKey
+  cifsNamedByHost: boolean
   docs: string
   sources: readonly {
     kind: VolumeSourceKind
@@ -26,6 +27,7 @@ export interface SourcePickerData {
 }
 
 export const VOLUME_SOURCES: SourcePickerData = {
+  cifsNamedByHost: false,
   intro:
     'Shared volumes are only for data that several services, or other devices, need to use. Each service already stores its own data, so most services never need one.',
   docs: '/start-os/shared-volumes.html#create-and-manage-volumes',

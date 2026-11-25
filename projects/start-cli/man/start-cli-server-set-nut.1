@@ -1,0 +1,23 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-set-nut 1  "set-nut "
+.SH NAME
+start\-cli\-server\-set\-nut \- Configure UPS monitoring with Network UPS Tools
+.SH SYNOPSIS
+\fBstart\-cli server set\-nut\fR [\fB\-\-disabled\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Configure UPS monitoring with Network UPS Tools
+.SH OPTIONS
+.TP
+\fB\-\-disabled\fR
+Store the settings without starting monitoring
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-server\-set\-nut\-server(1)
+Monitor a UPS connected directly to this server
+.TP
+start\-cli\-server\-set\-nut\-client(1)
+Monitor a UPS served by another NUT server

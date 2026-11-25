@@ -34,6 +34,8 @@ pub(super) struct Field {
     pub aliases: Vec<String>,
     pub optional: bool,
     pub option_default: bool,
+    /// A missing input takes the field type's own `Default`.
+    pub type_default: bool,
     pub flatten: bool,
     pub hints: Hints,
 }
@@ -465,6 +467,10 @@ fn fields(
             field: index,
         };
         let target = wire(&f.original.attrs, position, true, input)?;
+        let type_default = input
+            && target.is_none()
+            && a.deserialize_with().is_none()
+            && matches!(a.default(), attr::Default::Default);
         let name = if input {
             a.name().deserialize_name()
         } else {
@@ -507,6 +513,7 @@ fn fields(
                     a.skip_serializing_if().is_some()
                 },
                 option_default: a.deserialize_with().is_none(),
+                type_default,
                 flatten: a.flatten(),
                 hints: hints(&f.original.attrs),
             },

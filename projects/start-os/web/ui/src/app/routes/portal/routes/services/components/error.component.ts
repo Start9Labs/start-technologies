@@ -1,5 +1,10 @@
 import { Component, inject, Input } from '@angular/core'
-import { DialogService, i18nKey, i18nPipe } from '@start9labs/shared'
+import {
+  DialogService,
+  escapeHtml,
+  i18nKey,
+  i18nPipe,
+} from '@start9labs/shared'
 import { TuiButton, TuiIcon } from '@taiga-ui/core'
 import { TuiTooltip } from '@taiga-ui/kit'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
@@ -101,7 +106,9 @@ export class ServiceErrorComponent {
 
   show() {
     this.dialog
-      .openAlert(this.error?.details as i18nKey, { label: 'Service error' })
+      .openAlert(escapeHtml(this.error?.details || '') as i18nKey, {
+        label: 'Service error',
+      })
       .subscribe()
   }
 }

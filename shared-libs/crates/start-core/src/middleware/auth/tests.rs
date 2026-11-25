@@ -53,6 +53,7 @@ fn auth(
         local: local.map(|accepted| credential(accepted, "local")),
         bearer: None,
         signature: signature.map(|accepted| credential(accepted, "signature")),
+        password: None,
     }
 }
 
@@ -155,4 +156,30 @@ async fn public_requests_do_not_require_credentials() {
         )
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn password_is_checked_only_without_another_credential() {
+    for (local, password_calls) in [(true, 0), (false, 1)] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let password_attempts = Arc::new(AtomicUsize::new(0));
+        let mut auth = auth(Some(local), None, &calls);
+        auth.password = Some(DynMiddleware::new(Credential {
+            accepted: false,
+            calls: password_attempts.clone(),
+            name: "password",
+        }));
+        let result = auth
+            .process_rpc_request(&TestContext, json!({}), &mut request("diagnostic.rebuild"))
+            .await;
+        assert_eq!(result.is_ok(), local);
+        assert_eq!(password_attempts.load(Ordering::SeqCst), password_calls);
+        if let Err(response) = result {
+            let error = response.result.unwrap_err();
+            assert_eq!(
+                serde_json::to_value(&error).unwrap()["data"]["details"],
+                "password"
+            );
+        }
+    }
 }

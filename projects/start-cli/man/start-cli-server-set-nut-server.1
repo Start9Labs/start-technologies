@@ -1,0 +1,46 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-set-nut-server 1  "server "
+.SH NAME
+start\-cli\-server\-set\-nut\-server \- Monitor a UPS connected directly to this server
+.SH SYNOPSIS
+\fBstart\-cli server set\-nut server\fR [\fB\-\-vendor\-id\fR] [\fB\-\-product\-id\fR] [\fB\-\-serial\fR] [\fB\-\-bus\fR] [\fB\-\-bus\-port\fR] [\fB\-\-vendor\fR] [\fB\-\-product\fR] [\fB\-\-listen\-all\fR] [\fB\-\-remote\-username\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIDRIVER\fR> <\fIPORT\fR>
+.SH DESCRIPTION
+Monitor a UPS connected directly to this server
+.SH OPTIONS
+.TP
+\fB\-\-vendor\-id\fR \fI<VENDOR_ID>\fR
+USB vendor ID
+.TP
+\fB\-\-product\-id\fR \fI<PRODUCT_ID>\fR
+USB product ID
+.TP
+\fB\-\-serial\fR \fI<SERIAL>\fR
+UPS serial number
+.TP
+\fB\-\-bus\fR \fI<BUS>\fR
+USB bus
+.TP
+\fB\-\-bus\-port\fR \fI<BUS_PORT>\fR
+USB port that pins a device without a serial number
+.TP
+\fB\-\-vendor\fR \fI<VENDOR>\fR
+UPS vendor name
+.TP
+\fB\-\-product\fR \fI<PRODUCT>\fR
+UPS product name
+.TP
+\fB\-\-listen\-all\fR
+Serve the UPS to other NUT clients on the network
+.TP
+\fB\-\-remote\-username\fR \fI<REMOTE_USERNAME>\fR
+Username remote NUT clients authenticate with
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIDRIVER\fR>
+NUT driver, as reported by nut\-scan
+.TP
+<\fIPORT\fR>
+Device port, as reported by nut\-scan

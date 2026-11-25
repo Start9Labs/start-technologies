@@ -66,7 +66,7 @@ If you're using [Claude Code](https://claude.com/claude-code) (recommended), poi
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | [Depend on Another Service](recipe-dependency.md)                    | Declare a dependency, read its connection info, and auto-configure                                       |
 | [Enforce Settings on a Dependency](recipe-enforce-dependency.md)     | Create a cross-service task that requires specific dependency configuration                              |
-| [Mount Volumes from Another Service](recipe-mount-dependency.md)     | Read-only access to a dependency's data volume                                                           |
+| [Mount Volumes from Another Service](recipe-mount-dependency.md)     | Read-only access to a dependency's shared files, or the credentials it publishes for dependents          |
 | [Let Dependents Through a Proxy Auth Gate](recipe-dependent-auth.md) | Publish a key on a `public` volume so dependents pass a `proxy.auth` gate, and read it on the other side |
 | [Support Alternative Dependencies](recipe-alternative-deps.md)       | Let users choose between backends (e.g., LND vs CLN)                                                     |
 
