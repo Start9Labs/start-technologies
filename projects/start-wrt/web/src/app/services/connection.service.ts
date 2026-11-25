@@ -157,34 +157,22 @@ export class ConnectionService {
     )
   }
 
-  /**
-   * Enter the unreachable state: show the sticky toast and poll until the router
-   * responds. Idempotent — extra calls while already unreachable only refine the
-   * message / recovery intent. No-op while {@link suppress}ed (a flow is owning
-   * reconnection itself, e.g. an OS update, or the page is navigating away).
-   */
+  /** Unlabelled reports retain the active outage's message and recovery intent. */
   reportUnreachable(opts: DisruptionOptions = {}): void {
     if (this.suppressed) return
 
-    // Honor the recovery intent ONLY from the call that actually observed the
-    // drop — never inherited from a prior expectDisruption() context. Otherwise
-    // a background-poller blip within CONTEXT_TTL_MS of e.g. a Wi-Fi SSID change
-    // (whose caller armed 'reload') could reload the page out from under the
-    // user. The cosmetic message may still fall back to the pending context.
+    // Pending disruption context supplies copy, never recovery intent.
     if (opts.onReconnect) this.onReconnect = opts.onReconnect
-    // Set before the early-return below so a later/concurrent observer of the
-    // same drop can still register the success copy / recovery target. If a
-    // background poller armed the generic systemInfo poll first, setting
-    // probeUrl here switches the running poll over to the destination probe on
-    // its next tick.
     if (opts.successMessage) this.successMessage = opts.successMessage
     if (opts.probeUrl) this.probeUrl = opts.probeUrl
     if (opts.navigateTo) this.navigateTo = opts.navigateTo
-    this.message.set(
-      opts.message ||
-        this.pending?.message ||
-        this.i18n.transform('Trying to reach the router'),
-    )
+    if (opts.message || !this.unreachable()) {
+      this.message.set(
+        opts.message ||
+          this.pending?.message ||
+          this.i18n.transform('Trying to reach the router'),
+      )
+    }
 
     if (this.unreachable()) return
     this.unreachable.set(true)
@@ -246,8 +234,6 @@ export class ConnectionService {
   }
 
   private async poll(): Promise<void> {
-    // When a recovery target is armed, the current origin is gone — probe the
-    // destination cross-origin instead of systemInfo on a dead origin.
     if (this.probeUrl) {
       if (await this.reachable(this.probeUrl)) this.recover()
       return
