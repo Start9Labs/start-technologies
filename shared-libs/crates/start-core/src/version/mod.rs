@@ -166,6 +166,7 @@ pub async fn post_init(
         }
         release_notes::welcome(ctx).await?;
     }
+    crate::firmware::report_flash(ctx).await.log_err();
     progress.complete();
     Ok(())
 }
@@ -907,7 +908,7 @@ mod tests {
             ("0.4.1.3", "0.4.2", 0),
             ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.2.2", 0),
-            ("0.4.2.2", "0.4.3", 3),
+            ("0.4.2.2", "0.4.3", 4),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()

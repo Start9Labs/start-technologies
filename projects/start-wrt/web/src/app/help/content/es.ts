@@ -57,26 +57,34 @@ Reserva una dirección IP para asignar una dirección IPv4 fija que no cambiará
 Elimina un dispositivo sin conexión de tu lista de dispositivos. Se perderá cualquier nombre personalizado o ajuste de IP reservada. Si el dispositivo vuelve a conectarse, aparecerá como un dispositivo nuevo.`,
   '/ethernet': `## Ethernet
 
+Cada puerto asigna un perfil de seguridad a los dispositivos conectados a él, o delega esa elección en un switch gestionado.
+
 ### Puerto
 
-El puerto físico: un puerto Ethernet (p. ej., eth0, eth1) o un puerto USB con un adaptador Ethernet USB (p. ej., usb_eth0). Un puerto USB aparece la primera vez que se conecta a él un dispositivo de red y conserva su perfil aunque no haya nada conectado. Cada puerto de un hub USB es un puerto USB propio. Un puerto USB sin adaptador conectado se puede quitar.
+El puerto físico: un puerto Ethernet (p. ej., eth0, eth1) o un puerto USB con un adaptador Ethernet USB (p. ej., usb_eth0). Un puerto USB aparece la primera vez que se conecta a él un dispositivo de red y conserva su perfil aunque no haya nada conectado. Cada puerto de un hub USB es un puerto USB propio.
+
+**WAN** marca el puerto que se conecta a tu módem o a la red ascendente. No tiene perfil de seguridad. Solo un puerto puede ser WAN a la vez, y debe ser un puerto Ethernet.
+
+**No conectado** marca un puerto USB sin adaptador conectado. Quítalo con el botón de la papelera; vuelve a aparecer, en el perfil Admin, la próxima vez que se conecte un adaptador.
 
 ### Perfil de seguridad
 
-El perfil de seguridad por defecto asignado a los dispositivos conectados a través del puerto Ethernet especificado.
+El perfil de seguridad al que se unen los dispositivos conectados al puerto. Cambiarlo desconecta brevemente el puerto, y la mayoría de sus dispositivos se vuelven a conectar en el nuevo perfil en pocos segundos. **Gestionar perfiles** abre la página de perfiles para añadirlos o editarlos.
 
-### WAN
+### Delegar
 
-El puerto WAN (Wide Area Network) se conecta al módem de tu ISP o a la red ascendente. Solo un puerto Ethernet puede designarse como WAN a la vez. El puerto WAN debe ser un puerto Ethernet.
+Delega la elección del perfil en un switch gestionado conectado al puerto. El puerto transporta cada perfil de seguridad como una VLAN etiquetada, y la configuración del propio switch decide a qué perfil pertenece cada uno de sus puertos, así que cualquiera que pueda iniciar sesión en el switch puede acceder a todos los perfiles. El tráfico que llega al puerto sin etiqueta VLAN no obtiene acceso. No disponible en puertos USB.
+
+Un puerto delegado muestra **Switch gestionado**, y su botón **IDs de VLAN** lista el ID de VLAN de cada perfil. Configura el switch con estos IDs; Admin es siempre la VLAN 1.
 
 ### Cambiar puerto WAN
 
-Usa el botón «Cambiar puerto WAN» para reasignar la designación WAN a un puerto Ethernet distinto. Esto interrumpirá tu conexión a internet y reiniciará el router. Asegúrate de que tu módem esté conectado al nuevo puerto WAN antes de confirmar.`,
+Mueve el WAN a otro puerto Ethernet. Esto interrumpe tu conexión a internet y reinicia brevemente la red. Conecta tu módem al nuevo puerto WAN antes de confirmar.`,
   '/ethernet/dialog': `## Cambiar puerto WAN
 
 Selecciona un nuevo puerto Ethernet que sirva como conexión WAN (internet). El puerto WAN actual está preseleccionado.
 
-Cambiar el puerto WAN interrumpirá de inmediato tu conexión a internet y reiniciará el router. Asegúrate de que tu módem o el cable de la red ascendente esté conectado al nuevo puerto antes de confirmar.`,
+Cambiar el puerto WAN interrumpirá de inmediato tu conexión a internet y reiniciará brevemente la red. Asegúrate de que tu módem o el cable de la red ascendente esté conectado al nuevo puerto antes de confirmar.`,
   '/inbound': `## VPN entrantes
 
 Los servidores VPN son aplicaciones de software que proporcionan acceso seguro y cifrado a los recursos internos de la red, permitiendo a los clientes crear una conexión entrante a la red de forma segura a través de internet desde cualquier parte del mundo.

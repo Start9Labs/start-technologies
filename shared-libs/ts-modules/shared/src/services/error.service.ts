@@ -1,5 +1,42 @@
-import { ErrorHandler, inject, Service } from '@angular/core'
-import { TuiNotificationService } from '@taiga-ui/core'
+import { Component, ErrorHandler, inject, Service } from '@angular/core'
+import { TuiNotificationOptions, TuiNotificationService } from '@taiga-ui/core'
+import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
+
+import { i18nPipe } from '../i18n/i18n.pipe'
+import { getErrorMessage } from '../util/error-message'
+
+interface ErrorToast {
+  readonly message: string
+  readonly link?: string
+}
+
+@Component({
+  template: `
+    {{ context.data.message }}
+    @if (context.data.link; as link) {
+      <a target="_blank" rel="noreferrer" [href]="link">
+        {{ 'Get help' | i18n }}
+      </a>
+    }
+  `,
+  styles: `
+    :host {
+      white-space: pre-line;
+    }
+
+    a {
+      display: block;
+      margin-block-start: 1rem;
+    }
+  `,
+  imports: [i18nPipe],
+})
+class ErrorToastComponent {
+  protected readonly context =
+    injectContext<TuiNotificationOptions<ErrorToast>>()
+}
+
+const ERROR_TOAST = new PolymorpheusComponent(ErrorToastComponent)
 
 @Service()
 export class ErrorService extends ErrorHandler {
@@ -9,45 +46,11 @@ export class ErrorService extends ErrorHandler {
     console.error(error)
 
     this.alerts
-      .open(getErrorMessage(error, link), {
+      .open(ERROR_TOAST, {
         label: 'Error',
         appearance: 'negative',
+        data: { message: getErrorMessage(error), link },
       })
       .subscribe()
   }
-}
-
-/** Returns whether an RPC failure represents an unreachable transport. */
-export function isNetworkError(error: unknown): error is { code: 0 } {
-  return (
-    error !== null &&
-    typeof error === 'object' &&
-    'code' in error &&
-    error.code === 0
-  )
-}
-
-export function getErrorMessage(e: unknown, link?: string): string {
-  const error = e !== null && typeof e === 'object' ? e : null
-  let message = ''
-
-  if (typeof e === 'string') {
-    message = e
-  } else if (isNetworkError(e)) {
-    message =
-      "Request Error. Your browser couldn't reach your server (network or browser blocked the connection). Common causes: a VPN or firewall blocking loopback/LAN; the server is still starting; or the page is loaded from a different origin than the API. Try refreshing this page; if you're using a VPN, allow LAN connections or disconnect briefly."
-  } else if (
-    error &&
-    'message' in error &&
-    typeof error.message === 'string' &&
-    error.message
-  ) {
-    message = error.message
-  } else {
-    message = 'Unknown Error'
-  }
-
-  return link
-    ? `${message}<br /><br /><a href=${link} target="_blank" rel="noreferrer">Get Help</a>`
-    : message
 }

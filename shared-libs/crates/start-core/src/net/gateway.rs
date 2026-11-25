@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use imbl::{OrdMap, OrdSet};
 use imbl_value::{InternedString, Value};
-use ipnet::IpNet;
+use ipnet::{IpNet, Ipv6Net};
 use itertools::Itertools;
 use nix::net::if_::if_nametoindex;
 use patch_db::json_ptr::JsonPointer;
@@ -35,7 +35,7 @@ use crate::db::model::public::{
     CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
-use crate::net::dns::{OutboundDnsUpdate, validate_dns_update};
+use crate::net::dns::{GatewayDns, OutboundDnsUpdate, validate_dns_update};
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
 use crate::net::host::all_hosts;
@@ -136,6 +136,13 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
             from_fn_async(edit_gateway)
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
+        )
+        .subcommand(
+            "edit",
+            from_fn_async(cli_edit_gateway)
+                .no_ts()
+                .no_display()
+                .with_about("about.edit-gateway"),
         )
         .subcommand(
             "set-secure",
@@ -704,6 +711,52 @@ rpc_toolkit::ts_export!(EditGatewayParams, namespaces = [""]);
 
 async fn edit_gateway(ctx: RpcContext, params: EditGatewayParams) -> Result<(), Error> {
     ctx.net_controller.net_iface.edit(params).await
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+struct CliEditGatewayParams {
+    #[arg(help = "help.arg.gateway-id")]
+    id: GatewayId,
+    #[arg(long, help = "help.arg.gateway-name")]
+    name: Option<InternedString>,
+    #[arg(long = "dns", help = "help.arg.gateway-dns-server")]
+    dns: Vec<String>,
+    #[arg(long, conflicts_with = "dns", help = "help.arg.gateway-automatic-dns")]
+    automatic_dns: bool,
+}
+
+impl From<CliEditGatewayParams> for EditGatewayParams {
+    fn from(
+        CliEditGatewayParams {
+            id,
+            name,
+            dns,
+            automatic_dns,
+        }: CliEditGatewayParams,
+    ) -> Self {
+        let dns = if automatic_dns {
+            Some(OutboundDnsUpdate { servers: None })
+        } else {
+            (!dns.is_empty()).then_some(OutboundDnsUpdate { servers: Some(dns) })
+        };
+        Self { id, name, dns }
+    }
+}
+
+async fn cli_edit_gateway(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params,
+        ..
+    }: HandlerArgs<CliContext, CliEditGatewayParams>,
+) -> Result<(), Error> {
+    context
+        .call_fronted(parent_method, method, &EditGatewayParams::from(params))
+        .await
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
@@ -1675,9 +1728,7 @@ async fn watcher(
                         gc_policy_routing(&ifaces).await;
                         reconcile_mangle_rules(&policy_ifaces).await.log_err();
                         if !policy_ifaces.is_empty() {
-                            for v6 in [false, true] {
-                                ensure_main_suppress_rule(v6).await.log_err();
-                            }
+                            reconcile_main_rules(&watch_ip_info).await.log_err();
                         }
                         let mut jobs = jobs
                             .into_iter()
@@ -1716,30 +1767,50 @@ fn pcp_probe_key() -> Url {
 }
 
 async fn get_wan_ipv4(
-    iface: &str,
+    iface: &GatewayId,
+    index: u32,
+    dns_servers: &VecDeque<SocketAddr>,
     base_url: &Url,
     local_ipv4: Ipv4Addr,
 ) -> Result<Option<Ipv4Addr>, Error> {
     let url = base_url.join("/ip").with_kind(ErrorKind::ParseUrl)?;
+    let dns = GatewayDns::new(iface.clone(), index, dns_servers)?;
     let text = tokio::time::timeout(
         Duration::from_secs(5),
-        get_via_gateway(iface, &url, local_ipv4),
+        get_via_gateway(iface, dns, &url, local_ipv4),
     )
     .await
     .map_err(|_| Error::new(eyre!("request to {url} timed out"), ErrorKind::Network))??;
     parse_echoip(&text)
 }
 
-async fn get_via_gateway(iface: &str, url: &Url, local_ipv4: Ipv4Addr) -> Result<String, Error> {
-    let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+/// Connects through one gateway alone, whatever outbound gateway is selected.
+pub(crate) fn gateway_connector<R>(
+    iface: &str,
+    resolver: R,
+) -> Result<hyper_util::client::legacy::connect::HttpConnector<R>, Error> {
+    let mut connector =
+        hyper_util::client::legacy::connect::HttpConnector::new_with_resolver(resolver);
     connector.enforce_http(false);
-    connector.set_local_address(Some(local_ipv4.into()));
     #[cfg(target_os = "linux")]
     {
         let index = if_nametoindex(iface).with_kind(ErrorKind::Network)?;
         connector.set_interface(iface);
         connector.set_mark(Some(gateway_table_id(index)));
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = iface;
+    Ok(connector)
+}
+
+async fn get_via_gateway(
+    iface: &GatewayId,
+    dns: GatewayDns,
+    url: &Url,
+    local_ipv4: Ipv4Addr,
+) -> Result<String, Error> {
+    let mut connector = gateway_connector(iface.as_str(), dns)?;
+    connector.set_local_address(Some(local_ipv4.into()));
     let tls = native_tls::TlsConnector::new().with_kind(ErrorKind::Network)?;
     let connector = hyper_tls::HttpsConnector::from((connector, tls.into()));
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
@@ -2173,14 +2244,18 @@ async fn reconcile_local_outbound_mark(selected: bool) -> Result<(), Error> {
     Ok(())
 }
 
-/// An interface absent from the table stays absent.
-fn disconnected(write_to: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>, iface: &GatewayId) {
+/// Observed inactivity does not acknowledge completed rule retirement.
+async fn disconnected(
+    write_to: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    iface: &GatewayId,
+) {
     write_to.send_if_modified(|m| {
         m.get_mut(iface)
             .filter(|i| i.ip_info.is_some())
             .map(|i| i.ip_info = None)
             .is_some()
     });
+    reconcile_main_rules(write_to).await.log_err();
 }
 
 #[instrument(skip(connection, device_proxy, write_to, db))]
@@ -2225,12 +2300,12 @@ async fn watch_ip(
 
                 let managed = device_proxy.managed().await?;
                 if !managed {
-                    disconnected(write_to, &iface);
+                    disconnected(write_to, &iface).await;
                     return Ok(());
                 }
                 let dac = device_proxy.active_connection().await?;
                 if &*dac == "/" {
-                    disconnected(write_to, &iface);
+                    disconnected(write_to, &iface).await;
                     return Ok(());
                 }
 
@@ -2344,45 +2419,167 @@ fn rule_has(line: &str, key: &str, value: &str) -> bool {
         .any(|w| w[0] == key && w[1] == value)
 }
 
-fn main_suppress_rule(line: &str) -> bool {
-    rule_at_priority(line, MAIN_RULE_PRIORITY).is_some_and(|rule| {
-        rule.split_whitespace().eq([
-            "from",
-            "all",
-            "lookup",
-            "main",
-            "suppress_prefixlength",
-            "0",
-        ])
-    })
+pub(super) const NON_PUBLIC_V4: [&str; 12] = [
+    "0.0.0.0/8",
+    "10.0.0.0/8",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "172.16.0.0/12",
+    "192.0.0.0/24",
+    "192.168.0.0/16",
+    "198.18.0.0/15",
+    "224.0.0.0/4",
+    "240.0.0.0/4",
+    "255.255.255.255/32",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct MainRule {
+    not: bool,
+    /// Unset matches every destination.
+    to: Option<IpNet>,
 }
 
-/// Specific routes are `main`'s; per-interface tables hold only defaults.
-async fn ensure_main_suppress_rule(v6: bool) -> Result<(), Error> {
-    // Reject-type defaults terminate before suppression; `throw` routes fall through.
-    let mut ip = Command::new("ip");
-    if v6 {
-        ip.arg("-6");
+#[derive(Deserialize)]
+struct MainRoute {
+    dst: String,
+    dev: Option<GatewayId>,
+    gateway: Option<IpAddr>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+}
+
+fn parse_route_prefix(value: &str) -> Option<IpNet> {
+    value
+        .parse::<IpNet>()
+        .or_else(|_| value.parse::<IpAddr>().map(IpNet::from))
+        .ok()
+}
+
+fn parse_main_rule(line: &str) -> Option<MainRule> {
+    let words: Vec<&str> = rule_at_priority(line, MAIN_RULE_PRIORITY)?
+        .split_whitespace()
+        .collect();
+    let (not, words) = match words.split_first() {
+        Some((&"not", rest)) => (true, rest),
+        _ => (false, &words[..]),
+    };
+    let (to, tail) = match words {
+        ["from", "all", "to", to, tail @ ..] => (Some(parse_route_prefix(to)?), tail),
+        ["from", "all", tail @ ..] => (None, tail),
+        _ => return None,
+    };
+    (tail == ["lookup", "main", "suppress_prefixlength", "0"]).then_some(MainRule { not, to })
+}
+
+/// Public LAN exceptions admit IPv4 /16–/32 and IPv6 /64–/128.
+/// Configured WireGuard prefixes also admit shorter IPv6 prefix lengths.
+fn main_rules(
+    v6: bool,
+    ifaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    v6_routes: &[MainRoute],
+) -> BTreeSet<MainRule> {
+    let rule = |not, to| MainRule { not, to: Some(to) };
+    if !v6 {
+        let on_link = ifaces
+            .values()
+            .filter_map(|info| info.ip_info.as_ref())
+            .flat_map(|ip| ip.subnets.iter())
+            .filter_map(|net| match net {
+                IpNet::V4(net) if net.prefix_len() >= 16 => {
+                    Some(rule(false, IpNet::V4(net.trunc())))
+                }
+                _ => None,
+            });
+        return NON_PUBLIC_V4
+            .iter()
+            .map(|net| rule(false, net.parse().unwrap()))
+            .chain(on_link)
+            .collect();
     }
-    let rules = String::from_utf8(
-        ip.arg("rule")
+    let global: Ipv6Net = GLOBAL_UNICAST_V6.parse().unwrap();
+    let on_link = v6_routes
+        .iter()
+        .filter(|route| route.gateway.is_none())
+        .filter(|route| route.kind.as_deref().is_none_or(|kind| kind == "unicast"))
+        .filter_map(|route| {
+            let info = ifaces.get(route.dev.as_ref()?)?.ip_info.as_ref()?;
+            let IpNet::V6(net) = parse_route_prefix(&route.dst)? else {
+                return None;
+            };
+            let configured_tunnel_prefix = info.device_type
+                == Some(NetworkInterfaceType::Wireguard)
+                && info
+                    .subnets
+                    .iter()
+                    .any(|configured| configured.trunc() == IpNet::V6(net.trunc()));
+            (global.contains(&net.addr()) && (net.prefix_len() >= 64 || configured_tunnel_prefix))
+                .then(|| rule(false, IpNet::V6(net.trunc())))
+        });
+    std::iter::once(rule(true, IpNet::V6(global)))
+        .chain(on_link)
+        .collect()
+}
+
+async fn reconcile_main_rules(
+    ifaces: &Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+) -> Result<(), Error> {
+    static WRITER: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _writer = WRITER.lock().await;
+    let routes: Vec<MainRoute> = serde_json::from_slice(
+        &Command::new("ip")
+            .args(["-j", "-6", "route", "show", "table", "main"])
+            .invoke(ErrorKind::Network)
+            .await?,
+    )
+    .with_kind(ErrorKind::Deserialization)?;
+    let ifaces = ifaces.read();
+    for v6 in [false, true] {
+        reconcile_main_rules_family(v6, &main_rules(v6, &ifaces, &routes)).await?;
+    }
+    Ok(())
+}
+
+/// Failed additions retain the existing rules.
+async fn reconcile_main_rules_family(v6: bool, desired: &BTreeSet<MainRule>) -> Result<(), Error> {
+    // Reject-type defaults terminate before suppression; `throw` routes fall through.
+    let ip = || {
+        let mut c = Command::new("ip");
+        if v6 {
+            c.arg("-6");
+        }
+        c
+    };
+    let existing: BTreeSet<MainRule> = String::from_utf8(
+        ip().arg("rule")
             .arg("show")
             .invoke(ErrorKind::Network)
             .await?,
-    )?;
-    if !rules.lines().any(main_suppress_rule) {
-        let mut ip = Command::new("ip");
-        if v6 {
-            ip.arg("-6");
+    )?
+    .lines()
+    .filter_map(parse_main_rule)
+    .collect();
+    let changes = desired
+        .difference(&existing)
+        .map(|rule| ("add", rule))
+        .chain(existing.difference(desired).map(|rule| ("del", rule)));
+    for (verb, rule) in changes {
+        let mut cmd = ip();
+        cmd.arg("rule")
+            .arg(verb)
+            .arg("priority")
+            .arg(MAIN_RULE_PRIORITY.to_string());
+        if rule.not {
+            cmd.arg("not");
         }
-        ip.arg("rule")
-            .arg("add")
-            .arg("lookup")
+        if let Some(to) = &rule.to {
+            cmd.arg("to").arg(to.to_string());
+        }
+        cmd.arg("lookup")
             .arg("main")
             .arg("suppress_prefixlength")
             .arg("0")
-            .arg("priority")
-            .arg(MAIN_RULE_PRIORITY.to_string())
             .invoke(ErrorKind::Network)
             .await?;
     }
@@ -2493,17 +2690,30 @@ async fn apply_policy_routing(
         })
         .copied();
 
+    let v4_capable = carries_v4(subnets.iter().filter_map(|n| match n {
+        IpNet::V4(v4n) => Some(v4n.addr()),
+        _ => None,
+    }));
+
     let mut cmd = Command::new("ip");
-    cmd.arg("route").arg("replace").arg("default");
-    if let Some(gw) = ipv4_gateway {
-        cmd.arg("via").arg(gw.to_string());
-    }
-    cmd.arg("dev")
-        .arg(iface.as_str())
-        .arg("table")
-        .arg(&table_str);
-    if ipv4_gateway.is_none() {
-        cmd.arg("scope").arg("link");
+    cmd.arg("route").arg("replace");
+    if v4_capable {
+        cmd.arg("default");
+        if let Some(gw) = ipv4_gateway {
+            cmd.arg("via").arg(gw.to_string());
+        }
+        cmd.arg("dev")
+            .arg(iface.as_str())
+            .arg("table")
+            .arg(&table_str);
+        if ipv4_gateway.is_none() {
+            cmd.arg("scope").arg("link");
+        }
+    } else {
+        cmd.arg("blackhole")
+            .arg("default")
+            .arg("table")
+            .arg(&table_str);
     }
     cmd.invoke(ErrorKind::Network).await.log_err();
 
@@ -2534,6 +2744,11 @@ async fn apply_policy_routing(
     reconcile_source_rules(false, table_id, &own_v4, &rules_output).await;
 
     Ok(())
+}
+
+/// Sending needs an address of the interface's own beyond link-local.
+fn carries_v4(addrs: impl IntoIterator<Item = Ipv4Addr>) -> bool {
+    addrs.into_iter().any(|addr| !addr.is_link_local())
 }
 
 /// Sending needs an address of the interface's own beyond link-local; without
@@ -2812,6 +3027,9 @@ async fn poll_ip_info(
         .filter(|old| &old.ip_info == &Some(ip_info))
         .is_none()
     });
+    if policy_guard.is_some() {
+        reconcile_main_rules(write_to).await.log_err();
+    }
 
     // Now fetch the WAN IP in a second pass.  Even if this is slow or
     // gets cancelled, the gateway already has valid ip_info above.
@@ -2888,6 +3106,9 @@ async fn poll_ip_info(
         }
     }
 
+    let dns_servers = write_to
+        .peek(|m| m.get(iface).map(|i| i.dns.servers.clone()))
+        .unwrap_or_default();
     for echoip_url in echoip_urls {
         if wan_ip.is_some() {
             break;
@@ -2898,7 +3119,7 @@ async fn poll_ip_info(
             && forwardable
         {
             let local_ipv4 = local_ipv4.unwrap_or(Ipv4Addr::UNSPECIFIED);
-            match get_wan_ipv4(iface.as_str(), &echoip_url, local_ipv4).await {
+            match get_wan_ipv4(iface, scope_id, &dns_servers, &echoip_url, local_ipv4).await {
                 Ok(a) => {
                     wan_ip = a;
                 }
@@ -3763,16 +3984,241 @@ mod policy_rule_tests {
     use super::*;
 
     #[test]
-    fn main_suppress_rule_requires_the_unrestricted_rule() {
-        assert!(main_suppress_rule(
-            "50: from all lookup main suppress_prefixlength 0"
-        ));
-        assert!(!main_suppress_rule(
-            "50: from 192.0.2.1 lookup main suppress_prefixlength 0"
-        ));
-        assert!(!main_suppress_rule(
-            "50: from all fwmark 0x3e9 lookup main suppress_prefixlength 0"
-        ));
+    fn main_rules_parse_back_from_ip_rule_show() {
+        let rule = |not, to: Option<&str>| MainRule {
+            not,
+            to: to.map(|to| to.parse().unwrap()),
+        };
+        assert_eq!(
+            parse_main_rule("50:\tfrom all lookup main suppress_prefixlength 0"),
+            Some(rule(false, None))
+        );
+        assert_eq!(
+            parse_main_rule("50:\tfrom all to 10.0.0.0/8 lookup main suppress_prefixlength 0"),
+            Some(rule(false, Some("10.0.0.0/8")))
+        );
+        assert_eq!(
+            parse_main_rule("50:\tfrom all to 255.255.255.255 lookup main suppress_prefixlength 0"),
+            Some(rule(false, Some("255.255.255.255/32")))
+        );
+        assert_eq!(
+            parse_main_rule("50:\tnot from all to 2000::/3 lookup main suppress_prefixlength 0"),
+            Some(rule(true, Some("2000::/3")))
+        );
+        assert_eq!(
+            parse_main_rule("50:\tfrom 192.0.2.1 lookup main suppress_prefixlength 0"),
+            None
+        );
+        assert_eq!(
+            parse_main_rule("50:\tfrom all fwmark 0x3e9 lookup main suppress_prefixlength 0"),
+            None
+        );
+        assert_eq!(
+            parse_main_rule("51:\tfrom all fwmark 0x3e9 lookup 1001"),
+            None
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn run_with_mock_ip(test: &str, script: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let ip = temp.path().join("ip");
+        std::fs::write(&ip, script).unwrap();
+        std::fs::set_permissions(&ip, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--nocapture"])
+            .env("STARTOS_MAIN_RULE_LOG", temp.path().join("commands"))
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    temp.path().display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn failed_main_rule_add_preserves_existing_rules() {
+        if let Some(log) = std::env::var_os("STARTOS_MAIN_RULE_LOG") {
+            let desired = [MainRule {
+                not: false,
+                to: Some("10.0.0.0/8".parse().unwrap()),
+            }]
+            .into_iter()
+            .collect();
+            assert!(reconcile_main_rules_family(false, &desired).await.is_err());
+            let commands = std::fs::read_to_string(log).unwrap();
+            assert!(commands.contains("rule add "), "{commands}");
+            assert!(!commands.contains("rule del "), "{commands}");
+            return;
+        }
+
+        run_with_mock_ip(
+            "net::gateway::policy_rule_tests::failed_main_rule_add_preserves_existing_rules",
+            r#"#!/bin/bash
+printf '%s\n' "$*" >> "$STARTOS_MAIN_RULE_LOG"
+case "$2" in
+  show) echo '50: from all lookup main suppress_prefixlength 0' ;;
+  add) exit 1 ;;
+esac
+"#,
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn inactive_interface_retries_failed_rule_retirement() {
+        if let Some(log) = std::env::var_os("STARTOS_MAIN_RULE_LOG") {
+            let iface: GatewayId = "wg0".parse().unwrap();
+            let interfaces = Watch::new(
+                [(
+                    iface.clone(),
+                    NetworkInterfaceInfo {
+                        ip_info: Some(Arc::new(IpInfo {
+                            device_type: Some(NetworkInterfaceType::Wireguard),
+                            subnets: ["2001:db8:100::2/56".parse::<IpNet>().unwrap()]
+                                .into_iter()
+                                .collect(),
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            );
+            disconnected(&interfaces, &iface).await;
+            assert!(interfaces.peek(|m| m.get(&iface).unwrap().ip_info.is_none()));
+            disconnected(&interfaces, &iface).await;
+            let commands = std::fs::read_to_string(log).unwrap();
+            assert_eq!(commands.matches("-j -6 route show table main\n").count(), 2);
+            assert!(
+                commands.contains(&format!(
+                    "-6 rule del priority {} to 2001:db8:100::/56 ",
+                    MAIN_RULE_PRIORITY,
+                )),
+                "{commands}"
+            );
+            return;
+        }
+
+        run_with_mock_ip(
+            "net::gateway::policy_rule_tests::inactive_interface_retries_failed_rule_retirement",
+            r#"#!/bin/bash
+printf '%s\n' "$*" >> "$STARTOS_MAIN_RULE_LOG"
+if [ "$1" = '-j' ]; then
+  if [ ! -e "$STARTOS_MAIN_RULE_LOG.first-dump" ]; then
+    : > "$STARTOS_MAIN_RULE_LOG.first-dump"
+    exit 1
+  fi
+  echo '[]'
+elif [ "$1 $2 $3" = '-6 rule show' ]; then
+  echo '50: from all to 2001:db8:100::/56 lookup main suppress_prefixlength 0'
+fi
+exit 0
+"#,
+        );
+    }
+
+    #[test]
+    fn main_rules_preserve_on_link_prefixes_without_admitting_pushed_routes() {
+        let net = |s: &str| -> IpNet { s.parse().unwrap() };
+        let mut ifaces = OrdMap::new();
+        let mut info = NetworkInterfaceInfo::default();
+        info.ip_info = Some(Arc::new(IpInfo {
+            subnets: [
+                net("198.51.100.5/24"),
+                net("128.0.0.5/1"),
+                net("2001:db8:1::5/64"),
+                net("2001:db8:2::5/48"),
+                net("2001:db8:3::5/128"),
+                net("fd12:3456::5/64"),
+                net("fe80::5/64"),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        }));
+        ifaces.insert(GatewayId::from(InternedString::intern("eth0")), info);
+        ifaces.insert(
+            "wg0".parse().unwrap(),
+            NetworkInterfaceInfo {
+                ip_info: Some(Arc::new(IpInfo {
+                    device_type: Some(NetworkInterfaceType::Wireguard),
+                    subnets: [net("2001:db8:100::2/56")].into_iter().collect(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        );
+        let routes: Vec<MainRoute> = serde_json::from_value(serde_json::json!([
+            {"dst": "2001:db8:1::/64", "dev": "eth0"},
+            {"dst": "2001:db8:2::/48", "dev": "eth0"},
+            {"dst": "2001:db8:3::/64", "dev": "eth0", "protocol": "ra"},
+            {"dst": "2001:db8:4::/64", "dev": "eth0", "gateway": "fe80::1"},
+            {"dst": "2001:db8:5::/64", "dev": "gone"},
+            {"dst": "2001:db8:6::/64", "dev": "eth0", "type": "unreachable"},
+            {"dst": "2001:db8:7::9", "dev": "eth0"},
+            {"dst": "2001:db8:100::/56", "dev": "wg0"},
+            {"dst": "default", "dev": "eth0", "gateway": "fe80::1"}
+        ]))
+        .unwrap();
+        let to = |rules: BTreeSet<MainRule>| -> Vec<(bool, String)> {
+            rules
+                .into_iter()
+                .map(|r| (r.not, r.to.unwrap().to_string()))
+                .collect()
+        };
+        assert_eq!(
+            to(main_rules(true, &ifaces, &routes)),
+            [
+                (false, "2001:db8:1::/64".into()),
+                (false, "2001:db8:3::/64".into()),
+                (false, "2001:db8:7::9/128".into()),
+                (false, "2001:db8:100::/56".into()),
+                (true, "2000::/3".into()),
+            ]
+        );
+        let v4 = main_rules(false, &ifaces, &routes);
+        assert!(v4.contains(&MainRule {
+            not: false,
+            to: Some(net("198.51.100.0/24")),
+        }));
+        assert!(!v4.contains(&MainRule {
+            not: false,
+            to: Some(net("128.0.0.0/1")),
+        }));
+        for prefix in ["192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4"] {
+            assert!(v4.contains(&MainRule {
+                not: false,
+                to: Some(net(prefix)),
+            }));
+        }
+        assert_eq!(v4.len(), NON_PUBLIC_V4.len() + 1);
+
+        for (_, info) in OrdMapIterMut::from(&mut ifaces) {
+            info.ip_info = None;
+        }
+        assert_eq!(
+            main_rules(false, &ifaces, &routes).len(),
+            NON_PUBLIC_V4.len()
+        );
+        assert_eq!(
+            to(main_rules(true, &ifaces, &routes)),
+            [(true, "2000::/3".into())]
+        );
     }
 
     #[test]
@@ -4177,6 +4623,14 @@ mod carries_v6_tests {
     #[test]
     fn a_ula_address_without_a_router_carries_nothing() {
         assert!(!carries_v6(None, [v6("fd00::5")]));
+    }
+
+    #[test]
+    fn only_a_non_link_local_address_carries_v4() {
+        let v4 = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        assert!(carries_v4([v4("10.59.0.2")]));
+        assert!(!carries_v4([v4("169.254.3.4")]));
+        assert!(!carries_v4([]));
     }
 }
 
@@ -4807,5 +5261,29 @@ mod wg_config_tests {
         assert!(!parsed.to_nm_settings("wg0", None).unwrap()["connection"].contains_key("uuid"));
         let updated = parsed.to_nm_settings("wg0", Some("uuid-x")).unwrap();
         assert_eq!(as_str(&updated["connection"]["uuid"]), "uuid-x");
+    }
+}
+
+#[cfg(test)]
+mod edit_cli_tests {
+    use super::*;
+
+    fn edit(args: &[&str]) -> Result<EditGatewayParams, clap::Error> {
+        CliEditGatewayParams::try_parse_from(["edit", "eth0"].iter().chain(args)).map(Into::into)
+    }
+
+    #[test]
+    fn edit_cli_maps_dns_flags_to_the_update() {
+        let unchanged = edit(&["--name", "Home"]).unwrap();
+        assert_eq!(unchanged.name.as_deref(), Some("Home"));
+        assert!(unchanged.dns.is_none());
+        let fixed = edit(&["--dns", "1.1.1.1", "--dns", "9.9.9.9"]).unwrap();
+        assert_eq!(
+            fixed.dns.and_then(|dns| dns.servers),
+            Some(vec!["1.1.1.1".to_owned(), "9.9.9.9".to_owned()])
+        );
+        let automatic = edit(&["--automatic-dns"]).unwrap();
+        assert!(automatic.dns.is_some_and(|dns| dns.servers.is_none()));
+        assert!(edit(&["--dns", "1.1.1.1", "--automatic-dns"]).is_err());
     }
 }

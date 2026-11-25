@@ -47,6 +47,7 @@
 # Points of Entry
 
 - [Ethernet](ethernet.md)
+- [Connecting a Managed Switch](managed-switch.md)
 - [Wi-Fi](wifi.md)
 - [Wi-Fi Blackout](wifi-schedules.md)
 - [Inbound VPNs](inbound-vpn.md)
@@ -67,4 +68,5 @@
 - [CGNAT](cgnat.md)
 - [Architecture](architecture.md)
 - [Hardware](hardware.md)
+- [Managed Switch Notes: TP-Link Easy Smart](managed-switch-tp-link.md)
 - [FAQ](faq.md)

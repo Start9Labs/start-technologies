@@ -128,7 +128,7 @@ export class VolumeManage {
   protected readonly volume = computed(
     () => this.volumes()?.[this.context.data.id],
   )
-  protected readonly edit = sourceEdit(this.volume)
+  protected readonly edit = sourceEdit(this.volume, { cifsNamedByHost: false })
   protected readonly packages = computed(() =>
     Object.values(this.allPackages() || {})
       .map(getCurrentManifest)

@@ -315,6 +315,16 @@ Claude Code auto-loads `CLAUDE.md` when it opens the repo, and the `@AGENTS.md` 
 
 It is recommended to pull an existing Docker image as shown in the [Quick Start](./quick-start.md). If necessary, you can define a custom image using a Dockerfile in the project root.
 
+**Pin everything the `Dockerfile` fetches to its content, not its name.** A tag, a branch or a release URL builds whatever the server returns that day. Check a download against a pinned hash (`ARG APP_SHA256` and `sha256sum -c`), and check a clone out at a pinned full commit, failing unless the tag resolves to it — verifying the tag's signature too where upstream signs:
+
+```dockerfile
+RUN git clone --depth 1 --branch "${APP_TAG}" https://github.com/org/app /src \
+ && git -C /src checkout -q "${APP_COMMIT}" \
+ && test "$(git -C /src rev-parse HEAD)" = "${APP_COMMIT}"
+```
+
+The hash or commit moves with the version in the same bump; say so in `UPDATING.md`.
+
 ### icon.svg
 
 The service's visual identifier. Maximum size is 40 KiB. Accepts `.svg`, `.png`, `.jpg`, and `.webp` formats.
