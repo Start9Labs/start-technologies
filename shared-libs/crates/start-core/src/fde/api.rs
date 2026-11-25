@@ -5,6 +5,7 @@ use zeroize::Zeroizing;
 
 use crate::auth::PasswordType;
 use crate::context::RpcContext;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 
 #[derive(Deserialize, Serialize, VisitFields)]
@@ -56,10 +57,16 @@ async fn begin_enable(
 
 pub fn api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("status", from_fn_async(status).no_cli())
+        .subcommand(
+            "status",
+            from_fn_async(status)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .no_cli(),
+        )
         .subcommand(
             "begin-enable",
             from_fn_async(begin_enable)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),

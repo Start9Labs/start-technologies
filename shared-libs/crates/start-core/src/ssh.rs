@@ -12,6 +12,7 @@ use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
 use crate::hostname::ServerHostname;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::util::io::create_file;
 use crate::util::serde::{HandlerExtSerde, Pem, WithIoFormat, display_serializable};
@@ -172,6 +173,7 @@ pub fn ssh<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.add-ssh-key")
                 .with_call_remote::<CliContext>(),
@@ -179,6 +181,7 @@ pub fn ssh<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-ssh-key")
                 .with_call_remote::<CliContext>(),
@@ -186,6 +189,7 @@ pub fn ssh<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     display_all_ssh_keys(handle.params, result)

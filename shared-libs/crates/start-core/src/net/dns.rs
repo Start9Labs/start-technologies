@@ -30,6 +30,7 @@ use tracing::instrument;
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext, SetupContext};
 use crate::db::model::Database;
 use crate::db::model::public::{NetworkInterfaceInfo, Public};
+use crate::mcp::{EFFECT, Effect};
 use crate::net::gateway::{GatewayInfo, NetworkInterfaceController};
 use crate::net::utils::{bind_tokio_listener_reuse_port, ipv6_is_link_local};
 use crate::prelude::*;
@@ -62,6 +63,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "status",
             from_fn(|ctx: RpcContext| Ok::<_, Error>(ctx.net_controller.dns.status()))
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.dns-status")
                 .with_call_remote::<CliContext>(),
@@ -69,6 +71,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "query",
             from_fn_blocking(query_dns::<C>)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
                     if let Some(format) = params.format {
@@ -89,6 +92,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-static",
             from_fn_async(set_static_dns)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.set-static-dns-servers")
                 .with_call_remote::<CliContext>(),
@@ -96,6 +100,7 @@ pub fn dns_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "dump-table",
             from_fn_async(dump_table)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
                     use prettytable::*;

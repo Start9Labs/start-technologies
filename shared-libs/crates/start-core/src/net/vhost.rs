@@ -32,6 +32,7 @@ use visit_rs::Visit;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
+use crate::mcp::{EFFECT, Effect};
 use crate::net::acme::{
     ACME_TLS_ALPN_NAME, AcmeIssuance, AcmeTlsHandler, GetAcmeIssuance, ReportOrderFailure,
 };
@@ -112,6 +113,7 @@ pub fn vhost_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "dump-table",
             from_fn(dump_table)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
                     use prettytable::*;
@@ -150,6 +152,7 @@ pub fn vhost_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add-passthrough",
             from_fn_async(add_passthrough)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.add-vhost-passthrough")
                 .with_call_remote::<CliContext>(),
@@ -157,6 +160,7 @@ pub fn vhost_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove-passthrough",
             from_fn_async(remove_passthrough)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-vhost-passthrough")
                 .with_call_remote::<CliContext>(),
@@ -164,6 +168,7 @@ pub fn vhost_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list-passthrough",
             from_fn(list_passthrough)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-vhost-passthrough")
                 .with_call_remote::<CliContext>(),

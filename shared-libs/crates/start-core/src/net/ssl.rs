@@ -37,6 +37,7 @@ use crate::db::model::public::IpInfo;
 use crate::db::model::{Database, DatabaseModel};
 use crate::db::{DbAccess, DbAccessMut};
 use crate::init::check_time_is_synchronized;
+use crate::mcp::{EFFECT, Effect};
 use crate::net::gateway::GatewayInfo;
 use crate::net::tls::{TlsHandler, TlsHandlerAction};
 use crate::net::utils::is_global_ip;
@@ -811,6 +812,7 @@ pub fn ssl_api<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "generate-certificate",
         from_fn_async(generate_certificate)
+            .with_metadata(EFFECT, Effect::Write.into())
             .with_display_serializable()
             .with_custom_display_fn(|_, res: GenerateCertificateResponse| {
                 println!("Private Key:");
