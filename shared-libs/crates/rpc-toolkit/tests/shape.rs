@@ -207,15 +207,22 @@ reflect_ts!(impl ['a] for WrappedOptions<'a>);
 #[test]
 fn typed_option_identity_survives_aliases_and_pointer_wrappers() {
     let bindings = declarations::<WrappedOptions<'_>>();
-    for name in ["alias", "reference", "boxed", "arc", "rc", "cow"] {
+    for name in ["alias", "boxed", "arc", "rc", "cow"] {
         assert!(
             bindings.schemas.contains(&format!(
-                "\"{name}\": wire(z.string().nullable().optional(), z.string().nullable())"
+                "\"{name}\": z.string().nullable().default(() => (null))"
             )),
             "{}",
             bindings.schemas
         );
     }
+    assert!(
+        bindings.schemas.contains(
+            "\"reference\": wire(z.string().nullable().optional(), z.string().nullable())"
+        ),
+        "{}",
+        bindings.schemas
+    );
 }
 
 #[derive(Deserialize, Serialize, visit_rs::VisitFields)]

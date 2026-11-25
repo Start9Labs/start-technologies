@@ -17,6 +17,7 @@ use tracing::instrument;
 use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
+use crate::net::acme::AcmeIssuance;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
@@ -637,7 +638,12 @@ pub fn plan_host_exposure(
                             .iter()
                             .find(|a| a.address == addr_info.hostname)
                             .and_then(|a| a.public.as_ref())
-                            .and_then(|p| p.acme.clone())
+                            .and_then(|p| {
+                                Some(AcmeIssuance {
+                                    provider: p.acme.clone()?,
+                                    gateway: p.gateway.clone(),
+                                })
+                            })
                     },
                     ..target.clone()
                 },
@@ -1913,7 +1919,13 @@ mod tests {
                 "2001:db8::11".parse().unwrap(),
             ])
         );
-        assert_eq!(named.acme, Some("letsencrypt".parse().unwrap()));
+        assert_eq!(
+            named.acme,
+            Some(AcmeIssuance {
+                provider: "letsencrypt".parse().unwrap(),
+                gateway: "eth0".parse().unwrap(),
+            })
+        );
         let private = &plan.vhosts[&(Some("server.example".into()), 8443, false)];
         assert!(private.acme.is_none());
         assert!(private.public_v4.is_empty());

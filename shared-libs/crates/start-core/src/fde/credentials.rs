@@ -146,7 +146,7 @@ impl Credentials {
             .vhosts
             .into_iter()
             .filter_map(|((name, _, _), target)| {
-                Some((JsonKey::new(BTreeSet::from([name?])), target.acme?))
+                Some((JsonKey::new(BTreeSet::from([name?])), target.acme?.provider))
             })
             .collect();
         let mut credentials = Self {

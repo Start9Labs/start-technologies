@@ -123,15 +123,17 @@ impl UnlockNetwork {
                 let local = LocalIssuerCache::new(issuer);
                 let hostname = credentials.hostname.clone();
                 let acme_cache = Arc::new(SyncMutex::new(BTreeMap::new()));
-                move |get_provider| {
+                let interfaces = watcher.subscribe();
+                move |get_issuance| {
                     (
                         Arc::new(AcmeTlsHandler {
                             db: acme.clone(),
                             acme_cache: acme_cache.clone(),
                             crypto_provider: crypto_provider.clone(),
-                            get_provider,
+                            get_issuance,
                             in_progress: Watch::new(BTreeMap::new()),
                             report_failure: None,
+                            interfaces: interfaces.clone_unseen(),
                         }),
                         LocalCaTlsHandler {
                             db: local.clone(),
