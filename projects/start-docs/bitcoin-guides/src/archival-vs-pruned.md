@@ -22,7 +22,7 @@ A pruned node validates every block but discards block data after processing, ke
 
 **Advantages:**
 
-- **Much less disk space** — A pruned node can run with as little as 5-10 GB of block data, compared to 600+ GB for an archival node.
+- **Much less disk space** — Bitcoin allows a pruning target as low as 550 MiB for block and undo files, which StartOS uses by default on disks under 900 GB, compared to 600+ GB of blocks for an archival node. Actual usage can exceed the target: Bitcoin retains at least the most recent 288 blocks and prunes whole files. Both modes also keep the UTXO set.
 - **Same security** — Pruned nodes validate everything. They enforce the same consensus rules as archival nodes.
 
 **Trade-offs:**
@@ -62,7 +62,7 @@ The proxy answers over Bitcoin's RPC interface. Three things read the chain some
 
 ## Managing Pruning on StartOS
 
-Pruning is controlled from the Bitcoin service's Actions menu: **Services > Bitcoin > Actions > Other**. From there you can enable or disable pruning and set the prune target (the amount of block data to retain, in MB).
+Pruning is controlled from the Bitcoin service's Actions menu: **Services > Bitcoin > Actions > Other**. From there you can enable or disable pruning and set the prune target for block and undo files, in MiB.
 
 ### Automatic pruning on small disks
 
@@ -83,7 +83,7 @@ Choose an **archival node** if:
 | Feature                                | Archival            | Pruned (on StartOS)                |
 | -------------------------------------- | ------------------- | ---------------------------------- |
 | **Validates all blocks**               | Yes                 | Yes                                |
-| **Disk usage**                         | 600+ GB and growing | 5-10 GB (configurable)             |
+| **Block data**                         | 600+ GB and growing | ≥550 MiB target (configurable)     |
 | **LND, Core Lightning, BTCPay**        | Yes                 | Yes (via on-demand block fetching) |
 | **Multiple downstream services**       | Yes                 | Yes (via on-demand block fetching) |
 | **Electrum server (Fulcrum, electrs)** | Yes                 | No                                 |
