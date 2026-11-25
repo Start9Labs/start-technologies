@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
@@ -507,4 +509,143 @@ async fn a_slow_mirror_that_keeps_sending_completes_the_download() {
         .await
         .unwrap();
     asset.commitment.verify_file(&path).await.unwrap();
+}
+
+fn exits_with(code: u8) -> Command {
+    let mut sysupgrade = Command::new("sh");
+    sysupgrade.args(["-c", &format!("exit {code}")]);
+    sysupgrade
+}
+
+struct Pending {
+    _dir: tempfile::TempDir,
+    marker: std::path::PathBuf,
+    lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Pending {
+    fn new() -> (Self, OwnedMutexGuard<()>) {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("pending-update");
+        std::fs::write(&marker, "1.5.0").unwrap();
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let in_flight = lock.clone().try_lock_owned().unwrap();
+        (
+            Self {
+                _dir: dir,
+                marker,
+                lock,
+            },
+            in_flight,
+        )
+    }
+
+    fn assert_handed_off(&self, handed_off: bool) {
+        assert_eq!(self.marker.exists(), handed_off, "marker kept");
+        assert_eq!(self.lock.try_lock().is_err(), handed_off, "lock held");
+    }
+}
+
+fn stopping_after(delay: Duration) -> (CancellationToken, NonDetachingJoinHandle<()>) {
+    let shutdown = CancellationToken::new();
+    let stop = shutdown.clone();
+    let task = NonDetachingJoinHandle::from(tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        stop.cancel();
+    }));
+    (shutdown, task)
+}
+
+#[tokio::test]
+async fn a_lost_ubusd_during_shutdown_is_a_hand_off() {
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    let (pending, in_flight) = Pending::new();
+    run_sysupgrade(exits_with(246), &pending.marker, in_flight, &shutdown)
+        .await
+        .unwrap();
+    pending.assert_handed_off(true);
+
+    let (shutdown, _stop) = stopping_after(HANDOFF_GRACE / 4);
+    let (pending, in_flight) = Pending::new();
+    run_sysupgrade(exits_with(246), &pending.marker, in_flight, &shutdown)
+        .await
+        .unwrap();
+    pending.assert_handed_off(true);
+}
+
+#[tokio::test]
+async fn a_lost_ubusd_without_shutdown_is_reported_after_the_grace() {
+    let shutdown = CancellationToken::new();
+    let (pending, in_flight) = Pending::new();
+    let started = tokio::time::Instant::now();
+    let error = run_sysupgrade(exits_with(246), &pending.marker, in_flight, &shutdown)
+        .await
+        .unwrap_err();
+    assert!(started.elapsed() >= HANDOFF_GRACE);
+    assert!(
+        error
+            .to_string()
+            .contains("sysupgrade exited with code 246"),
+        "{error}"
+    );
+    pending.assert_handed_off(false);
+}
+
+#[tokio::test]
+async fn a_zero_exit_is_a_hand_off() {
+    let (pending, in_flight) = Pending::new();
+    let started = tokio::time::Instant::now();
+    run_sysupgrade(
+        exits_with(0),
+        &pending.marker,
+        in_flight,
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert!(started.elapsed() < HANDOFF_GRACE);
+    pending.assert_handed_off(true);
+}
+
+#[tokio::test]
+async fn a_sysupgrade_that_never_ran_fails_during_shutdown() {
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    let (pending, in_flight) = Pending::new();
+    let error = run_sysupgrade(
+        Command::new("/nonexistent/sysupgrade"),
+        &pending.marker,
+        in_flight,
+        &shutdown,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("spawning sysupgrade"), "{error}");
+    pending.assert_handed_off(false);
+}
+
+#[tokio::test]
+async fn a_rejection_is_reported_at_once_whatever_the_daemon_does() {
+    for code in [1, 248] {
+        let never = CancellationToken::new();
+        let stopped = CancellationToken::new();
+        stopped.cancel();
+        let (stopping, _stop) = stopping_after(HANDOFF_GRACE / 4);
+        for shutdown in [&never, &stopped, &stopping] {
+            let (pending, in_flight) = Pending::new();
+            let started = tokio::time::Instant::now();
+            let error = run_sysupgrade(exits_with(code), &pending.marker, in_flight, shutdown)
+                .await
+                .unwrap_err();
+            assert!(started.elapsed() < HANDOFF_GRACE);
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("sysupgrade exited with code {code}")),
+                "{error}"
+            );
+            pending.assert_handed_off(false);
+        }
+    }
 }

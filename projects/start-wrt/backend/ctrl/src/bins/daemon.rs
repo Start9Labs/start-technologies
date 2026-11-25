@@ -15,6 +15,7 @@ use startos::middleware::auth::session::RpcSessionUpgrader;
 use startos::net::tls::TlsListener;
 use startos::net::web_server::{Accept, Acceptor, DynAccept, MetadataVisitor, WebServer};
 use tokio::signal::unix::SignalKind;
+use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 use visit_rs::Visit;
 
@@ -135,9 +136,11 @@ async fn inner_main() -> Result<(), Error> {
     let continuations = Arc::new(RpcContinuations::new());
     let auth = Arc::new(crate::auth::AuthState::open().await?);
     let server_identity = auth.server_identity().await?;
+    let shutdown = CancellationToken::new();
     let ctx = ServerContext {
         setup_flash: Arc::new(tokio::sync::Mutex::new(())),
         system_update: Arc::new(tokio::sync::Mutex::new(())),
+        shutdown: shutdown.clone(),
         secure_session: None,
         continuations: continuations.clone(),
         auth,
@@ -455,6 +458,7 @@ async fn inner_main() -> Result<(), Error> {
         _ = sigterm.recv() => tracing::info!("received SIGTERM, shutting down"),
         _ = sigint.recv() => tracing::info!("received SIGINT, shutting down"),
     }
+    shutdown.cancel();
     if !setup_mode {
         crate::boot::record_stop();
     }
