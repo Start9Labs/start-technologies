@@ -8,6 +8,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
+use crate::mcp::{EFFECT, Effect};
 
 pub(crate) mod access;
 pub mod mounts;
@@ -277,12 +278,42 @@ pub(crate) fn access_denied() -> Error {
 
 pub fn handler<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("create", from_fn_async(create).no_cli())
-        .subcommand("rename", from_fn_async(rename).no_cli())
-        .subcommand("update-cifs", from_fn_async(update_cifs).no_cli())
-        .subcommand("set-grant", from_fn_async(set_grant).no_cli())
-        .subcommand("remove", from_fn_async(remove).no_cli())
-        .subcommand("inspect", from_fn_async(inspect).no_cli())
+        .subcommand(
+            "create",
+            from_fn_async(create)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "rename",
+            from_fn_async(rename)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "update-cifs",
+            from_fn_async(update_cifs)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "set-grant",
+            from_fn_async(set_grant)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "remove",
+            from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "inspect",
+            from_fn_async(inspect)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
 }
 
 #[derive(Deserialize, Serialize, VisitVariants)]

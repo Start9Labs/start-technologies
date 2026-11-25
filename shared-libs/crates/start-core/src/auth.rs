@@ -21,6 +21,7 @@ use tokio::io::AsyncWriteExt;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
+use crate::mcp::{EFFECT, Effect};
 use crate::middleware::auth::signature::{HasUnenrolledKeys, SignatureAuthorizationContext};
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RevocationSubscription};
@@ -339,6 +340,7 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
         .subcommand(
             "login",
             from_fn_async(login_impl::<AC>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("login", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .with_metadata("get_signer", Value::Bool(true))
@@ -355,6 +357,7 @@ pub fn auth<C: Context, AC: LoginContext, CC: IdKeyContext + CallRemote<AC>>() -
         .subcommand(
             "logout",
             from_fn_async(logout::<AC>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_display()
@@ -372,6 +375,7 @@ fn key<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add_key::<AC>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_display()
@@ -381,6 +385,7 @@ fn key<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove_key::<AC>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-authorized-key")
@@ -389,6 +394,7 @@ fn key<C: Context, AC: LoginContext, CC: CallRemote<AC>>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list_keys::<AC>)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
@@ -474,6 +480,7 @@ where
         .subcommand(
             "create",
             from_fn_async(create_token::<AC>)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
@@ -489,6 +496,7 @@ where
         .subcommand(
             "list",
             from_fn_async(list_tokens::<AC>)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     if let Some(format) = handle.params.format {
@@ -502,6 +510,7 @@ where
         .subcommand(
             "remove",
             from_fn_async(remove_tokens::<AC>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-auth-tokens")
                 .with_call_remote::<CliContext>(),

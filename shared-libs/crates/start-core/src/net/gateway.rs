@@ -35,6 +35,7 @@ use crate::db::model::public::{
     CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
+use crate::mcp::{EFFECT, Effect};
 use crate::net::dns::{OutboundDnsUpdate, validate_dns_update};
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
@@ -63,6 +64,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list_interfaces)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
                     use prettytable::*;
@@ -118,6 +120,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "forget",
             from_fn_async(forget_iface)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.forget-disconnected-gateway")
@@ -126,6 +129,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-name",
             from_fn_async(set_name)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.rename-gateway")
@@ -134,12 +138,14 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "edit",
             from_fn_async(edit_gateway)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(
             "set-secure",
             from_fn_async(set_secure)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.mark-gateway-network-secure")
@@ -148,6 +154,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "unset-secure",
             from_fn_async(unset_secure)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.allow-gateway-infer-network-security")
@@ -156,6 +163,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "check-port",
             from_fn_async(check_port)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.check-port-reachability")
                 .with_call_remote::<CliContext>(),
@@ -163,6 +171,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "check-port-v6",
             from_fn_async(check_port_v6)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.check-port-v6-reachability")
                 .with_call_remote::<CliContext>(),
@@ -170,6 +179,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "check-dns",
             from_fn_async(check_dns)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.check-dns-configuration")
                 .with_call_remote::<CliContext>(),
@@ -177,6 +187,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-default-outbound",
             from_fn_async(set_default_outbound)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-default-outbound-gateway")

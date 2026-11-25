@@ -5,6 +5,7 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, RpcContext};
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::registry::signer::{AcceptSigners, ContactInfo};
 use crate::sign::AnyVerifyingKey;
@@ -343,6 +344,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-trusted-keys")
                 .with_call_remote::<CliContext>(),
@@ -350,6 +352,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.add-trusted-key")
@@ -358,6 +361,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "update",
             from_fn_async(update)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.update-trusted-key")
@@ -366,6 +370,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-trusted-key")
@@ -374,6 +379,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove-many",
             from_fn_async(remove_many)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )

@@ -15,6 +15,7 @@ use web_push_native::{Auth, WebPushBuilder, p256};
 
 use crate::context::RpcContext;
 use crate::db::model::{Database, DatabaseModel};
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::util::new_guid;
 
@@ -87,25 +88,34 @@ pub(super) fn push<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "key",
             from_fn_async(key)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
-        .subcommand("list", from_fn_async(list).no_cli())
+        .subcommand(
+            "list",
+            from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .no_cli(),
+        )
         .subcommand(
             "subscribe",
             from_fn_async(subscribe)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(
             "unsubscribe",
             from_fn_async(unsubscribe)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(
             "test",
             from_fn_async(test)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )

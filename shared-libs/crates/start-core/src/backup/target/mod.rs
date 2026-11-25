@@ -22,6 +22,7 @@ use crate::disk::mount::filesystem::block_dev::BlockDev;
 use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::filesystem::{FileSystem, MountType, ReadWrite};
 use crate::disk::mount::guard::GenericMountGuard;
+use crate::mcp::{EFFECT, Effect};
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::util::serde::{
@@ -185,12 +186,42 @@ impl FileSystem for BackupTargetFS {
 
 pub fn target<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("create", from_fn_async(catalog::create).no_cli())
-        .subcommand("find", from_fn_async(catalog::find).no_cli())
-        .subcommand("rename", from_fn_async(catalog::rename).no_cli())
-        .subcommand("update-cifs", from_fn_async(catalog::update_cifs).no_cli())
-        .subcommand("remove", from_fn_async(catalog::remove).no_cli())
-        .subcommand("inspect", from_fn_async(catalog::inspect).no_cli())
+        .subcommand(
+            "create",
+            from_fn_async(catalog::create)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "find",
+            from_fn_async(catalog::find)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "rename",
+            from_fn_async(catalog::rename)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "update-cifs",
+            from_fn_async(catalog::update_cifs)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "remove",
+            from_fn_async(catalog::remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "inspect",
+            from_fn_async(catalog::inspect)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
         .subcommand(
             "cifs",
             cifs::cifs::<C>().with_about("about.add-remove-update-backup-target"),
@@ -198,13 +229,17 @@ pub fn target<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-existing-backup-targets")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "info",
-            from_fn_async(info).with_display_serializable().no_cli(),
+            from_fn_async(info)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .with_display_serializable()
+                .no_cli(),
         )
         .subcommand(
             "info",
@@ -216,8 +251,18 @@ pub fn target<C: Context>() -> ParentHandler<C> {
                 })
                 .with_about("about.display-package-backup-information"),
         )
-        .subcommand("convert", from_fn_async(conversion::start).no_cli())
-        .subcommand("mount", from_fn_async(mount).no_cli())
+        .subcommand(
+            "convert",
+            from_fn_async(conversion::start)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "mount",
+            from_fn_async(mount)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "mount",
             from_fn_async(cli_mount)
@@ -227,6 +272,7 @@ pub fn target<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "umount",
             from_fn_async(umount)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.unmount-backup-target")
                 .with_call_remote::<CliContext>(),
@@ -234,6 +280,7 @@ pub fn target<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "delete-legacy",
             from_fn_async(delete_legacy)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.delete-legacy-backup")
                 .with_call_remote::<CliContext>(),

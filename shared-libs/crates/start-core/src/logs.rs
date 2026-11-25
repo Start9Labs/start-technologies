@@ -28,6 +28,7 @@ use tracing::instrument;
 use crate::PackageId;
 use crate::context::{CliContext, RpcContext};
 use crate::error::ResultExt;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, WebSocket, WebSocketPolicy};
 use crate::util::serde::Reversible;
@@ -573,6 +574,7 @@ where
             }
         },
     )
+    .with_metadata(EFFECT, Effect::Read.into())
 }
 
 fn logs_follow<C: LogContext, Extra: FromArgMatches + Args + Send + Sync + 'static>(
@@ -620,6 +622,7 @@ fn logs_follow<C: LogContext, Extra: FromArgMatches + Args + Send + Sync + 'stat
         },
     )
     .with_metadata(crate::mcp::MCP, Value::Bool(false))
+    .with_metadata(EFFECT, Effect::Read.into())
     .with_metadata("get_signer", Value::Bool(true))
 }
 

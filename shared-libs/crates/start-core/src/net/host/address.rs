@@ -9,6 +9,7 @@ use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
 use crate::hostname::ServerHostname;
+use crate::mcp::{EFFECT, Effect};
 use crate::net::acme::{AcmeProvider, CheckChallengeParams, CheckChallengeRes, check_challenge};
 use crate::net::dns::QueryDnsRes;
 use crate::net::gateway::{
@@ -104,6 +105,7 @@ pub fn address_api<C: Context, Kind: HostApiKind>()
                         .subcommand(
                             "add",
                             from_fn_async(add_public_domain::<Kind>)
+                                .with_metadata(EFFECT, Effect::Destructive.into())
                                 .with_metadata("sync_db", Value::Bool(true))
                                 .with_inherited(|_, a| a)
                                 .no_display()
@@ -113,6 +115,7 @@ pub fn address_api<C: Context, Kind: HostApiKind>()
                         .subcommand(
                             "remove",
                             from_fn_async(remove_public_domain::<Kind>)
+                                .with_metadata(EFFECT, Effect::Destructive.into())
                                 .with_metadata("sync_db", Value::Bool(true))
                                 .with_inherited(|_, a| a)
                                 .no_display()
@@ -128,6 +131,7 @@ pub fn address_api<C: Context, Kind: HostApiKind>()
                         .subcommand(
                             "add",
                             from_fn_async(add_private_domain::<Kind>)
+                                .with_metadata(EFFECT, Effect::Destructive.into())
                                 .with_metadata("sync_db", Value::Bool(true))
                                 .with_inherited(|_, a| a)
                                 .no_display()
@@ -137,6 +141,7 @@ pub fn address_api<C: Context, Kind: HostApiKind>()
                         .subcommand(
                             "remove",
                             from_fn_async(remove_private_domain::<Kind>)
+                                .with_metadata(EFFECT, Effect::Destructive.into())
                                 .with_metadata("sync_db", Value::Bool(true))
                                 .with_inherited(|_, a| a)
                                 .no_display()
@@ -152,6 +157,7 @@ pub fn address_api<C: Context, Kind: HostApiKind>()
         .subcommand(
             "list",
             from_fn_async(list_addresses::<Kind>)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_inherited(Kind::inheritance)
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {

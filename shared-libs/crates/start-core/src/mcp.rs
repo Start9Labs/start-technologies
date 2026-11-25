@@ -23,6 +23,9 @@ use crate::prelude::*;
 /// Handler metadata key. `false` withholds the method from MCP clients.
 pub const MCP: &str = "mcp";
 
+/// Handler metadata key holding the method's worst-case [`Effect`]. Every cataloged method sets it.
+pub const EFFECT: &str = "effect";
+
 /// What a method does to the server. A read grant admits `Read` methods alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
@@ -33,225 +36,25 @@ pub enum Effect {
     /// code and shutdown count.
     Destructive,
 }
-
-/// Every cataloged method's worst-case effect.
-const EFFECTS: &[(&str, Effect)] = &[
-    ("auth.get-pubkey", Effect::Read),
-    ("auth.key.add", Effect::Destructive),
-    ("auth.key.list", Effect::Read),
-    ("auth.key.remove", Effect::Destructive),
-    ("auth.login", Effect::Destructive),
-    ("auth.logout", Effect::Destructive),
-    ("auth.reset-password", Effect::Destructive),
-    ("auth.token.create", Effect::Write),
-    ("auth.token.list", Effect::Read),
-    ("auth.token.remove", Effect::Destructive),
-    ("backup.create", Effect::Destructive),
-    ("backup.history.list", Effect::Read),
-    ("backup.target.cifs.add", Effect::Write),
-    ("backup.target.cifs.remove", Effect::Destructive),
-    ("backup.target.cifs.update", Effect::Destructive),
-    ("backup.target.convert", Effect::Destructive),
-    ("backup.target.create", Effect::Write),
-    ("backup.target.delete-legacy", Effect::Destructive),
-    ("backup.target.find", Effect::Write),
-    ("backup.target.info", Effect::Destructive),
-    ("backup.target.inspect", Effect::Write),
-    ("backup.target.list", Effect::Read),
-    ("backup.target.mount", Effect::Destructive),
-    ("backup.target.remove", Effect::Destructive),
-    ("backup.target.rename", Effect::Destructive),
-    ("backup.target.umount", Effect::Write),
-    ("backup.target.update-cifs", Effect::Destructive),
-    ("backup.volume.restore", Effect::Destructive),
-    ("db.apply", Effect::Destructive),
-    ("db.dump", Effect::Read),
-    ("db.put.ui", Effect::Destructive),
-    ("db.subscribe", Effect::Read),
-    ("diagnostic.disk.forget", Effect::Destructive),
-    ("diagnostic.disk.repair", Effect::Destructive),
-    ("disk.format", Effect::Destructive),
-    ("disk.repair", Effect::Destructive),
-    ("echo", Effect::Read),
-    ("git-info", Effect::Read),
-    ("kiosk.disable", Effect::Write),
-    ("kiosk.enable", Effect::Write),
-    ("net.acme.check-challenge", Effect::Read),
-    ("net.acme.init", Effect::Destructive),
-    ("net.acme.remove", Effect::Destructive),
-    ("net.dns.dump-table", Effect::Read),
-    ("net.dns.query", Effect::Read),
-    ("net.dns.set-static", Effect::Destructive),
-    ("net.dns.status", Effect::Read),
-    ("net.forward.dump-table", Effect::Read),
-    ("net.gateway.check-dns", Effect::Read),
-    ("net.gateway.check-port", Effect::Read),
-    ("net.gateway.check-port-v6", Effect::Read),
-    ("net.gateway.edit", Effect::Destructive),
-    ("net.gateway.forget", Effect::Destructive),
-    ("net.gateway.list", Effect::Read),
-    ("net.gateway.set-default-outbound", Effect::Destructive),
-    ("net.gateway.set-name", Effect::Destructive),
-    ("net.gateway.set-secure", Effect::Destructive),
-    ("net.gateway.unset-secure", Effect::Destructive),
-    ("net.ssl.generate-certificate", Effect::Write),
-    ("net.tunnel.add", Effect::Destructive),
-    ("net.tunnel.remove", Effect::Destructive),
-    ("net.tunnel.update", Effect::Destructive),
-    ("net.vhost.add-passthrough", Effect::Destructive),
-    ("net.vhost.dump-table", Effect::Read),
-    ("net.vhost.list-passthrough", Effect::Read),
-    ("net.vhost.remove-passthrough", Effect::Destructive),
-    ("notification.create", Effect::Destructive),
-    ("notification.list", Effect::Read),
-    ("notification.mark-seen", Effect::Write),
-    ("notification.mark-seen-before", Effect::Destructive),
-    ("notification.mark-unseen", Effect::Write),
-    ("notification.push.key", Effect::Write),
-    ("notification.push.list", Effect::Read),
-    ("notification.push.subscribe", Effect::Destructive),
-    ("notification.push.test", Effect::Destructive),
-    ("notification.push.unsubscribe", Effect::Destructive),
-    ("notification.remove", Effect::Destructive),
-    ("notification.remove-before", Effect::Destructive),
-    ("package.action.clear-task", Effect::Destructive),
-    ("package.action.get-input", Effect::Destructive),
-    ("package.action.run", Effect::Destructive),
-    ("package.attach", Effect::Destructive),
-    ("package.backup.restore", Effect::Destructive),
-    ("package.cancel-install", Effect::Destructive),
-    ("package.exec", Effect::Destructive),
-    (
-        "package.host.address.domain.private.add",
-        Effect::Destructive,
-    ),
-    (
-        "package.host.address.domain.private.remove",
-        Effect::Destructive,
-    ),
-    (
-        "package.host.address.domain.public.add",
-        Effect::Destructive,
-    ),
-    (
-        "package.host.address.domain.public.remove",
-        Effect::Destructive,
-    ),
-    ("package.host.address.list", Effect::Read),
-    ("package.host.binding.list", Effect::Read),
-    ("package.host.binding.reassign-port", Effect::Destructive),
-    (
-        "package.host.binding.set-address-enabled",
-        Effect::Destructive,
-    ),
-    ("package.host.binding.set-gua-wan", Effect::Destructive),
-    (
-        "package.host.binding.set-range-address-enabled",
-        Effect::Destructive,
-    ),
-    ("package.host.list", Effect::Read),
-    ("package.install", Effect::Destructive),
-    ("package.installed-version", Effect::Read),
-    ("package.list", Effect::Read),
-    ("package.logs", Effect::Read),
-    ("package.logs.follow", Effect::Read),
-    ("package.rebuild", Effect::Destructive),
-    ("package.restart", Effect::Write),
-    ("package.set-outbound-gateway", Effect::Destructive),
-    ("package.sideload", Effect::Destructive),
-    ("package.start", Effect::Write),
-    ("package.stats", Effect::Read),
-    ("package.stop", Effect::Write),
-    ("package.uninstall", Effect::Destructive),
-    ("server.clear-nut", Effect::Destructive),
-    ("server.clear-smtp", Effect::Destructive),
-    ("server.device-info", Effect::Read),
-    ("server.epp", Effect::Destructive),
-    ("server.experimental.zram", Effect::Write),
-    ("server.governor", Effect::Destructive),
-    (
-        "server.host.address.domain.private.add",
-        Effect::Destructive,
-    ),
-    (
-        "server.host.address.domain.private.remove",
-        Effect::Destructive,
-    ),
-    ("server.host.address.domain.public.add", Effect::Destructive),
-    (
-        "server.host.address.domain.public.remove",
-        Effect::Destructive,
-    ),
-    ("server.host.address.list", Effect::Read),
-    ("server.host.binding.list", Effect::Read),
-    ("server.host.binding.reassign-port", Effect::Destructive),
-    (
-        "server.host.binding.set-address-enabled",
-        Effect::Destructive,
-    ),
-    ("server.host.binding.set-gua-wan", Effect::Destructive),
-    (
-        "server.host.binding.set-range-address-enabled",
-        Effect::Destructive,
-    ),
-    ("server.kernel-logs", Effect::Read),
-    ("server.kernel-logs.follow", Effect::Read),
-    ("server.logs", Effect::Read),
-    ("server.logs.follow", Effect::Read),
-    ("server.metrics", Effect::Read),
-    ("server.metrics.follow", Effect::Read),
-    ("server.nut-list-ups", Effect::Read),
-    ("server.nut-scan", Effect::Read),
-    ("server.nut-status", Effect::Read),
-    ("server.rebuild", Effect::Write),
-    ("server.registries.add", Effect::Destructive),
-    ("server.registries.list", Effect::Read),
-    ("server.registries.refresh", Effect::Destructive),
-    ("server.registries.remove", Effect::Destructive),
-    ("server.registries.set-os", Effect::Destructive),
-    ("server.restart", Effect::Write),
-    ("server.set-echoip-urls", Effect::Destructive),
-    ("server.set-hostname", Effect::Destructive),
-    ("server.set-keyboard", Effect::Destructive),
-    ("server.set-language", Effect::Destructive),
-    ("server.set-log-level", Effect::Write),
-    ("server.set-nut", Effect::Destructive),
-    ("server.set-smtp", Effect::Destructive),
-    ("server.shutdown", Effect::Destructive),
-    ("server.test-smtp", Effect::Write),
-    ("server.time", Effect::Read),
-    ("server.trust-ca", Effect::Write),
-    ("server.trusted-keys.add", Effect::Write),
-    ("server.trusted-keys.list", Effect::Read),
-    ("server.trusted-keys.remove", Effect::Destructive),
-    ("server.trusted-keys.remove-many", Effect::Destructive),
-    ("server.trusted-keys.update", Effect::Destructive),
-    ("server.update", Effect::Destructive),
-    ("server.update-firmware", Effect::Destructive),
-    ("ssh.add", Effect::Destructive),
-    ("ssh.list", Effect::Read),
-    ("ssh.remove", Effect::Destructive),
-    ("state", Effect::Read),
-    ("volumes.create", Effect::Write),
-    ("volumes.inspect", Effect::Write),
-    ("volumes.remove", Effect::Destructive),
-    ("volumes.rename", Effect::Destructive),
-    ("volumes.set-grant", Effect::Destructive),
-    ("volumes.update-cifs", Effect::Destructive),
-    ("wifi.add", Effect::Destructive),
-    ("wifi.available.get", Effect::Read),
-    ("wifi.connect", Effect::Write),
-    ("wifi.country.set", Effect::Destructive),
-    ("wifi.get", Effect::Read),
-    ("wifi.remove", Effect::Destructive),
-    ("wifi.set-enabled", Effect::Write),
-];
-
-pub fn effect(method: &str) -> Option<Effect> {
-    EFFECTS
-        .iter()
-        .find(|(name, _)| *name == method)
-        .map(|(_, effect)| *effect)
+impl Effect {
+    const ALL: [Self; 3] = [Self::Read, Self::Write, Self::Destructive];
+    fn name(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Destructive => "destructive",
+        }
+    }
+    /// `None` for a handler without a recognized [`EFFECT`].
+    pub fn of(metadata: &OrdMap<&'static str, Value>) -> Option<Self> {
+        let name = metadata.get(EFFECT)?.as_str()?;
+        Self::ALL.into_iter().find(|effect| effect.name() == name)
+    }
+}
+impl From<Effect> for Value {
+    fn from(effect: Effect) -> Self {
+        Value::from(effect.name())
+    }
 }
 
 /// Generated by `make start-core-mcp-tools`.
@@ -264,10 +67,10 @@ impl ToolPolicy for StartOsTools {
     }
     fn annotations(
         &self,
-        method: &str,
-        _: &OrdMap<&'static str, Value>,
+        _: &str,
+        metadata: &OrdMap<&'static str, Value>,
     ) -> Option<ToolAnnotations> {
-        effect(method).map(|effect| match effect {
+        Effect::of(metadata).map(|effect| match effect {
             Effect::Read => ToolAnnotations::new().read_only(true),
             Effect::Write => ToolAnnotations::new().read_only(false).destructive(false),
             Effect::Destructive => ToolAnnotations::new().read_only(false).destructive(true),
@@ -357,8 +160,8 @@ pub fn router(ctx: RpcContext, http: HttpServer<RpcContext>) -> Result<Router, E
 
 #[cfg(test)]
 mod test {
-    use rpc_toolkit::Server;
     use rpc_toolkit::mcp::rmcp::ServerHandler;
+    use rpc_toolkit::{HandlerFor, Server};
 
     use super::*;
 
@@ -414,18 +217,17 @@ mod test {
     }
 
     #[test]
-    fn every_cataloged_method_has_one_effect() {
+    fn every_cataloged_method_has_an_effect() {
+        let api = crate::main_api::<RpcContext>();
         let catalog: Vec<Tool> = serde_json::from_str(CATALOG).unwrap();
-        let names: std::collections::BTreeSet<_> =
-            catalog.iter().map(|tool| tool.name.to_string()).collect();
-        let classified: std::collections::BTreeSet<_> =
-            EFFECTS.iter().map(|(name, _)| name.to_string()).collect();
-        assert_eq!(
-            classified.len(),
-            EFFECTS.len(),
-            "a method is classified twice"
-        );
-        assert_eq!(names, classified);
+        for tool in catalog {
+            let method = api.method_from_dots(&tool.name).unwrap();
+            assert!(
+                Effect::of(&api.metadata(method)).is_some(),
+                "{} has no effect",
+                tool.name
+            );
+        }
     }
 
     #[test]
