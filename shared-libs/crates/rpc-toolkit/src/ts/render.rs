@@ -39,6 +39,7 @@ impl Target {
 struct Rendered {
     expr: Expr,
     option: bool,
+    default: Option<&'static str>,
     recursive: bool,
     edges: Vec<Edge>,
 }
@@ -349,28 +350,36 @@ impl TSVisitor {
 
     fn render_type(&mut self, hints: &Hints, callback: Callback) -> Rendered {
         self.errors.extend(hints.errors.iter().cloned());
-        let (expr, option, recursive, edges) = match &hints.literal {
+        let (expr, option, default, recursive, edges) = match &hints.literal {
             Some(literal) => {
-                let (_, option, recursive, edges) =
+                let (_, option, _, recursive, edges) =
                     self.capture_field(|visitor| visitor.with_suppressed_types(callback));
-                (self.literal(literal), option, recursive, edges)
+                (self.literal(literal), option, None, recursive, edges)
             }
             None => self.capture_field(callback),
         };
         Rendered {
             expr,
             option,
+            default,
             recursive,
             edges,
         }
     }
 
-    fn optionality(&mut self, expr: Expr, input: bool, output: bool) -> Expr {
-        match (input, output) {
-            (false, false) => expr,
-            (true, true) => expr.optional(),
-            (true, false) => self.wired(expr.clone().optional(), expr),
-            (false, true) => self.wired(expr.clone(), expr.optional()),
+    fn optionality(
+        &mut self,
+        expr: Expr,
+        input: bool,
+        output: bool,
+        default: Option<&str>,
+    ) -> Expr {
+        match (input, output, default) {
+            (false, false, _) => expr,
+            (true, true, _) => expr.optional(),
+            (true, false, Some(default)) => expr.defaulted(default),
+            (true, false, None) => self.wired(expr.clone().optional(), expr),
+            (false, true, _) => self.wired(expr.clone(), expr.optional()),
         }
     }
 
@@ -478,7 +487,14 @@ impl TSVisitor {
                         intersections.push(Self::flattened(field, &plan.field.docs));
                         continue;
                     }
-                    let expr = self.optionality(field.expr, in_opt, out_opt);
+                    let fills = plan.field.type_default
+                        || (field.option && plan.field.option_default && !plan.field.optional);
+                    let default = if plan.target.is_none() && fills {
+                        field.default
+                    } else {
+                        None
+                    };
+                    let expr = self.optionality(field.expr, in_opt, out_opt, default);
                     properties.push(Property {
                         recursive,
                         ..property(&plan.field.name, &plan.field.docs, expr)

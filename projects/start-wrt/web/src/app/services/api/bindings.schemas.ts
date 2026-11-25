@@ -29,17 +29,17 @@ export const ActivityEntry: z.ZodObject<{
   id: 'ActivityEntry',
 })
 export const ActivityListParams: z.ZodObject<{
-  offset: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  limit: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  offset: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+  limit: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
-  offset: wire(z.int().nullable().optional(), z.int().nullable()),
-  limit: wire(z.int().nullable().optional(), z.int().nullable()),
+  offset: z
+    .int()
+    .nullable()
+    .default(() => null),
+  limit: z
+    .int()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'ActivityListParams',
 })
@@ -79,17 +79,11 @@ export const AutomaticPortUse: z.ZodObject<{
    */
   kind: z.ZodString
   device_mac: z.ZodString
-  device_name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  device_name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Forward target address on the LAN.
    */
-  internal_ip: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  internal_ip: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Internal port (or range).
    */
@@ -102,17 +96,11 @@ export const AutomaticPortUse: z.ZodObject<{
    * Seconds until the lease expires if not renewed (None when the daemon
    * isn't tracking it yet, e.g. right after boot).
    */
-  expires_secs: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  expires_secs: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   /**
    * Hostname for an SNI route; absent for plain forwards.
    */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  hostname: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * UCI section name (`apf_<mac>_<extport>`).
@@ -127,16 +115,20 @@ export const AutomaticPortUse: z.ZodObject<{
     description: 'Which mechanism created it ("PCP", "UPnP", or "SNI").',
   }),
   device_mac: z.string(),
-  device_name: wire(z.string().nullable().optional(), z.string().nullable()),
+  device_name: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Forward target address on the LAN.
    */
-  internal_ip: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description: 'Forward target address on the LAN.',
-  }),
+  internal_ip: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Forward target address on the LAN.',
+    }),
   /**
    * Internal port (or range).
    */
@@ -153,16 +145,24 @@ export const AutomaticPortUse: z.ZodObject<{
    * Seconds until the lease expires if not renewed (None when the daemon
    * isn't tracking it yet, e.g. right after boot).
    */
-  expires_secs: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      "Seconds until the lease expires if not renewed (None when the daemon\nisn't tracking it yet, e.g. right after boot).",
-  }),
+  expires_secs: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Seconds until the lease expires if not renewed (None when the daemon\nisn't tracking it yet, e.g. right after boot).",
+    }),
   /**
    * Hostname for an SNI route; absent for plain forwards.
    */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Hostname for an SNI route; absent for plain forwards.',
-  }),
+  hostname: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Hostname for an SNI route; absent for plain forwards.',
+    }),
 }).meta({
   id: 'AutomaticPortUse',
   description: 'One automatic port use for the published-ports UI.',
@@ -172,12 +172,12 @@ export const BackupCreateParams: z.ZodObject<{ password: z.ZodString }> =
     id: 'BackupCreateParams',
   })
 export const BackupRestoreParams: z.ZodObject<{
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'BackupRestoreParams',
 })
@@ -340,29 +340,29 @@ export const DeletedPublishedPort: z.ZodObject<{
   id: z.ZodString
   label: z.ZodString
   mac: z.ZodString
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: z.string(),
   label: z.string(),
   mac: z.string(),
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'DeletedPublishedPort',
   description: 'A published port deleted with the profile it forwards into.',
 })
 export const DeletedReservation: z.ZodObject<{
   mac: z.ZodString
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   ipv4: z.ZodString
 }> = /* @__PURE__ */ object({
   mac: z.string(),
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
   ipv4: z.string(),
 }).meta({
   id: 'DeletedReservation',
@@ -374,14 +374,14 @@ export const DeletedReservation: z.ZodObject<{
  */
 export const DeviceLeavingProfile: z.ZodObject<{
   mac: z.ZodString
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   profile: z.ZodString
 }> = /* @__PURE__ */ object({
   mac: z.string(),
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
   profile: z.string(),
 }).meta({
   id: 'DeviceLeavingProfile',
@@ -402,10 +402,7 @@ export const DeviceUpdateReq: z.ZodObject<{
    * Absent leaves the assigned name untouched; empty clears it. Otherwise
    * it must pass [`validate_device_name`].
    */
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * On: `ipv4` becomes the reservation in the profile whose subnet holds it.
    * Off: the reservation `ipv4` names is deleted; with `ipv4` empty, the one
@@ -416,20 +413,21 @@ export const DeviceUpdateReq: z.ZodObject<{
   /**
    * Reservations to delete, by address.
    */
-  remove_ipv4_reservations: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
+  remove_ipv4_reservations: z.ZodDefault<z.ZodArray<z.ZodString>>
 }> = /* @__PURE__ */ object({
   mac: z.string(),
   /**
    * Absent leaves the assigned name untouched; empty clears it. Otherwise
    * it must pass [`validate_device_name`].
    */
-  name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Absent leaves the assigned name untouched; empty clears it. Otherwise\nit must pass [`validate_device_name`].',
-  }),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Absent leaves the assigned name untouched; empty clears it. Otherwise\nit must pass [`validate_device_name`].',
+    }),
   /**
    * On: `ipv4` becomes the reservation in the profile whose subnet holds it.
    * Off: the reservation `ipv4` names is deleted; with `ipv4` empty, the one
@@ -443,12 +441,12 @@ export const DeviceUpdateReq: z.ZodObject<{
   /**
    * Reservations to delete, by address.
    */
-  remove_ipv4_reservations: wire(
-    z.array(z.string()).optional(),
-    z.array(z.string()),
-  ).meta({
-    description: 'Reservations to delete, by address.',
-  }),
+  remove_ipv4_reservations: z
+    .array(z.string())
+    .default(() => [])
+    .meta({
+      description: 'Reservations to delete, by address.',
+    }),
 }).meta({
   id: 'DeviceUpdateReq',
 })
@@ -603,38 +601,23 @@ export const InjectedDnsRecord: z.ZodObject<{
   /**
    * The injecting device's address, when known.
    */
-  source: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  source: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Owning LAN device MAC (uppercase); absent for a WireGuard peer.
    */
-  owner_mac: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  owner_mac: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Owning inbound-VPN peer public key; absent for a LAN device.
    */
-  owner_peer: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  owner_peer: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Display name of the owning LAN device, when one is known.
    */
-  device_name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  device_name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Profile interface whose subnet the record was injected from.
    */
-  profile: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  profile: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   rtype: z.string(),
@@ -643,42 +626,56 @@ export const InjectedDnsRecord: z.ZodObject<{
   /**
    * The injecting device's address, when known.
    */
-  source: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: "The injecting device's address, when known.",
-  }),
+  source: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: "The injecting device's address, when known.",
+    }),
   /**
    * Owning LAN device MAC (uppercase); absent for a WireGuard peer.
    */
-  owner_mac: wire(z.string().nullable().optional(), z.string().nullable()).meta(
-    {
+  owner_mac: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
       description:
         'Owning LAN device MAC (uppercase); absent for a WireGuard peer.',
-    },
-  ),
+    }),
   /**
    * Owning inbound-VPN peer public key; absent for a LAN device.
    */
-  owner_peer: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description: 'Owning inbound-VPN peer public key; absent for a LAN device.',
-  }),
+  owner_peer: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Owning inbound-VPN peer public key; absent for a LAN device.',
+    }),
   /**
    * Display name of the owning LAN device, when one is known.
    */
-  device_name: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description: 'Display name of the owning LAN device, when one is known.',
-  }),
+  device_name: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Display name of the owning LAN device, when one is known.',
+    }),
   /**
    * Profile interface whose subnet the record was injected from.
    */
-  profile: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Profile interface whose subnet the record was injected from.',
-  }),
+  profile: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Profile interface whose subnet the record was injected from.',
+    }),
 }).meta({
   id: 'InjectedDnsRecord',
 })
@@ -699,10 +696,7 @@ export const Ipv4Reservation: z.ZodObject<{
   /**
    * The profile whose subnet holds it; `None` when no profile's does.
    */
-  profile: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  profile: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * DHCP gives it to the device on the profile it is on.
    */
@@ -712,10 +706,14 @@ export const Ipv4Reservation: z.ZodObject<{
   /**
    * The profile whose subnet holds it; `None` when no profile's does.
    */
-  profile: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "The profile whose subnet holds it; `None` when no profile's does.",
-  }),
+  profile: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "The profile whose subnet holds it; `None` when no profile's does.",
+    }),
   /**
    * DHCP gives it to the device on the profile it is on.
    */
@@ -736,16 +734,19 @@ export const LanIpv4SetRequest: z.ZodObject<{
   /**
    * When true, forcibly delete VPN peers that would break due to block change.
    */
-  force: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  force: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   address: z.string(),
   /**
    * When true, forcibly delete VPN peers that would break due to block change.
    */
-  force: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'When true, forcibly delete VPN peers that would break due to block change.',
-  }),
+  force: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'When true, forcibly delete VPN peers that would break due to block change.',
+    }),
 }).meta({
   id: 'LanIpv4SetRequest',
 })
@@ -760,17 +761,11 @@ export const LanIpv6Response: z.ZodObject<{
   /**
    * Current IPv6 address (if assigned)
    */
-  ip6addr: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ip6addr: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Length of the global prefix the ISP delegated; null without one.
    */
-  delegated_prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  delegated_prefix: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   slaac: z.boolean(),
   dhcpv6: z.boolean(),
@@ -785,19 +780,24 @@ export const LanIpv6Response: z.ZodObject<{
   /**
    * Current IPv6 address (if assigned)
    */
-  ip6addr: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Current IPv6 address (if assigned)',
-  }),
+  ip6addr: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Current IPv6 address (if assigned)',
+    }),
   /**
    * Length of the global prefix the ISP delegated; null without one.
    */
-  delegated_prefix: wire(
-    z.int().nullable().optional(),
-    z.int().nullable(),
-  ).meta({
-    description:
-      'Length of the global prefix the ISP delegated; null without one.',
-  }),
+  delegated_prefix: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Length of the global prefix the ISP delegated; null without one.',
+    }),
 }).meta({
   id: 'LanIpv6Response',
 })
@@ -807,19 +807,20 @@ export const LanIpv6SetRequest: z.ZodObject<{
   /**
    * Absent keeps the configured prefix length.
    */
-  prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  prefix: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   slaac: z.boolean(),
   dhcpv6: z.boolean(),
   /**
    * Absent keeps the configured prefix length.
    */
-  prefix: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description: 'Absent keeps the configured prefix length.',
-  }),
+  prefix: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Absent keeps the configured prefix length.',
+    }),
 }).meta({
   id: 'LanIpv6SetRequest',
 })
@@ -852,10 +853,7 @@ export const OutboundVpnCreateRequest: z.ZodObject<{
   /**
    * Replaces the config's `DNS =` servers. Absent keeps them.
    */
-  dns: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
+  dns: z.ZodDefault<z.ZodNullable<z.ZodArray<z.ZodString>>>
 }> = /* @__PURE__ */ object({
   label: z.string(),
   target: z.string(),
@@ -868,12 +866,13 @@ export const OutboundVpnCreateRequest: z.ZodObject<{
   /**
    * Replaces the config's `DNS =` servers. Absent keeps them.
    */
-  dns: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ).meta({
-    description: "Replaces the config's `DNS =` servers. Absent keeps them.",
-  }),
+  dns: z
+    .array(z.string())
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: "Replaces the config's `DNS =` servers. Absent keeps them.",
+    }),
 }).meta({
   id: 'OutboundVpnCreateRequest',
 })
@@ -909,17 +908,11 @@ export const OutboundVpnUpdateRequest: z.ZodObject<{
    * Desired interface MTU. `None` (or absent) restores the default: the
    * chain MTU for a VPN connecting through another, else the kernel's.
    */
-  mtu: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  mtu: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   /**
    * Replaces the resolvers reached through the tunnel. Absent keeps them.
    */
-  dns: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
+  dns: z.ZodDefault<z.ZodNullable<z.ZodArray<z.ZodString>>>
 }> = /* @__PURE__ */ object({
   id: z.string(),
   label: z.string(),
@@ -928,20 +921,25 @@ export const OutboundVpnUpdateRequest: z.ZodObject<{
    * Desired interface MTU. `None` (or absent) restores the default: the
    * chain MTU for a VPN connecting through another, else the kernel's.
    */
-  mtu: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      "Desired interface MTU. `None` (or absent) restores the default: the\nchain MTU for a VPN connecting through another, else the kernel's.",
-  }),
+  mtu: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Desired interface MTU. `None` (or absent) restores the default: the\nchain MTU for a VPN connecting through another, else the kernel's.",
+    }),
   /**
    * Replaces the resolvers reached through the tunnel. Absent keeps them.
    */
-  dns: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ).meta({
-    description:
-      'Replaces the resolvers reached through the tunnel. Absent keeps them.',
-  }),
+  dns: z
+    .array(z.string())
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Replaces the resolvers reached through the tunnel. Absent keeps them.',
+    }),
 }).meta({
   id: 'OutboundVpnUpdateRequest',
 })
@@ -1093,22 +1091,22 @@ export const ProfileId: z.ZodObject<{
   id: 'ProfileId',
 })
 export const ProfileIdOpt: z.ZodObject<{
-  fullname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  interface: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  vlan_tag: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  fullname: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  interface: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  vlan_tag: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
-  fullname: wire(z.string().nullable().optional(), z.string().nullable()),
-  interface: wire(z.string().nullable().optional(), z.string().nullable()),
-  vlan_tag: wire(z.int().nullable().optional(), z.int().nullable()),
+  fullname: z
+    .string()
+    .nullable()
+    .default(() => null),
+  interface: z
+    .string()
+    .nullable()
+    .default(() => null),
+  vlan_tag: z
+    .int()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'ProfileIdOpt',
 })
@@ -1195,15 +1193,15 @@ export const ScheduleWindow: z.ZodObject<{
 })
 export const Section: z.ZodObject<{
   ty: z.ZodString
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   options: z.ZodRecord<z.ZodString, z.ZodString>
   lists: z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
 }> = /* @__PURE__ */ object({
   ty: z.string(),
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
   options: z.record(z.string(), z.string()),
   lists: z.record(z.string(), z.array(z.string())),
 }).meta({
@@ -1214,28 +1212,29 @@ export const Session: z.ZodObject<{
    * A friendly name for the key, if one was assigned at enrollment (e.g.
    * tunnel device keys). UI-enrolled keys are unnamed.
    */
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   loggedIn: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
   lastActive: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
-  userAgent: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  userAgent: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * A friendly name for the key, if one was assigned at enrollment (e.g.
    * tunnel device keys). UI-enrolled keys are unnamed.
    */
-  name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
-  }),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
+    }),
   loggedIn: wire(z.string().optional(), z.string()),
   lastActive: wire(z.string().optional(), z.string()),
-  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'Session',
 })
@@ -1254,34 +1253,34 @@ export const SetDnsInjectionReq: z.ZodObject<{
 export const SetFileArgs: z.ZodObject<{
   path: z.ZodString
   contents: z.ZodString
-  modified: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  modified: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   path: z.string(),
   contents: z.string(),
-  modified: wire(z.string().nullable().optional(), z.string().nullable()),
+  modified: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'SetFileArgs',
 })
 export const SetPreferencesReq: z.ZodObject<{
-  language: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  theme: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  remoteAccess: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  language: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  theme: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  remoteAccess: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  language: wire(z.string().nullable().optional(), z.string().nullable()),
-  theme: wire(z.string().nullable().optional(), z.string().nullable()),
-  remoteAccess: wire(z.string().nullable().optional(), z.string().nullable()),
+  language: z
+    .string()
+    .nullable()
+    .default(() => null),
+  theme: z
+    .string()
+    .nullable()
+    .default(() => null),
+  remoteAccess: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'SetPreferencesReq',
 })
@@ -1420,32 +1419,32 @@ export const SystemInfoResponse: z.ZodObject<{
   id: 'SystemInfoResponse',
 })
 export const UpdateSystemParams: z.ZodObject<{
-  registry: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  targetVersion: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  registry: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  targetVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  registry: wire(z.string().nullable().optional(), z.string().nullable()),
-  targetVersion: wire(z.string().nullable().optional(), z.string().nullable()),
+  registry: z
+    .string()
+    .nullable()
+    .default(() => null),
+  targetVersion: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'UpdateSystemParams',
 })
 export const UpdateSystemRes: z.ZodObject<{
-  target: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  progress: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  target: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  progress: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  target: wire(z.string().nullable().optional(), z.string().nullable()),
-  progress: wire(z.string().nullable().optional(), z.string().nullable()),
+  target: z
+    .string()
+    .nullable()
+    .default(() => null),
+  progress: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'UpdateSystemRes',
 })
@@ -1677,10 +1676,7 @@ export const WifiRadio: z.ZodObject<{
    * Channel width in MHz. Null when the radio's mode sets none; null on
    * `set` keeps the current width.
    */
-  width: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  width: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   enabled: z.ZodBoolean
   broadcast: z.ZodBoolean
 }> = /* @__PURE__ */ object({
@@ -1690,10 +1686,14 @@ export const WifiRadio: z.ZodObject<{
    * Channel width in MHz. Null when the radio's mode sets none; null on
    * `set` keeps the current width.
    */
-  width: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      "Channel width in MHz. Null when the radio's mode sets none; null on\n`set` keeps the current width.",
-  }),
+  width: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Channel width in MHz. Null when the radio's mode sets none; null on\n`set` keeps the current width.",
+    }),
   enabled: z.boolean(),
   broadcast: z.boolean(),
 }).meta({
@@ -1710,18 +1710,18 @@ export const ActivityListResponse: z.ZodObject<{
 })
 export const AddKeyParams: z.ZodObject<{
   key: typeof AnyVerifyingKey
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  userAgent: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  userAgent: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   key: AnyVerifyingKey,
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  userAgent: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'AddKeyParams',
 })
@@ -1779,26 +1779,11 @@ export const ConfigFinding: z.ZodObject<{
   /**
    * One-based.
    */
-  line: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  section: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  sectionType: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  option: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  found: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  line: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+  section: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  sectionType: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  option: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  found: z.ZodDefault<z.ZodNullable<z.ZodString>>
   problem: typeof ConfigProblem
   /**
    * Shown beside the page's settings rather than in their place.
@@ -1807,10 +1792,7 @@ export const ConfigFinding: z.ZodObject<{
   /**
    * The parser's explanation, in English.
    */
-  detail: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  detail: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * Pages that cannot represent it.
@@ -1827,13 +1809,29 @@ export const ConfigFinding: z.ZodObject<{
   /**
    * One-based.
    */
-  line: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description: 'One-based.',
-  }),
-  section: wire(z.string().nullable().optional(), z.string().nullable()),
-  sectionType: wire(z.string().nullable().optional(), z.string().nullable()),
-  option: wire(z.string().nullable().optional(), z.string().nullable()),
-  found: wire(z.string().nullable().optional(), z.string().nullable()),
+  line: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'One-based.',
+    }),
+  section: z
+    .string()
+    .nullable()
+    .default(() => null),
+  sectionType: z
+    .string()
+    .nullable()
+    .default(() => null),
+  option: z
+    .string()
+    .nullable()
+    .default(() => null),
+  found: z
+    .string()
+    .nullable()
+    .default(() => null),
   problem: ConfigProblem,
   /**
    * Shown beside the page's settings rather than in their place.
@@ -1844,9 +1842,13 @@ export const ConfigFinding: z.ZodObject<{
   /**
    * The parser's explanation, in English.
    */
-  detail: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: "The parser's explanation, in English.",
-  }),
+  detail: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: "The parser's explanation, in English.",
+    }),
 }).meta({
   id: 'ConfigFinding',
 })
@@ -1857,10 +1859,7 @@ export const DataUsageReq: z.ZodObject<{
   id: 'DataUsageReq',
 })
 export const Device: z.ZodObject<{
-  mac: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  mac: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Fully-resolved display name: UCI static name → live DHCP hostname →
    * remembered hostname (cache) → `device-<mac>` placeholder.
@@ -1870,33 +1869,18 @@ export const Device: z.ZodObject<{
    * The UCI static name; `None` when `name` is resolved from elsewhere.
    * What the rename form edits.
    */
-  custom_name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  custom_name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Raw DHCP lease hostname (may be "*").
    */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  hostname: z.ZodDefault<z.ZodNullable<z.ZodString>>
   status: typeof DeviceStatus
-  connection: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  connection: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * The reservation DHCP applies, otherwise the live address.
    */
-  ipv4: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ipv6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ipv4: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ipv6: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * `ipv4` is a reservation DHCP applies.
    */
@@ -1908,10 +1892,7 @@ export const Device: z.ZodObject<{
   /**
    * The router's address on the device's profile, with its prefix length.
    */
-  profile_network: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  profile_network: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Whether this device may auto-create port forwards via PCP/UPnP
    * (default off; set via `devices set-auto-forward`).
@@ -1939,22 +1920,16 @@ export const Device: z.ZodObject<{
    * false for a VPN peer.
    */
   allow_router_advertisements: z.ZodBoolean
-  security_profile: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  speed: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof SpeedData>>,
-    z.ZodNullable<typeof SpeedData>
-  >
-  data_usage: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodNullable<z.ZodCodec<z.ZodNumber, z.ZodNullable<z.ZodNumber>>>
-    >,
+  security_profile: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  speed: z.ZodDefault<z.ZodNullable<typeof SpeedData>>
+  data_usage: z.ZodDefault<
     z.ZodNullable<z.ZodCodec<z.ZodNumber, z.ZodNullable<z.ZodNumber>>>
   >
 }> = /* @__PURE__ */ object({
-  mac: wire(z.string().nullable().optional(), z.string().nullable()),
+  mac: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Fully-resolved display name: UCI static name → live DHCP hostname →
    * remembered hostname (cache) → `device-<mac>` placeholder.
@@ -1967,28 +1942,43 @@ export const Device: z.ZodObject<{
    * The UCI static name; `None` when `name` is resolved from elsewhere.
    * What the rename form edits.
    */
-  custom_name: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description:
-      'The UCI static name; `None` when `name` is resolved from elsewhere.\nWhat the rename form edits.',
-  }),
+  custom_name: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'The UCI static name; `None` when `name` is resolved from elsewhere.\nWhat the rename form edits.',
+    }),
   /**
    * Raw DHCP lease hostname (may be "*").
    */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'Raw DHCP lease hostname (may be "*").',
-  }),
+  hostname: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Raw DHCP lease hostname (may be "*").',
+    }),
   status: DeviceStatus,
-  connection: wire(z.string().nullable().optional(), z.string().nullable()),
+  connection: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * The reservation DHCP applies, otherwise the live address.
    */
-  ipv4: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description: 'The reservation DHCP applies, otherwise the live address.',
-  }),
-  ipv6: wire(z.string().nullable().optional(), z.string().nullable()),
+  ipv4: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'The reservation DHCP applies, otherwise the live address.',
+    }),
+  ipv6: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * `ipv4` is a reservation DHCP applies.
    */
@@ -2004,13 +1994,14 @@ export const Device: z.ZodObject<{
   /**
    * The router's address on the device's profile, with its prefix length.
    */
-  profile_network: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description:
-      "The router's address on the device's profile, with its prefix length.",
-  }),
+  profile_network: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "The router's address on the device's profile, with its prefix length.",
+    }),
   /**
    * Whether this device may auto-create port forwards via PCP/UPnP
    * (default off; set via `devices set-auto-forward`).
@@ -2053,15 +2044,14 @@ export const Device: z.ZodObject<{
     description:
       "Whether the router forwards this device's IPv6 router advertisements\nto the rest of the LAN (`devices set-router-advertisements`). Always\nfalse for a VPN peer.",
   }),
-  security_profile: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ),
-  speed: wire(SpeedData.nullable().optional(), SpeedData.nullable()),
-  data_usage: wire(
-    wire(z.number(), z.number().nullable()).nullable().optional(),
-    wire(z.number(), z.number().nullable()).nullable(),
-  ),
+  security_profile: z
+    .string()
+    .nullable()
+    .default(() => null),
+  speed: SpeedData.nullable().default(() => null),
+  data_usage: wire(z.number(), z.number().nullable())
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'Device',
 })
@@ -2119,21 +2109,15 @@ export const EthernetInfo: z.ZodIntersection<
   }>,
   z.ZodObject<{
     wan_ipv6: z.ZodBoolean
-    wan_port: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    wan_port: z.ZodDefault<z.ZodNullable<z.ZodString>>
     ports: z.ZodRecord<
       z.ZodString,
       z.ZodObject<{
-        profile: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<typeof ProfileId>>,
-          z.ZodNullable<typeof ProfileId>
-        >
+        profile: z.ZodDefault<z.ZodNullable<typeof ProfileId>>
         /**
          * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
          */
-        trunk: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+        trunk: z.ZodDefault<z.ZodBoolean>
       }>
     >
   }>
@@ -2149,18 +2133,24 @@ export const EthernetInfo: z.ZodIntersection<
     }),
     object({
       wan_ipv6: z.boolean(),
-      wan_port: wire(z.string().nullable().optional(), z.string().nullable()),
+      wan_port: z
+        .string()
+        .nullable()
+        .default(() => null),
       ports: z.record(
         z.string(),
         object({
-          profile: wire(ProfileId.nullable().optional(), ProfileId.nullable()),
+          profile: ProfileId.nullable().default(() => null),
           /**
            * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
            */
-          trunk: wire(z.boolean().optional(), z.boolean()).meta({
-            description:
-              "Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.",
-          }),
+          trunk: z
+            .boolean()
+            .default(() => false)
+            .meta({
+              description:
+                "Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.",
+            }),
         }),
       ),
     }),
@@ -2175,49 +2165,44 @@ export const EthernetInfo: z.ZodIntersection<
  * a reassigned port leaves.
  */
 export const EthernetSetRequest: z.ZodIntersection<
-  z.ZodObject<{
-    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  }>,
+  z.ZodObject<{ preview: z.ZodDefault<z.ZodBoolean> }>,
   z.ZodObject<{
     wan_ipv6: z.ZodBoolean
-    wan_port: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    wan_port: z.ZodDefault<z.ZodNullable<z.ZodString>>
     ports: z.ZodRecord<
       z.ZodString,
       z.ZodObject<{
-        profile: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<typeof ProfileIdOpt>>,
-          z.ZodNullable<typeof ProfileIdOpt>
-        >
+        profile: z.ZodDefault<z.ZodNullable<typeof ProfileIdOpt>>
         /**
          * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
          */
-        trunk: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+        trunk: z.ZodDefault<z.ZodBoolean>
       }>
     >
   }>
 > = /* @__PURE__ */ z
   .intersection(
-    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
+    object({ preview: z.boolean().default(() => false) }),
     object({
       wan_ipv6: z.boolean(),
-      wan_port: wire(z.string().nullable().optional(), z.string().nullable()),
+      wan_port: z
+        .string()
+        .nullable()
+        .default(() => null),
       ports: z.record(
         z.string(),
         object({
-          profile: wire(
-            ProfileIdOpt.nullable().optional(),
-            ProfileIdOpt.nullable(),
-          ),
+          profile: ProfileIdOpt.nullable().default(() => null),
           /**
            * Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.
            */
-          trunk: wire(z.boolean().optional(), z.boolean()).meta({
-            description:
-              "Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.",
-          }),
+          trunk: z
+            .boolean()
+            .default(() => false)
+            .meta({
+              description:
+                "Tagged into every profile's VLAN for a managed switch behind it; has no profile of its own.",
+            }),
         }),
       ),
     }),
@@ -2247,19 +2232,18 @@ export const FollowLogsRes: z.ZodObject<{
    * Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
    * Null when the entries arrive on the request's response stream.
    */
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
-  >
+  guid: z.ZodDefault<z.ZodNullable<typeof Guid>>
 }> = /* @__PURE__ */ object({
   /**
    * Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.
    * Null when the entries arrive on the request's response stream.
    */
-  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
-    description:
-      "Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.\nNull when the entries arrive on the request's response stream.",
-  }),
+  guid: Guid.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Streams each new [`LogEntry`] as JSON from `/rpc/v2/{guid}`.\nNull when the entries arrive on the request's response stream.",
+    }),
 }).meta({
   id: 'FollowLogsRes',
 })
@@ -2275,7 +2259,7 @@ export const LoginParams: z.ZodObject<{
    * Enroll in memory only, never persisted (kiosk mode, which re-enrolls
    * on every browser restart and would otherwise accumulate keys).
    */
-  ephemeral: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  ephemeral: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   password: z.string(),
   /**
@@ -2291,10 +2275,13 @@ export const LoginParams: z.ZodObject<{
    * Enroll in memory only, never persisted (kiosk mode, which re-enrolls
    * on every browser restart and would otherwise accumulate keys).
    */
-  ephemeral: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).',
-  }),
+  ephemeral: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).',
+    }),
 }).meta({
   id: 'LoginParams',
 })
@@ -2319,10 +2306,7 @@ export const OutboundVpn: z.ZodObject<{
    * Interface MTU, if explicitly set. `None` means the kernel default
    * (1420 on a clean path) is in effect. Editable via `update`.
    */
-  mtu: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  mtu: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   /**
    * The server is named by hostname; only `Internet` is a valid target.
    */
@@ -2337,10 +2321,7 @@ export const OutboundVpn: z.ZodObject<{
    * Seconds since the tunnel's latest handshake, measured on the router.
    * `None` when it has never completed one.
    */
-  last_handshake_secs: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  last_handshake_secs: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   id: z.string(),
   label: z.string(),
@@ -2360,10 +2341,14 @@ export const OutboundVpn: z.ZodObject<{
    * Interface MTU, if explicitly set. `None` means the kernel default
    * (1420 on a clean path) is in effect. Editable via `update`.
    */
-  mtu: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Interface MTU, if explicitly set. `None` means the kernel default\n(1420 on a clean path) is in effect. Editable via `update`.',
-  }),
+  mtu: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Interface MTU, if explicitly set. `None` means the kernel default\n(1420 on a clean path) is in effect. Editable via `update`.',
+    }),
   /**
    * The server is named by hostname; only `Internet` is a valid target.
    */
@@ -2384,13 +2369,14 @@ export const OutboundVpn: z.ZodObject<{
    * Seconds since the tunnel's latest handshake, measured on the router.
    * `None` when it has never completed one.
    */
-  last_handshake_secs: wire(
-    z.int().nullable().optional(),
-    z.int().nullable(),
-  ).meta({
-    description:
-      "Seconds since the tunnel's latest handshake, measured on the router.\n`None` when it has never completed one.",
-  }),
+  last_handshake_secs: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Seconds since the tunnel's latest handshake, measured on the router.\n`None` when it has never completed one.",
+    }),
 }).meta({
   id: 'OutboundVpn',
 })
@@ -2429,13 +2415,11 @@ export const PeerAddArgs: z.ZodObject<{
  * `profiles.delete` request. With `preview`, nothing is deleted.
  */
 export const ProfileDeleteRequest: z.ZodIntersection<
-  z.ZodObject<{
-    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  }>,
+  z.ZodObject<{ preview: z.ZodDefault<z.ZodBoolean> }>,
   typeof ProfileIdOpt
 > = /* @__PURE__ */ z
   .intersection(
-    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
+    object({ preview: z.boolean().default(() => false) }),
     ProfileIdOpt,
   )
   .meta({
@@ -2458,7 +2442,7 @@ export const ProfileDeleteResult: z.ZodObject<{
   description: 'The reservations and published ports deleted with the profile.',
 })
 export const ProfileSetRequest: z.ZodIntersection<
-  z.ZodObject<{ force: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean> }>,
+  z.ZodObject<{ force: z.ZodDefault<z.ZodBoolean> }>,
   z.ZodIntersection<
     z.ZodObject<{
       gateway_ip: z.ZodString
@@ -2471,11 +2455,8 @@ export const ProfileSetRequest: z.ZodIntersection<
         ]
       >
       wan_access: typeof WanAccess
-      dns_override: z.ZodCodec<
-        z.ZodOptional<z.ZodArray<typeof DnsServer>>,
-        z.ZodArray<typeof DnsServer>
-      >
-      dns_source: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
+      dns_override: z.ZodDefault<z.ZodArray<typeof DnsServer>>
+      dns_source: z.ZodDefault<z.ZodString>
       access_to_new_profiles: z.ZodBoolean
       owns_lan: z.ZodBoolean
     }>,
@@ -2483,7 +2464,7 @@ export const ProfileSetRequest: z.ZodIntersection<
   >
 > = /* @__PURE__ */ z
   .intersection(
-    object({ force: wire(z.boolean().optional(), z.boolean()) }),
+    object({ force: z.boolean().default(() => false) }),
     z.intersection(
       object({
         gateway_ip: z.string(),
@@ -2494,8 +2475,8 @@ export const ProfileSetRequest: z.ZodIntersection<
           object({ other_profiles: z.array(ProfileIdOpt) }),
         ]),
         wan_access: WanAccess,
-        dns_override: wire(z.array(DnsServer).optional(), z.array(DnsServer)),
-        dns_source: wire(z.string().optional(), z.string()),
+        dns_override: z.array(DnsServer).default(() => []),
+        dns_source: z.string().default(() => ''),
         access_to_new_profiles: z.boolean(),
         owns_lan: z.boolean(),
       }),
@@ -2516,14 +2497,8 @@ export const Progress: z.ZodUnion<
     z.ZodBoolean,
     z.ZodObject<{
       done: z.ZodInt
-      total: z.ZodCodec<
-        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-        z.ZodNullable<z.ZodInt>
-      >
-      units: z.ZodCodec<
-        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
-        z.ZodNullable<typeof ProgressUnits>
-      >
+      total: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+      units: z.ZodDefault<z.ZodNullable<typeof ProgressUnits>>
     }>,
   ]
 > = /* @__PURE__ */ z
@@ -2537,11 +2512,11 @@ export const Progress: z.ZodUnion<
     }),
     object({
       done: z.int(),
-      total: wire(z.int().nullable().optional(), z.int().nullable()),
-      units: wire(
-        ProgressUnits.nullable().optional(),
-        ProgressUnits.nullable(),
-      ),
+      total: z
+        .int()
+        .nullable()
+        .default(() => null),
+      units: ProgressUnits.nullable().default(() => null),
     }).meta({
       description: 'In progress',
     }),
@@ -2560,32 +2535,17 @@ export const PublishedPort: z.ZodObject<{
   protocol: typeof Protocol
   ipv4: z.ZodBoolean
   ipv6: z.ZodBoolean
-  ipv4_public_port: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ipv4_public_port: z.ZodDefault<z.ZodNullable<z.ZodString>>
   source: z.ZodString
   /**
    * Whether WAN collision confirmation remains active.
    */
   override_wan_ports: z.ZodBoolean
   status: typeof PublishedPortStatus
-  status_reason: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  device_name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  device_ipv4: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  device_ipv6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  status_reason: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  device_name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  device_ipv4: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  device_ipv6: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   id: z.string(),
   enabled: z.boolean(),
@@ -2595,10 +2555,10 @@ export const PublishedPort: z.ZodObject<{
   protocol: Protocol,
   ipv4: z.boolean(),
   ipv6: z.boolean(),
-  ipv4_public_port: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ),
+  ipv4_public_port: z
+    .string()
+    .nullable()
+    .default(() => null),
   source: z.string(),
   /**
    * Whether WAN collision confirmation remains active.
@@ -2607,10 +2567,22 @@ export const PublishedPort: z.ZodObject<{
     description: 'Whether WAN collision confirmation remains active.',
   }),
   status: PublishedPortStatus,
-  status_reason: wire(z.string().nullable().optional(), z.string().nullable()),
-  device_name: wire(z.string().nullable().optional(), z.string().nullable()),
-  device_ipv4: wire(z.string().nullable().optional(), z.string().nullable()),
-  device_ipv6: wire(z.string().nullable().optional(), z.string().nullable()),
+  status_reason: z
+    .string()
+    .nullable()
+    .default(() => null),
+  device_name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  device_ipv4: z
+    .string()
+    .nullable()
+    .default(() => null),
+  device_ipv6: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'PublishedPort',
 })
@@ -2623,15 +2595,12 @@ export const PublishedPortInput: z.ZodObject<{
   protocol: typeof Protocol
   ipv4: z.ZodBoolean
   ipv6: z.ZodBoolean
-  ipv4_public_port: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ipv4_public_port: z.ZodDefault<z.ZodNullable<z.ZodString>>
   source: z.ZodString
   /**
    * Confirms an enabled IPv4 WAN collision.
    */
-  override_wan_ports: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  override_wan_ports: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   id: z.string(),
   enabled: z.boolean(),
@@ -2641,17 +2610,20 @@ export const PublishedPortInput: z.ZodObject<{
   protocol: Protocol,
   ipv4: z.boolean(),
   ipv6: z.boolean(),
-  ipv4_public_port: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ),
+  ipv4_public_port: z
+    .string()
+    .nullable()
+    .default(() => null),
   source: z.string(),
   /**
    * Confirms an enabled IPv4 WAN collision.
    */
-  override_wan_ports: wire(z.boolean().optional(), z.boolean()).meta({
-    description: 'Confirms an enabled IPv4 WAN collision.',
-  }),
+  override_wan_ports: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description: 'Confirms an enabled IPv4 WAN collision.',
+    }),
 }).meta({
   id: 'PublishedPortInput',
 })
@@ -2702,13 +2674,13 @@ export const SetupStatusRes: z.ZodObject<{
 })
 export const UciFile: z.ZodObject<{
   sections: z.ZodArray<typeof Section>
-  modified: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  modified: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   sections: z.array(Section),
-  modified: wire(z.string().nullable().optional(), z.string().nullable()),
+  modified: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'UciFile',
 })
@@ -2808,68 +2780,68 @@ export const VpnServer: z.ZodObject<{
 export const WanDdnsResponse: z.ZodObject<{
   enabled: z.ZodBoolean
   provider: typeof DdnsProvider
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  username: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  token: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  zone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  hostname: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  username: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  token: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  zone: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
   provider: DdnsProvider,
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
-  username: wire(z.string().nullable().optional(), z.string().nullable()),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
-  token: wire(z.string().nullable().optional(), z.string().nullable()),
-  zone: wire(z.string().nullable().optional(), z.string().nullable()),
+  hostname: z
+    .string()
+    .nullable()
+    .default(() => null),
+  username: z
+    .string()
+    .nullable()
+    .default(() => null),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
+  token: z
+    .string()
+    .nullable()
+    .default(() => null),
+  zone: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'WanDdnsResponse',
 })
 export const WanDdnsSetRequest: z.ZodObject<{
   enabled: z.ZodBoolean
   provider: typeof DdnsProvider
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  username: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  token: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  zone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  hostname: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  username: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  token: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  zone: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   enabled: z.boolean(),
   provider: DdnsProvider,
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
-  username: wire(z.string().nullable().optional(), z.string().nullable()),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
-  token: wire(z.string().nullable().optional(), z.string().nullable()),
-  zone: wire(z.string().nullable().optional(), z.string().nullable()),
+  hostname: z
+    .string()
+    .nullable()
+    .default(() => null),
+  username: z
+    .string()
+    .nullable()
+    .default(() => null),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
+  token: z
+    .string()
+    .nullable()
+    .default(() => null),
+  zone: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'WanDdnsSetRequest',
 })
@@ -2884,228 +2856,221 @@ export const WanDnsResponse: z.ZodObject<{
 })
 export const WanDnsSetRequest: z.ZodObject<{
   mode: typeof DnsMode
-  servers: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof DnsServer>>>,
-    z.ZodNullable<z.ZodArray<typeof DnsServer>>
-  >
+  servers: z.ZodDefault<z.ZodNullable<z.ZodArray<typeof DnsServer>>>
 }> = /* @__PURE__ */ object({
   mode: DnsMode,
-  servers: wire(
-    z.array(DnsServer).nullable().optional(),
-    z.array(DnsServer).nullable(),
-  ),
+  servers: z
+    .array(DnsServer)
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'WanDnsSetRequest',
 })
 export const WanIpv4Response: z.ZodObject<{
   mode: typeof WanIpv4Mode
-  assigned_ip: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  assigned_ip: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Whether the WAN port has link. A failed read reports link.
    */
   carrier: z.ZodBoolean
-  address: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  netmask: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  gateway: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  username: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  device: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  address: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  netmask: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  gateway: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  username: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  device: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   mode: WanIpv4Mode,
-  assigned_ip: wire(z.string().nullable().optional(), z.string().nullable()),
+  assigned_ip: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Whether the WAN port has link. A failed read reports link.
    */
   carrier: z.boolean().meta({
     description: 'Whether the WAN port has link. A failed read reports link.',
   }),
-  address: wire(z.string().nullable().optional(), z.string().nullable()),
-  netmask: wire(z.string().nullable().optional(), z.string().nullable()),
-  gateway: wire(z.string().nullable().optional(), z.string().nullable()),
-  username: wire(z.string().nullable().optional(), z.string().nullable()),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
-  device: wire(z.string().nullable().optional(), z.string().nullable()),
+  address: z
+    .string()
+    .nullable()
+    .default(() => null),
+  netmask: z
+    .string()
+    .nullable()
+    .default(() => null),
+  gateway: z
+    .string()
+    .nullable()
+    .default(() => null),
+  username: z
+    .string()
+    .nullable()
+    .default(() => null),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
+  device: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'WanIpv4Response',
 })
 export const WanIpv4SetRequest: z.ZodObject<{
   mode: typeof WanIpv4Mode
-  address: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  netmask: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  gateway: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  username: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  device: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  address: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  netmask: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  gateway: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  username: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  device: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   mode: WanIpv4Mode,
-  address: wire(z.string().nullable().optional(), z.string().nullable()),
-  netmask: wire(z.string().nullable().optional(), z.string().nullable()),
-  gateway: wire(z.string().nullable().optional(), z.string().nullable()),
-  username: wire(z.string().nullable().optional(), z.string().nullable()),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
-  device: wire(z.string().nullable().optional(), z.string().nullable()),
+  address: z
+    .string()
+    .nullable()
+    .default(() => null),
+  netmask: z
+    .string()
+    .nullable()
+    .default(() => null),
+  gateway: z
+    .string()
+    .nullable()
+    .default(() => null),
+  username: z
+    .string()
+    .nullable()
+    .default(() => null),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
+  device: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'WanIpv4SetRequest',
 })
 export const WanIpv6Response: z.ZodObject<{
   mode: typeof WanIpv6Mode
-  address: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  gateway: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ip6prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ip6prefixlen: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ip4prefixlen: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  border_relay: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  assigned_ipv6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  address: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  prefix: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  gateway: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ip6prefix: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ip6prefixlen: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ip4prefixlen: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  border_relay: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  assigned_ipv6: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8:abcd::/48"
    */
-  lan_prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  lan_prefix: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   mode: WanIpv6Mode,
-  address: wire(z.string().nullable().optional(), z.string().nullable()),
-  prefix: wire(z.string().nullable().optional(), z.string().nullable()),
-  gateway: wire(z.string().nullable().optional(), z.string().nullable()),
-  ip6prefix: wire(z.string().nullable().optional(), z.string().nullable()),
-  ip6prefixlen: wire(z.string().nullable().optional(), z.string().nullable()),
-  ip4prefixlen: wire(z.string().nullable().optional(), z.string().nullable()),
-  border_relay: wire(z.string().nullable().optional(), z.string().nullable()),
-  assigned_ipv6: wire(z.string().nullable().optional(), z.string().nullable()),
+  address: z
+    .string()
+    .nullable()
+    .default(() => null),
+  prefix: z
+    .string()
+    .nullable()
+    .default(() => null),
+  gateway: z
+    .string()
+    .nullable()
+    .default(() => null),
+  ip6prefix: z
+    .string()
+    .nullable()
+    .default(() => null),
+  ip6prefixlen: z
+    .string()
+    .nullable()
+    .default(() => null),
+  ip4prefixlen: z
+    .string()
+    .nullable()
+    .default(() => null),
+  border_relay: z
+    .string()
+    .nullable()
+    .default(() => null),
+  assigned_ipv6: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8:abcd::/48"
    */
-  lan_prefix: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description:
-      'Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8:abcd::/48"',
-  }),
+  lan_prefix: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8:abcd::/48"',
+    }),
 }).meta({
   id: 'WanIpv6Response',
 })
 export const WanIpv6SetRequest: z.ZodObject<{
   mode: typeof WanIpv6Mode
-  address: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  gateway: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ip6prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ip6prefixlen: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ip4prefixlen: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  border_relay: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  address: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  prefix: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  gateway: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ip6prefix: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ip6prefixlen: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ip4prefixlen: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  border_relay: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8:abcd::/48"
    */
-  lan_prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  lan_prefix: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   mode: WanIpv6Mode,
-  address: wire(z.string().nullable().optional(), z.string().nullable()),
-  prefix: wire(z.string().nullable().optional(), z.string().nullable()),
-  gateway: wire(z.string().nullable().optional(), z.string().nullable()),
-  ip6prefix: wire(z.string().nullable().optional(), z.string().nullable()),
-  ip6prefixlen: wire(z.string().nullable().optional(), z.string().nullable()),
-  ip4prefixlen: wire(z.string().nullable().optional(), z.string().nullable()),
-  border_relay: wire(z.string().nullable().optional(), z.string().nullable()),
+  address: z
+    .string()
+    .nullable()
+    .default(() => null),
+  prefix: z
+    .string()
+    .nullable()
+    .default(() => null),
+  gateway: z
+    .string()
+    .nullable()
+    .default(() => null),
+  ip6prefix: z
+    .string()
+    .nullable()
+    .default(() => null),
+  ip6prefixlen: z
+    .string()
+    .nullable()
+    .default(() => null),
+  ip4prefixlen: z
+    .string()
+    .nullable()
+    .default(() => null),
+  border_relay: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8:abcd::/48"
    */
-  lan_prefix: wire(
-    z.string().nullable().optional(),
-    z.string().nullable(),
-  ).meta({
-    description:
-      'Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8:abcd::/48"',
-  }),
+  lan_prefix: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Static mode: LAN prefix pool for sub-delegation, e.g. "2001:db8:abcd::/48"',
+    }),
 }).meta({
   id: 'WanIpv6SetRequest',
 })
@@ -3122,13 +3087,13 @@ export const WanMacResponse: z.ZodObject<{
 })
 export const WanMacSetRequest: z.ZodObject<{
   strategy: typeof MacStrategy
-  mac: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  mac: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   strategy: MacStrategy,
-  mac: wire(z.string().nullable().optional(), z.string().nullable()),
+  mac: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'WanMacSetRequest',
 })
@@ -3158,54 +3123,44 @@ export const WanPortCollision: z.ZodObject<{
  * profile losing its last password.
  */
 export const WifiSetRequest: z.ZodIntersection<
-  z.ZodObject<{
-    preview: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
-  }>,
+  z.ZodObject<{ preview: z.ZodDefault<z.ZodBoolean> }>,
   z.ZodObject<{
     ssid: z.ZodString
     broadcastSeparately: z.ZodBoolean
     /**
      * Unset runs the world regulatory domain.
      */
-    country: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    country: z.ZodDefault<z.ZodNullable<z.ZodString>>
     radios: z.ZodRecord<z.ZodString, typeof WifiRadio>
     passwords: z.ZodArray<
       z.ZodObject<{
         label: z.ZodString
-        profile: z.ZodCodec<
-          z.ZodOptional<z.ZodNullable<typeof ProfileIdOpt>>,
-          z.ZodNullable<typeof ProfileIdOpt>
-        >
+        profile: z.ZodDefault<z.ZodNullable<typeof ProfileIdOpt>>
         password: z.ZodString
       }>
     >
   }>
 > = /* @__PURE__ */ z
   .intersection(
-    object({ preview: wire(z.boolean().optional(), z.boolean()) }),
+    object({ preview: z.boolean().default(() => false) }),
     object({
       ssid: z.string(),
       broadcastSeparately: z.boolean(),
       /**
        * Unset runs the world regulatory domain.
        */
-      country: wire(
-        z.string().nullable().optional(),
-        z.string().nullable(),
-      ).meta({
-        description: 'Unset runs the world regulatory domain.',
-      }),
+      country: z
+        .string()
+        .nullable()
+        .default(() => null)
+        .meta({
+          description: 'Unset runs the world regulatory domain.',
+        }),
       radios: z.record(z.string(), WifiRadio),
       passwords: z.array(
         object({
           label: z.string(),
-          profile: wire(
-            ProfileIdOpt.nullable().optional(),
-            ProfileIdOpt.nullable(),
-          ),
+          profile: ProfileIdOpt.nullable().default(() => null),
           password: z.string(),
         }),
       ),
@@ -3240,18 +3195,11 @@ export const WifiSetResult: z.ZodObject<{
  * with the flag true it saves the windows and applies them at once.
  */
 export const BlackoutSetRequest: z.ZodIntersection<
-  z.ZodObject<{
-    confirmImmediateBlackout: z.ZodCodec<
-      z.ZodOptional<z.ZodBoolean>,
-      z.ZodBoolean
-    >
-  }>,
+  z.ZodObject<{ confirmImmediateBlackout: z.ZodDefault<z.ZodBoolean> }>,
   typeof BlackoutWindows
 > = /* @__PURE__ */ z
   .intersection(
-    object({
-      confirmImmediateBlackout: wire(z.boolean().optional(), z.boolean()),
-    }),
+    object({ confirmImmediateBlackout: z.boolean().default(() => false) }),
     BlackoutWindows,
   )
   .meta({
@@ -3270,20 +3218,21 @@ export const FlashParams: z.ZodObject<{
   /**
    * IANA timezone name. An unknown name leaves the default unchanged.
    */
-  timezone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  timezone: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   mode: FlashMode,
   password: PasswordType,
   /**
    * IANA timezone name. An unknown name leaves the default unchanged.
    */
-  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'IANA timezone name. An unknown name leaves the default unchanged.',
-  }),
+  timezone: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'IANA timezone name. An unknown name leaves the default unchanged.',
+    }),
 }).meta({
   id: 'FlashParams',
 })
@@ -3292,13 +3241,13 @@ export const FlashParams: z.ZodObject<{
  * Enrolled keys, including ephemeral ones, and the caller's own.
  */
 export const KeyList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  current: z.ZodDefault<z.ZodNullable<z.ZodString>>
   keys: typeof AuthKeys
 }> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  current: z
+    .string()
+    .nullable()
+    .default(() => null),
   keys: AuthKeys,
 }).meta({
   id: 'KeyList',
@@ -3334,19 +3283,20 @@ export const SetInitialPasswordParams: z.ZodObject<{
   /**
    * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
    */
-  timezone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  timezone: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   password: PasswordType,
   /**
    * IANA timezone name, e.g. "America/New_York". An unknown name is skipped.
    */
-  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
-  }),
+  timezone: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'IANA timezone name, e.g. "America/New_York". An unknown name is skipped.',
+    }),
 }).meta({
   id: 'SetInitialPasswordParams',
 })
@@ -3421,12 +3371,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ActivityListParams,
@@ -3458,12 +3403,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 ListKeysParams,
@@ -3535,12 +3475,7 @@ export const Api = {
         check: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -3557,12 +3492,7 @@ export const Api = {
         'data-usage': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             DataUsageReq.meta({
@@ -3586,12 +3516,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -3655,12 +3580,7 @@ export const Api = {
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             DirGetArgs,
@@ -3677,12 +3597,7 @@ export const Api = {
         'injected-list': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -3699,12 +3614,7 @@ export const Api = {
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -3716,12 +3626,7 @@ export const Api = {
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -3742,12 +3647,7 @@ export const Api = {
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             EthernetSetRequest.meta({
@@ -3764,9 +3664,7 @@ export const Api = {
     exec: {
       _PARAMS: /* @__PURE__ */ z.intersection(
         z.intersection(
-          object({
-            format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
-          }),
+          object({ format: IoFormat.nullable().default(() => null) }),
           empty,
         ),
         ExecReq,
@@ -3781,12 +3679,7 @@ export const Api = {
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             GetFileArgs,
@@ -3798,12 +3691,7 @@ export const Api = {
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SetFileArgs,
@@ -3820,12 +3708,7 @@ export const Api = {
         'ipv4-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -3837,12 +3720,7 @@ export const Api = {
         'ipv4-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             LanIpv4SetRequest.meta({
@@ -3857,12 +3735,7 @@ export const Api = {
         'ipv6-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -3874,12 +3747,7 @@ export const Api = {
         'ipv6-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             LanIpv6SetRequest.meta({
@@ -3899,12 +3767,7 @@ export const Api = {
         create: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             z
@@ -3918,11 +3781,8 @@ export const Api = {
                     object({ other_profiles: z.array(ProfileIdOpt) }),
                   ]),
                   wan_access: WanAccess,
-                  dns_override: wire(
-                    z.array(DnsServer).optional(),
-                    z.array(DnsServer),
-                  ),
-                  dns_source: wire(z.string().optional(), z.string()),
+                  dns_override: z.array(DnsServer).default(() => []),
+                  dns_source: z.string().default(() => ''),
                   access_to_new_profiles: z.boolean(),
                   owns_lan: z.boolean(),
                 }),
@@ -3940,12 +3800,7 @@ export const Api = {
         delete: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ProfileDeleteRequest,
@@ -3957,12 +3812,7 @@ export const Api = {
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             EditArgs,
@@ -3974,12 +3824,7 @@ export const Api = {
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ProfileIdOpt,
@@ -3994,11 +3839,8 @@ export const Api = {
                 object({ other_profiles: z.array(ProfileId) }),
               ]),
               wan_access: WanAccess,
-              dns_override: wire(
-                z.array(DnsServer).optional(),
-                z.array(DnsServer),
-              ),
-              dns_source: wire(z.string().optional(), z.string()),
+              dns_override: z.array(DnsServer).default(() => []),
+              dns_source: z.string().default(() => ''),
               access_to_new_profiles: z.boolean(),
               owns_lan: z.boolean(),
             }),
@@ -4010,12 +3852,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4027,12 +3864,7 @@ export const Api = {
         'schedule-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ScheduleGetParams.meta({
@@ -4056,12 +3888,7 @@ export const Api = {
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ProfileSetRequest.meta({
@@ -4076,12 +3903,7 @@ export const Api = {
         'wan-overlaps': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4098,12 +3920,7 @@ export const Api = {
         'auto-list': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4115,12 +3932,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4187,12 +3999,7 @@ export const Api = {
         add: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SshKeyAddParams,
@@ -4210,12 +4017,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4244,12 +4046,7 @@ export const Api = {
         'get-timezones': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4261,12 +4058,7 @@ export const Api = {
         info: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4278,12 +4070,7 @@ export const Api = {
         logs: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4301,12 +4088,7 @@ export const Api = {
         'newer-versions': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4324,12 +4106,7 @@ export const Api = {
         'set-preferences': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SetPreferencesReq.meta({
@@ -4353,12 +4130,7 @@ export const Api = {
         update: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             UpdateSystemParams,
@@ -4375,12 +4147,7 @@ export const Api = {
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             GetArgs,
@@ -4392,12 +4159,7 @@ export const Api = {
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             GetArgs,
@@ -4409,12 +4171,7 @@ export const Api = {
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             z.record(z.string(), UciFile).meta({
@@ -4434,12 +4191,7 @@ export const Api = {
         create: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             OutboundVpnCreateRequest.meta({
@@ -4454,12 +4206,7 @@ export const Api = {
         delete: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             OutboundVpnDeleteRequest,
@@ -4471,12 +4218,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4488,12 +4230,7 @@ export const Api = {
         'set-enabled': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             OutboundVpnSetEnabledRequest.meta({
@@ -4508,12 +4245,7 @@ export const Api = {
         update: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             OutboundVpnUpdateRequest.meta({
@@ -4533,12 +4265,7 @@ export const Api = {
         delete: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             DeleteArgs,
@@ -4550,12 +4277,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4567,12 +4289,7 @@ export const Api = {
         'peer-add': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             PeerAddArgs.meta({
@@ -4587,12 +4304,7 @@ export const Api = {
         'peer-delete': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             PeerDeleteArgs,
@@ -4604,12 +4316,7 @@ export const Api = {
         'peer-rename': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             PeerRenameArgs,
@@ -4627,12 +4334,7 @@ export const Api = {
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             SetArgs.meta({
@@ -4652,12 +4354,7 @@ export const Api = {
         'ddns-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4669,12 +4366,7 @@ export const Api = {
         'ddns-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             WanDdnsSetRequest.meta({
@@ -4689,12 +4381,7 @@ export const Api = {
         'dns-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4706,12 +4393,7 @@ export const Api = {
         'dns-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             WanDnsSetRequest.meta({
@@ -4726,12 +4408,7 @@ export const Api = {
         'ipv4-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4743,12 +4420,7 @@ export const Api = {
         'ipv4-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             WanIpv4SetRequest.meta({
@@ -4763,12 +4435,7 @@ export const Api = {
         'ipv6-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4780,12 +4447,7 @@ export const Api = {
         'ipv6-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             WanIpv6SetRequest.meta({
@@ -4800,12 +4462,7 @@ export const Api = {
         'mac-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4817,12 +4474,7 @@ export const Api = {
         'mac-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             WanMacSetRequest.meta({
@@ -4847,12 +4499,7 @@ export const Api = {
         'blackout-get': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4864,12 +4511,7 @@ export const Api = {
         'blackout-set': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             BlackoutSetRequest.meta({
@@ -4884,12 +4526,7 @@ export const Api = {
         edit: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4901,12 +4538,7 @@ export const Api = {
         'generate-password': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4918,12 +4550,7 @@ export const Api = {
         get: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4934,20 +4561,18 @@ export const Api = {
             /**
              * Unset runs the world regulatory domain.
              */
-            country: wire(
-              z.string().nullable().optional(),
-              z.string().nullable(),
-            ).meta({
-              description: 'Unset runs the world regulatory domain.',
-            }),
+            country: z
+              .string()
+              .nullable()
+              .default(() => null)
+              .meta({
+                description: 'Unset runs the world regulatory domain.',
+              }),
             radios: z.record(z.string(), WifiRadio),
             passwords: z.array(
               object({
                 label: z.string(),
-                profile: wire(
-                  ProfileId.nullable().optional(),
-                  ProfileId.nullable(),
-                ),
+                profile: ProfileId.nullable().default(() => null),
                 password: z.string(),
               }),
             ),
@@ -4958,12 +4583,7 @@ export const Api = {
         regulatory: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -4975,12 +4595,7 @@ export const Api = {
         set: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             WifiSetRequest.meta({

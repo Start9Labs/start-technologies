@@ -23,8 +23,8 @@
           "type": "object",
           "properties": {
             "key": { "$ref": "#/$defs/AnyVerifyingKey" },
-            "name": { "type": ["string", "null"] },
-            "userAgent": { "type": ["string", "null"] }
+            "name": { "default": null, "type": ["string", "null"] },
+            "userAgent": { "default": null, "type": ["string", "null"] }
           },
           "required": ["key"],
           "additionalProperties": true
@@ -34,8 +34,8 @@
       "type": "object",
       "properties": {
         "key": { "$ref": "#/$defs/AnyVerifyingKey" },
-        "name": { "type": ["string", "null"] },
-        "userAgent": { "type": ["string", "null"] }
+        "name": { "default": null, "type": ["string", "null"] },
+        "userAgent": { "default": null, "type": ["string", "null"] }
       },
       "required": ["key"],
       "additionalProperties": true
@@ -50,6 +50,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -77,7 +78,7 @@
         "KeyList": {
           "type": "object",
           "properties": {
-            "current": { "type": ["string", "null"] },
+            "current": { "default": null, "type": ["string", "null"] },
             "keys": { "$ref": "#/$defs/AuthKeys" }
           },
           "required": ["current", "keys"],
@@ -94,12 +95,13 @@
           "type": "object",
           "properties": {
             "name": {
+              "default": null,
               "description": "A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.",
               "type": ["string", "null"]
             },
             "loggedIn": { "type": "string" },
             "lastActive": { "type": "string" },
-            "userAgent": { "type": ["string", "null"] }
+            "userAgent": { "default": null, "type": ["string", "null"] }
           },
           "required": ["name", "loggedIn", "lastActive", "userAgent"],
           "additionalProperties": true
@@ -107,7 +109,7 @@
       },
       "type": "object",
       "properties": {
-        "current": { "type": ["string", "null"] },
+        "current": { "default": null, "type": ["string", "null"] },
         "keys": { "$ref": "#/$defs/AuthKeys" }
       },
       "required": ["current", "keys"],
@@ -158,6 +160,7 @@
               "$ref": "#/$defs/AnyVerifyingKey"
             },
             "ephemeral": {
+              "default": false,
               "description": "Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).",
               "type": "boolean"
             }
@@ -175,6 +178,7 @@
           "$ref": "#/$defs/AnyVerifyingKey"
         },
         "ephemeral": {
+          "default": false,
           "description": "Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).",
           "type": "boolean"
         }
@@ -208,6 +212,7 @@
           "type": "object",
           "properties": {
             "newPassword": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/PasswordType" }, { "type": "null" }]
             }
           },
@@ -226,6 +231,7 @@
       "type": "object",
       "properties": {
         "newPassword": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/PasswordType" }, { "type": "null" }]
         }
       },
@@ -241,6 +247,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -304,6 +311,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -324,12 +332,13 @@
           "type": "object",
           "properties": {
             "name": {
+              "default": null,
               "description": "A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.",
               "type": ["string", "null"]
             },
             "loggedIn": { "type": "string" },
             "lastActive": { "type": "string" },
-            "userAgent": { "type": ["string", "null"] }
+            "userAgent": { "default": null, "type": ["string", "null"] }
           },
           "required": ["name", "loggedIn", "lastActive", "userAgent"],
           "additionalProperties": true
@@ -369,15 +378,18 @@
           "properties": {
             "targetId": { "$ref": "#/$defs/BackupTargetId" },
             "oldPassword": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/PasswordType" }, { "type": "null" }]
             },
             "packageIds": {
+              "default": null,
               "anyOf": [
                 { "type": "array", "items": { "$ref": "#/$defs/PackageId" } },
                 { "type": "null" }
               ]
             },
             "sharedVolumeIds": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "array",
@@ -414,15 +426,18 @@
       "properties": {
         "targetId": { "$ref": "#/$defs/BackupTargetId" },
         "oldPassword": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/PasswordType" }, { "type": "null" }]
         },
         "packageIds": {
+          "default": null,
           "anyOf": [
             { "type": "array", "items": { "$ref": "#/$defs/PackageId" } },
             { "type": "null" }
           ]
         },
         "sharedVolumeIds": {
+          "default": null,
           "anyOf": [
             { "type": "array", "items": { "$ref": "#/$defs/SharedVolumeId" } },
             { "type": "null" }
@@ -443,6 +458,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -530,6 +546,7 @@
               "additionalProperties": { "$ref": "#/$defs/PackageBackupReport" }
             },
             "sharedVolumes": {
+              "default": {},
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/VolumeBackupReport" }
@@ -542,7 +559,7 @@
           "type": "object",
           "properties": {
             "attempted": { "type": "boolean" },
-            "error": { "type": ["string", "null"] }
+            "error": { "default": null, "type": ["string", "null"] }
           },
           "required": ["attempted", "error"],
           "additionalProperties": true
@@ -550,7 +567,7 @@
         "PackageBackupReport": {
           "type": "object",
           "properties": {
-            "error": { "type": ["string", "null"] },
+            "error": { "default": null, "type": ["string", "null"] },
             "duration_ms": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -596,7 +613,7 @@
             "hostname": { "type": "string" },
             "path": { "type": "string" },
             "username": { "type": "string" },
-            "password": { "type": ["string", "null"] }
+            "password": { "default": null, "type": ["string", "null"] }
           },
           "required": ["hostname", "path", "username"],
           "additionalProperties": true
@@ -607,7 +624,7 @@
         "hostname": { "type": "string" },
         "path": { "type": "string" },
         "username": { "type": "string" },
-        "password": { "type": ["string", "null"] }
+        "password": { "default": null, "type": ["string", "null"] }
       },
       "required": ["hostname", "path", "username"],
       "additionalProperties": true
@@ -626,13 +643,14 @@
                 "name": { "type": "string" },
                 "source": { "$ref": "#/$defs/SharedVolumeSource" },
                 "startOs": {
+                  "default": {},
                   "type": "object",
                   "propertyNames": { "type": "string" },
                   "additionalProperties": {
                     "$ref": "#/$defs/StartOsRecoveryInfo"
                   }
                 },
-                "legacyBackup": { "type": "boolean" }
+                "legacyBackup": { "default": false, "type": "boolean" }
               },
               "required": ["name", "source", "startOs", "legacyBackup"],
               "additionalProperties": true
@@ -662,6 +680,7 @@
                 "logicalname": { "type": "string" },
                 "path": { "type": "string" },
                 "drive": {
+                  "default": null,
                   "description": "The drive as reported when the source was created, for display.",
                   "anyOf": [
                     { "$ref": "#/$defs/SharedVolumeDrive" },
@@ -677,7 +696,7 @@
                 "kind": { "type": "string", "const": "cifs" },
                 "hostname": { "type": "string" },
                 "path": { "type": "string" },
-                "username": { "type": "string" }
+                "username": { "default": "", "type": "string" }
               },
               "required": ["kind", "hostname", "path", "username"]
             }
@@ -686,9 +705,9 @@
         "SharedVolumeDrive": {
           "type": "object",
           "properties": {
-            "vendor": { "type": ["string", "null"] },
-            "model": { "type": ["string", "null"] },
-            "label": { "type": ["string", "null"] },
+            "vendor": { "default": null, "type": ["string", "null"] },
+            "model": { "default": null, "type": ["string", "null"] },
+            "label": { "default": null, "type": ["string", "null"] },
             "capacity": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -777,7 +796,7 @@
             "hostname": { "type": "string" },
             "path": { "type": "string" },
             "username": { "type": "string" },
-            "password": { "type": ["string", "null"] }
+            "password": { "default": null, "type": ["string", "null"] }
           },
           "required": ["id", "hostname", "path", "username"],
           "additionalProperties": true
@@ -793,7 +812,7 @@
         "hostname": { "type": "string" },
         "path": { "type": "string" },
         "username": { "type": "string" },
-        "password": { "type": ["string", "null"] }
+        "password": { "default": null, "type": ["string", "null"] }
       },
       "required": ["id", "hostname", "path", "username"],
       "additionalProperties": true
@@ -812,13 +831,14 @@
                 "name": { "type": "string" },
                 "source": { "$ref": "#/$defs/SharedVolumeSource" },
                 "startOs": {
+                  "default": {},
                   "type": "object",
                   "propertyNames": { "type": "string" },
                   "additionalProperties": {
                     "$ref": "#/$defs/StartOsRecoveryInfo"
                   }
                 },
-                "legacyBackup": { "type": "boolean" }
+                "legacyBackup": { "default": false, "type": "boolean" }
               },
               "required": ["name", "source", "startOs", "legacyBackup"],
               "additionalProperties": true
@@ -848,6 +868,7 @@
                 "logicalname": { "type": "string" },
                 "path": { "type": "string" },
                 "drive": {
+                  "default": null,
                   "description": "The drive as reported when the source was created, for display.",
                   "anyOf": [
                     { "$ref": "#/$defs/SharedVolumeDrive" },
@@ -863,7 +884,7 @@
                 "kind": { "type": "string", "const": "cifs" },
                 "hostname": { "type": "string" },
                 "path": { "type": "string" },
-                "username": { "type": "string" }
+                "username": { "default": "", "type": "string" }
               },
               "required": ["kind", "hostname", "path", "username"]
             }
@@ -872,9 +893,9 @@
         "SharedVolumeDrive": {
           "type": "object",
           "properties": {
-            "vendor": { "type": ["string", "null"] },
-            "model": { "type": ["string", "null"] },
-            "label": { "type": ["string", "null"] },
+            "vendor": { "default": null, "type": ["string", "null"] },
+            "model": { "default": null, "type": ["string", "null"] },
+            "label": { "default": null, "type": ["string", "null"] },
             "capacity": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -1022,7 +1043,7 @@
             "hostname": { "type": "string" },
             "path": { "type": "string" },
             "username": { "type": "string" },
-            "password": { "type": ["string", "null"] }
+            "password": { "default": null, "type": ["string", "null"] }
           },
           "required": ["hostname", "path", "username"],
           "additionalProperties": true
@@ -1066,6 +1087,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -1086,6 +1108,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -1123,13 +1146,14 @@
           "type": "object",
           "properties": {
             "version": { "type": "string" },
-            "timestamp": { "type": ["string", "null"] },
+            "timestamp": { "default": null, "type": ["string", "null"] },
             "packageBackups": {
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/PackageBackupInfo" }
             },
             "sharedVolumeBackups": {
+              "default": {},
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": {
@@ -1174,13 +1198,14 @@
       "type": "object",
       "properties": {
         "version": { "type": "string" },
-        "timestamp": { "type": ["string", "null"] },
+        "timestamp": { "default": null, "type": ["string", "null"] },
         "packageBackups": {
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/PackageBackupInfo" }
         },
         "sharedVolumeBackups": {
+          "default": {},
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/SharedVolumeBackupInfo" }
@@ -1204,6 +1229,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -1285,6 +1311,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -1309,13 +1336,14 @@
                 "name": { "type": "string" },
                 "source": { "$ref": "#/$defs/SharedVolumeSource" },
                 "startOs": {
+                  "default": {},
                   "type": "object",
                   "propertyNames": { "type": "string" },
                   "additionalProperties": {
                     "$ref": "#/$defs/StartOsRecoveryInfo"
                   }
                 },
-                "legacyBackup": { "type": "boolean" }
+                "legacyBackup": { "default": false, "type": "boolean" }
               },
               "required": ["name", "source", "startOs", "legacyBackup"],
               "additionalProperties": true
@@ -1345,6 +1373,7 @@
                 "logicalname": { "type": "string" },
                 "path": { "type": "string" },
                 "drive": {
+                  "default": null,
                   "description": "The drive as reported when the source was created, for display.",
                   "anyOf": [
                     { "$ref": "#/$defs/SharedVolumeDrive" },
@@ -1360,7 +1389,7 @@
                 "kind": { "type": "string", "const": "cifs" },
                 "hostname": { "type": "string" },
                 "path": { "type": "string" },
-                "username": { "type": "string" }
+                "username": { "default": "", "type": "string" }
               },
               "required": ["kind", "hostname", "path", "username"]
             }
@@ -1369,9 +1398,9 @@
         "SharedVolumeDrive": {
           "type": "object",
           "properties": {
-            "vendor": { "type": ["string", "null"] },
-            "model": { "type": ["string", "null"] },
-            "label": { "type": ["string", "null"] },
+            "vendor": { "default": null, "type": ["string", "null"] },
+            "model": { "default": null, "type": ["string", "null"] },
+            "label": { "default": null, "type": ["string", "null"] },
             "capacity": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -1435,7 +1464,7 @@
           "type": "object",
           "properties": {
             "targetId": { "$ref": "#/$defs/BackupTargetId" },
-            "serverId": { "type": ["string", "null"] },
+            "serverId": { "default": null, "type": ["string", "null"] },
             "password": { "type": "string" },
             "allowPartial": { "type": "boolean" }
           },
@@ -1450,7 +1479,7 @@
       "type": "object",
       "properties": {
         "targetId": { "$ref": "#/$defs/BackupTargetId" },
-        "serverId": { "type": ["string", "null"] },
+        "serverId": { "default": null, "type": ["string", "null"] },
         "password": { "type": "string" },
         "allowPartial": { "type": "boolean" }
       },
@@ -1517,6 +1546,7 @@
           "type": "object",
           "properties": {
             "targetId": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/BackupTargetId" },
                 { "type": "null" }
@@ -1533,6 +1563,7 @@
       "type": "object",
       "properties": {
         "targetId": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/BackupTargetId" }, { "type": "null" }]
         }
       },
@@ -1552,6 +1583,7 @@
             "path": { "type": "string" },
             "username": { "type": "string" },
             "password": {
+              "default": null,
               "description": "Omitted keeps the stored password; empty clears it.",
               "type": ["string", "null"]
             }
@@ -1571,6 +1603,7 @@
         "path": { "type": "string" },
         "username": { "type": "string" },
         "password": {
+          "default": null,
           "description": "Omitted keeps the stored password; empty clears it.",
           "type": ["string", "null"]
         }
@@ -1593,7 +1626,7 @@
               "type": "array",
               "items": { "$ref": "#/$defs/SharedVolumeId" }
             },
-            "serverId": { "type": ["string", "null"] }
+            "serverId": { "default": null, "type": ["string", "null"] }
           },
           "required": ["targetId", "password", "ids"],
           "additionalProperties": true
@@ -1615,7 +1648,7 @@
           "type": "array",
           "items": { "$ref": "#/$defs/SharedVolumeId" }
         },
-        "serverId": { "type": ["string", "null"] }
+        "serverId": { "default": null, "type": ["string", "null"] }
       },
       "required": ["targetId", "password", "ids"],
       "additionalProperties": true
@@ -1689,7 +1722,9 @@
           "allOf": [
             {
               "type": "object",
-              "properties": { "pointer": { "type": ["string", "null"] } },
+              "properties": {
+                "pointer": { "default": null, "type": ["string", "null"] }
+              },
               "additionalProperties": true
             },
             { "$ref": "#/$defs/ProjectionParams" }
@@ -1752,7 +1787,9 @@
       "allOf": [
         {
           "type": "object",
-          "properties": { "pointer": { "type": ["string", "null"] } },
+          "properties": {
+            "pointer": { "default": null, "type": ["string", "null"] }
+          },
           "additionalProperties": true
         },
         { "$ref": "#/$defs/ProjectionParams" }
@@ -1798,6 +1835,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -1831,8 +1869,9 @@
             {
               "type": "object",
               "properties": {
-                "pointer": { "type": ["string", "null"] },
+                "pointer": { "default": null, "type": ["string", "null"] },
                 "since": {
+                  "default": null,
                   "description": "The subscriber's last revision; resumes only within the epoch that reported it.",
                   "anyOf": [{ "$ref": "#/$defs/DbCursor" }, { "type": "null" }]
                 }
@@ -1913,8 +1952,9 @@
         {
           "type": "object",
           "properties": {
-            "pointer": { "type": ["string", "null"] },
+            "pointer": { "default": null, "type": ["string", "null"] },
             "since": {
+              "default": null,
               "description": "The subscriber's last revision; resumes only within the epoch that reported it.",
               "anyOf": [{ "$ref": "#/$defs/DbCursor" }, { "type": "null" }]
             }
@@ -2052,6 +2092,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -2069,7 +2110,7 @@
           "type": "object",
           "properties": {
             "disk": { "type": "string" },
-            "label": { "type": ["string", "null"] }
+            "label": { "default": null, "type": ["string", "null"] }
           },
           "required": ["disk"],
           "additionalProperties": true
@@ -2141,6 +2182,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -2221,6 +2263,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -2247,6 +2290,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -2275,8 +2319,8 @@
         "QueryDnsRes": {
           "type": "object",
           "properties": {
-            "ipv4": { "type": ["string", "null"] },
-            "ipv6": { "type": ["string", "null"] }
+            "ipv4": { "default": null, "type": ["string", "null"] },
+            "ipv6": { "default": null, "type": ["string", "null"] }
           },
           "required": ["ipv4", "ipv6"],
           "additionalProperties": true,
@@ -2285,8 +2329,8 @@
       },
       "type": "object",
       "properties": {
-        "ipv4": { "type": ["string", "null"] },
-        "ipv6": { "type": ["string", "null"] }
+        "ipv4": { "default": null, "type": ["string", "null"] },
+        "ipv6": { "default": null, "type": ["string", "null"] }
       },
       "required": ["ipv4", "ipv6"],
       "additionalProperties": true,
@@ -2303,6 +2347,7 @@
           "properties": {
             "gateway": { "$ref": "#/$defs/GatewayId" },
             "servers": {
+              "default": null,
               "anyOf": [
                 { "type": "array", "items": { "type": "string" } },
                 { "type": "null" }
@@ -2318,6 +2363,7 @@
       "properties": {
         "gateway": { "$ref": "#/$defs/GatewayId" },
         "servers": {
+          "default": null,
           "anyOf": [
             { "type": "array", "items": { "type": "string" } },
             { "type": "null" }
@@ -2335,6 +2381,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -2356,6 +2403,7 @@
               "description": "True until stored network policy takes authority."
             },
             "gateway": {
+              "default": null,
               "description": "Present only before stored network policy takes authority.",
               "anyOf": [
                 { "$ref": "#/$defs/NetworkGatewayInfo" },
@@ -2414,6 +2462,7 @@
           "type": "object",
           "properties": {
             "staticServers": {
+              "default": null,
               "anyOf": [
                 { "type": "array", "items": { "type": "string" } },
                 { "type": "null" }
@@ -2440,6 +2489,7 @@
               "maximum": 9007199254740991
             },
             "deviceType": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/NetworkInterfaceType" },
                 { "type": "null" }
@@ -2447,10 +2497,11 @@
             },
             "subnets": { "type": "array", "items": { "type": "string" } },
             "lanIp": { "type": "array", "items": { "type": "string" } },
-            "wanIp": { "type": ["string", "null"] },
+            "wanIp": { "default": null, "type": ["string", "null"] },
             "ntpServers": { "type": "array", "items": { "type": "string" } },
             "dnsServers": { "type": "array", "items": { "type": "string" } },
             "defaultRouteV4": {
+              "default": null,
               "description": "Lowest IPv4 default-route metric in `main`, or `None` when absent.",
               "anyOf": [
                 {
@@ -2462,6 +2513,7 @@
               ]
             },
             "defaultRouteV6": {
+              "default": null,
               "description": "Lowest IPv6 default-route metric in `main`, or `None` when absent.",
               "anyOf": [
                 {
@@ -2514,10 +2566,11 @@
           "type": "object",
           "properties": {
             "supported": {
+              "default": null,
               "description": "`None` = never probed.",
               "type": ["boolean", "null"]
             },
-            "at": { "type": ["string", "null"] }
+            "at": { "default": null, "type": ["string", "null"] }
           },
           "required": ["supported", "at"],
           "additionalProperties": true
@@ -2530,6 +2583,7 @@
           "description": "True until stored network policy takes authority."
         },
         "gateway": {
+          "default": null,
           "description": "Present only before stored network policy takes authority.",
           "anyOf": [
             { "$ref": "#/$defs/NetworkGatewayInfo" },
@@ -2549,6 +2603,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -2596,6 +2651,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -2632,6 +2688,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -2719,6 +2776,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -2759,8 +2817,9 @@
           "type": "object",
           "properties": {
             "id": { "$ref": "#/$defs/GatewayId" },
-            "name": { "type": ["string", "null"] },
+            "name": { "default": null, "type": ["string", "null"] },
             "dns": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/OutboundDnsUpdate" },
                 { "type": "null" }
@@ -2775,6 +2834,7 @@
           "type": "object",
           "properties": {
             "servers": {
+              "default": null,
               "anyOf": [
                 { "type": "array", "items": { "type": "string" } },
                 { "type": "null" }
@@ -2788,8 +2848,9 @@
       "type": "object",
       "properties": {
         "id": { "$ref": "#/$defs/GatewayId" },
-        "name": { "type": ["string", "null"] },
+        "name": { "default": null, "type": ["string", "null"] },
         "dns": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/OutboundDnsUpdate" }, { "type": "null" }]
         }
       },
@@ -2823,6 +2884,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -2876,6 +2938,7 @@
           "type": "object",
           "properties": {
             "staticServers": {
+              "default": null,
               "anyOf": [
                 { "type": "array", "items": { "type": "string" } },
                 { "type": "null" }
@@ -2902,6 +2965,7 @@
               "maximum": 9007199254740991
             },
             "deviceType": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/NetworkInterfaceType" },
                 { "type": "null" }
@@ -2909,10 +2973,11 @@
             },
             "subnets": { "type": "array", "items": { "type": "string" } },
             "lanIp": { "type": "array", "items": { "type": "string" } },
-            "wanIp": { "type": ["string", "null"] },
+            "wanIp": { "default": null, "type": ["string", "null"] },
             "ntpServers": { "type": "array", "items": { "type": "string" } },
             "dnsServers": { "type": "array", "items": { "type": "string" } },
             "defaultRouteV4": {
+              "default": null,
               "description": "Lowest IPv4 default-route metric in `main`, or `None` when absent.",
               "anyOf": [
                 {
@@ -2924,6 +2989,7 @@
               ]
             },
             "defaultRouteV6": {
+              "default": null,
               "description": "Lowest IPv6 default-route metric in `main`, or `None` when absent.",
               "anyOf": [
                 {
@@ -2976,10 +3042,11 @@
           "type": "object",
           "properties": {
             "supported": {
+              "default": null,
               "description": "`None` = never probed.",
               "type": ["boolean", "null"]
             },
-            "at": { "type": ["string", "null"] }
+            "at": { "default": null, "type": ["string", "null"] }
           },
           "required": ["supported", "at"],
           "additionalProperties": true
@@ -2996,9 +3063,11 @@
           "type": "object",
           "properties": {
             "gateway": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/GatewayId" }, { "type": "null" }]
             },
             "dns": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/OutboundDnsUpdate" },
                 { "type": "null" }
@@ -3012,6 +3081,7 @@
           "type": "object",
           "properties": {
             "servers": {
+              "default": null,
               "anyOf": [
                 { "type": "array", "items": { "type": "string" } },
                 { "type": "null" }
@@ -3025,9 +3095,11 @@
       "type": "object",
       "properties": {
         "gateway": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/GatewayId" }, { "type": "null" }]
         },
         "dns": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/OutboundDnsUpdate" }, { "type": "null" }]
         }
       },
@@ -3068,7 +3140,7 @@
           "type": "object",
           "properties": {
             "gateway": { "$ref": "#/$defs/GatewayId" },
-            "secure": { "type": ["boolean", "null"] }
+            "secure": { "default": null, "type": ["boolean", "null"] }
           },
           "required": ["gateway"],
           "additionalProperties": true
@@ -3078,7 +3150,7 @@
       "type": "object",
       "properties": {
         "gateway": { "$ref": "#/$defs/GatewayId" },
-        "secure": { "type": ["boolean", "null"] }
+        "secure": { "default": null, "type": ["boolean", "null"] }
       },
       "required": ["gateway"],
       "additionalProperties": true
@@ -3112,6 +3184,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -3129,7 +3202,7 @@
           "type": "object",
           "properties": {
             "hostnames": { "type": "array", "items": { "type": "string" } },
-            "ed25519": { "type": "boolean" }
+            "ed25519": { "default": false, "type": "boolean" }
           },
           "required": ["hostnames"],
           "additionalProperties": true
@@ -3170,6 +3243,7 @@
             "name": { "type": "string" },
             "config": { "type": "string" },
             "type": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/GatewayType" }, { "type": "null" }]
             },
             "setAsDefaultOutbound": { "type": "boolean" }
@@ -3187,6 +3261,7 @@
         "name": { "type": "string" },
         "config": { "type": "string" },
         "type": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/GatewayType" }, { "type": "null" }]
         },
         "setAsDefaultOutbound": { "type": "boolean" }
@@ -3303,6 +3378,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -3334,6 +3410,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -3386,6 +3463,7 @@
           "type": "object",
           "properties": {
             "package": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
             },
             "level": { "$ref": "#/$defs/NotificationLevel" },
@@ -3404,6 +3482,7 @@
       "type": "object",
       "properties": {
         "package": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
         },
         "level": { "$ref": "#/$defs/NotificationLevel" },
@@ -3423,6 +3502,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -3440,6 +3520,7 @@
           "type": "object",
           "properties": {
             "before": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -3450,6 +3531,7 @@
               ]
             },
             "limit": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -3584,6 +3666,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -3752,7 +3835,7 @@
           "properties": {
             "packageId": { "$ref": "#/$defs/PackageId" },
             "replayId": { "$ref": "#/$defs/ReplayId" },
-            "force": { "type": "boolean" }
+            "force": { "default": false, "type": "boolean" }
           },
           "required": ["packageId", "replayId"],
           "additionalProperties": true
@@ -3764,7 +3847,7 @@
       "properties": {
         "packageId": { "$ref": "#/$defs/PackageId" },
         "replayId": { "$ref": "#/$defs/ReplayId" },
-        "force": { "type": "boolean" }
+        "force": { "default": false, "type": "boolean" }
       },
       "required": ["packageId", "replayId"],
       "additionalProperties": true
@@ -3779,6 +3862,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -3826,6 +3910,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -3844,10 +3929,11 @@
           "properties": {
             "packageId": { "$ref": "#/$defs/PackageId" },
             "eventId": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
             },
             "actionId": { "$ref": "#/$defs/ActionId" },
-            "input": { "anyOf": [{}, { "type": "null" }] }
+            "input": { "default": null, "anyOf": [{}, { "type": "null" }] }
           },
           "required": ["packageId", "actionId"],
           "additionalProperties": true
@@ -3876,14 +3962,16 @@
             "tty": { "type": "boolean" },
             "stderrTty": { "type": "boolean" },
             "ptySize": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/TermSize" }, { "type": "null" }]
             },
-            "subcontainer": { "type": ["string", "null"] },
-            "name": { "type": ["string", "null"] },
+            "subcontainer": { "default": null, "type": ["string", "null"] },
+            "name": { "default": null, "type": ["string", "null"] },
             "imageId": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
             },
-            "user": { "type": ["string", "null"] }
+            "user": { "default": null, "type": ["string", "null"] }
           },
           "required": ["id", "command", "tty", "stderrTty"],
           "additionalProperties": true
@@ -3903,6 +3991,7 @@
               "maximum": 9007199254740991
             },
             "pixels": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "array",
@@ -3942,14 +4031,16 @@
         "tty": { "type": "boolean" },
         "stderrTty": { "type": "boolean" },
         "ptySize": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/TermSize" }, { "type": "null" }]
         },
-        "subcontainer": { "type": ["string", "null"] },
-        "name": { "type": ["string", "null"] },
+        "subcontainer": { "default": null, "type": ["string", "null"] },
+        "name": { "default": null, "type": ["string", "null"] },
         "imageId": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
         },
-        "user": { "type": ["string", "null"] }
+        "user": { "default": null, "type": ["string", "null"] }
       },
       "required": ["id", "command", "tty", "stderrTty"],
       "additionalProperties": true
@@ -3969,7 +4060,7 @@
               "type": "array",
               "items": { "$ref": "#/$defs/PackageId" }
             },
-            "serverId": { "type": ["string", "null"] }
+            "serverId": { "default": null, "type": ["string", "null"] }
           },
           "required": ["targetId", "password", "ids"],
           "additionalProperties": true
@@ -3985,7 +4076,7 @@
         "targetId": { "$ref": "#/$defs/BackupTargetId" },
         "password": { "type": "string" },
         "ids": { "type": "array", "items": { "$ref": "#/$defs/PackageId" } },
-        "serverId": { "type": ["string", "null"] }
+        "serverId": { "default": null, "type": ["string", "null"] }
       },
       "required": ["targetId", "password", "ids"],
       "additionalProperties": true
@@ -4019,6 +4110,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -4042,10 +4134,12 @@
               "description": "Program and arguments, run without a shell. Empty runs the user's login shell."
             },
             "stdin": {
+              "default": null,
               "description": "Written to the command's standard input, which is otherwise empty.",
               "type": ["string", "null"]
             },
             "timeoutSecs": {
+              "default": null,
               "description": "Seconds before the command is terminated. Defaults to 120.",
               "anyOf": [
                 {
@@ -4057,18 +4151,22 @@
               ]
             },
             "subcontainer": {
+              "default": null,
               "description": "Part of the subcontainer's ID. Overrides `name` and `imageId`.",
               "type": ["string", "null"]
             },
             "name": {
+              "default": null,
               "description": "Part of the subcontainer's name, case-insensitive. Overrides `imageId`.",
               "type": ["string", "null"]
             },
             "imageId": {
+              "default": null,
               "description": "Part of the subcontainer's image ID, case-insensitive.",
               "anyOf": [{ "$ref": "#/$defs/ImageId" }, { "type": "null" }]
             },
             "user": {
+              "default": null,
               "description": "Defaults to the image's user, else root.",
               "type": ["string", "null"]
             }
@@ -4224,6 +4322,7 @@
           "properties": {
             "fqdn": { "type": "string" },
             "acme": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/AcmeProvider" }, { "type": "null" }]
             },
             "gateway": { "$ref": "#/$defs/GatewayId" },
@@ -4250,12 +4349,14 @@
             "dns": { "$ref": "#/$defs/QueryDnsRes" },
             "port": { "$ref": "#/$defs/CheckPortRes" },
             "portV6": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/CheckPortV6Res" },
                 { "type": "null" }
               ]
             },
             "challenge": {
+              "default": null,
               "description": "The authority's own reachability requirement, where the domain has one.",
               "anyOf": [
                 { "$ref": "#/$defs/CheckChallengeRes" },
@@ -4269,8 +4370,8 @@
         "QueryDnsRes": {
           "type": "object",
           "properties": {
-            "ipv4": { "type": ["string", "null"] },
-            "ipv6": { "type": ["string", "null"] }
+            "ipv4": { "default": null, "type": ["string", "null"] },
+            "ipv6": { "default": null, "type": ["string", "null"] }
           },
           "required": ["ipv4", "ipv6"],
           "additionalProperties": true,
@@ -4313,9 +4414,11 @@
           "type": "object",
           "properties": {
             "port": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/CheckPortRes" }, { "type": "null" }]
             },
             "portV6": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/CheckPortV6Res" },
                 { "type": "null" }
@@ -4332,9 +4435,11 @@
         "dns": { "$ref": "#/$defs/QueryDnsRes" },
         "port": { "$ref": "#/$defs/CheckPortRes" },
         "portV6": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/CheckPortV6Res" }, { "type": "null" }]
         },
         "challenge": {
+          "default": null,
           "description": "The authority's own reachability requirement, where the domain has one.",
           "anyOf": [{ "$ref": "#/$defs/CheckChallengeRes" }, { "type": "null" }]
         }
@@ -4388,6 +4493,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -4430,6 +4536,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -4476,6 +4583,7 @@
             "net": { "$ref": "#/$defs/NetInfo" },
             "addresses": { "$ref": "#/$defs/DerivedAddressInfo" },
             "interfaces": {
+              "default": {},
               "description": "Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.",
               "type": "object",
               "propertyNames": { "type": "string" },
@@ -4594,10 +4702,12 @@
           "properties": {
             "type": { "type": "string", "const": "http" },
             "addXForwardedHeaders": {
+              "default": false,
               "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
               "type": "boolean"
             },
             "auth": {
+              "default": null,
               "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
               "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
             }
@@ -4611,7 +4721,7 @@
               "properties": {
                 "type": { "type": "string", "const": "bearer" },
                 "tokens": { "type": "array", "items": { "type": "string" } },
-                "realm": { "type": ["string", "null"] }
+                "realm": { "default": null, "type": ["string", "null"] }
               },
               "required": ["type", "tokens", "realm"]
             },
@@ -4623,7 +4733,7 @@
                   "type": "array",
                   "items": { "$ref": "#/$defs/BasicCredential" }
                 },
-                "realm": { "type": ["string", "null"] }
+                "realm": { "default": null, "type": ["string", "null"] }
               },
               "required": ["type", "credentials", "realm"]
             }
@@ -4643,6 +4753,7 @@
           "type": "object",
           "properties": {
             "assignedPort": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -4653,6 +4764,7 @@
               ]
             },
             "assignedSslPort": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -4693,11 +4805,13 @@
               "description": "User override: disable these addresses (only for domains and private IP & port)"
             },
             "guaWan": {
+              "default": [],
               "description": "User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.",
               "type": "array",
               "items": { "type": "string" }
             },
             "lanEnabled": {
+              "default": [],
               "description": "User override: enable these private IPs regardless of their mDNS address.",
               "type": "array",
               "items": {
@@ -4716,6 +4830,7 @@
               }
             },
             "insecure": {
+              "default": [],
               "description": "Plaintext private addresses requiring consent, keyed by hostname, port and gateway.",
               "type": "array",
               "items": {
@@ -4735,6 +4850,7 @@
               }
             },
             "insecureEnabled": {
+              "default": [],
               "description": "Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.",
               "type": "array",
               "items": {
@@ -4759,6 +4875,7 @@
               "description": "COMPUTED: NetServiceData::update — all possible addresses for this binding"
             },
             "effective": {
+              "default": [],
               "description": "Effective address selections shared by network enforcement and clients.",
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" }
@@ -4784,6 +4901,7 @@
             "public": { "type": "boolean" },
             "hostname": { "type": "string" },
             "port": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -4857,6 +4975,7 @@
                 "kind": { "type": "string", "const": "plugin" },
                 "packageId": { "$ref": "#/$defs/PackageId" },
                 "removeAction": {
+                  "default": null,
                   "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
                 },
                 "overflowActions": {
@@ -4887,6 +5006,7 @@
             "addressInfo": { "$ref": "#/$defs/AddressInfo" },
             "type": { "$ref": "#/$defs/ServiceInterfaceType" },
             "preferredLauncherAddress": {
+              "default": null,
               "description": "The interface address Open UI should prefer.",
               "type": ["string", "null"]
             }
@@ -4906,15 +5026,15 @@
         "AddressInfo": {
           "type": "object",
           "properties": {
-            "username": { "type": ["string", "null"] },
+            "username": { "default": null, "type": ["string", "null"] },
             "hostId": { "$ref": "#/$defs/HostId" },
             "internalPort": {
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
-            "scheme": { "type": ["string", "null"] },
-            "sslScheme": { "type": ["string", "null"] },
+            "scheme": { "default": null, "type": ["string", "null"] },
+            "sslScheme": { "default": null, "type": ["string", "null"] },
             "suffix": { "type": "string" }
           },
           "required": [
@@ -4975,7 +5095,7 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
-            "ssl": { "type": "boolean" }
+            "ssl": { "default": false, "type": "boolean" }
           },
           "required": ["internalPort", "externalPort"],
           "additionalProperties": true
@@ -5017,8 +5137,9 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] },
+            "enabled": { "default": null, "type": ["boolean", "null"] },
             "allowInsecure": {
+              "default": false,
               "description": "Accepts readable and alterable plaintext traffic, including passwords.",
               "type": "boolean"
             }
@@ -5033,6 +5154,7 @@
             "public": { "type": "boolean" },
             "hostname": { "type": "string" },
             "port": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -5106,6 +5228,7 @@
                 "kind": { "type": "string", "const": "plugin" },
                 "packageId": { "$ref": "#/$defs/PackageId" },
                 "removeAction": {
+                  "default": null,
                   "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
                 },
                 "overflowActions": {
@@ -5169,6 +5292,7 @@
             "public": { "type": "boolean" },
             "hostname": { "type": "string" },
             "port": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -5242,6 +5366,7 @@
                 "kind": { "type": "string", "const": "plugin" },
                 "packageId": { "$ref": "#/$defs/PackageId" },
                 "removeAction": {
+                  "default": null,
                   "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
                 },
                 "overflowActions": {
@@ -5293,8 +5418,9 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] },
+            "enabled": { "default": null, "type": ["boolean", "null"] },
             "allowInsecure": {
+              "default": false,
               "description": "Accepts readable and alterable plaintext traffic, including passwords.",
               "type": "boolean"
             }
@@ -5309,6 +5435,7 @@
             "public": { "type": "boolean" },
             "hostname": { "type": "string" },
             "port": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -5382,6 +5509,7 @@
                 "kind": { "type": "string", "const": "plugin" },
                 "packageId": { "$ref": "#/$defs/PackageId" },
                 "removeAction": {
+                  "default": null,
                   "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
                 },
                 "overflowActions": {
@@ -5428,12 +5556,14 @@
           "type": "object",
           "properties": {
             "acceptSigners": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
             },
             "registry": { "type": "string" },
             "id": { "$ref": "#/$defs/PackageId" },
             "version": { "$ref": "#/$defs/Version" },
             "trust": {
+              "default": false,
               "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
               "type": "boolean"
             }
@@ -5480,12 +5610,14 @@
       "type": "object",
       "properties": {
         "acceptSigners": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
         },
         "registry": { "type": "string" },
         "id": { "$ref": "#/$defs/PackageId" },
         "version": { "$ref": "#/$defs/Version" },
         "trust": {
+          "default": false,
           "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
           "type": "boolean"
         }
@@ -5503,6 +5635,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -5534,6 +5667,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -5554,6 +5688,7 @@
           "type": "object",
           "properties": {
             "limit": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -5563,8 +5698,9 @@
                 { "type": "null" }
               ]
             },
-            "cursor": { "type": ["string", "null"] },
+            "cursor": { "default": null, "type": ["string", "null"] },
             "boot": {
+              "default": null,
               "anyOf": [
                 {
                   "anyOf": [
@@ -5579,7 +5715,7 @@
                 { "type": "null" }
               ]
             },
-            "before": { "type": "boolean" }
+            "before": { "default": false, "type": "boolean" }
           },
           "additionalProperties": true
         },
@@ -5606,8 +5742,8 @@
               "type": "array",
               "items": { "$ref": "#/$defs/LogEntry" }
             },
-            "startCursor": { "type": ["string", "null"] },
-            "endCursor": { "type": ["string", "null"] }
+            "startCursor": { "default": null, "type": ["string", "null"] },
+            "endCursor": { "default": null, "type": ["string", "null"] }
           },
           "required": ["entries", "startCursor", "endCursor"],
           "additionalProperties": true
@@ -5626,8 +5762,8 @@
       "type": "object",
       "properties": {
         "entries": { "type": "array", "items": { "$ref": "#/$defs/LogEntry" } },
-        "startCursor": { "type": ["string", "null"] },
-        "endCursor": { "type": ["string", "null"] }
+        "startCursor": { "default": null, "type": ["string", "null"] },
+        "endCursor": { "default": null, "type": ["string", "null"] }
       },
       "required": ["entries", "startCursor", "endCursor"],
       "additionalProperties": true
@@ -5642,6 +5778,7 @@
           "type": "object",
           "properties": {
             "limit": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -5651,8 +5788,9 @@
                 { "type": "null" }
               ]
             },
-            "cursor": { "type": ["string", "null"] },
+            "cursor": { "default": null, "type": ["string", "null"] },
             "boot": {
+              "default": null,
               "anyOf": [
                 {
                   "anyOf": [
@@ -5667,7 +5805,7 @@
                 { "type": "null" }
               ]
             },
-            "before": { "type": "boolean" }
+            "before": { "default": false, "type": "boolean" }
           },
           "additionalProperties": true
         },
@@ -5690,8 +5828,9 @@
         "LogFollowResponse": {
           "type": "object",
           "properties": {
-            "startCursor": { "type": ["string", "null"] },
+            "startCursor": { "default": null, "type": ["string", "null"] },
             "guid": {
+              "default": null,
               "description": "Present for ordinary replies; typed observations use same-ID events.",
               "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
             }
@@ -5703,8 +5842,9 @@
       },
       "type": "object",
       "properties": {
-        "startCursor": { "type": ["string", "null"] },
+        "startCursor": { "default": null, "type": ["string", "null"] },
         "guid": {
+          "default": null,
           "description": "Present for ordinary replies; typed observations use same-ID events.",
           "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
         }
@@ -5761,9 +5901,11 @@
           "properties": {
             "package": { "$ref": "#/$defs/PackageId" },
             "gateway": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/GatewayId" }, { "type": "null" }]
             },
             "dns": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/OutboundDnsUpdate" },
                 { "type": "null" }
@@ -5779,6 +5921,7 @@
           "type": "object",
           "properties": {
             "servers": {
+              "default": null,
               "anyOf": [
                 { "type": "array", "items": { "type": "string" } },
                 { "type": "null" }
@@ -5793,9 +5936,11 @@
       "properties": {
         "package": { "$ref": "#/$defs/PackageId" },
         "gateway": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/GatewayId" }, { "type": "null" }]
         },
         "dns": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/OutboundDnsUpdate" }, { "type": "null" }]
         }
       },
@@ -5812,15 +5957,18 @@
           "type": "object",
           "properties": {
             "acceptSigners": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
             },
             "signatures": {
+              "default": {},
               "description": "DER64 supplemental signatures for the uploaded archive.",
               "type": "object",
               "propertyNames": { "type": "string" },
               "additionalProperties": { "$ref": "#/$defs/AnySignature" }
             },
             "trust": {
+              "default": false,
               "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
               "type": "boolean"
             }
@@ -5865,15 +6013,18 @@
       "type": "object",
       "properties": {
         "acceptSigners": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
         },
         "signatures": {
+          "default": {},
           "description": "DER64 supplemental signatures for the uploaded archive.",
           "type": "object",
           "propertyNames": { "type": "string" },
           "additionalProperties": { "$ref": "#/$defs/AnySignature" }
         },
         "trust": {
+          "default": false,
           "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
           "type": "boolean"
         }
@@ -5888,6 +6039,7 @@
           "properties": {
             "upload": { "$ref": "#/$defs/Guid" },
             "progress": {
+              "default": null,
               "description": "Legacy progress continuation, absent for rpcstream observers.",
               "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
             }
@@ -5901,6 +6053,7 @@
       "properties": {
         "upload": { "$ref": "#/$defs/Guid" },
         "progress": {
+          "default": null,
           "description": "Legacy progress continuation, absent for rpcstream observers.",
           "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
         }
@@ -5935,6 +6088,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -6000,8 +6154,8 @@
           "type": "object",
           "properties": {
             "id": { "$ref": "#/$defs/PackageId" },
-            "soft": { "type": "boolean" },
-            "force": { "type": "boolean" }
+            "soft": { "default": false, "type": "boolean" },
+            "force": { "default": false, "type": "boolean" }
           },
           "required": ["id"],
           "additionalProperties": true
@@ -6011,8 +6165,8 @@
       "type": "object",
       "properties": {
         "id": { "$ref": "#/$defs/PackageId" },
-        "soft": { "type": "boolean" },
-        "force": { "type": "boolean" }
+        "soft": { "default": false, "type": "boolean" },
+        "force": { "default": false, "type": "boolean" }
       },
       "required": ["id"],
       "additionalProperties": true
@@ -6043,6 +6197,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -6061,6 +6216,7 @@
           "properties": {
             "os": { "$ref": "#/$defs/OsInfo" },
             "hardware": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/HardwareInfo" }, { "type": "null" }]
             }
           },
@@ -6073,7 +6229,7 @@
             "version": { "$ref": "#/$defs/Version" },
             "compat": { "type": "string" },
             "platform": { "type": "string" },
-            "language": { "type": ["string", "null"] }
+            "language": { "default": null, "type": ["string", "null"] }
           },
           "required": ["version", "compat", "platform", "language"],
           "additionalProperties": true
@@ -6089,6 +6245,7 @@
               "maximum": 9007199254740991
             },
             "devices": {
+              "default": null,
               "anyOf": [
                 { "type": "array", "items": { "$ref": "#/$defs/LshwDevice" } },
                 { "type": "null" }
@@ -6131,8 +6288,8 @@
         "LshwProcessor": {
           "type": "object",
           "properties": {
-            "product": { "type": ["string", "null"] },
-            "vendor": { "type": ["string", "null"] },
+            "product": { "default": null, "type": ["string", "null"] },
+            "vendor": { "default": null, "type": ["string", "null"] },
             "capabilities": { "type": "array", "items": { "type": "string" } }
           },
           "required": ["product", "vendor", "capabilities"],
@@ -6141,10 +6298,10 @@
         "LshwDisplay": {
           "type": "object",
           "properties": {
-            "product": { "type": ["string", "null"] },
-            "vendor": { "type": ["string", "null"] },
+            "product": { "default": null, "type": ["string", "null"] },
+            "vendor": { "default": null, "type": ["string", "null"] },
             "capabilities": { "type": "array", "items": { "type": "string" } },
-            "driver": { "type": ["string", "null"] }
+            "driver": { "default": null, "type": ["string", "null"] }
           },
           "required": ["product", "vendor", "capabilities", "driver"],
           "additionalProperties": true
@@ -6154,6 +6311,7 @@
       "properties": {
         "os": { "$ref": "#/$defs/OsInfo" },
         "hardware": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/HardwareInfo" }, { "type": "null" }]
         }
       },
@@ -6170,6 +6328,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -6186,7 +6345,10 @@
         "EppParams": {
           "type": "object",
           "properties": {
-            "set": { "anyOf": [{ "$ref": "#/$defs/Epp" }, { "type": "null" }] }
+            "set": {
+              "default": null,
+              "anyOf": [{ "$ref": "#/$defs/Epp" }, { "type": "null" }]
+            }
           },
           "additionalProperties": true
         },
@@ -6204,6 +6366,7 @@
           "type": "object",
           "properties": {
             "current": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/Epp" }, { "type": "null" }]
             },
             "available": { "type": "array", "items": { "$ref": "#/$defs/Epp" } }
@@ -6218,7 +6381,10 @@
       },
       "type": "object",
       "properties": {
-        "current": { "anyOf": [{ "$ref": "#/$defs/Epp" }, { "type": "null" }] },
+        "current": {
+          "default": null,
+          "anyOf": [{ "$ref": "#/$defs/Epp" }, { "type": "null" }]
+        },
         "available": { "type": "array", "items": { "$ref": "#/$defs/Epp" } }
       },
       "required": ["current", "available"],
@@ -6252,6 +6418,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -6269,6 +6436,7 @@
           "type": "object",
           "properties": {
             "set": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/Governor" }, { "type": "null" }]
             }
           },
@@ -6285,6 +6453,7 @@
           "type": "object",
           "properties": {
             "current": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/Governor" }, { "type": "null" }]
             },
             "available": {
@@ -6300,6 +6469,7 @@
       "type": "object",
       "properties": {
         "current": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/Governor" }, { "type": "null" }]
         },
         "available": {
@@ -6364,6 +6534,7 @@
           "properties": {
             "fqdn": { "type": "string" },
             "acme": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/AcmeProvider" }, { "type": "null" }]
             },
             "gateway": { "$ref": "#/$defs/GatewayId" },
@@ -6383,6 +6554,7 @@
       "properties": {
         "fqdn": { "type": "string" },
         "acme": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/AcmeProvider" }, { "type": "null" }]
         },
         "gateway": { "$ref": "#/$defs/GatewayId" },
@@ -6404,12 +6576,14 @@
             "dns": { "$ref": "#/$defs/QueryDnsRes" },
             "port": { "$ref": "#/$defs/CheckPortRes" },
             "portV6": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/CheckPortV6Res" },
                 { "type": "null" }
               ]
             },
             "challenge": {
+              "default": null,
               "description": "The authority's own reachability requirement, where the domain has one.",
               "anyOf": [
                 { "$ref": "#/$defs/CheckChallengeRes" },
@@ -6423,8 +6597,8 @@
         "QueryDnsRes": {
           "type": "object",
           "properties": {
-            "ipv4": { "type": ["string", "null"] },
-            "ipv6": { "type": ["string", "null"] }
+            "ipv4": { "default": null, "type": ["string", "null"] },
+            "ipv6": { "default": null, "type": ["string", "null"] }
           },
           "required": ["ipv4", "ipv6"],
           "additionalProperties": true,
@@ -6467,9 +6641,11 @@
           "type": "object",
           "properties": {
             "port": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/CheckPortRes" }, { "type": "null" }]
             },
             "portV6": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/CheckPortV6Res" },
                 { "type": "null" }
@@ -6486,9 +6662,11 @@
         "dns": { "$ref": "#/$defs/QueryDnsRes" },
         "port": { "$ref": "#/$defs/CheckPortRes" },
         "portV6": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/CheckPortV6Res" }, { "type": "null" }]
         },
         "challenge": {
+          "default": null,
           "description": "The authority's own reachability requirement, where the domain has one.",
           "anyOf": [{ "$ref": "#/$defs/CheckChallengeRes" }, { "type": "null" }]
         }
@@ -6522,6 +6700,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -6540,6 +6719,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -6566,6 +6746,7 @@
             "net": { "$ref": "#/$defs/NetInfo" },
             "addresses": { "$ref": "#/$defs/DerivedAddressInfo" },
             "interfaces": {
+              "default": {},
               "description": "Service interfaces exported from this binding (`Origin.export`). A single\nbinding (host + internal port) may back several interfaces (e.g. a `ui`\nand an `api` on the same port), so this is keyed by interface id.",
               "type": "object",
               "propertyNames": { "type": "string" },
@@ -6684,10 +6865,12 @@
           "properties": {
             "type": { "type": "string", "const": "http" },
             "addXForwardedHeaders": {
+              "default": false,
               "description": "Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.\nClient-supplied `X-Forwarded-*` headers are stripped on both legs.",
               "type": "boolean"
             },
             "auth": {
+              "default": null,
               "description": "Validates every request before forwarding. Basic auth sets `X-Forwarded-User`.",
               "anyOf": [{ "$ref": "#/$defs/ProxyAuth" }, { "type": "null" }]
             }
@@ -6701,7 +6884,7 @@
               "properties": {
                 "type": { "type": "string", "const": "bearer" },
                 "tokens": { "type": "array", "items": { "type": "string" } },
-                "realm": { "type": ["string", "null"] }
+                "realm": { "default": null, "type": ["string", "null"] }
               },
               "required": ["type", "tokens", "realm"]
             },
@@ -6713,7 +6896,7 @@
                   "type": "array",
                   "items": { "$ref": "#/$defs/BasicCredential" }
                 },
-                "realm": { "type": ["string", "null"] }
+                "realm": { "default": null, "type": ["string", "null"] }
               },
               "required": ["type", "credentials", "realm"]
             }
@@ -6733,6 +6916,7 @@
           "type": "object",
           "properties": {
             "assignedPort": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -6743,6 +6927,7 @@
               ]
             },
             "assignedSslPort": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -6783,11 +6968,13 @@
               "description": "User override: disable these addresses (only for domains and private IP & port)"
             },
             "guaWan": {
+              "default": [],
               "description": "User override: IPv6 global-unicast addresses opted into WAN exposure.\nProjected into `HostnameInfo.public` by `update_addresses`, so `public`\nstays the single source of truth for WAN reachability (P2P address\nselection, upstream pinholes). A GUA not in this set is LAN-only.",
               "type": "array",
               "items": { "type": "string" }
             },
             "lanEnabled": {
+              "default": [],
               "description": "User override: enable these private IPs regardless of their mDNS address.",
               "type": "array",
               "items": {
@@ -6806,6 +6993,7 @@
               }
             },
             "insecure": {
+              "default": [],
               "description": "Plaintext private addresses requiring consent, keyed by hostname, port and gateway.",
               "type": "array",
               "items": {
@@ -6825,6 +7013,7 @@
               }
             },
             "insecureEnabled": {
+              "default": [],
               "description": "Persisted consent; ordinary address changes must not grant insecure access.\nAddress removal retains consent; explicit disabling or gateway removal revokes it.",
               "type": "array",
               "items": {
@@ -6849,6 +7038,7 @@
               "description": "COMPUTED: NetServiceData::update — all possible addresses for this binding"
             },
             "effective": {
+              "default": [],
               "description": "Effective address selections shared by network enforcement and clients.",
               "type": "array",
               "items": { "$ref": "#/$defs/HostnameInfo" }
@@ -6874,6 +7064,7 @@
             "public": { "type": "boolean" },
             "hostname": { "type": "string" },
             "port": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -6947,6 +7138,7 @@
                 "kind": { "type": "string", "const": "plugin" },
                 "packageId": { "$ref": "#/$defs/PackageId" },
                 "removeAction": {
+                  "default": null,
                   "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
                 },
                 "overflowActions": {
@@ -6977,6 +7169,7 @@
             "addressInfo": { "$ref": "#/$defs/AddressInfo" },
             "type": { "$ref": "#/$defs/ServiceInterfaceType" },
             "preferredLauncherAddress": {
+              "default": null,
               "description": "The interface address Open UI should prefer.",
               "type": ["string", "null"]
             }
@@ -6996,15 +7189,15 @@
         "AddressInfo": {
           "type": "object",
           "properties": {
-            "username": { "type": ["string", "null"] },
+            "username": { "default": null, "type": ["string", "null"] },
             "hostId": { "$ref": "#/$defs/HostId" },
             "internalPort": {
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
-            "scheme": { "type": ["string", "null"] },
-            "sslScheme": { "type": ["string", "null"] },
+            "scheme": { "default": null, "type": ["string", "null"] },
+            "sslScheme": { "default": null, "type": ["string", "null"] },
             "suffix": { "type": "string" }
           },
           "required": [
@@ -7046,7 +7239,7 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
-            "ssl": { "type": "boolean" }
+            "ssl": { "default": false, "type": "boolean" }
           },
           "required": ["internalPort", "externalPort"],
           "additionalProperties": true
@@ -7064,7 +7257,7 @@
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
         },
-        "ssl": { "type": "boolean" }
+        "ssl": { "default": false, "type": "boolean" }
       },
       "required": ["internalPort", "externalPort"],
       "additionalProperties": true
@@ -7084,8 +7277,9 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] },
+            "enabled": { "default": null, "type": ["boolean", "null"] },
             "allowInsecure": {
+              "default": false,
               "description": "Accepts readable and alterable plaintext traffic, including passwords.",
               "type": "boolean"
             }
@@ -7100,6 +7294,7 @@
             "public": { "type": "boolean" },
             "hostname": { "type": "string" },
             "port": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -7173,6 +7368,7 @@
                 "kind": { "type": "string", "const": "plugin" },
                 "packageId": { "$ref": "#/$defs/PackageId" },
                 "removeAction": {
+                  "default": null,
                   "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
                 },
                 "overflowActions": {
@@ -7197,8 +7393,9 @@
           "maximum": 9007199254740991
         },
         "address": { "$ref": "#/$defs/HostnameInfo" },
-        "enabled": { "type": ["boolean", "null"] },
+        "enabled": { "default": null, "type": ["boolean", "null"] },
         "allowInsecure": {
+          "default": false,
           "description": "Accepts readable and alterable plaintext traffic, including passwords.",
           "type": "boolean"
         }
@@ -7233,6 +7430,7 @@
             "public": { "type": "boolean" },
             "hostname": { "type": "string" },
             "port": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -7306,6 +7504,7 @@
                 "kind": { "type": "string", "const": "plugin" },
                 "packageId": { "$ref": "#/$defs/PackageId" },
                 "removeAction": {
+                  "default": null,
                   "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
                 },
                 "overflowActions": {
@@ -7350,8 +7549,9 @@
               "maximum": 9007199254740991
             },
             "address": { "$ref": "#/$defs/HostnameInfo" },
-            "enabled": { "type": ["boolean", "null"] },
+            "enabled": { "default": null, "type": ["boolean", "null"] },
             "allowInsecure": {
+              "default": false,
               "description": "Accepts readable and alterable plaintext traffic, including passwords.",
               "type": "boolean"
             }
@@ -7366,6 +7566,7 @@
             "public": { "type": "boolean" },
             "hostname": { "type": "string" },
             "port": {
+              "default": null,
               "anyOf": [
                 {
                   "type": "integer",
@@ -7439,6 +7640,7 @@
                 "kind": { "type": "string", "const": "plugin" },
                 "packageId": { "$ref": "#/$defs/PackageId" },
                 "removeAction": {
+                  "default": null,
                   "anyOf": [{ "$ref": "#/$defs/ActionId" }, { "type": "null" }]
                 },
                 "overflowActions": {
@@ -7463,8 +7665,9 @@
           "maximum": 9007199254740991
         },
         "address": { "$ref": "#/$defs/HostnameInfo" },
-        "enabled": { "type": ["boolean", "null"] },
+        "enabled": { "default": null, "type": ["boolean", "null"] },
         "allowInsecure": {
+          "default": false,
           "description": "Accepts readable and alterable plaintext traffic, including passwords.",
           "type": "boolean"
         }
@@ -7480,6 +7683,7 @@
       "type": "object",
       "properties": {
         "limit": {
+          "default": null,
           "anyOf": [
             {
               "type": "integer",
@@ -7489,8 +7693,9 @@
             { "type": "null" }
           ]
         },
-        "cursor": { "type": ["string", "null"] },
+        "cursor": { "default": null, "type": ["string", "null"] },
         "boot": {
+          "default": null,
           "anyOf": [
             {
               "anyOf": [
@@ -7505,7 +7710,7 @@
             { "type": "null" }
           ]
         },
-        "before": { "type": "boolean" }
+        "before": { "default": false, "type": "boolean" }
       }
     },
     "outputSchema": {
@@ -7518,8 +7723,8 @@
               "type": "array",
               "items": { "$ref": "#/$defs/LogEntry" }
             },
-            "startCursor": { "type": ["string", "null"] },
-            "endCursor": { "type": ["string", "null"] }
+            "startCursor": { "default": null, "type": ["string", "null"] },
+            "endCursor": { "default": null, "type": ["string", "null"] }
           },
           "required": ["entries", "startCursor", "endCursor"],
           "additionalProperties": true
@@ -7538,8 +7743,8 @@
       "type": "object",
       "properties": {
         "entries": { "type": "array", "items": { "$ref": "#/$defs/LogEntry" } },
-        "startCursor": { "type": ["string", "null"] },
-        "endCursor": { "type": ["string", "null"] }
+        "startCursor": { "default": null, "type": ["string", "null"] },
+        "endCursor": { "default": null, "type": ["string", "null"] }
       },
       "required": ["entries", "startCursor", "endCursor"],
       "additionalProperties": true
@@ -7552,6 +7757,7 @@
       "type": "object",
       "properties": {
         "limit": {
+          "default": null,
           "anyOf": [
             {
               "type": "integer",
@@ -7561,8 +7767,9 @@
             { "type": "null" }
           ]
         },
-        "cursor": { "type": ["string", "null"] },
+        "cursor": { "default": null, "type": ["string", "null"] },
         "boot": {
+          "default": null,
           "anyOf": [
             {
               "anyOf": [
@@ -7577,7 +7784,7 @@
             { "type": "null" }
           ]
         },
-        "before": { "type": "boolean" }
+        "before": { "default": false, "type": "boolean" }
       }
     },
     "outputSchema": {
@@ -7586,8 +7793,9 @@
         "LogFollowResponse": {
           "type": "object",
           "properties": {
-            "startCursor": { "type": ["string", "null"] },
+            "startCursor": { "default": null, "type": ["string", "null"] },
             "guid": {
+              "default": null,
               "description": "Present for ordinary replies; typed observations use same-ID events.",
               "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
             }
@@ -7599,8 +7807,9 @@
       },
       "type": "object",
       "properties": {
-        "startCursor": { "type": ["string", "null"] },
+        "startCursor": { "default": null, "type": ["string", "null"] },
         "guid": {
+          "default": null,
           "description": "Present for ordinary replies; typed observations use same-ID events.",
           "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
         }
@@ -7616,6 +7825,7 @@
       "type": "object",
       "properties": {
         "limit": {
+          "default": null,
           "anyOf": [
             {
               "type": "integer",
@@ -7625,8 +7835,9 @@
             { "type": "null" }
           ]
         },
-        "cursor": { "type": ["string", "null"] },
+        "cursor": { "default": null, "type": ["string", "null"] },
         "boot": {
+          "default": null,
           "anyOf": [
             {
               "anyOf": [
@@ -7641,7 +7852,7 @@
             { "type": "null" }
           ]
         },
-        "before": { "type": "boolean" }
+        "before": { "default": false, "type": "boolean" }
       }
     },
     "outputSchema": {
@@ -7654,8 +7865,8 @@
               "type": "array",
               "items": { "$ref": "#/$defs/LogEntry" }
             },
-            "startCursor": { "type": ["string", "null"] },
-            "endCursor": { "type": ["string", "null"] }
+            "startCursor": { "default": null, "type": ["string", "null"] },
+            "endCursor": { "default": null, "type": ["string", "null"] }
           },
           "required": ["entries", "startCursor", "endCursor"],
           "additionalProperties": true
@@ -7674,8 +7885,8 @@
       "type": "object",
       "properties": {
         "entries": { "type": "array", "items": { "$ref": "#/$defs/LogEntry" } },
-        "startCursor": { "type": ["string", "null"] },
-        "endCursor": { "type": ["string", "null"] }
+        "startCursor": { "default": null, "type": ["string", "null"] },
+        "endCursor": { "default": null, "type": ["string", "null"] }
       },
       "required": ["entries", "startCursor", "endCursor"],
       "additionalProperties": true
@@ -7688,6 +7899,7 @@
       "type": "object",
       "properties": {
         "limit": {
+          "default": null,
           "anyOf": [
             {
               "type": "integer",
@@ -7697,8 +7909,9 @@
             { "type": "null" }
           ]
         },
-        "cursor": { "type": ["string", "null"] },
+        "cursor": { "default": null, "type": ["string", "null"] },
         "boot": {
+          "default": null,
           "anyOf": [
             {
               "anyOf": [
@@ -7713,7 +7926,7 @@
             { "type": "null" }
           ]
         },
-        "before": { "type": "boolean" }
+        "before": { "default": false, "type": "boolean" }
       }
     },
     "outputSchema": {
@@ -7722,8 +7935,9 @@
         "LogFollowResponse": {
           "type": "object",
           "properties": {
-            "startCursor": { "type": ["string", "null"] },
+            "startCursor": { "default": null, "type": ["string", "null"] },
             "guid": {
+              "default": null,
               "description": "Present for ordinary replies; typed observations use same-ID events.",
               "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
             }
@@ -7735,8 +7949,9 @@
       },
       "type": "object",
       "properties": {
-        "startCursor": { "type": ["string", "null"] },
+        "startCursor": { "default": null, "type": ["string", "null"] },
         "guid": {
+          "default": null,
           "description": "Present for ordinary replies; typed observations use same-ID events.",
           "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
         }
@@ -7752,6 +7967,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -7780,6 +7996,7 @@
           "type": "object",
           "properties": {
             "temperature": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/Celsius" }, { "type": "null" }]
             }
           },
@@ -7894,6 +8111,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -7922,6 +8140,7 @@
           "type": "object",
           "properties": {
             "guid": {
+              "default": null,
               "description": "Present for ordinary replies; typed observations use same-ID events.",
               "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
             },
@@ -7946,6 +8165,7 @@
           "type": "object",
           "properties": {
             "temperature": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/Celsius" }, { "type": "null" }]
             }
           },
@@ -8043,6 +8263,7 @@
       "type": "object",
       "properties": {
         "guid": {
+          "default": null,
           "description": "Present for ordinary replies; typed observations use same-ID events.",
           "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
         },
@@ -8061,6 +8282,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -8099,6 +8321,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -8117,6 +8340,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -8139,7 +8363,7 @@
               "propertyNames": { "type": "string" },
               "additionalProperties": { "type": "string" }
             },
-            "monitoringError": { "type": ["string", "null"] }
+            "monitoringError": { "default": null, "type": ["string", "null"] }
           },
           "required": ["target", "variables", "monitoringError"],
           "additionalProperties": true,
@@ -8154,7 +8378,7 @@
           "propertyNames": { "type": "string" },
           "additionalProperties": { "type": "string" }
         },
-        "monitoringError": { "type": ["string", "null"] }
+        "monitoringError": { "default": null, "type": ["string", "null"] }
       },
       "required": ["target", "variables", "monitoringError"],
       "additionalProperties": true,
@@ -8170,6 +8394,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -8187,7 +8412,7 @@
           "type": "object",
           "properties": {
             "url": { "type": "string" },
-            "name": { "type": ["string", "null"] }
+            "name": { "default": null, "type": ["string", "null"] }
           },
           "required": ["url"],
           "additionalProperties": true
@@ -8203,6 +8428,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -8247,6 +8473,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -8279,6 +8506,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -8311,6 +8539,7 @@
           "type": "object",
           "properties": {
             "wait": {
+              "default": false,
               "description": "Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.",
               "type": "boolean"
             }
@@ -8321,6 +8550,7 @@
       "type": "object",
       "properties": {
         "wait": {
+          "default": false,
           "description": "Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.",
           "type": "boolean"
         }
@@ -8387,10 +8617,14 @@
           "type": "object",
           "properties": {
             "layout": { "type": "string" },
-            "keymap": { "type": ["string", "null"] },
-            "model": { "type": ["string", "null"] },
-            "variant": { "type": ["string", "null"] },
-            "options": { "type": "array", "items": { "type": "string" } }
+            "keymap": { "default": null, "type": ["string", "null"] },
+            "model": { "default": null, "type": ["string", "null"] },
+            "variant": { "default": null, "type": ["string", "null"] },
+            "options": {
+              "default": [],
+              "type": "array",
+              "items": { "type": "string" }
+            }
           },
           "required": ["layout"],
           "additionalProperties": true
@@ -8399,10 +8633,14 @@
       "type": "object",
       "properties": {
         "layout": { "type": "string" },
-        "keymap": { "type": ["string", "null"] },
-        "model": { "type": ["string", "null"] },
-        "variant": { "type": ["string", "null"] },
-        "options": { "type": "array", "items": { "type": "string" } }
+        "keymap": { "default": null, "type": ["string", "null"] },
+        "model": { "default": null, "type": ["string", "null"] },
+        "variant": { "default": null, "type": ["string", "null"] },
+        "options": {
+          "default": [],
+          "type": "array",
+          "items": { "type": "string" }
+        }
       },
       "required": ["layout"],
       "additionalProperties": true
@@ -8477,6 +8715,7 @@
           "type": "object",
           "properties": {
             "enabled": {
+              "default": false,
               "description": "Whether StartOS should run NUT monitoring.",
               "type": "boolean"
             },
@@ -8499,9 +8738,15 @@
                   "description": "Serve and monitor a UPS connected directly to this StartOS host."
                 },
                 "device": { "$ref": "#/$defs/NutDevice" },
-                "listenAll": { "type": "boolean" },
-                "remoteUsername": { "type": ["string", "null"] },
-                "remotePassword": { "type": ["string", "null"] }
+                "listenAll": { "default": false, "type": "boolean" },
+                "remoteUsername": {
+                  "default": null,
+                  "type": ["string", "null"]
+                },
+                "remotePassword": {
+                  "default": null,
+                  "type": ["string", "null"]
+                }
               },
               "required": ["mode", "device"]
             },
@@ -8539,16 +8784,17 @@
           "properties": {
             "driver": { "type": "string" },
             "port": { "type": "string" },
-            "vendorId": { "type": ["string", "null"] },
-            "productId": { "type": ["string", "null"] },
-            "serial": { "type": ["string", "null"] },
-            "bus": { "type": ["string", "null"] },
+            "vendorId": { "default": null, "type": ["string", "null"] },
+            "productId": { "default": null, "type": ["string", "null"] },
+            "serial": { "default": null, "type": ["string", "null"] },
+            "bus": { "default": null, "type": ["string", "null"] },
             "busPort": {
+              "default": null,
               "description": "Pins devices without a serial number to the selected USB port.",
               "type": ["string", "null"]
             },
-            "vendor": { "type": ["string", "null"] },
-            "product": { "type": ["string", "null"] }
+            "vendor": { "default": null, "type": ["string", "null"] },
+            "product": { "default": null, "type": ["string", "null"] }
           },
           "required": ["driver", "port"],
           "additionalProperties": true,
@@ -8689,6 +8935,7 @@
           "type": "object",
           "properties": {
             "wait": {
+              "default": false,
               "description": "Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.",
               "type": "boolean"
             }
@@ -8699,6 +8946,7 @@
       "type": "object",
       "properties": {
         "wait": {
+          "default": false,
           "description": "Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.",
           "type": "boolean"
         }
@@ -8756,6 +9004,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -8805,6 +9054,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -8858,6 +9108,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -8884,6 +9135,7 @@
               "description": "Ed25519 public keys in PEM or armored GPG format."
             },
             "trustFor": {
+              "default": null,
               "description": "Grants this permission to every imported key, including existing keys.",
               "anyOf": [{ "$ref": "#/$defs/TrustContext" }, { "type": "null" }]
             }
@@ -8942,6 +9194,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -8967,6 +9220,7 @@
               "type": "string"
             },
             "originRegistry": {
+              "default": null,
               "description": "Registry identity recorded when this key was first imported.",
               "anyOf": [
                 { "$ref": "#/$defs/RegistryIdentity" },
@@ -8975,11 +9229,13 @@
             },
             "publicKey": { "$ref": "#/$defs/AnyVerifyingKey" },
             "gpgExports": {
+              "default": [],
               "description": "Original GPG exports; signing trust is determined by `public_key`.",
               "type": "array",
               "items": { "$ref": "#/$defs/GpgPublicKeyExport" }
             },
             "contact": {
+              "default": [],
               "description": "Contact details registries publish for the key's signer.",
               "type": "array",
               "items": { "$ref": "#/$defs/ContactInfo" }
@@ -9010,8 +9266,9 @@
         "RegistryIdentity": {
           "type": "object",
           "properties": {
-            "name": { "type": ["string", "null"] },
+            "name": { "default": null, "type": ["string", "null"] },
             "icon": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/DataUrl" }, { "type": "null" }]
             }
           },
@@ -9038,6 +9295,7 @@
               "description": "Self-certified user IDs containing names, comments, and email addresses."
             },
             "identities": {
+              "default": {},
               "description": "Self-certified claims indexed by the signing key's canonical DER encoding.",
               "type": "object",
               "propertyNames": { "type": "string" },
@@ -9047,6 +9305,7 @@
               }
             },
             "keyFingerprints": {
+              "default": {},
               "description": "OpenPGP fingerprints indexed by the signing key's canonical DER encoding.",
               "type": "object",
               "propertyNames": { "type": "string" },
@@ -9170,19 +9429,23 @@
           "type": "object",
           "properties": {
             "registry": {
+              "default": null,
               "description": "Fetches once from this registry instead of using the selected update registry's\nsynchronized releases.",
               "type": ["string", "null"]
             },
             "acceptSigners": {
+              "default": null,
               "description": "Additional signer requirements checked before starting the update.",
               "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
             },
             "trust": {
+              "default": false,
               "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
               "type": "boolean"
             },
-            "targetVersion": { "type": ["string", "null"] },
+            "targetVersion": { "default": null, "type": ["string", "null"] },
             "progress": {
+              "default": false,
               "description": "Requests a legacy progress GUID; rpcstream observes completion independently.",
               "type": "boolean"
             }
@@ -9226,19 +9489,23 @@
       "type": "object",
       "properties": {
         "registry": {
+          "default": null,
           "description": "Fetches once from this registry instead of using the selected update registry's\nsynchronized releases.",
           "type": ["string", "null"]
         },
         "acceptSigners": {
+          "default": null,
           "description": "Additional signer requirements checked before starting the update.",
           "anyOf": [{ "$ref": "#/$defs/AcceptSigners" }, { "type": "null" }]
         },
         "trust": {
+          "default": false,
           "description": "Accepts an untrusted signer without skipping signature or integrity verification.",
           "type": "boolean"
         },
-        "targetVersion": { "type": ["string", "null"] },
+        "targetVersion": { "default": null, "type": ["string", "null"] },
         "progress": {
+          "default": false,
           "description": "Requests a legacy progress GUID; rpcstream observes completion independently.",
           "type": "boolean"
         }
@@ -9251,8 +9518,9 @@
         "UpdateSystemRes": {
           "type": "object",
           "properties": {
-            "target": { "type": ["string", "null"] },
+            "target": { "default": null, "type": ["string", "null"] },
             "progress": {
+              "default": null,
               "description": "Legacy progress continuation, absent for rpcstream observers.",
               "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
             }
@@ -9264,8 +9532,9 @@
       },
       "type": "object",
       "properties": {
-        "target": { "type": ["string", "null"] },
+        "target": { "default": null, "type": ["string", "null"] },
         "progress": {
+          "default": null,
           "description": "Legacy progress continuation, absent for rpcstream observers.",
           "anyOf": [{ "$ref": "#/$defs/Guid" }, { "type": "null" }]
         }
@@ -9334,6 +9603,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -9424,7 +9694,7 @@
             "hostname": { "type": "string" },
             "path": { "type": "string" },
             "username": { "type": "string" },
-            "password": { "type": ["string", "null"] }
+            "password": { "default": null, "type": ["string", "null"] }
           },
           "required": ["hostname", "path", "username"],
           "additionalProperties": true
@@ -9448,6 +9718,7 @@
           "type": "object",
           "properties": {
             "format": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
             }
           },
@@ -9529,6 +9800,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -9590,6 +9862,7 @@
                 "logicalname": { "type": "string" },
                 "path": { "type": "string" },
                 "drive": {
+                  "default": null,
                   "description": "The drive as reported when the source was created, for display.",
                   "anyOf": [
                     { "$ref": "#/$defs/SharedVolumeDrive" },
@@ -9605,7 +9878,7 @@
                 "kind": { "type": "string", "const": "cifs" },
                 "hostname": { "type": "string" },
                 "path": { "type": "string" },
-                "username": { "type": "string" }
+                "username": { "default": "", "type": "string" }
               },
               "required": ["kind", "hostname", "path", "username"]
             }
@@ -9614,9 +9887,9 @@
         "SharedVolumeDrive": {
           "type": "object",
           "properties": {
-            "vendor": { "type": ["string", "null"] },
-            "model": { "type": ["string", "null"] },
-            "label": { "type": ["string", "null"] },
+            "vendor": { "default": null, "type": ["string", "null"] },
+            "model": { "default": null, "type": ["string", "null"] },
+            "label": { "default": null, "type": ["string", "null"] },
             "capacity": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -9720,6 +9993,7 @@
             "id": { "$ref": "#/$defs/SharedVolumeId" },
             "packageId": { "$ref": "#/$defs/PackageId" },
             "grant": {
+              "default": null,
               "anyOf": [
                 { "$ref": "#/$defs/SharedVolumeGrant" },
                 { "type": "null" }
@@ -9746,6 +10020,7 @@
         "id": { "$ref": "#/$defs/SharedVolumeId" },
         "packageId": { "$ref": "#/$defs/PackageId" },
         "grant": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/SharedVolumeGrant" }, { "type": "null" }]
         }
       },
@@ -9766,6 +10041,7 @@
             "path": { "type": "string" },
             "username": { "type": "string" },
             "password": {
+              "default": null,
               "description": "Omitted keeps the stored password; empty clears it.",
               "type": ["string", "null"]
             }
@@ -9785,6 +10061,7 @@
         "path": { "type": "string" },
         "username": { "type": "string" },
         "password": {
+          "default": null,
           "description": "Omitted keeps the stored password; empty clears it.",
           "type": ["string", "null"]
         }
@@ -9824,6 +10101,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -9878,6 +10156,7 @@
       "type": "object",
       "properties": {
         "format": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/IoFormat" }, { "type": "null" }]
         }
       },
@@ -9900,9 +10179,10 @@
               "additionalProperties": { "$ref": "#/$defs/SignalStrength" }
             },
             "connected": {
+              "default": null,
               "anyOf": [{ "$ref": "#/$defs/Ssid" }, { "type": "null" }]
             },
-            "country": { "type": ["string", "null"] },
+            "country": { "default": null, "type": ["string", "null"] },
             "ethernet": { "type": "boolean" },
             "availableWifi": {
               "type": "array",
@@ -9947,9 +10227,10 @@
           "additionalProperties": { "$ref": "#/$defs/SignalStrength" }
         },
         "connected": {
+          "default": null,
           "anyOf": [{ "$ref": "#/$defs/Ssid" }, { "type": "null" }]
         },
-        "country": { "type": ["string", "null"] },
+        "country": { "default": null, "type": ["string", "null"] },
         "ethernet": { "type": "boolean" },
         "availableWifi": {
           "type": "array",
