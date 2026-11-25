@@ -11,6 +11,8 @@ import {
   projectOperations,
   projectRoot,
   projectScoped,
+  reconcile,
+  reprojectRoot,
   scopeOperations,
   selectionContains,
   SubtreePatchDB,
@@ -742,4 +744,110 @@ test('narrowing a replica projects as a whole re-projection would, sharing what 
   )
   assert.deepEqual(narrowed, { a: { x: 1 } })
   assert.equal(narrowed.a, replica.a)
+})
+
+test('reprojection matches a full projection and keeps what the change leaves', () => {
+  for (const selection of SELECTIONS) {
+    for (const from of STATES) {
+      const previous = { source: from, value: projectRoot(selection, from) }
+      assert.equal(
+        reprojectRoot(selection, from, previous),
+        previous.value,
+        JSON.stringify({ selection, from }),
+      )
+      for (const to of STATES) {
+        for (const patch of patchesBetween(from, to)) {
+          const next = { id: 0, value: from }
+          patch.forEach(op => applyOperation(next, op))
+          assert.deepEqual(
+            reprojectRoot(selection, next.value, previous),
+            projectRoot(selection, next.value),
+            JSON.stringify({ selection, from, patch }),
+          )
+        }
+      }
+    }
+  }
+  const selection = [{ include: '/*/title' }]
+  const from = { a: { title: 'A', notes: 'n' }, b: { title: 'B', notes: 'm' } }
+  const previous = { source: from, value: projectRoot(selection, from) }
+  const notes = { id: 0, value: from }
+  applyOperation(notes, { op: 'replace', path: '/a/notes', value: 'x' })
+  assert.equal(reprojectRoot(selection, notes.value, previous), previous.value)
+  const title = { id: 0, value: from }
+  applyOperation(title, { op: 'replace', path: '/a/title', value: 'Z' })
+  const next = reprojectRoot(selection, title.value, previous)
+  assert.deepEqual(next, { a: { title: 'Z' }, b: { title: 'B' } })
+  assert.equal(next.b, previous.value.b)
+})
+
+test('reconciling keeps every subtree the next document deeply equals', () => {
+  for (const value of STATES) {
+    assert.equal(reconcile(value, structuredClone(value)), value)
+  }
+  const previous = { a: { x: [1, { y: 2 }] }, b: { z: 3 }, c: 1 }
+  const next = structuredClone(previous)
+  next.b.z = 4
+  next.d = { e: 5 }
+  const merged = reconcile(previous, next)
+  assert.deepEqual(merged, next)
+  assert.equal(merged.a, previous.a)
+  assert.notEqual(merged.b, previous.b)
+  assert.deepEqual(reconcile({ a: 1, b: 2 }, { a: 1 }), { a: 1 })
+  assert.deepEqual(reconcile([1, 2, 3], [1, 2]), [1, 2])
+})
+
+test('a revision notifies a projected watch only when its projection changes', t => {
+  const f = fixture(t)
+  const listing = f.project({ include: ['/*/title'] }, 'packages')
+  f.db.start()
+  f.start(f.calls[0], 3, {
+    packages: { a: { title: 'A', notes: 'n' }, b: { title: 'B', notes: 'm' } },
+  })
+  assert.equal(listing.values.length, 1)
+  f.revision(f.calls[0], 4, [
+    { op: 'replace', path: '/packages/a/notes', value: 'x' },
+  ])
+  t.mock.timers.tick(250)
+  assert.equal(listing.values.length, 1)
+  f.revision(f.calls[0], 5, [
+    { op: 'replace', path: '/packages/a/title', value: 'Z' },
+  ])
+  t.mock.timers.tick(250)
+  assert.deepEqual(listing.values.at(-1), {
+    a: { title: 'Z' },
+    b: { title: 'B' },
+  })
+  assert.equal(listing.values.at(-1).b, listing.values[0].b)
+})
+
+test('a resumed subscription dump notifies no watch whose data it repeats', t => {
+  const f = fixture(t)
+  const info = f.watch('serverInfo')
+  const ui = f.watch('ui')
+  f.db.start()
+  const value = { serverInfo: { name: 'box' }, ui: { theme: 1 } }
+  f.start(f.calls[0], 3, structuredClone(value))
+  const before = f.cache.value.value
+  f.calls[0].events.error(new Error('dropped'))
+  f.db.start()
+  f.start(f.calls[1], 4, { ...structuredClone(value), ui: { theme: 2 } })
+  assert.equal(f.cache.value.value.serverInfo, before.serverInfo)
+  assert.equal(info.values.length, 1)
+  assert.deepEqual(ui.values, [{ theme: 1 }, { theme: 2 }])
+})
+
+test('revisions during a selection update notify only the watches they change', t => {
+  const f = fixture(t)
+  const info = f.watch('serverInfo')
+  const ui = f.watch('ui')
+  f.db.start()
+  f.start(f.calls[0], 3, { serverInfo: { name: 'box' }, ui: { theme: 1 } })
+  f.watch('packageData')
+  f.revision(f.calls[0], 4, [{ op: 'replace', path: '/ui/theme', value: 2 }])
+  t.mock.timers.tick(250)
+  assert.equal(info.values.length, 1)
+  assert.deepEqual(ui.values, [{ theme: 1 }, { theme: 2 }])
+  f.extend(f.calls[0], 4, [{ op: 'add', path: '/packageData', value: {} }])
+  assert.equal(info.values.length, 1)
 })
