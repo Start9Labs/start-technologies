@@ -439,8 +439,10 @@ pub(crate) fn begin_exclusive(
 #[derive(Clone)]
 pub struct ServerContext {
     pub(crate) setup_flash: Arc<tokio::sync::Mutex<()>>,
-    /// Held by an update request and its task; procd stops the daemon before a flash.
+    /// Held by an update request and its task, and from procd's hand-off until the daemon exits.
     pub(crate) system_update: Arc<tokio::sync::Mutex<()>>,
+    /// Cancelled when the daemon receives its stop signal.
+    pub(crate) shutdown: tokio_util::sync::CancellationToken,
     pub continuations: Arc<continuations::RpcContinuations>,
     pub auth: Arc<auth::AuthState>,
     pub server_identity: startos::sign::Signer,
@@ -457,6 +459,7 @@ impl ServerContext {
         let server_identity = self.server_identity.clone();
         let setup_flash = self.setup_flash.clone();
         let system_update = self.system_update.clone();
+        let shutdown = self.shutdown.clone();
         startos::middleware::auth::signature::RequestReplayCheck::new(&self.auth, move |auth| {
             Some(Self {
                 continuations: continuations.upgrade()?,
@@ -464,6 +467,7 @@ impl ServerContext {
                 server_identity: server_identity.clone(),
                 setup_flash: setup_flash.clone(),
                 system_update: system_update.clone(),
+                shutdown: shutdown.clone(),
                 secure_session: None,
             })
         })
@@ -484,6 +488,7 @@ impl Default for ServerContext {
         Self {
             setup_flash: Arc::new(tokio::sync::Mutex::new(())),
             system_update: Arc::new(tokio::sync::Mutex::new(())),
+            shutdown: tokio_util::sync::CancellationToken::new(),
             continuations: Arc::new(continuations::RpcContinuations::new()),
             auth: Arc::new(auth::AuthState::in_memory()),
             server_identity: startos::sign::AnySigningKey::generate().into(),

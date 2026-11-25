@@ -13,6 +13,8 @@ use startos::sign::commitment::blake3::Blake3Commitment;
 use startos::util::io::create_file;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::sync::OwnedMutexGuard;
+use tokio_util::sync::CancellationToken;
 
 use crate::continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::prelude::*;
@@ -150,14 +152,16 @@ pub async fn update_system(
     let client = firmware_client(DOWNLOAD_IDLE_TIMEOUT)?;
     let target_ver_for_task = target_ver.clone();
     let tracker_for_task = tracker.clone();
+    let shutdown = ctx.shutdown.clone();
     let done = tokio::spawn(async move {
-        let _in_flight = in_flight;
         let tracker = tracker_for_task;
         let target_ver = target_ver_for_task;
         let result = do_update(
             &client,
             asset,
             &target_ver,
+            in_flight,
+            &shutdown,
             &mut download_phase,
             &mut verify_phase,
             &mut apply_phase,
@@ -283,8 +287,8 @@ fn write_pending_marker(target_ver: &str) {
     }
 }
 
-fn clear_pending_marker() {
-    let _ = std::fs::remove_file(PENDING_UPDATE_MARKER);
+fn clear_pending_marker(marker: &Path) {
+    let _ = std::fs::remove_file(marker);
 }
 
 /// Whether this boot follows an update [`check_pending_update_marker`] has
@@ -317,7 +321,7 @@ pub fn check_pending_update_marker() {
             Some("version mismatch after reboot"),
         );
     }
-    clear_pending_marker();
+    clear_pending_marker(Path::new(PENDING_UPDATE_MARKER));
 }
 
 async fn download_firmware(
@@ -362,6 +366,8 @@ async fn do_update(
     client: &reqwest::Client,
     asset: RegistryAsset<Blake3Commitment>,
     target_ver: &str,
+    in_flight: OwnedMutexGuard<()>,
+    shutdown: &CancellationToken,
     download_phase: &mut crate::progress::PhaseProgressTrackerHandle,
     verify_phase: &mut crate::progress::PhaseProgressTrackerHandle,
     apply_phase: &mut crate::progress::PhaseProgressTrackerHandle,
@@ -389,16 +395,52 @@ async fn do_update(
     );
     write_pending_marker(target_ver);
     // `sysupgrade` must survive cancellation of the daemon's update task.
-    let status = Command::new("sysupgrade").arg(firmware_path).status().await;
-    clear_pending_marker();
-    let status = status.map_err(|e| Error::other(format!("spawning sysupgrade: {e}")))?;
-    if !status.success() {
-        return Err(Error::other(format!(
-            "sysupgrade exited with code {}",
-            status.code().unwrap_or(-1)
-        )));
-    }
+    let mut sysupgrade = Command::new("sysupgrade");
+    sysupgrade.arg(firmware_path);
+    run_sysupgrade(
+        sysupgrade,
+        Path::new(PENDING_UPDATE_MARKER),
+        in_flight,
+        shutdown,
+    )
+    .await?;
     apply_phase.complete();
 
     Ok(())
+}
+
+/// sysupgrade's exit when ubusd stops during its `ubus call`.
+const UBUS_CONNECTION_FAILED: i32 = 246;
+/// The longest a sysupgrade that lost ubusd waits for the daemon's shutdown.
+const HANDOFF_GRACE: Duration = Duration::from_secs(2);
+
+/// Treats a zero exit, or losing ubusd during the daemon's shutdown, as procd's hand-off.
+/// A hand-off keeps the marker and holds the update lock until the daemon exits.
+async fn run_sysupgrade(
+    mut sysupgrade: Command,
+    marker: &Path,
+    in_flight: OwnedMutexGuard<()>,
+    shutdown: &CancellationToken,
+) -> Result<(), Error> {
+    let error = match sysupgrade.status().await {
+        Ok(status) => {
+            if status.success()
+                || (status.code() == Some(UBUS_CONNECTION_FAILED)
+                    && tokio::time::timeout(HANDOFF_GRACE, shutdown.cancelled())
+                        .await
+                        .is_ok())
+            {
+                std::mem::forget(in_flight);
+                return Ok(());
+            }
+            Error::other(format!(
+                "sysupgrade exited with code {}",
+                status.code().unwrap_or(-1)
+            ))
+        }
+        Err(e) => Error::other(format!("spawning sysupgrade: {e}")),
+    };
+    clear_pending_marker(marker);
+    drop(in_flight);
+    Err(error)
 }
