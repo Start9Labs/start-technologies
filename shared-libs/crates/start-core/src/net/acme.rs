@@ -7,6 +7,7 @@ use clap::Parser;
 use clap::builder::ValueParserFactory;
 use futures::future::{BoxFuture, Shared};
 use futures::{FutureExt, StreamExt};
+use imbl::OrdMap;
 use imbl_value::InternedString;
 use instant_acme::{Error as AcmeError, LetsEncrypt};
 use itertools::Itertools;
@@ -24,7 +25,7 @@ use url::Url;
 
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
-use crate::db::model::public::AcmeSettings;
+use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::model::{Database, DatabaseModel};
 use crate::db::{DbAccess, DbAccessByKey, DbAccessMut};
 use crate::error::ErrorData;
@@ -98,9 +99,10 @@ pub struct AcmeTlsHandler<M: HasModel, S> {
     pub db: TypedPatchDb<M>,
     pub acme_cache: AcmeTlsAlpnCache,
     pub crypto_provider: Arc<CryptoProvider>,
-    pub get_provider: S,
+    pub get_issuance: S,
     pub in_progress: Watch<BTreeMap<BTreeSet<InternedString>, OrderEntry>>,
     pub report_failure: Option<ReportOrderFailure>,
+    pub interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
 }
 impl<M, S> AcmeTlsHandler<M, S>
 where
@@ -110,11 +112,11 @@ where
         + Send
         + Sync
         + 'static,
-    S: GetAcmeProvider + Clone + Send + Sync,
+    S: GetAcmeIssuance + Clone + Send + Sync,
 {
     pub async fn get_cert(&self, san_info: &BTreeSet<InternedString>) -> Option<CertifiedKey> {
-        let provider = self.get_provider.get_provider(san_info).await?;
-        let provider = provider.as_ref();
+        let AcmeIssuance { provider, gateway } = self.get_issuance.get_issuance(san_info).await?;
+        let provider = &provider;
 
         let peek = self.db.peek().await;
         let store = <M as DbAccess<AcmeCertStore>>::access(&peek);
@@ -182,6 +184,7 @@ where
             }
 
             let provider_clone = provider.clone();
+            let gateway = gateway.clone();
             let report_failure = self.report_failure.clone();
             let acme_cache = self.acme_cache.clone();
             let db = self.db.clone();
@@ -190,6 +193,10 @@ where
             let cache_entries_clone = cache_entries.clone();
             let contact_clone = contact.clone();
             let crypto_provider = self.crypto_provider.clone();
+            let route = self.interfaces.peek(|interfaces| {
+                let info = interfaces.get(&gateway)?;
+                Some((info.ip_info.as_ref()?.scope_id, info.dns.servers.clone()))
+            });
 
             let fut = async move {
                 acme_cache.mutate(|c| {
@@ -215,7 +222,18 @@ where
                         &AcmeCertCache(&db),
                         &contact_clone,
                         &crypto_provider,
-                        Box::new(order::AcmeHttpClient::new()?),
+                        Box::new({
+                            let (index, dns_servers) = route.ok_or_else(|| {
+                                AcmeError::Other(
+                                    std::io::Error::new(
+                                        std::io::ErrorKind::NotConnected,
+                                        "ACME gateway is unavailable",
+                                    )
+                                    .into(),
+                                )
+                            })?;
+                            order::AcmeHttpClient::via_gateway(&gateway, index, &dns_servers)?
+                        }),
                     )
                     .await
                 })
@@ -310,11 +328,19 @@ fn certified_key(
     .with_kind(ErrorKind::TLSInit)?)
 }
 
-pub trait GetAcmeProvider {
-    fn get_provider<'a, 'b: 'a>(
-        &'b self,
+/// The authority that issues a name's certificate, and the gateway the name is
+/// published on, which carries the order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcmeIssuance {
+    pub provider: AcmeProvider,
+    pub gateway: GatewayId,
+}
+
+pub trait GetAcmeIssuance {
+    fn get_issuance<'a>(
+        &'a self,
         san_info: &'a BTreeSet<InternedString>,
-    ) -> impl Future<Output = Option<impl AsRef<AcmeProvider> + Send + 'b>> + Send + 'a;
+    ) -> impl Future<Output = Option<AcmeIssuance>> + Send + 'a;
 }
 
 impl<'a, A, M, S> TlsHandler<'a, A> for Arc<AcmeTlsHandler<M, S>>
@@ -327,7 +353,7 @@ where
         + Send
         + Sync
         + 'static,
-    S: GetAcmeProvider + Clone + Send + Sync,
+    S: GetAcmeIssuance + Clone + Send + Sync,
 {
     async fn get_config(
         &'a mut self,

@@ -57,7 +57,7 @@ A connection that arrived through a gateway is answered through that gateway, an
 - **`system-selection`**, **`system-kill-switch`** — The same two guarantees for the server itself and every service without a pin. (#3101, #4003)
 - **`v6-leak-guard`** — A selected gateway that is up but cannot carry IPv6 drops IPv6 rather than leaking it. The `blackhole default` in its own table does this, so the drop follows the gateway into whichever selection points at it. (#3388)
 - **`v4-leak-guard`** — A selected outbound gateway that is up but has no IPv4 address beyond link-local drops IPv4 rather than sending IPv4 into the tunnel with another interface's source address. The `blackhole default` in the gateway's own IPv4 table does this.
-- **`gateway-probe`** — A connection the server opens with a gateway's mark leaves through that gateway under any selection. The WAN address probe and the DNS upstreams carry one; `mangle_local_outbound` marks only an unmarked packet, so it never replaces it.
+- **`gateway-probe`** — A connection the server opens with a gateway's mark leaves through that gateway under any selection. The WAN address probe, the DNS upstreams, and an ACME order, through its domain's gateway, carry one; `mangle_local_outbound` marks only an unmarked packet, so it never replaces it.
 - **`local-outbound`** — Any other connection the server opens is routed by the selection and by nothing else, even once the kernel has given it a source address. Source rules match unmarked lookups only, and while a gateway is selected `mangle_output` gives every new local connection the local outbound mark, so its repeated lookup passes the source rules and ends in 75–76. The mark is a dedicated one: a gateway's own mark would send the server's traffic to an on-link global IPv6 host through rule 48. Only `ct state new` packets are marked, so a flow opened before the selection keeps its path. (#4006)
 - **`auto`** — With nothing selected, `main` picks each family's default by metric. These rules sit above NetworkManager's own, because StartOS imports every WireGuard peer as `0.0.0.0/0, ::/0` and NetworkManager would otherwise route the whole server into the tunnel. (#3037, #3388)
 
@@ -132,6 +132,8 @@ Upstream UDP and TCP sockets bind to the gateway's captured interface index and 
 Host source matching retains the interface zone of IPv6 link-local addresses; the same address on another link does not identify the host.
 
 Host-originated lookups of exact configured WireGuard endpoint names use the automatic non-WireGuard underlay's DNS pool. The interface watcher owns that allowlist, retained while a tunnel is disconnected and seeded before importing a tunnel configuration. Service-originated queries for the same names retain their selected gateway. An unavailable underlay fails bootstrap rather than trying another tunnel.
+
+An ACME order and the WAN address probe resolve names without the StartOS DNS server: each queries the DNS servers of the gateway it leaves through (the gateway an ACME order's domain is published on, or the gateway being probed), over sockets bound and marked for that gateway like the upstream sockets above. An unavailable gateway fails the request.
 
 `src/net/dns/transport_test.sh` runs the production socket provider in a throwaway network namespace, against IPv4 and IPv6 UDP/TCP peers, with competing on-link and default routes. It checks device containment with an empty table, a down device, and a recreated interface.
 

@@ -18,6 +18,7 @@ use crate::db::model::Database;
 use crate::db::model::public::NetworkInterfaceInfo;
 use crate::hostname::ServerHostname;
 use crate::lxc::slot::{OS_LISTEN_IP, OS_LISTEN_IPV6, VETH_PREFIX, is_os_listen};
+use crate::net::acme::AcmeIssuance;
 use crate::net::dns::DnsController;
 use crate::net::dns_update::{DnsUpdateController, spawn_server_mdns_injection};
 use crate::net::forward::{
@@ -695,7 +696,12 @@ impl NetServiceData {
                                 .iter()
                                 .find(|a| a.address == addr_info.hostname)
                                 .and_then(|a| a.public.as_ref())
-                                .and_then(|p| p.acme.clone())
+                                .and_then(|p| {
+                                    Some(AcmeIssuance {
+                                        provider: p.acme.clone()?,
+                                        gateway: p.gateway.clone(),
+                                    })
+                                })
                         },
                         ..target.clone()
                     },
