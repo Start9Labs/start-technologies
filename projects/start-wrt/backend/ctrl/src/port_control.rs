@@ -195,7 +195,6 @@ impl LanAddr {
     }
 }
 
-/// A peer on no LAN bridge, or on the Admin profile's.
 fn ui_fallback_admits(peer: Ipv4Addr, bridges: &[LanAddr], admin: Option<Ipv4Addr>) -> bool {
     match bridges.iter().find(|bridge| bridge.contains(peer)) {
         None => true,
@@ -214,7 +213,10 @@ async fn screen_ui_fallback(
             return;
         };
         let admitted = match meta.peer_addr.ip().to_canonical() {
-            IpAddr::V4(peer) => pc.admits_ui_fallback(peer).await,
+            IpAddr::V4(peer) => pc.admits_ui_fallback(peer).await.unwrap_or_else(|e| {
+                tracing::warn!("port-control: reading the UI fallback policy failed: {e}");
+                false
+            }),
             IpAddr::V6(_) => true,
         };
         drop(pc);
@@ -262,24 +264,29 @@ impl PortControl {
         pc
     }
 
-    /// Reads the Admin profile's address only for a peer on a LAN bridge.
-    async fn admits_ui_fallback(&self, peer: Ipv4Addr) -> bool {
-        let bridges = self.lan_addrs().await;
-        if !bridges.iter().any(|bridge| bridge.contains(peer)) {
-            return true;
-        }
+    /// Non-Admin profiles stay blocked while their bridges are recreated.
+    async fn admits_ui_fallback(&self, peer: Ipv4Addr) -> Result<bool, Error> {
         let uci_root = self.uci_root.clone();
-        let admin = uci_task(move || async move {
+        let (configured, admin) = uci_task(move || async move {
             let arena = Arena::new();
-            let cfgs = parse_all(&uci_root, &arena, &["network"]).await?;
-            Ok(crate::profiles::get_lan_ip(&cfgs))
+            let cfgs = parse_all(&uci_root, &arena, &["network", "startwrt"]).await?;
+            let lookup = crate::profiles::Lookup::parse(ServerContext::default(), &cfgs)?;
+            let bridges: Vec<_> = crate::reservations::profile_networks(&cfgs, &lookup)
+                .into_iter()
+                .filter_map(|profile| profile.address)
+                .map(|net| LanAddr {
+                    addr: net.addr(),
+                    prefix: net.prefix_len(),
+                })
+                .collect();
+            Ok((bridges, crate::profiles::get_lan_ip(&cfgs)))
         })
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("port-control: reading the Admin profile's address failed: {e}");
-            None
-        });
-        ui_fallback_admits(peer, &bridges, admin)
+        .await?;
+        if configured.iter().any(|bridge| bridge.contains(peer)) {
+            return Ok(ui_fallback_admits(peer, &configured, admin));
+        }
+        let live = read_lan_addrs().await?;
+        Ok(ui_fallback_admits(peer, &live, admin))
     }
 
     /// Seconds remaining on a section's lease, if the daemon is tracking one.
@@ -520,14 +527,7 @@ impl PortControl {
                 }
             }
         }
-        let out = tokio::process::Command::new("ip")
-            .args(["-j", "addr", "show"])
-            .invoke(ErrorKind::Network.into())
-            .await
-            .ok()
-            .and_then(|out| String::from_utf8(out).ok())
-            .unwrap_or_default();
-        let addrs = Arc::new(parse_lan_addrs(&out));
+        let addrs = Arc::new(read_lan_addrs().await.unwrap_or_default());
         *self.lan_cache.lock().unwrap() = Some((Instant::now(), addrs.clone()));
         addrs
     }
@@ -1939,13 +1939,22 @@ fn unauthorized_sni_routes(
         .collect()
 }
 
-/// The router's own `br-*` IPv4 addresses from `ip -j addr show`.
-fn parse_lan_addrs(json: &str) -> Vec<LanAddr> {
-    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json) else {
-        return Vec::new();
-    };
+async fn read_lan_addrs() -> Result<Vec<LanAddr>, Error> {
+    let out = tokio::process::Command::new("ip")
+        .args(["-j", "addr", "show"])
+        .invoke(ErrorKind::Network.into())
+        .await?;
+    parse_lan_addrs(&String::from_utf8_lossy(&out))
+}
+
+fn parse_lan_addrs(json: &str) -> Result<Vec<LanAddr>, Error> {
+    let parsed = serde_json::from_str::<serde_json::Value>(json)
+        .map_err(|e| Error::new(e, ErrorKind::Network))?;
+    let interfaces = parsed
+        .as_array()
+        .ok_or_else(|| Error::new(eyre!("expected an interface list"), ErrorKind::Network))?;
     let mut out = Vec::new();
-    for iface in parsed.as_array().into_iter().flatten() {
+    for iface in interfaces {
         let Some(name) = iface.get("ifname").and_then(|v| v.as_str()) else {
             continue;
         };
@@ -1972,7 +1981,7 @@ fn parse_lan_addrs(json: &str) -> Vec<LanAddr> {
             out.push(LanAddr { addr, prefix });
         }
     }
-    out
+    Ok(out)
 }
 
 /// Stable UPnP device UDN, derived from the router's root CA (generated once
@@ -2953,7 +2962,7 @@ config redirect 'pp_a'
             ]},
             {"ifname":"eth1","addr_info":[{"family":"inet","local":"203.0.113.7","prefixlen":24}]}
         ]"#;
-        let addrs = parse_lan_addrs(json);
+        let addrs = parse_lan_addrs(json).unwrap();
         assert_eq!(addrs.len(), 1);
         assert_eq!(addrs[0].addr, Ipv4Addr::new(192, 168, 1, 1));
         assert_eq!(addrs[0].prefix, 24);
@@ -3891,6 +3900,83 @@ config host
             &bridges,
             None
         ));
+    }
+
+    #[tokio::test]
+    async fn ui_fallback_blocks_configured_profiles_missing_from_the_bridge_cache() {
+        let dir = temp_root("");
+        let profiles = "\
+config profile 'lan'
+\toption fullname 'Admin'
+\toption interface 'lan'
+\toption vlan_tag '1'
+";
+        let admin_network = "\
+config interface 'lan'
+\toption device 'br-lan'
+\toption proto 'static'
+\toption ipaddr '192.168.0.1'
+\toption netmask '255.255.255.0'
+";
+        std::fs::write(dir.path().join("startwrt"), profiles).unwrap();
+        std::fs::write(dir.path().join("network"), admin_network).unwrap();
+        let pc = PortControl::new(dir.path().to_path_buf());
+        *pc.lan_cache.lock().unwrap() = Some((
+            Instant::now(),
+            Arc::new(vec![LanAddr {
+                addr: Ipv4Addr::new(192, 168, 0, 1),
+                prefix: 24,
+            }]),
+        ));
+        assert!(pc
+            .admits_ui_fallback(Ipv4Addr::new(192, 168, 0, 50))
+            .await
+            .unwrap());
+
+        std::fs::write(
+            dir.path().join("startwrt"),
+            format!(
+                "{profiles}
+config profile 'guest'
+\toption fullname 'Guest'
+\toption interface 'guest'
+\toption vlan_tag '101'
+"
+            ),
+        )
+        .unwrap();
+        for subnet in [101, 102] {
+            std::fs::write(
+                dir.path().join("network"),
+                format!(
+                    "{admin_network}
+config interface 'guest'
+\toption device 'br-lan.101'
+\toption proto 'static'
+\toption ipaddr '192.168.{subnet}.1'
+\toption netmask '255.255.255.0'
+"
+                ),
+            )
+            .unwrap();
+            assert!(!pc
+                .admits_ui_fallback(Ipv4Addr::new(192, 168, subnet, 50))
+                .await
+                .unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn ui_fallback_rejects_an_unreadable_profile_policy() {
+        let dir = temp_root("");
+        let pc = PortControl::new(dir.path().to_path_buf());
+        *pc.lan_cache.lock().unwrap() = Some((Instant::now(), Arc::new(Vec::new())));
+        assert!(pc
+            .admits_ui_fallback(Ipv4Addr::new(192, 168, 101, 50))
+            .await
+            .is_err());
+        assert!(parse_lan_addrs("invalid").is_err());
+        assert!(parse_lan_addrs("{}").is_err());
     }
 
     #[tokio::test]
