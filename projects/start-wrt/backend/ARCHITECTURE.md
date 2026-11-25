@@ -45,7 +45,7 @@ The single binary `startwrt` uses `MultiExecutable` to dispatch based on the sym
 ```
 --config-root PATH   UCI config directory (default: /etc/config)
 --configs-only       Skip service reloads (write configs only)
---host URL           Server URL (default: http://127.0.0.1/rpc/v1 on the router, else https://router.lan/rpc/v1)
+--host URL           Server base URL (default: http://127.0.0.1 on the router, else https://router.lan)
 --root-ca PEM_PATH   Certificate authority to trust, such as the router's from /static/local-root-ca.crt (repeatable)
 ```
 

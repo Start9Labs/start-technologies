@@ -19,7 +19,10 @@ export class MarketplaceIconDirective extends IconDirective {
     this.marketplace?.currentRegistryUrl$ || of(null),
   )
 
-  readonly marketplaceIcon = input.required<MarketplacePkgBase>()
+  readonly marketplaceIcon = input.required<
+    Pick<MarketplacePkgBase, 'icon'> &
+      Partial<Pick<MarketplacePkgBase, 'dependencyMetadata'>>
+  >()
   readonly dependency = input<string>()
   readonly registry = input<string>()
 
@@ -34,7 +37,7 @@ export class MarketplaceIconDirective extends IconDirective {
       switchMap(({ pkg, dependency, registry }) =>
         defer(() => {
           const icon = dependency
-            ? pkg.dependencyMetadata[dependency]?.icon
+            ? pkg.dependencyMetadata?.[dependency]?.icon
             : pkg.icon
 
           if (icon?.startsWith('data:')) return of(icon)

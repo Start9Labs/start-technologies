@@ -807,6 +807,7 @@ mod test {
         };
         DatabaseModel::from(imbl_value::json!({
             "public": {
+                "registryIndexes": {},
                 "registryCache": {},
                 "osUpdateCache": null,
                 "ui": {},

@@ -4,10 +4,12 @@ import {
   provideMutationObserverInit,
   WaMutationObserverService,
 } from '@ng-web-apis/mutation-observer'
-import { tuiInjectElement } from '@taiga-ui/cdk'
+import { tuiInjectElement, tuiIsElement } from '@taiga-ui/cdk'
 
+/** Cross-origin links open in new tabs. Link clicks do not bubble beyond the host. */
 @Directive({
   selector: '[safeLinks]',
+  host: { '(click)': 'onClick($event)' },
   providers: [
     WaMutationObserverService,
     provideMutationObserverInit({ childList: true, subtree: true }),
@@ -22,13 +24,21 @@ export class SafeLinksDirective {
       Array.from(this.doc.links)
         .filter(
           link =>
-            link.hostname !== this.doc.location.hostname &&
-            this.el.contains(link),
+            link.origin !== this.doc.location.origin && this.el.contains(link),
         )
         .forEach(link => {
           link.target = '_blank'
-          link.setAttribute('rel', 'noreferrer')
+          link.setAttribute('rel', 'noopener noreferrer')
           link.classList.add('g-external-link')
         })
     })
+
+  protected onClick(event: MouseEvent) {
+    if (
+      tuiIsElement(event.target) &&
+      this.el.contains(event.target.closest('a[href]'))
+    ) {
+      event.stopPropagation()
+    }
+  }
 }

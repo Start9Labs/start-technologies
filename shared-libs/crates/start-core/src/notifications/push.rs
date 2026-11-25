@@ -13,11 +13,12 @@ use serde::{Deserialize, Serialize};
 use web_push_native::p256::elliptic_curve::sec1::ToEncodedPoint;
 use web_push_native::{Auth, WebPushBuilder, p256};
 
-use crate::context::RpcContext;
+use crate::context::{CliContext, RpcContext};
 use crate::db::model::{Database, DatabaseModel};
 use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::util::new_guid;
+use crate::util::serde::HandlerExtSerde;
 
 const MAX_PENDING: usize = 512;
 const MAX_AGE: i64 = 86400;
@@ -43,9 +44,12 @@ pub struct PushSubscription {
 }
 rpc_toolkit::reflect_ts!(PushSubscription);
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, clap::Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct EndpointParams {
+    #[arg(help = "help.arg.push-endpoint")]
     pub endpoint: String,
 }
 rpc_toolkit::reflect_ts!(EndpointParams);
@@ -96,7 +100,9 @@ pub(super) fn push<C: Context>() -> ParentHandler<C> {
             "list",
             from_fn_async(list)
                 .with_metadata(EFFECT, Effect::Read.into())
-                .no_cli(),
+                .with_display_serializable()
+                .with_about("about.list-push-subscriptions")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "subscribe",
@@ -110,14 +116,18 @@ pub(super) fn push<C: Context>() -> ParentHandler<C> {
             from_fn_async(unsubscribe)
                 .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .no_display()
+                .with_about("about.remove-push-subscription")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "test",
             from_fn_async(test)
                 .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .no_display()
+                .with_about("about.test-push-subscription")
+                .with_call_remote::<CliContext>(),
         )
 }
 

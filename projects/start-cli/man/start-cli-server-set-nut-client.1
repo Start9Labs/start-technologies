@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-set-nut-client 1  "client "
+.SH NAME
+start\-cli\-server\-set\-nut\-client \- Monitor a UPS served by another NUT server
+.SH SYNOPSIS
+\fBstart\-cli server set\-nut client\fR [\fB\-\-port\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIUPS_NAME\fR> <\fIHOST\fR> <\fIMONITOR_USERNAME\fR>
+.SH DESCRIPTION
+Monitor a UPS served by another NUT server
+.SH OPTIONS
+.TP
+\fB\-\-port\fR \fI<PORT>\fR [default: 3493]
+NUT server port
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIUPS_NAME\fR>
+UPS name on the NUT server
+.TP
+<\fIHOST\fR>
+NUT server hostname or IP address
+.TP
+<\fIMONITOR_USERNAME\fR>
+Username for monitoring the remote UPS

@@ -29,7 +29,9 @@ pub fn api<C: Context>() -> ParentHandler<C> {
             "refresh",
             from_fn_async(refresh)
                 .with_metadata(EFFECT, Effect::Destructive.into())
-                .no_cli(),
+                .no_display()
+                .with_about("about.refresh-registry")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "remove",

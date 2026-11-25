@@ -1,0 +1,35 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-volumes 1  "volumes "
+.SH NAME
+start\-cli\-volumes \- Commands for managing shared volumes
+.SH SYNOPSIS
+\fBstart\-cli volumes\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Commands for managing shared volumes
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+start\-cli\-volumes\-create(1)
+Create a shared volume
+.TP
+start\-cli\-volumes\-inspect(1)
+Check a shared volume\*(Aqs availability and free space
+.TP
+start\-cli\-volumes\-list(1)
+List shared volumes
+.TP
+start\-cli\-volumes\-remove(1)
+Remove a shared volume; deletes the data of a local volume
+.TP
+start\-cli\-volumes\-rename(1)
+Rename a shared volume
+.TP
+start\-cli\-volumes\-set\-grant(1)
+Grant or revoke a package\*(Aqs access to a shared volume
+.TP
+start\-cli\-volumes\-update\-cifs(1)
+Update the connection details of a CIFS shared volume

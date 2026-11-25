@@ -2,10 +2,11 @@
 .el .ds Aq '
 .TH start-container-action 1  "action " 
 .SH NAME
-start\-container\-action
+start\-container\-action \- Commands for this service\*(Aqs actions and tasks
 .SH SYNOPSIS
 \fBstart\-container action\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
+Commands for this service\*(Aqs actions and tasks
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
@@ -13,9 +14,19 @@ Print help
 .SH SUBCOMMANDS
 .TP
 start\-container\-action\-clear(1)
+Remove registered actions
 .TP
 start\-container\-action\-clear\-tasks(1)
+Remove tasks this service created
+.TP
+start\-container\-action\-create\-task(1)
+Create a task for a service action (JSON parameters on stdin)
+.TP
+start\-container\-action\-export(1)
+Register an action (JSON parameters on stdin)
 .TP
 start\-container\-action\-get\-input(1)
+Display an action\*(Aqs input form
 .TP
 start\-container\-action\-run(1)
+Run an action

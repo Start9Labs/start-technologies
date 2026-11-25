@@ -47,7 +47,7 @@ project structure, conventions, build process, or product context.
 1. Define serializable request and response types.
 2. Choose a handler type (`from_fn_async` for most cases).
 3. Write the async handler.
-4. Register it in the appropriate `ParentHandler` tree. A server-side handler declares its worst-case `mcp::Effect` inline with `.with_metadata(EFFECT, Effect::<Read|Write|Destructive>.into())`; the MCP tests fail for a cataloged method without one.
+4. Register it in the appropriate `ParentHandler` tree with its CLI binding: `with_call_remote::<CliContext>()` (`ContainerCliContext` for service effects), or `no_cli()` beside a same-named `no_ts()` CLI handler that gathers input locally, such as a password prompt. An effect whose parameters have no flag form fronts its RPC with `service::effects::forward_stdin`, which reads them as JSON on stdin. Add its `about.*`/`help.arg.*` keys and run `make manpages`. A server-side handler declares its worst-case `mcp::Effect` inline with `.with_metadata(EFFECT, Effect::<Read|Write|Destructive>.into())`; the MCP tests fail for a cataloged method without one.
 5. Derive `visit_rs::VisitFields` for reachable parameter/result structs or `visit_rs::VisitVariants` for enums and add an adjacent `rpc_toolkit::reflect_ts!` consumer bridge. Register standalone shared DTOs with `rpc_toolkit::ts_export!` beside their declarations. Read the [TypeScript guide](../rpc-toolkit/docs/typescript.md) for local type selectors and explicit storage opacity.
 
 See [rpc-toolkit.md](rpc-toolkit.md) for handler patterns.

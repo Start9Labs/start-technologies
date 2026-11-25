@@ -818,7 +818,7 @@ mod tests {
         let schema = visitor.into_bindings(None, "./schemas").unwrap().schemas;
         assert!(
             schema.contains(
-                "\"boot\": wire(z.union([z.number().int().min(-2147483648).max(2147483647), z.string()]).nullable().optional(), z.union([z.number().int().min(-2147483648).max(2147483647), z.string()]).nullable())"
+                "\"boot\": z.union([z.number().int().min(-2147483648).max(2147483647), z.string()]).nullable().default(() => (null))"
             ),
             "{schema}"
         );

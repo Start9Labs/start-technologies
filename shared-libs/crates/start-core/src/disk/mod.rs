@@ -209,7 +209,7 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "repair",
-            from_fn_async(|_: C| repair())
+            from_fn_async(|_: RpcContext| repair())
                 .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_cli(),
         )

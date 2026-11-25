@@ -1,0 +1,26 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-volumes-create 1  "create "
+.SH NAME
+start\-cli\-volumes\-create \- Create a shared volume
+.SH SYNOPSIS
+\fBstart\-cli volumes create\fR [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> <\fIsubcommands\fR>
+.SH DESCRIPTION
+Create a shared volume
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fINAME\fR>
+Shared volume name
+.SH SUBCOMMANDS
+.TP
+start\-cli\-volumes\-create\-local(1)
+Create the volume on the data drive
+.TP
+start\-cli\-volumes\-create\-disk(1)
+Create the volume on an external drive partition
+.TP
+start\-cli\-volumes\-create\-cifs(1)
+Create the volume on a CIFS network share
