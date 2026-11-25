@@ -1110,4 +1110,5 @@ export default {
   1311: "Obtenir de l'aide",
   1312: 'Dernière synchronisation',
   1313: "à l'instant",
+  1314: 'Saisissez votre mot de passe principal pour continuer.',
 } satisfies i18n

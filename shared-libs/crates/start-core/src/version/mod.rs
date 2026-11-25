@@ -166,6 +166,7 @@ pub async fn post_init(
         }
         release_notes::welcome(ctx).await?;
     }
+    crate::firmware::report_flash(ctx).await.log_err();
     progress.complete();
     Ok(())
 }
