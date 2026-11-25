@@ -223,7 +223,13 @@ mod test {
     #[test]
     fn power_tools_offer_optional_force_and_cancellation() {
         let server = api_server();
-        assert!(server.get_tool("server.cancel-deferred-power").is_some());
+        let cancel = server
+            .get_tool("server.cancel-deferred-power")
+            .unwrap()
+            .annotations
+            .unwrap();
+        assert_eq!(cancel.read_only_hint, Some(false));
+        assert_eq!(cancel.destructive_hint, Some(false));
         for method in ["server.restart", "server.shutdown"] {
             let tool = serde_json::to_value(server.get_tool(method).unwrap()).unwrap();
             assert_eq!(

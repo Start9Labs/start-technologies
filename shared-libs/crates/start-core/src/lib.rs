@@ -467,6 +467,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "cancel-deferred-power",
             from_fn_async(shutdown::cancel_deferred_power)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.cancel-deferred-power")
                 .with_call_remote::<CliContext>(),
