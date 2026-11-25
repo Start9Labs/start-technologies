@@ -660,12 +660,7 @@ pub(crate) fn start_flash(
     params: FlashParams,
 ) -> Result<FlashOperation, Error> {
     let password = crate::auth::decrypt_password(ctx, params.password)?;
-    let guard = ctx.setup_flash.clone().try_lock_owned().map_err(|_| {
-        Error::new(
-            eyre!("flash already in progress"),
-            ErrorKind::InvalidRequest,
-        )
-    })?;
+    let guard = crate::begin_exclusive(&ctx.setup_flash, "flash")?;
     let (tx, events) = mpsc::channel(32);
     let completion = tokio::spawn(async move {
         startos::util::future::make_send(move || async move {
