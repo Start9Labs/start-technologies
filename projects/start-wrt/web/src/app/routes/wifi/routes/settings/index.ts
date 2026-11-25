@@ -114,8 +114,8 @@ const COUNTRY_CHANGE_MAX_WIDTH = 80
           </label>
         }
       </tui-elastic-container>
-      @let show24 = band() !== '5 GHz';
-      @let show5 = band() !== '2.4 GHz';
+      @let show24 = includesBand(band(), '2g');
+      @let show5 = includesBand(band(), '5g');
       <fieldset>
         <legend>{{ 'Frequency Range' | i18n }}</legend>
         @if (show24) {
@@ -259,6 +259,11 @@ export default class WifiSettings {
   )
 
   protected readonly bands = ['2.4 GHz', '5 GHz', 'Both']
+
+  protected readonly includesBand = (selection: string, band: string) =>
+    selection === 'Both' ||
+    (band === '2g' && selection === '2.4 GHz') ||
+    (band === '5g' && selection === '5 GHz')
 
   // Typing over a selection empties the control until an item is picked.
   protected readonly unset = toSignal(
@@ -434,10 +439,7 @@ export default class WifiSettings {
     for (const [key, radio] of Object.entries(data.radios)) {
       const is2g = radio.band === '2g'
       const is5g = radio.band === '5g'
-      const enabledByBand =
-        form.band === 'Both' ||
-        (is2g && form.band === '2.4 GHz') ||
-        (is5g && form.band === '5 GHz')
+      const enabledByBand = this.includesBand(form.band, radio.band)
 
       radios[key] = {
         band: radio.band,
