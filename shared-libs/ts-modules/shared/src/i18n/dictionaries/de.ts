@@ -1106,4 +1106,6 @@ export default {
   1312: 'Zuletzt synchronisiert',
   1313: 'gerade eben',
   1314: 'Geben Sie Ihr Master-Passwort ein, um fortzufahren.',
+  1315: 'Ein Passwort ist gespeichert. Lassen Sie „Passwort“ leer, um es beizubehalten.',
+  1316: 'Gespeichertes Passwort entfernen',
 } satisfies i18n

@@ -178,6 +178,7 @@ Configure SMTP for email notifications.
 - `--from <EMAIL>` — Sender address (required)
 - `--username <USER>` — Auth username (required)
 - `--password <PASS>` — Auth password
+- `--keep-password` — Keep the saved password when `--password` is omitted
 - `--security <MODE>` — `starttls` or `tls` (required)
 
 ### `start-cli server test-smtp`
@@ -189,7 +190,7 @@ Send a test email to verify SMTP configuration.
 - `--from <EMAIL>` — Sender address (required)
 - `--to <EMAIL>` — Recipient address (required)
 - `--username <USER>` — Auth username (required)
-- `--password <PASS>` — Auth password (required)
+- `--password <PASS>` — Auth password; omitted, the saved password is used when host, port and username match the saved settings
 - `--security <MODE>` — `starttls` or `tls` (required)
 
 ### `start-cli server clear-smtp`

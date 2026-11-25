@@ -680,6 +680,7 @@ export type ResetPasswordParamsInput = z.input<
   typeof schemas.ResetPasswordParams
 >
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
+export type SetSmtpParamsInput = z.input<typeof schemas.SetSmtpParams>
 export type SharedVolume = z.output<typeof schemas.SharedVolume>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>

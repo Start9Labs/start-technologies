@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-server\-set\-smtp \- Set SMTP configuration
 .SH SYNOPSIS
-\fBstart\-cli server set\-smtp\fR <\fB\-\-host\fR> <\fB\-\-port\fR> <\fB\-\-from\fR> <\fB\-\-username\fR> [\fB\-\-password\fR] <\fB\-\-security\fR> [\fB\-h\fR|\fB\-\-help\fR]
+\fBstart\-cli server set\-smtp\fR <\fB\-\-host\fR> <\fB\-\-port\fR> <\fB\-\-from\fR> <\fB\-\-username\fR> [\fB\-\-password\fR] <\fB\-\-security\fR> [\fB\-\-keep\-password\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Set SMTP configuration
 .SH OPTIONS
@@ -36,6 +36,9 @@ starttls
 .IP \(bu 2
 tls
 .RE
+.TP
+\fB\-\-keep\-password\fR
+Keep the saved SMTP password when no password is given
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

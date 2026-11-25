@@ -15,7 +15,7 @@ You need credentials from a provider that will send mail for you. [SMTP Credenti
 
 1. Select your provider, or **Other** for any provider not listed, and enter your credentials. Choosing a listed provider pre-fills its host and defaults to TLS on port 465; to use STARTTLS instead, set **Connection Security** to **STARTTLS** and the **Port** becomes **587**. The **From Address** may optionally include a display name, e.g. `Your Name <you@yourdomain.com>`.
 
-1. Hit "Save".
+1. Hit "Save". The saved password is never shown again: the page notes that one is saved, and leaving **Password** empty keeps it when you save or send a test email. **Remove saved password** clears it.
 
 1. On the same page, send yourself a test email. Remember to check your spam folder. If the email goes to spam, mark it as not spam.
 

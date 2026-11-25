@@ -1106,4 +1106,6 @@ export default {
   1312: 'Ostatnia synchronizacja',
   1313: 'przed chwilą',
   1314: 'Wprowadź hasło główne, aby kontynuować.',
+  1315: 'Hasło jest zapisane. Pozostaw pole „Hasło” puste, aby je zachować.',
+  1316: 'Usuń zapisane hasło',
 } satisfies i18n

@@ -3469,7 +3469,10 @@ export const TestSmtpParams: z.ZodObject<{
   from: z.ZodString
   to: z.ZodString
   username: z.ZodString
-  password: z.ZodString
+  /**
+   * Omitted, uses the saved password for the same host, port and username.
+   */
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
   security: z.ZodCodec<z.ZodOptional<typeof SmtpSecurity>, typeof SmtpSecurity>
 }> = /* @__PURE__ */ object({
   host: z.string(),
@@ -3477,7 +3480,17 @@ export const TestSmtpParams: z.ZodObject<{
   from: z.string(),
   to: z.string(),
   username: z.string(),
-  password: z.string(),
+  /**
+   * Omitted, uses the saved password for the same host, port and username.
+   */
+  password: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Omitted, uses the saved password for the same host, port and username.',
+    }),
   security: wire(SmtpSecurity.optional(), SmtpSecurity),
 }).meta({
   id: 'TestSmtpParams',
@@ -4209,6 +4222,17 @@ export const ServiceInterface: z.ZodObject<{
 }).meta({
   id: 'ServiceInterface',
 })
+export const SetSmtpParams: z.ZodIntersection<
+  z.ZodObject<{ keepPassword: z.ZodDefault<z.ZodBoolean> }>,
+  typeof SmtpValue
+> = /* @__PURE__ */ z
+  .intersection(
+    object({ keepPassword: z.boolean().default(() => false) }),
+    SmtpValue,
+  )
+  .meta({
+    id: 'SetSmtpParams',
+  })
 export const SharedVolume: z.ZodIntersection<
   z.ZodObject<{
     /**
@@ -6627,7 +6651,7 @@ export const Api = {
           _FINAL: /* @__PURE__ */ z.null(),
         },
         'set-smtp': {
-          _PARAMS: /* @__PURE__ */ SmtpValue,
+          _PARAMS: /* @__PURE__ */ SetSmtpParams,
           _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),

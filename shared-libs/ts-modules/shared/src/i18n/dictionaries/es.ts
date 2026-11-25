@@ -1106,4 +1106,6 @@ export default {
   1312: 'Última sincronización',
   1313: 'justo ahora',
   1314: 'Introduzca su contraseña maestra para continuar.',
+  1315: 'Hay una contraseña guardada. Deje «Contraseña» vacío para conservarla.',
+  1316: 'Eliminar la contraseña guardada',
 } satisfies i18n

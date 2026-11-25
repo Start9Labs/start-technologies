@@ -25,7 +25,7 @@ use crate::nut::NutConfig;
 use crate::prelude::*;
 use crate::progress::FullProgress;
 use crate::ssh::SshKeys;
-use crate::system::{KeyboardOptions, SmtpValue};
+use crate::system::{KeyboardOptions, SmtpInfo};
 use crate::trusted_keys::{
     Registries, TrustedKeys, initial_os_registry, initial_registries, initial_trusted_keys,
 };
@@ -224,7 +224,7 @@ pub struct ServerInfo {
     pub governor: Option<Governor>,
     #[serde(default)]
     pub epp: Option<Epp>,
-    pub smtp: Option<SmtpValue>,
+    pub smtp: Option<SmtpInfo>,
     #[serde(default)]
     pub nut: NutConfig,
     #[serde(default = "default_echoip_urls")]

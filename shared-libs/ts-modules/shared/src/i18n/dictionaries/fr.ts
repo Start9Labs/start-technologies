@@ -1106,4 +1106,6 @@ export default {
   1312: 'Dernière synchronisation',
   1313: "à l'instant",
   1314: 'Saisissez votre mot de passe principal pour continuer.',
+  1315: 'Un mot de passe est enregistré. Laissez « Mot de passe » vide pour le conserver.',
+  1316: 'Supprimer le mot de passe enregistré',
 } satisfies i18n

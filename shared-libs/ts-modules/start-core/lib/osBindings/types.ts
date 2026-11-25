@@ -1236,6 +1236,8 @@ export type SignPackageParams = z.output<typeof schemas.SignPackageParams>
 export type SignPackageParamsInput = z.input<typeof schemas.SignPackageParams>
 export type SignerInfo = z.output<typeof schemas.SignerInfo>
 export type SignerInfoInput = z.input<typeof schemas.SignerInfo>
+export type SmtpInfo = z.output<typeof schemas.SmtpInfo>
+export type SmtpInfoInput = z.input<typeof schemas.SmtpInfo>
 export type SmtpValue = z.output<typeof schemas.SmtpValue>
 export type SmtpValueInput = z.input<typeof schemas.SmtpValue>
 export type SshAddParams = z.output<typeof schemas.SshAddParams>
@@ -1458,6 +1460,8 @@ export type SetDependenciesParams = z.output<
 export type SetDependenciesParamsInput = z.input<
   typeof schemas.SetDependenciesParams
 >
+export type SetSmtpParams = z.output<typeof schemas.SetSmtpParams>
+export type SetSmtpParamsInput = z.input<typeof schemas.SetSmtpParams>
 export type SetupExecuteParams = z.output<typeof schemas.SetupExecuteParams>
 export type SetupExecuteParamsInput = z.input<typeof schemas.SetupExecuteParams>
 export type SetupProgress = z.output<typeof schemas.SetupProgress>
