@@ -4,7 +4,6 @@ import {
   computed,
   inject,
   input,
-  linkedSignal,
   signal,
   TemplateRef,
 } from '@angular/core'
@@ -29,7 +28,6 @@ import {
   filter,
   firstValueFrom,
   map,
-  of,
   shareReplay,
   startWith,
   switchMap,
@@ -38,7 +36,7 @@ import {
 } from 'rxjs'
 
 import { AbstractMarketplaceService } from '../services/abstract-marketplace.service'
-import { MarketplacePkg } from '../types'
+import { MarketplaceListing, MarketplacePkg } from '../types'
 import {
   compatibleVersions,
   satisfiesWithAliases,
@@ -63,12 +61,12 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
       @if (flavors$ | async; as flavors) {
         <marketplace-flavors [pkgs]="flavors" />
       }
-    } @else if (pkg$ | async; as pkg) {
+    } @else if (pkg() || placeholder(); as shown) {
       <header tuiHeader>
         <span tuiAvatar [round]="false" [tuiSkeleton]="icon.loading()">
-          <img #icon="marketplaceIcon" [marketplaceIcon]="pkg" />
+          <img #icon="marketplaceIcon" [marketplaceIcon]="shown" />
         </span>
-        <span tuiTitle tuiFade>{{ pkg.title }}</span>
+        <span tuiTitle tuiFade>{{ shown.title }}</span>
         <span tuiAccessories><ng-content /></span>
       </header>
       @if (flavorFallback) {
@@ -79,23 +77,29 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
           </div>
         </div>
       }
-      <ng-container
-        *ngTemplateOutlet="controls(); context: { $implicit: pkg }"
-      />
-      <marketplace-about
-        [pkg]="pkg"
-        [versions]="versions$ | async"
-        (static)="onStatic()"
-        (onVersion)="selectedVersion.set($event)"
-      />
-      <marketplace-release-notes [pkg]="pkg" />
+      @if (pkg(); as pkg) {
+        <ng-container
+          *ngTemplateOutlet="controls(); context: { $implicit: pkg }"
+        />
+        <marketplace-about
+          [pkg]="pkg"
+          [versions]="versions$ | async"
+          (static)="onStatic()"
+          (onVersion)="selectedVersion.set($event)"
+        />
+      } @else {
+        <tui-loader [textContent]="'Loading' | i18n" />
+      }
+      <marketplace-release-notes [pkg]="shown" />
       @if (flavors$ | async; as flavors) {
         <marketplace-flavors [pkgs]="flavors" />
       }
-      @if (!(pkg.dependencyMetadata | empty)) {
-        <marketplace-dependencies [pkg]="pkg" />
+      @if (pkg(); as pkg) {
+        @if (!(pkg.dependencyMetadata | empty)) {
+          <marketplace-dependencies [pkg]="pkg" />
+        }
+        <marketplace-links [pkg]="pkg" />
       }
-      <marketplace-links [pkg]="pkg" />
     } @else {
       <tui-loader [textContent]="'Loading' | i18n" />
     }
@@ -144,8 +148,8 @@ export class MarketplacePreviewComponent {
 
   readonly pkgId = input.required<string>()
 
-  /** A package already in hand, shown without fetching; defaults to the newest. */
-  readonly pkg = input<MarketplacePkg | null>(null)
+  /** The newest release's listing, shown while the full release loads. */
+  readonly listing = input<MarketplaceListing>()
 
   /** Action buttons for the resolved package (install/update), rendered with
    * the resolved `MarketplacePkg` as `$implicit`. The brochure omits it. */
@@ -165,7 +169,7 @@ export class MarketplacePreviewComponent {
       : null,
   )
 
-  readonly selectedVersion = linkedSignal(() => this.pkg()?.version ?? null)
+  readonly selectedVersion = signal<string | null>(null)
 
   readonly noMatch = signal(false)
 
@@ -177,7 +181,7 @@ export class MarketplacePreviewComponent {
     this.flavor$,
   ]).pipe(
     switchMap(([version, flavor]) =>
-      this.package$(version, flavor).pipe(
+      this.marketplaceService.getPackage$(this.pkgId(), version, flavor).pipe(
         tap(pkg => {
           if (!pkg || version) return
           const range = this.targetRange()
@@ -205,13 +209,11 @@ export class MarketplacePreviewComponent {
     shareReplay({ bufferSize: 1, refCount: false }),
   )
 
-  private package$(version: string | null, flavor: string | null) {
-    const pkg = this.pkg()
+  protected readonly pkg = toSignal(this.pkg$, { initialValue: null })
 
-    return pkg?.version === version
-      ? of(pkg)
-      : this.marketplaceService.getPackage$(this.pkgId(), version, flavor)
-  }
+  protected readonly placeholder = computed(() =>
+    this.selectedVersion() || this.targetRange() ? null : this.listing(),
+  )
 
   private async selectSatisfyingFlavor(current: string | null, range: string) {
     const { packages } = await firstValueFrom(
