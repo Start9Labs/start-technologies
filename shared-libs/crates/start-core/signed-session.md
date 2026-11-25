@@ -81,15 +81,17 @@ connection. No callback receives unauthenticated plaintext as an admitted reques
 Each physical connection gets fresh DH keys, commitment and nonce. Client signing
 finishes before the 30-second network/admission deadline; provider handles may be
 reused, prepared hellos may not. The existing signed-timestamp freshness policy still
-applies while signing and connecting, and the server never relaxes it. When the server
-closes an opened browser connection without answering, the browser reads the server's
-`Date` header. If that time differs from the one it signed with by more than half the
-tolerance, it signs one fresh hello on a new connection with the server's time. Once that
-admission succeeds, later connections to that host start from the same offset. A device-clock
-change greater than half the tolerance refreshes the offset before opening another
-connection. GUID continuations are single-use even when admission fails. Native clients
-and the browser's signed HTTP requests sign with the local clock. The server signs only
-after validating the initiation.
+applies while signing and connecting, and the server never relaxes it. When an opened
+browser connection fails before a complete answer record arrives, the browser reads the
+server's `Date` header. If that time differs from the one it signed with by more than half
+the tolerance, the browser forgets the offset it remembers for that host. For the RPC
+target it then signs one fresh hello on a new connection with the server's time. A GUID
+continuation is spent by its first upgrade, even when admission fails, and is never
+retried. Once an admission signed with a measured offset succeeds, later connections to
+that host start from that offset. A device-clock change greater than half the tolerance
+measures the offset again before the next connection opens; a failed measurement fails
+that connection unopened. Native clients and the browser's signed HTTP requests sign with
+the local clock. The server signs only after validating the initiation.
 
 The first message exposes the client's public identity on `ws://`; `wss://` protects
 it. Private signing keys never travel. Identity proof is separate from enrollment,

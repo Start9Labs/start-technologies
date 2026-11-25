@@ -87,6 +87,31 @@ test('opaque fresh initiation signs once per connection and binds exact GUID int
   assert.equal(b.hello.target, 'rpc')
 })
 
+test('a hello proof carries the requested signing time', async () => {
+  const key = await auth.generateAuthKey()
+  const time = Date.UTC(2030, 0, 1, 0, 0, 30, 999)
+  const prepared = await prepareSession(
+    auth.requestSigner(key),
+    fixture.context,
+    'rpc',
+    time,
+  )
+  const body = await decodeFirst(prepared.message)
+  const proof = prepared.message.subarray(body.length)
+  assert.equal(
+    BigInt((await decodeFirst(proof)).value.commitment.timestamp),
+    BigInt(Math.floor(time / 1000)),
+  )
+  assert.equal(
+    await auth.verifyRequestProof(
+      proof,
+      fixture.context,
+      prepared.message.subarray(0, body.length),
+    ),
+    auth.normalizeDer64(key.pubkeyPem),
+  )
+})
+
 test('independent WebCrypto golden matches both directional records and full captured hellos', async context => {
   const prepared = await frozenClient(context)
   assert.deepEqual(prepared.message, client)

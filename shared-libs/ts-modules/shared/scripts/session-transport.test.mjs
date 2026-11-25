@@ -6,6 +6,10 @@ import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profi
 import { SIGNATURE_PROFILE } from '@start9labs/start-core/osBindings/signature-profile'
 import './typescript-loader.mjs'
 
+globalThis.fetch = async () => {
+  throw new TypeError('Transport tests have no network')
+}
+
 // Framing/lifecycle tests replace crypto; real signed-DH interoperability has separate coverage.
 registerHooks({
   load(url, context, next) {
@@ -195,12 +199,37 @@ function admissionServer(answers) {
     }
   }
 }
+function singleUseServer(serverSkewMs = 0) {
+  let available = true
+  return class extends Socket {
+    constructor(url) {
+      super(url)
+      const found = available
+      available = false
+      queueMicrotask(() =>
+        found ? this.dispatchEvent(new Event('open')) : this.close(),
+      )
+    }
+    send(data) {
+      super.send(data)
+      if (this.writes.length !== 1) return
+      const timely =
+        Math.abs(
+          globalThis.preparedSessions.at(-1)[3] - Date.now() - serverSkewMs,
+        ) <=
+        SIGNATURE_PROFILE.timestampToleranceSecs * 1000
+      queueMicrotask(() => (timely ? this.receive(record([1])) : this.close()))
+    }
+  }
+}
+/** A null skew makes the server's clock unreadable. */
 async function withServerClock(skewMs, run) {
   const fetch = globalThis.fetch
   const requests = []
   globalThis.preparedSessions = []
   globalThis.fetch = async (url, init) => {
     requests.push({ url: String(url), method: init.method })
+    if (skewMs === null) throw new TypeError('Failed to fetch')
     return new Response(null, {
       headers: { date: new Date(Date.now() + skewMs).toUTCString() },
     })
@@ -212,6 +241,23 @@ async function withServerClock(skewMs, run) {
     delete globalThis.preparedSessions
   }
 }
+async function withDeviceClock(skewMs, run) {
+  const now = Date.now
+  let skew = skewMs
+  Date.now = () => now() + skew
+  try {
+    await run(value => (skew = value))
+  } finally {
+    Date.now = now
+  }
+}
+async function rememberOffset(host, serverSkewMs) {
+  await withServerClock(serverSkewMs, async () => {
+    const result = await connect(host, admissionServer([undefined, [1]]))
+    assert.equal(result.opened, true)
+    result.socket.close()
+  })
+}
 function connect(host, Server) {
   const Constructor = sessionWebSocketConstructor(
     async () => identity(),
@@ -220,6 +266,15 @@ function connect(host, Server) {
     Server,
   )
   return connectionResult(new Constructor(`wss://${host}/rpc/v2`))
+}
+function redeem(host, Server, guid = 'A'.repeat(32)) {
+  const Constructor = sessionWebSocketConstructor(
+    async () => identity(),
+    'server.test',
+    { continuation: guid },
+    Server,
+  )
+  return connectionResult(new Constructor(`wss://${host}/rpc/v2/${guid}`))
 }
 function connectionResult(socket) {
   return new Promise(resolve => {
@@ -321,14 +376,7 @@ test('a re-signed admission the server still drops is not remembered', async () 
 })
 
 test('a remembered offset follows a corrected server clock', async () => {
-  await withServerClock(120_000, async () => {
-    const skewed = await connect(
-      'corrected.test',
-      admissionServer([undefined, [1]]),
-    )
-    assert.equal(skewed.opened, true)
-    skewed.socket.close()
-  })
+  await rememberOffset('corrected.test', 120_000)
   await withServerClock(0, async (requests, prepared) => {
     Socket.instances = []
     const corrected = await connect(
@@ -353,50 +401,13 @@ test('a remembered offset follows a corrected server clock', async () => {
 
 for (const skew of [-120_000, 120_000])
   test(`correcting a ${skew} ms device clock refreshes before single-use admission`, async () => {
-    const now = Date.now
-    let deviceSkew = skew
-    Date.now = () => now() + deviceSkew
     const host = `corrected-device-${skew}.test`
-    try {
-      await withServerClock(-skew, async () => {
-        const initial = await connect(host, admissionServer([undefined, [1]]))
-        assert.equal(initial.opened, true)
-        initial.socket.close()
-      })
-      deviceSkew = 0
+    await withDeviceClock(skew, async setDeviceSkew => {
+      await rememberOffset(host, -skew)
+      setDeviceSkew(0)
       await withServerClock(0, async (requests, prepared) => {
         Socket.instances = []
-        let available = true
-        class SingleUse extends Socket {
-          constructor(url) {
-            super(url)
-            const found = available
-            available = false
-            queueMicrotask(() =>
-              found ? this.dispatchEvent(new Event('open')) : this.close(),
-            )
-          }
-          send(data) {
-            super.send(data)
-            if (this.writes.length !== 1) return
-            const timely =
-              Math.abs(prepared.at(-1)[3] - Date.now()) <=
-              SIGNATURE_PROFILE.timestampToleranceSecs * 1000
-            queueMicrotask(() =>
-              timely ? this.receive(record([1])) : this.close(),
-            )
-          }
-        }
-        const guid = 'A'.repeat(32)
-        const Constructor = sessionWebSocketConstructor(
-          async () => identity(),
-          'server.test',
-          { continuation: guid },
-          SingleUse,
-        )
-        const result = await connectionResult(
-          new Constructor(`wss://${host}/rpc/v2/${guid}`),
-        )
+        const result = await redeem(host, singleUseServer())
         assert.equal(result.opened, true)
         assert.equal(Socket.instances.length, 1)
         assert.equal(prepared.length, 1)
@@ -411,10 +422,49 @@ for (const skew of [-120_000, 120_000])
         assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
         next.socket.close()
       })
-    } finally {
-      Date.now = now
-    }
+    })
   })
+
+test('an unreadable server clock after a device-clock change leaves the continuation unspent', async () => {
+  const host = 'unreadable-refresh.test'
+  const Server = singleUseServer()
+  await withDeviceClock(120_000, async setDeviceSkew => {
+    await rememberOffset(host, -120_000)
+    setDeviceSkew(0)
+    await withServerClock(null, async (requests, prepared) => {
+      Socket.instances = []
+      const refused = await redeem(host, Server)
+      assert.equal(refused.opened, false)
+      assert.equal(Socket.instances.length, 0)
+      assert.equal(prepared.length, 0)
+      assert.equal(requests.length, 1)
+    })
+    await withServerClock(0, async () => {
+      const redeemed = await redeem(host, Server)
+      assert.equal(redeemed.opened, true)
+      redeemed.socket.close()
+    })
+  })
+})
+
+test('a continuation the server clock no longer admits forgets the offset without reconnecting', async () => {
+  const host = 'server-corrected.test'
+  await rememberOffset(host, 120_000)
+  await withServerClock(0, async (requests, prepared) => {
+    Socket.instances = []
+    const stale = await redeem(host, singleUseServer())
+    assert.equal(stale.opened, false)
+    assert.equal(Socket.instances.length, 1)
+    assert.equal(prepared.length, 1)
+    assert.equal(requests.length, 1)
+
+    const next = await redeem(host, singleUseServer(), 'B'.repeat(32))
+    assert.equal(next.opened, true)
+    assert.equal(requests.length, 1)
+    assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
+    next.socket.close()
+  })
+})
 
 test('closing while the server clock is read opens no second connection', async () => {
   const fetch = globalThis.fetch

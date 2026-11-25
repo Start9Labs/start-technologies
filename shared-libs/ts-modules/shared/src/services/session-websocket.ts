@@ -199,6 +199,10 @@ export function sessionWebSocketConstructor(
             Math.abs(measured.offset - offset) <= RETRYABLE_SKEW_MS
           )
             throw error
+          if (serverClockOffsets.get(host) === cached)
+            serverClockOffsets.delete(host)
+          // The server spends a continuation's GUID on its first upgrade.
+          if (target !== SESSION_PROFILE.identity.rpcTarget) throw error
           return this.admit(identity, protocols, measured.offset)
         },
       )
