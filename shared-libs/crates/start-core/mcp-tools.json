@@ -6173,6 +6173,15 @@
     }
   },
   {
+    "name": "server.cancel-deferred-power",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "server.clear-nut",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8549,7 +8558,12 @@
           "properties": {
             "wait": {
               "default": false,
-              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+              "type": "boolean"
+            },
+            "force": {
+              "default": false,
+              "description": "Interrupt a running backup instead of waiting for it to finish.",
               "type": "boolean"
             }
           },
@@ -8560,7 +8574,12 @@
       "properties": {
         "wait": {
           "default": false,
-          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+          "type": "boolean"
+        },
+        "force": {
+          "default": false,
+          "description": "Interrupt a running backup instead of waiting for it to finish.",
           "type": "boolean"
         }
       },
@@ -8945,7 +8964,12 @@
           "properties": {
             "wait": {
               "default": false,
-              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+              "type": "boolean"
+            },
+            "force": {
+              "default": false,
+              "description": "Interrupt a running backup instead of waiting for it to finish.",
               "type": "boolean"
             }
           },
@@ -8956,7 +8980,12 @@
       "properties": {
         "wait": {
           "default": false,
-          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+          "type": "boolean"
+        },
+        "force": {
+          "default": false,
+          "description": "Interrupt a running backup instead of waiting for it to finish.",
           "type": "boolean"
         }
       },
