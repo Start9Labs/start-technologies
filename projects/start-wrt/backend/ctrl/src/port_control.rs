@@ -3969,8 +3969,8 @@ config interface 'guest'
     #[tokio::test]
     async fn ui_fallback_rejects_an_unreadable_profile_policy() {
         let dir = temp_root("");
+        std::fs::create_dir(dir.path().join("network")).unwrap();
         let pc = PortControl::new(dir.path().to_path_buf());
-        *pc.lan_cache.lock().unwrap() = Some((Instant::now(), Arc::new(Vec::new())));
         assert!(pc
             .admits_ui_fallback(Ipv4Addr::new(192, 168, 101, 50))
             .await
