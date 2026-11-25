@@ -3127,13 +3127,13 @@ test('WRT update refuses to start while the reconnect indicator is up', async ()
     },
     i18n: { transform: value => value },
   })
-  assert.equal(service.canStartUpdate(), false)
   await assert.rejects(service.startUpdate('1.5.1'), {
     message: 'Failed to start update',
   })
   assert.equal(requested, 0)
   assert.equal(suppressed, 0)
   assert.equal(updating, false)
+  assert.equal(service.canStartUpdate(), false)
 })
 
 test('WRT update progress dialog closes when the update cannot start', async () => {

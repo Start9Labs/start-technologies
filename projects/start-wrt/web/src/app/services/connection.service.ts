@@ -235,7 +235,7 @@ export class ConnectionService {
     this.recover()
   }
 
-  /** True once the origin answers at all; an untrusted certificate fails it silently. */
+  /** True when the origin answers at all; an untrusted certificate fails it silently. */
   private async reachable(url: string): Promise<boolean> {
     // Mock mode answers every probe; recover() then skips the reload or navigation.
     if (this.isMock) return true
