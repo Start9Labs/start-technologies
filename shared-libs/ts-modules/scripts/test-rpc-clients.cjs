@@ -2953,13 +2953,20 @@ test('WRT flash transport loss reuses the existing reconnect owner without repla
   assert.equal(fixture.service.error(), 'lost transport')
 })
 
-test('WRT outage ownership aborts a stalled RPC session only on the first declaration', () => {
-  const { load } = wrtFlowHarness({ setInterval: () => 1 })
+test('WRT outage ownership retains explicit recovery copy and aborts once per outage', () => {
+  let reloaded = 0
+  const { load } = wrtFlowHarness({
+    setInterval: () => 1,
+    clearInterval() {},
+    clearTimeout() {},
+    window: { location: { reload: () => reloaded++ } },
+  })
   const service = Object.create(
     load('projects/start-wrt/web/src/app/services/connection.service.ts')
       .ConnectionService.prototype,
   )
   let unreachable = false
+  let message = ''
   let aborted = 0
   Object.assign(service, {
     unreachable: Object.assign(() => unreachable, {
@@ -2967,16 +2974,38 @@ test('WRT outage ownership aborts a stalled RPC session only on the first declar
         unreachable = value
       },
     }),
-    message: { set() {} },
+    message: { set: value => (message = value) },
     sockets: { disconnect: () => aborted++ },
     i18n: { transform: value => value },
     alerts: { open: () => of(null) },
     poll() {},
   })
-  service.reportUnreachable()
+  service.reportUnreachable({
+    message: 'Update recovery is still pending',
+    probeUrl: 'https://router.lan',
+    onReconnect: 'reload',
+  })
   service.reportUnreachable()
   assert.equal(aborted, 1)
   assert.equal(unreachable, true)
+  assert.equal(message, 'Update recovery is still pending')
+  assert.equal(service.probeUrl, 'https://router.lan')
+  assert.equal(service.onReconnect, 'reload')
+
+  service.reportUnreachable({ message: 'Refined recovery copy' })
+  service.reportUnreachable()
+  assert.equal(message, 'Refined recovery copy')
+  service.recover()
+  assert.equal(unreachable, false)
+  assert.equal(reloaded, 1)
+
+  service.reportUnreachable()
+  assert.equal(aborted, 2)
+  assert.equal(message, 'Trying to reach the router')
+  assert.equal(service.probeUrl, '')
+  assert.equal(service.onReconnect, 'none')
+  service.recover()
+  assert.equal(reloaded, 1)
 })
 
 test('WRT every failed recovery probe discards its stalled multiplexed session', async () => {
