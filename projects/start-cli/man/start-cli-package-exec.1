@@ -1,0 +1,40 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-package-exec 1  "exec "
+.SH NAME
+start\-cli\-package\-exec \- Run a command in a service container and print its output
+.SH SYNOPSIS
+\fBstart\-cli package exec\fR [\fB\-\-stdin\fR] [\fB\-\-timeout\-secs\fR] [\fB\-\-subcontainer\fR] [\fB\-\-name\fR] [\fB\-\-image\-id\fR] [\fB\-\-user\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> [\fICOMMAND\fR]
+.SH DESCRIPTION
+Run a command in a service container and print its output
+.SH OPTIONS
+.TP
+\fB\-\-stdin\fR \fI<STDIN>\fR
+Text written to the command\*(Aqs standard input
+.TP
+\fB\-\-timeout\-secs\fR \fI<TIMEOUT_SECS>\fR
+Seconds before the command is terminated; defaults to 120
+.TP
+\fB\-\-subcontainer\fR \fI<SUBCONTAINER>\fR
+Guid of the subcontainer, or a prefix; use \-\-name to select by name
+.TP
+\fB\-\-name\fR \fI<NAME>\fR
+Name of the subcontainer
+.TP
+\fB\-\-image\-id\fR \fI<IMAGE_ID>\fR
+Docker image identifier
+.TP
+\fB\-\-user\fR \fI<USER>\fR
+User name to run as
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Package identifier
+.TP
+[\fICOMMAND\fR]
+Command to execute in the container

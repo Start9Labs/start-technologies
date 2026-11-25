@@ -180,7 +180,7 @@ if (rune) {
   receipts.push(
     await origin.export([
       sdk.createInterface(effects, {
-        /* … query: { rune } */
+        /* … */
       }),
     ]),
   )
@@ -207,7 +207,7 @@ const rune = await FileHelper.string(runePath)
 The handler then re-runs when the new value lands, updating the interface in place, and never for the moment in between. A first run still sees `null` and correctly exports nothing.
 
 > [!WARNING]
-> Reading another package's interface has the same hazard from the other side. `sdk.host.get(…)` mapped through `host.bindings[…].interfaces[…]` with a `?? null` fallback cannot tell "not exported right now" from "gone", and a `.const()` on it in `main` restarts your service when the dependency rotates a credential. Take an address from `sdk.host.getBridgeAddress`, which resolves off the binding and works with no exported interface at all; only where you need something the interface alone publishes — a scheme, or a credential in its `suffix` — read the interface, and pass the same null-tolerant equality.
+> Reading another package's interface has the same hazard from the other side. `sdk.host.get(…)` mapped through `host.bindings[…].interfaces[…]` with a `?? null` fallback cannot tell "not exported right now" from "gone", and a `.const()` on it in `main` restarts your service when the dependency rotates a credential. Take an address from `sdk.host.getBridgeAddress`, which resolves off the binding and works with no exported interface at all; only where you need something the interface alone publishes — a scheme or a path — read the interface, and pass the same null-tolerant equality.
 
 ## bindPort Options
 
@@ -232,7 +232,7 @@ HTTP proxying and TLS termination are separate: `proxy` describes HTTP handling,
 
 Both HTTP-proxied legs connect to the container from StartOS, rather than preserving the client's TCP source address. With forwarded-header generation enabled, applications identify the client through `X-Forwarded-For`.
 
-The HTTP proxy strips client-supplied `X-Forwarded-*` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
+The HTTP proxy strips client-supplied `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `True-Client-IP` and `CF-Connecting-IP` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
 
 An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
 
@@ -244,7 +244,7 @@ sdk.createInterface(effects, {
   id: 'unique-id', // How you find this interface under its host
   description: i18n('Description'), // Shown in UI (wrap with i18n)
   type: 'ui', // 'ui', 'api', or 'p2p'
-  masked: false, // Hide URLs with sensitive credentials?
+  masked: false,
   schemeOverride: null, // Override URL scheme (see below)
   username: null, // Auth username embedded in URL
   path: '/some/path/', // URL path
@@ -253,18 +253,18 @@ sdk.createInterface(effects, {
 })
 ```
 
-| Option                     | Type                                                       | Description                                                                                                                                                                    |
-| -------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`                     | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                            |
-| `id`                       | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                            |
-| `description`              | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                             |
-| `type`                     | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                       |
-| `masked`                   | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. Use for URLs containing credentials or tokens.                                                                     |
-| `schemeOverride`           | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`. |
-| `username`                 | `string` \| `null`                                         | Username embedded in the URL (e.g., for `smp://fingerprint:password@host`).                                                                                                    |
-| `path`                     | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                     |
-| `query`                    | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ macaroon: 'abc123' }`).                                                                                                      |
-| `preferredLauncherAddress` | `string` \| `null` \| _omitted_                            | The URL of the address StartOS's **Open UI** control should prefer for this interface. See [Nominating an Address to Open](#nominating-an-address-to-open).                    |
+| Option                     | Type                                                       | Description                                                                                                                                                                                                         |
+| -------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                     | `string`                                                   | Display name shown to the user. Wrap with `i18n()`.                                                                                                                                                                 |
+| `id`                       | `string`                                                   | Unique identifier. How you find this interface at runtime, by walking the host from `sdk.host.getOwn()` (see [main.ts](./main.md)).                                                                                 |
+| `description`              | `string`                                                   | Description shown to the user. Wrap with `i18n()`.                                                                                                                                                                  |
+| `type`                     | `'ui'`, `'api'`, or `'p2p'`                                | `'ui'` for browser interfaces, `'api'` for programmatic endpoints, `'p2p'` for peer-to-peer connections.                                                                                                            |
+| `masked`                   | `boolean`                                                  | If `true`, the interface URL is shown as a copyable secret. It hides the URL in the UI only: every installed service can read your exported interfaces, so never put a credential in `username`, `path` or `query`. |
+| `schemeOverride`           | `{ ssl: string \| null; noSsl: string \| null }` \| `null` | Override the URL scheme for custom protocols. For example, `{ ssl: 'lndconnect', noSsl: 'lndconnect' }` produces `lndconnect://` URLs. Use `null` for standard `http`/`https`.                                      |
+| `username`                 | `string` \| `null`                                         | Username embedded in the URL (e.g., `https://username@example.com/route/`).                                                                                                                                         |
+| `path`                     | `string`                                                   | URL path appended to the base address (e.g., `'/admin/'`).                                                                                                                                                          |
+| `query`                    | `object`                                                   | URL query parameters as key-value pairs (e.g., `{ network: 'mainnet' }`). Not for credentials — show a connection string that carries one from an action instead.                                                   |
+| `preferredLauncherAddress` | `string` \| `null` \| _omitted_                            | The URL of the address StartOS's **Open UI** control should prefer for this interface. See [Nominating an Address to Open](#nominating-an-address-to-open).                                                         |
 
 > [!TIP]
 > The `id` you assign to an interface is what you use in `main.ts` to retrieve hostnames for it. Interfaces are reached through their **host**: `sdk.host.getOwn(effects, hostId)` returns the host, and the interface lives at `host.bindings[internalPort].interfaces[id]`. See [Main](./main.md#getting-hostnames) for details.
@@ -370,7 +370,7 @@ Three options shape the choice:
 
 ## Port Ranges
 
-Some services need a **contiguous block of ports** rather than a single one — coturn / RTP media relays, bitcoin's ZMQ notification endpoints, passive-FTP data ports. Use `bindPortRange` instead of one `bindPort` per port:
+Some services need a **contiguous block of ports** rather than a single one — coturn / RTP media relays, passive-FTP data ports. Use `bindPortRange` instead of one `bindPort` per port:
 
 ```typescript
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
@@ -393,20 +393,20 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
 })
 ```
 
-A range binds **TCP + UDP** by default. Set `transport: ['tcp']` or `transport: ['udp']` to forward one protocol, or `transport: ['tcp', 'udp']` to select both. A bare `'tcp'` or `'udp'` is accepted as a singleton set. Empty sets are rejected; duplicate protocols are deduplicated. This declaration is independent of the interface's URL scheme. A range exposes **exactly one** `api` service interface spanning the whole range. The interface is deliberately restricted compared to `createInterface`: it is always `type: 'api'` and has **no** `masked`, `username`, `path`, `query`, or `schemeOverride`. The one extra option is an optional `scheme` — a transport prefix for protocols addressed as `scheme://host:port`, e.g. `tcp` for bitcoin ZMQ:
+A range binds **TCP + UDP** by default. Set `transport: ['tcp']` or `transport: ['udp']` to forward one protocol, or `transport: ['tcp', 'udp']` to select both. A bare `'tcp'` or `'udp'` is accepted as a singleton set. Empty sets are rejected; duplicate protocols are deduplicated. This declaration is independent of the interface's URL scheme. A range exposes **exactly one** `api` service interface spanning the whole range. The interface is deliberately restricted compared to `createInterface`: it is always `type: 'api'` and has **no** `masked`, `username`, `path`, `query`, or `schemeOverride`. The one extra option is an optional `scheme` — a transport prefix for protocols addressed as `scheme://host:port`, e.g. `tcp`:
 
 ```typescript
-const zmq = sdk.MultiHost.of(effects, 'zmq')
-const zmqRange = await zmq.bindPortRange({
-  internalStartPort: 28332,
-  externalStartPort: 28332,
+const feeds = sdk.MultiHost.of(effects, 'feeds')
+const feedRange = await feeds.bindPortRange({
+  internalStartPort: 9100,
+  externalStartPort: 9100,
   numberOfPorts: 2,
 })
-await zmqRange.export(
+await feedRange.export(
   sdk.createRangeInterface(effects, {
-    id: 'zmq',
-    name: i18n('ZMQ'),
-    description: i18n('Bitcoin ZMQ notification endpoints'),
+    id: 'feeds',
+    name: i18n('Feeds'),
+    description: i18n('Endpoints for clients on your network'),
     scheme: 'tcp', // omit for raw UDP/TCP ranges (coturn, RTP, FTP data)
   }),
 )
@@ -653,7 +653,10 @@ An HTTP-proxied binding, with or without `addSsl`, reaches your container over I
 
 ## Authenticating at the Proxy
 
-Gate an HTTP-proxied binding with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and never reach your service. You do **not** need to build auth into the service or run a sidecar proxy — the platform enforces it at the edge.
+Gate an HTTP-proxied binding with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and are not forwarded. You do **not** need to build auth into the service or run a sidecar proxy to gate the addresses StartOS publishes.
+
+> [!WARNING]
+> The gate guards the proxy, not your container. Every service on the server shares one bridge, so another service can still dial your container's own IP and reach the port directly, ungated. Treat `proxy.auth` as protection from the network, not from other services: where the app holds something worth stealing (keys, funds, admin over another service), keep the app's own login on as well. Bind listeners used only by your own daemons to loopback; ports consumed by other services or off-server clients must listen on the container's bridge addresses, including raw TCP, UDP and TLS-passthrough ports without an HTTP proxy (see [Service-to-Service Networking](service-to-service.md)).
 
 `auth` takes a `ProxyAuth`, which is one of two shapes:
 
@@ -664,7 +667,7 @@ const uiOrigin = await uiMulti.bindPort(uiPort, {
   proxy: {
     auth: {
       type: 'basic',
-      credentials: [{ username: 'admin', password }],
+      credentials: password ? [{ username: 'admin', password }] : [], // empty admits nobody
       realm: null, // advertised in the WWW-Authenticate challenge; defaults to "StartOS"
     },
   },
@@ -686,7 +689,7 @@ const apiOrigin = await apiMulti.bindPort(apiPort, {
 | `tokens` (bearer)     | `Array<string>`                 | Accepted bearer tokens. Any match passes.                                                                                                                            |
 | `realm`               | `string` \| `null`              | Realm advertised in the 401 `WWW-Authenticate` challenge. Defaults to `"StartOS"`. Use a stable realm across bindings that share credentials so browsers reuse them. |
 
-The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled.
+The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled. A gated WebSocket or other upgrade request whose `Origin` differs from the connection's scheme, host or effective port gets `403 Forbidden`, so a page on another site cannot reuse the browser's cached credentials; a request without `Origin` passes. Omitted ports mean `80` for plaintext connections and `443` for TLS connections, independently of forwarded-header generation.
 
 **The gate covers every address the binding publishes, including its plaintext [bridge address](./service-to-service.md#the-host-bridge).** A service that depends on you is challenged like any other client, so if one must reach a gated binding, give it a credential — see [Admitting dependent services](#admitting-dependent-services).
 
@@ -705,7 +708,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   const uiOrigin = await uiMulti.bindPort(uiPort, {
     protocol: 'http',
     proxy: {
-      auth: { type: 'basic', credentials: [{ username: 'admin', password }], realm: null },
+      auth: { type: 'basic', credentials: password ? [{ username: 'admin', password }] : [], realm: null },
     },
   })
 
@@ -762,7 +765,7 @@ await sdk.MultiHost.of(effects, apiHostId).bindPort(apiPort, {
 })
 ```
 
-**If it doesn't, bind a second host on the same internal port.** A binding takes exactly one `ProxyAuth`. When browsers need Basic and the dependents' clients only send Bearer — an OpenAI-compatible API is the usual case — the two can't share a host. Keep the browser interface on its host and add a key-gated `api` interface beside it, bound only once the key exists:
+**If it doesn't, bind a second host on the same internal port.** A binding takes exactly one `ProxyAuth`. When browsers need Basic and the dependents' clients only send Bearer — an OpenAI-compatible API is the usual case — the two can't share a host. Keep the browser interface on its host and bind a key-gated host beside it once the key exists. Leave it [bridge-only](service-to-service.md#exposing-a-bridge-only-port) when only dependents use it; export an `api` interface when off-server clients also need it:
 
 ```typescript
 if (apiKey) {

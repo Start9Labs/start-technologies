@@ -1,11 +1,7 @@
 import { DestroyRef, inject, Service, signal } from '@angular/core'
-import {
-  DialogService,
-  ErrorService,
-  formatProgress,
-  TaskService,
-} from '@start9labs/shared'
+import { DialogService, ErrorService, formatProgress } from '@start9labs/shared'
 import { StartupApiService } from 'src/app/services/api/startup-api.service'
+import { DiagnosticPassword } from './password'
 
 type UpdateObservation = Awaited<
   ReturnType<StartupApiService['streams']['diagnostic']['update']>
@@ -15,7 +11,7 @@ type UpdateObservation = Awaited<
 @Service()
 export class DiagnosticUpdate {
   private readonly api = inject(StartupApiService)
-  private readonly tasks = inject(TaskService)
+  private readonly password = inject(DiagnosticPassword)
   private readonly errors = inject(ErrorService)
   private readonly dialog = inject(DialogService)
   private readonly lifetime = new AbortController()
@@ -31,16 +27,16 @@ export class DiagnosticUpdate {
   async update(): Promise<void> {
     const signal = this.lifetime.signal
     let operation: UpdateObservation | undefined
-    await this.tasks.run(async () => {
+    await this.password.run('Checking for updates', async password => {
       try {
         operation = await this.api.streams.diagnostic.update(
-          { progress: true },
+          { progress: true, password },
           { signal },
         )
       } catch (error) {
         if (!signal.aborted) throw error
       }
-    }, 'Checking for updates')
+    })
     if (!operation) return
 
     try {

@@ -29,8 +29,12 @@ system_index=$(ip -o link show eth0 | cut -d: -f1)
 system_table=$((1000 + system_index))
 ip route add table "$system_table" default via 192.0.2.1 dev eth0
 ip -6 route add table "$system_table" default via 2001:db8::1 dev eth0
+for net in $NON_PUBLIC_V4 192.0.2.0/24 198.51.100.0/24; do
+    ip rule add priority "$MAIN" to "$net" lookup main suppress_prefixlength 0
+done
+ip -6 rule add priority "$MAIN" not to 2000::/3 lookup main suppress_prefixlength 0
+ip -6 rule add priority "$MAIN" to 2001:db8::/64 lookup main suppress_prefixlength 0
 for family in -4 -6; do
-    ip "$family" rule add priority "$MAIN" lookup main suppress_prefixlength 0
     ip "$family" rule add priority "$REPLY" fwmark "$table" lookup "$table"
     ip "$family" rule add priority "$DEFAULT_OUTBOUND" lookup "$system_table"
     ip "$family" rule add priority "$DEFAULT_OUTBOUND_REJECT" unreachable

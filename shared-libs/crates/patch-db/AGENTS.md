@@ -4,19 +4,21 @@ patch-db is a JSON Patch–based database with a Rust backend and a TypeScript c
 
 ## Layout
 
-| Area          | Path                                                                            |
-| ------------- | ------------------------------------------------------------------------------- |
-| Core API      | `core/src/store.rs` — `PatchDb`, `TypedPatchDb`, `Store`, `MutateResult`        |
-| Types         | `core/src/patch.rs` — `Revision`, `Dump`, `DiffPatch`, `diff()`                 |
-| Subscriptions | `core/src/subscriber.rs` — `DbWatch`, `TypedDbWatch`, `Subscriber`, `Broadcast` |
-| Model system  | `core/src/model.rs` — `HasModel`, `Model`, `ModelExt`, `Pointer`                |
-| Derive macro  | `macro-internals/src/lib.rs` — `HasModel` derive implementation                 |
-| Error types   | `core/src/lib.rs` — `Error` enum, re-exports                                    |
-| JSON Pointer  | `json-ptr/src/lib.rs` — `JsonPointer`, `ROOT`, path navigation                  |
-| JSON Patch    | `json-patch/src/lib.rs` — `Patch`, `PatchOperation`, `diff()`, `patch()`        |
-| TS client     | `client/lib/patch-db.ts` — `PatchDB<T>` class                                   |
-| TS patch lib  | `client/lib/json-patch-lib.ts` — client-side patch application                  |
-| TS types      | `client/lib/types.ts` — `Revision`, `Dump`, `Update`, `PatchOp`                 |
+| Area          | Path                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------- |
+| Core API      | `core/src/store.rs` — `PatchDb`, `TypedPatchDb`, `Store`, `MutateResult`                                      |
+| Types         | `core/src/patch.rs` — `Revision`, `Dump`, `DiffPatch`, `diff()`                                               |
+| Subscriptions | `core/src/subscriber.rs` — `DbWatch`, `TypedDbWatch`, `Subscriber`, `Broadcast`                               |
+| Projections   | `core/src/projection.rs` — `Projection`: depth/include/exclude over dumps and revisions                       |
+| Model system  | `core/src/model.rs` — `HasModel`, `Model`, `ModelExt`, `Pointer`                                              |
+| Derive macro  | `macro-internals/src/lib.rs` — `HasModel` derive implementation                                               |
+| Error types   | `core/src/lib.rs` — `Error` enum, re-exports                                                                  |
+| JSON Pointer  | `json-ptr/src/lib.rs` — `JsonPointer`, `ROOT`, path navigation                                                |
+| JSON Patch    | `json-patch/src/lib.rs` — `Patch`, `PatchOperation`, `diff()`, `patch()`                                      |
+| TS client     | `client/lib/patch-db.ts` — `PatchDB<T>` class                                                                 |
+| TS subtrees   | `client/lib/subtree-patch-db.ts` — `SubtreePatchDB<T>`: one server subscription with a mutable selector union |
+| TS patch lib  | `client/lib/json-patch-lib.ts` — client-side patch application                                                |
+| TS types      | `client/lib/types.ts` — `Revision`, `Dump`, `Update`, `PatchOp`                                               |
 
 Workspace members (`Cargo.toml`): `patch-db` (`core/`), `json-patch`, `json-ptr`, `patch-db-macro` (`macro/`), `patch-db-macro-internals` (`macro-internals/`), `patch-db-util` (`util/`).
 
@@ -41,7 +43,7 @@ The web workspace consumes the built TS client; the monorepo's root `build/commo
   `VisitFields` for snapshots, revisions and patch structs, plus `VisitVariants`
   for patch operations, supplying raw facts and static traversal. RPC's `ts` + `patch-db` consumer owns TypeScript bridges
   and enables reflection; do not add a leaf-to-RPC dependency or TS feature.
-- **Wire format** — Rust and TS define `Revision`, `Dump`, and patch operations independently. Changes to one side must be mirrored in the other. The definitions live in `core/src/patch.rs` and `client/lib/types.ts`; patch application lives in `json-patch/` and `client/lib/json-patch-lib.ts`.
+- **Wire format** — Rust and TS define `Revision`, `Dump`, and patch operations independently. Changes to one side must be mirrored in the other. The definitions live in `core/src/patch.rs` and `client/lib/types.ts`; patch application lives in `json-patch/` and `client/lib/json-patch-lib.ts`, whose `scopeOperations` mirrors `Revision::for_path`; `client/lib/projection.ts` mirrors `core/src/projection.rs`.
 - **Patch operations** — Only `add`, `remove`, and `replace` are used. The TS client does not implement `test`, `move`, or `copy`.
 - **Immutable patch application** — The TS client applies patches by shallow-copying objects/arrays, not mutating in place. This is intentional for UI framework change detection.
 - **`HasModel` derive** — Respects serde attributes (`rename_all`, `rename`, `flatten`, `tag`, `content`). Generated accessors follow the pattern `as_<field>()`, `as_<field>_mut()`, `into_<field>()`.

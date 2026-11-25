@@ -22,9 +22,11 @@ pub struct GrantedSharedVolume {
 rpc_toolkit::reflect_ts!(GrantedSharedVolume);
 rpc_toolkit::ts_export!(GrantedSharedVolume, namespaces = [""]);
 
-#[derive(Serialize, Deserialize, VisitFields)]
+#[derive(Serialize, Deserialize, VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSharedVolumesParams {
+    #[arg(skip)]
     pub callback: Option<CallbackId>,
 }
 
@@ -54,6 +56,7 @@ fn granted_volumes(
 
 type MountInput = (
     SharedVolumeId,
+    String,
     bool,
     SharedVolumeAvailability,
     SourceDefinition,
@@ -68,6 +71,7 @@ fn mount_inputs(package: &PackageId, db: &DatabaseModel) -> Result<Vec<MountInpu
             Some(SourceDefinition::read(db, &id).map(|definition| {
                 (
                     id,
+                    volume.name,
                     grant.readonly,
                     volume.inspection.availability,
                     definition,
@@ -79,9 +83,9 @@ fn mount_inputs(package: &PackageId, db: &DatabaseModel) -> Result<Vec<MountInpu
 
 fn mount_inputs_changed(previous: &[MountInput], mut current: Vec<MountInput>) -> bool {
     for input in &mut current {
-        if input.2 == SharedVolumeAvailability::Unknown {
+        if input.3 == SharedVolumeAvailability::Unknown {
             if let Some(known) = previous.iter().find(|known| known.0 == input.0) {
-                input.2 = known.2.clone();
+                input.3 = known.3.clone();
             }
         }
     }
@@ -129,13 +133,20 @@ pub async fn get_shared_volumes(
     Ok(result)
 }
 
-#[derive(Serialize, Deserialize, VisitFields)]
+#[derive(Serialize, Deserialize, VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct MountSharedVolumeParams {
+    #[arg(help = "help.arg.shared-volume-id", value_parser = crate::shared_volumes::parse_id)]
     pub id: SharedVolumeId,
+    #[arg(help = "help.arg.subcontainer-id")]
     pub subcontainer: crate::rpc_continuations::Guid,
+    #[arg(help = "help.arg.mountpoint")]
     pub mountpoint: std::path::PathBuf,
+    #[arg(long, help = "help.arg.shared-volume-subpath")]
     pub subpath: Option<std::path::PathBuf>,
+    #[arg(long, help = "help.arg.mount-readonly")]
     pub readonly: bool,
 }
 
@@ -384,8 +395,9 @@ mod tests {
             edit(&mut edited);
             mount_inputs_changed(&inputs, mount_inputs(&package, &database(&edited)).unwrap())
         };
+        assert!(changed(&|c| c.get_mut(&mine).unwrap().name = "Songs".into()));
         assert!(!changed(
-            &|c| c.get_mut(&mine).unwrap().name = "Songs".into()
+            &|c| c.get_mut(&other).unwrap().name = "Secret".into()
         ));
         assert!(!changed(&|c| {
             c.get_mut(&other).unwrap().inspection.availability =

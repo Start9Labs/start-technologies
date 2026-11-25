@@ -1,6 +1,6 @@
 import { HealthStatus } from '@start9labs/start-core/types'
 import { Trigger } from '.'
-import { delay } from './delay'
+import { delay, ExponentialBackoff } from '../util/delay'
 
 const SETTLED_MS = 30_000
 const PENDING: { [K in HealthStatus]?: number } = {
@@ -18,18 +18,18 @@ const PENDING: { [K in HealthStatus]?: number } = {
  */
 export const defaultTrigger: Trigger = async function* (getInput) {
   let succeeded = false
-  let loadingMs = 1_000
+  const loading = new ExponentialBackoff(1_000, SETTLED_MS)
   while (true) {
     const input = getInput()
     succeeded ||= input.lastResult === 'success'
     const backoff =
       !succeeded && (input.lastResult === 'loading' || input.lastWaiting)
+    if (!backoff) loading.reset()
     const ms = backoff
-      ? loadingMs
+      ? loading.next()
       : input.lastWaiting
         ? SETTLED_MS
         : (PENDING[input.lastResult ?? 'starting'] ?? SETTLED_MS)
-    loadingMs = backoff ? Math.min(loadingMs * 2, SETTLED_MS) : 1_000
     await delay(ms)
     yield
   }

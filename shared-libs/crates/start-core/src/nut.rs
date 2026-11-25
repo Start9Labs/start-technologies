@@ -5,7 +5,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
-use rpc_toolkit::Empty;
+use clap::{Parser, Subcommand};
+use rpc_toolkit::{Empty, HandlerArgs};
 use serde::{Deserialize, Serialize};
 use tokio::io::{
     AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufStream,
@@ -13,7 +14,7 @@ use tokio::io::{
 use tokio::net::TcpStream;
 use tokio::process::Command;
 
-use crate::context::RpcContext;
+use crate::context::{CliContext, RpcContext};
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::io::{delete_file, write_file_atomic};
@@ -41,30 +42,42 @@ rpc_toolkit::reflect_ts!(NutConfig);
 rpc_toolkit::ts_export!(NutConfig, namespaces = [""]);
 
 /// Directly connected UPS server settings or remote NUT client settings.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, VisitVariants)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Subcommand, VisitVariants)]
 #[serde(
     tag = "mode",
     rename_all = "kebab-case",
     rename_all_fields = "camelCase"
 )]
+#[command(rename_all = "kebab-case")]
 pub enum NutSettings {
     /// Serve and monitor a UPS connected directly to this StartOS host.
+    #[command(about = "about.set-nut-server")]
     Server {
+        #[command(flatten)]
         device: NutDevice,
+        #[arg(long, help = "help.arg.nut-listen-all")]
         #[serde(default)]
         listen_all: bool,
+        #[arg(long, help = "help.arg.nut-remote-username")]
         #[serde(default)]
         remote_username: Option<String>,
+        #[arg(skip)]
         #[serde(default)]
         remote_password: Option<String>,
     },
     /// Monitor a UPS exposed by another NUT server.
+    #[command(about = "about.set-nut-client")]
     Client {
+        #[arg(help = "help.arg.nut-ups-name")]
         ups_name: String,
+        #[arg(help = "help.arg.nut-host")]
         host: String,
+        #[arg(long, default_value_t = NUT_PORT, help = "help.arg.nut-port")]
         #[serde(default = "default_nut_port")]
         port: u16,
+        #[arg(help = "help.arg.nut-monitor-username")]
         monitor_username: String,
+        #[arg(skip)]
         monitor_password: String,
     },
 }
@@ -73,24 +86,35 @@ rpc_toolkit::reflect_ts!(NutSettings);
 rpc_toolkit::ts_export!(NutSettings, namespaces = [""]);
 
 /// A UPS detected on USB, with the driver settings that address it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, clap::Args, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct NutDevice {
+    #[arg(help = "help.arg.nut-driver")]
     pub driver: String,
+    #[arg(help = "help.arg.nut-device-port")]
     pub port: String,
+    #[arg(long, help = "help.arg.nut-vendor-id")]
     #[serde(default)]
     pub vendor_id: Option<String>,
+    #[arg(long, help = "help.arg.nut-product-id")]
     #[serde(default)]
     pub product_id: Option<String>,
+    #[arg(long, help = "help.arg.nut-serial")]
     #[serde(default)]
     pub serial: Option<String>,
+    #[arg(long, help = "help.arg.nut-bus")]
     #[serde(default)]
     pub bus: Option<String>,
     /// Pins devices without a serial number to the selected USB port.
+    #[arg(long, help = "help.arg.nut-bus-port")]
     #[serde(default)]
     pub bus_port: Option<String>,
+    #[arg(long, help = "help.arg.nut-vendor")]
     #[serde(default)]
     pub vendor: Option<String>,
+    #[arg(long, help = "help.arg.nut-product")]
     #[serde(default)]
     pub product: Option<String>,
 }
@@ -110,10 +134,14 @@ rpc_toolkit::reflect_ts!(NutRemoteUps);
 rpc_toolkit::ts_export!(NutRemoteUps, namespaces = [""]);
 
 /// Address of the NUT server to list UPS devices from.
-#[derive(Debug, Clone, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Clone, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct ListNutUpsParams {
+    #[arg(help = "help.arg.nut-host")]
     pub host: String,
+    #[arg(long, default_value_t = NUT_PORT, help = "help.arg.nut-port")]
     #[serde(default = "default_nut_port")]
     pub port: u16,
 }
@@ -165,6 +193,51 @@ pub async fn set_nut(ctx: RpcContext, SetNutParams { config }: SetNutParams) -> 
         })
         .await
         .result
+}
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[command(rename_all = "kebab-case")]
+pub struct CliSetNutParams {
+    #[arg(long, help = "help.arg.nut-disabled")]
+    pub disabled: bool,
+    #[command(subcommand)]
+    pub settings: NutSettings,
+}
+
+/// Fronts `set_nut`, prompting for the password the settings authenticate with.
+pub async fn cli_set_nut(
+    HandlerArgs {
+        context,
+        parent_method,
+        method,
+        params: CliSetNutParams {
+            disabled,
+            mut settings,
+        },
+        ..
+    }: HandlerArgs<CliContext, CliSetNutParams>,
+) -> Result<(), Error> {
+    let read_password =
+        || crate::util::tui::read_password("NUT_PASSWORD", &t!("nut.prompt-password"));
+    match &mut settings {
+        NutSettings::Server {
+            remote_username: Some(_),
+            remote_password,
+            ..
+        } => *remote_password = Some(read_password()?),
+        NutSettings::Client {
+            monitor_password, ..
+        } => *monitor_password = read_password()?,
+        NutSettings::Server { .. } => {}
+    }
+    let config = NutConfig {
+        enabled: !disabled,
+        settings: Some(settings),
+    };
+    context
+        .call_fronted(parent_method, method, &SetNutParams { config })
+        .await
 }
 
 /// Disable NUT and clear its retained settings.
@@ -943,6 +1016,52 @@ fn validate_quoted(field: &str, value: &str) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_nut_cli_selects_a_mode_and_omits_passwords() {
+        let client =
+            CliSetNutParams::try_parse_from(["set-nut", "client", "ups", "nas.local", "monitor"])
+                .unwrap();
+        assert!(!client.disabled);
+        assert_eq!(
+            client.settings,
+            NutSettings::Client {
+                ups_name: "ups".into(),
+                host: "nas.local".into(),
+                port: NUT_PORT,
+                monitor_username: "monitor".into(),
+                monitor_password: String::new(),
+            }
+        );
+        let server = CliSetNutParams::try_parse_from([
+            "set-nut",
+            "--disabled",
+            "server",
+            "usbhid-ups",
+            "auto",
+            "--serial",
+            "ABC",
+            "--listen-all",
+        ])
+        .unwrap();
+        assert!(server.disabled);
+        let NutSettings::Server {
+            device,
+            listen_all,
+            remote_username,
+            remote_password,
+        } = server.settings
+        else {
+            panic!("expected server settings");
+        };
+        assert_eq!(
+            (device.driver.as_str(), device.port.as_str()),
+            ("usbhid-ups", "auto")
+        );
+        assert_eq!(device.serial.as_deref(), Some("ABC"));
+        assert!(listen_all && remote_username.is_none() && remote_password.is_none());
+        assert!(CliSetNutParams::try_parse_from(["set-nut"]).is_err());
+    }
 
     #[tokio::test]
     async fn verifies_monitor_login_and_primary_permissions() {
