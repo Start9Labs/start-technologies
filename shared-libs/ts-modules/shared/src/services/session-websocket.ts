@@ -172,17 +172,20 @@ export function sessionWebSocketConstructor(
         () => this.fail(identity.signal.reason),
         { once: true, signal: this.lifetime.signal },
       )
+      // The server spends a continuation GUID on its first upgrade.
+      const reusable = target === SESSION_PROFILE.identity.rpcTarget
       const host = new URL(this.url).host
       const cached = serverClockOffsets.get(host)
       const signal = AbortSignal.any([identity.signal, this.lifetime.signal])
       let measured: ServerClockOffset | undefined
       if (
         cached &&
-        Math.abs(
-          Date.now() -
-            cached.localTime -
-            (performance.now() - cached.monotonicTime),
-        ) > RETRYABLE_SKEW_MS
+        (!reusable ||
+          Math.abs(
+            Date.now() -
+              cached.localTime -
+              (performance.now() - cached.monotonicTime),
+          ) > RETRYABLE_SKEW_MS)
       ) {
         measured = await measureServerClockOffset(this.url, signal)
         if (measured === undefined)
@@ -201,8 +204,7 @@ export function sessionWebSocketConstructor(
             throw error
           if (serverClockOffsets.get(host) === cached)
             serverClockOffsets.delete(host)
-          // The server spends a continuation's GUID on its first upgrade.
-          if (target !== SESSION_PROFILE.identity.rpcTarget) throw error
+          if (!reusable) throw error
           return this.admit(identity, protocols, measured.offset)
         },
       )

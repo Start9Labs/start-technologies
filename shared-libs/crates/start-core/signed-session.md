@@ -88,10 +88,11 @@ the tolerance, the browser forgets the offset it remembers for that host. For th
 target it then signs one fresh hello on a new connection with the server's time. A GUID
 continuation is spent by its first upgrade, even when admission fails, and is never
 retried. Once an admission signed with a measured offset succeeds, later connections to
-that host start from that offset. A device-clock change greater than half the tolerance
-measures the offset again before the next connection opens; a failed measurement fails
-that connection unopened. Native clients and the browser's signed HTTP requests sign with
-the local clock. The server signs only after validating the initiation.
+that host start from that offset. The browser measures the offset again before opening a
+GUID continuation while one is remembered, and before any connection once the device clock
+has moved more than half the tolerance against its monotonic clock; a failed measurement
+fails that connection unopened. Native clients and the browser's signed HTTP requests sign
+with the local clock. The server signs only after validating the initiation.
 
 The first message exposes the client's public identity on `ws://`; `wss://` protects
 it. Private signing keys never travel. Identity proof is separate from enrollment,

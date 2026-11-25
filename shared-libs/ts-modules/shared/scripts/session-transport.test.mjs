@@ -425,44 +425,118 @@ for (const skew of [-120_000, 120_000])
     })
   })
 
-test('an unreadable server clock after a device-clock change leaves the continuation unspent', async () => {
-  const host = 'unreadable-refresh.test'
-  const Server = singleUseServer()
-  await withDeviceClock(120_000, async setDeviceSkew => {
-    await rememberOffset(host, -120_000)
-    setDeviceSkew(0)
-    await withServerClock(null, async (requests, prepared) => {
-      Socket.instances = []
-      const refused = await redeem(host, Server)
-      assert.equal(refused.opened, false)
-      assert.equal(Socket.instances.length, 0)
-      assert.equal(prepared.length, 0)
-      assert.equal(requests.length, 1)
-    })
-    await withServerClock(0, async () => {
-      const redeemed = await redeem(host, Server)
-      assert.equal(redeemed.opened, true)
-      redeemed.socket.close()
-    })
+test('an unreadable server clock leaves a continuation with a remembered offset unspent', async () => {
+  const host = 'unreadable.test'
+  const Server = singleUseServer(120_000)
+  await rememberOffset(host, 120_000)
+  await withServerClock(null, async (requests, prepared) => {
+    Socket.instances = []
+    const refused = await redeem(host, Server)
+    assert.equal(refused.opened, false)
+    assert.equal(Socket.instances.length, 0)
+    assert.equal(prepared.length, 0)
+    assert.equal(requests.length, 1)
+  })
+  await withServerClock(120_000, async () => {
+    const redeemed = await redeem(host, Server)
+    assert.equal(redeemed.opened, true)
+    redeemed.socket.close()
   })
 })
 
-test('a continuation the server clock no longer admits forgets the offset without reconnecting', async () => {
+test('a continuation measures the server clock before signing with a remembered offset', async () => {
   const host = 'server-corrected.test'
   await rememberOffset(host, 120_000)
   await withServerClock(0, async (requests, prepared) => {
     Socket.instances = []
-    const stale = await redeem(host, singleUseServer())
-    assert.equal(stale.opened, false)
+    const result = await redeem(host, singleUseServer())
+    assert.equal(result.opened, true)
     assert.equal(Socket.instances.length, 1)
     assert.equal(prepared.length, 1)
     assert.equal(requests.length, 1)
-
-    const next = await redeem(host, singleUseServer(), 'B'.repeat(32))
-    assert.equal(next.opened, true)
-    assert.equal(requests.length, 1)
     assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
-    next.socket.close()
+    result.socket.close()
+  })
+})
+
+test('a slewed device-clock correction does not spend a continuation', async () => {
+  const host = 'slewed-device.test'
+  const monotonic = performance.now
+  let slew = 0
+  performance.now = () => monotonic.call(performance) + slew
+  try {
+    await withDeviceClock(120_000, async setDeviceSkew => {
+      await rememberOffset(host, -120_000)
+      setDeviceSkew(0)
+      slew = -120_000
+      await withServerClock(0, async (requests, prepared) => {
+        Socket.instances = []
+        const result = await redeem(host, singleUseServer())
+        assert.equal(result.opened, true)
+        assert.equal(Socket.instances.length, 1)
+        assert.equal(requests.length, 1)
+        assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
+        result.socket.close()
+      })
+    })
+  } finally {
+    performance.now = monotonic
+  }
+})
+
+test('an unanswered continuation is never re-signed on a second connection', async () => {
+  await withServerClock(120_000, async (requests, prepared) => {
+    Socket.instances = []
+    const result = await redeem('unanswered.test', singleUseServer(120_000))
+    assert.equal(result.opened, false)
+    assert.equal(Socket.instances.length, 1)
+    assert.equal(prepared.length, 1)
+    assert.equal(requests.length, 1)
+  })
+})
+
+test('a failed connection keeps the offset another connection just remembered', async () => {
+  const host = 'concurrent.test'
+  const settled = async (count, pending) => {
+    while (pending.length < count) await new Promise(r => setTimeout(r, 1))
+  }
+  await withDeviceClock(-120_000, async () => {
+    await rememberOffset(host, 180_000)
+    const fetch = globalThis.fetch
+    const pending = []
+    globalThis.preparedSessions = []
+    globalThis.fetch = () =>
+      new Promise(resolve =>
+        pending.push(() =>
+          resolve(
+            new Response(null, {
+              headers: { date: new Date(Date.now() + 120_000).toUTCString() },
+            }),
+          ),
+        ),
+      )
+    try {
+      const first = connect(host, admissionServer([undefined, [1]]))
+      await settled(1, pending)
+      const second = connect(host, admissionServer([undefined, undefined]))
+      await settled(2, pending)
+      pending[0]()
+      const remembered = await first
+      assert.equal(remembered.opened, true)
+      pending[1]()
+      assert.equal((await second).opened, false)
+
+      const next = await connect(host, admissionServer([[1]]))
+      assert.equal(next.opened, true)
+      assert.equal(pending.length, 2)
+      const signed = globalThis.preparedSessions.at(-1)[3] - Date.now()
+      assert.ok(Math.abs(signed - 120_000) < 2_000)
+      remembered.socket.close()
+      next.socket.close()
+    } finally {
+      globalThis.fetch = fetch
+      delete globalThis.preparedSessions
+    }
   })
 })
 
