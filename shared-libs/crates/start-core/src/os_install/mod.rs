@@ -360,7 +360,8 @@ async fn preserved_os_image(config: &Path, guid: &str) -> Option<PathBuf> {
     Some(config.join(image))
 }
 
-/// Rejects incompatible preservation before installation writes the target.
+/// Rejects an unmigratable version before installation writes the target.
+/// Missing image metadata allows preservation, keeping legacy directory-root installs eligible.
 async fn check_preserved_version(disk_path: &Path, guid: &str) -> Result<(), Error> {
     let Some(root) = previous_os_root(disk_path).await else {
         return Ok(());
@@ -968,6 +969,18 @@ mod tests {
         assert_eq!(preserved_os_image(&config, "EMBASSY_BBBB").await, None);
 
         std::fs::remove_file(config.join("disk.guid")).unwrap();
+        assert_eq!(preserved_os_image(&config, "EMBASSY_AAAA").await, None);
+    }
+
+    #[tokio::test]
+    async fn legacy_directory_root_remains_eligible_for_preservation() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config");
+        std::fs::create_dir(&config).unwrap();
+        std::fs::create_dir(root.path().join("current")).unwrap();
+        std::fs::create_dir(root.path().join("next")).unwrap();
+        std::fs::write(config.join("disk.guid"), "EMBASSY_AAAA").unwrap();
+
         assert_eq!(preserved_os_image(&config, "EMBASSY_AAAA").await, None);
     }
 
