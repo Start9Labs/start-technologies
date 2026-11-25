@@ -7,6 +7,7 @@ use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
+use crate::mcp::{EFFECT, Effect};
 
 pub(crate) mod access;
 pub mod mounts;
@@ -291,11 +292,17 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-shared-volumes")
                 .with_call_remote::<CliContext>(),
         )
-        .subcommand("create", from_fn_async(create).no_cli())
+        .subcommand(
+            "create",
+            from_fn_async(create)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
         .subcommand(
             "create",
             from_fn_async(cli_create::<SharedVolumeId>)
@@ -305,11 +312,17 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "rename",
             from_fn_async(rename)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.rename-shared-volume")
                 .with_call_remote::<CliContext>(),
         )
-        .subcommand("update-cifs", from_fn_async(update_cifs).no_cli())
+        .subcommand(
+            "update-cifs",
+            from_fn_async(update_cifs)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "update-cifs",
             from_fn_async(cli_update_cifs)
@@ -317,7 +330,12 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.update-cifs-shared-volume"),
         )
-        .subcommand("set-grant", from_fn_async(set_grant).no_cli())
+        .subcommand(
+            "set-grant",
+            from_fn_async(set_grant)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "set-grant",
             from_fn_async(cli_set_grant)
@@ -328,6 +346,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-shared-volume")
                 .with_call_remote::<CliContext>(),
@@ -335,6 +354,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "inspect",
             from_fn_async(inspect)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_display_serializable()
                 .with_about("about.inspect-shared-volume")
                 .with_call_remote::<CliContext>(),

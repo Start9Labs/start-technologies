@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -35,7 +35,8 @@ use crate::db::model::public::{
     CapabilityVerdict, GatewayPortMapCapabilities, IpInfo, NetworkInterfaceInfo,
     NetworkInterfaceType,
 };
-use crate::net::dns::{OutboundDnsUpdate, validate_dns_update};
+use crate::mcp::{EFFECT, Effect};
+use crate::net::dns::{GatewayDns, OutboundDnsUpdate, validate_dns_update};
 use crate::net::forward::{START9_BRIDGE_IFACE, nft_ensure_base};
 use crate::net::gateway::device::DeviceProxy;
 use crate::net::host::all_hosts;
@@ -63,6 +64,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list_interfaces)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
                     use prettytable::*;
@@ -118,6 +120,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "forget",
             from_fn_async(forget_iface)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.forget-disconnected-gateway")
@@ -126,6 +129,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-name",
             from_fn_async(set_name)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.rename-gateway")
@@ -134,6 +138,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "edit",
             from_fn_async(edit_gateway)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
@@ -147,6 +152,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-secure",
             from_fn_async(set_secure)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.mark-gateway-network-secure")
@@ -155,6 +161,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "unset-secure",
             from_fn_async(unset_secure)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.allow-gateway-infer-network-security")
@@ -163,6 +170,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "check-port",
             from_fn_async(check_port)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.check-port-reachability")
                 .with_call_remote::<CliContext>(),
@@ -170,6 +178,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "check-port-v6",
             from_fn_async(check_port_v6)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.check-port-v6-reachability")
                 .with_call_remote::<CliContext>(),
@@ -177,6 +186,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "check-dns",
             from_fn_async(check_dns)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.check-dns-configuration")
                 .with_call_remote::<CliContext>(),
@@ -184,6 +194,7 @@ pub fn gateway_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-default-outbound",
             from_fn_async(set_default_outbound)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-default-outbound-gateway")
@@ -1767,30 +1778,50 @@ fn pcp_probe_key() -> Url {
 }
 
 async fn get_wan_ipv4(
-    iface: &str,
+    iface: &GatewayId,
+    index: u32,
+    dns_servers: &VecDeque<SocketAddr>,
     base_url: &Url,
     local_ipv4: Ipv4Addr,
 ) -> Result<Option<Ipv4Addr>, Error> {
     let url = base_url.join("/ip").with_kind(ErrorKind::ParseUrl)?;
+    let dns = GatewayDns::new(iface.clone(), index, dns_servers)?;
     let text = tokio::time::timeout(
         Duration::from_secs(5),
-        get_via_gateway(iface, &url, local_ipv4),
+        get_via_gateway(iface, dns, &url, local_ipv4),
     )
     .await
     .map_err(|_| Error::new(eyre!("request to {url} timed out"), ErrorKind::Network))??;
     parse_echoip(&text)
 }
 
-async fn get_via_gateway(iface: &str, url: &Url, local_ipv4: Ipv4Addr) -> Result<String, Error> {
-    let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+/// Connects through one gateway alone, whatever outbound gateway is selected.
+pub(crate) fn gateway_connector<R>(
+    iface: &str,
+    resolver: R,
+) -> Result<hyper_util::client::legacy::connect::HttpConnector<R>, Error> {
+    let mut connector =
+        hyper_util::client::legacy::connect::HttpConnector::new_with_resolver(resolver);
     connector.enforce_http(false);
-    connector.set_local_address(Some(local_ipv4.into()));
     #[cfg(target_os = "linux")]
     {
         let index = if_nametoindex(iface).with_kind(ErrorKind::Network)?;
         connector.set_interface(iface);
         connector.set_mark(Some(gateway_table_id(index)));
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = iface;
+    Ok(connector)
+}
+
+async fn get_via_gateway(
+    iface: &GatewayId,
+    dns: GatewayDns,
+    url: &Url,
+    local_ipv4: Ipv4Addr,
+) -> Result<String, Error> {
+    let mut connector = gateway_connector(iface.as_str(), dns)?;
+    connector.set_local_address(Some(local_ipv4.into()));
     let tls = native_tls::TlsConnector::new().with_kind(ErrorKind::Network)?;
     let connector = hyper_tls::HttpsConnector::from((connector, tls.into()));
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
@@ -3086,6 +3117,9 @@ async fn poll_ip_info(
         }
     }
 
+    let dns_servers = write_to
+        .peek(|m| m.get(iface).map(|i| i.dns.servers.clone()))
+        .unwrap_or_default();
     for echoip_url in echoip_urls {
         if wan_ip.is_some() {
             break;
@@ -3096,7 +3130,7 @@ async fn poll_ip_info(
             && forwardable
         {
             let local_ipv4 = local_ipv4.unwrap_or(Ipv4Addr::UNSPECIFIED);
-            match get_wan_ipv4(iface.as_str(), &echoip_url, local_ipv4).await {
+            match get_wan_ipv4(iface, scope_id, &dns_servers, &echoip_url, local_ipv4).await {
                 Ok(a) => {
                     wan_ip = a;
                 }

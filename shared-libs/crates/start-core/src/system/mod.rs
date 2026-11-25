@@ -18,6 +18,7 @@ use crate::db::model::Database;
 use crate::db::model::public::RestartReason;
 use crate::disk::util::{get_available, get_used};
 use crate::logs::{LogSource, LogsParams, SYSTEM_UNIT};
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::registry::device_info::DeviceInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
@@ -43,6 +44,7 @@ pub fn experimental<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "zram",
         from_fn_async(zram)
+            .with_metadata(EFFECT, Effect::Write.into())
             .no_display()
             .with_about("about.enable-zram")
             .with_call_remote::<CliContext>(),
@@ -423,6 +425,7 @@ pub fn kiosk<C: Context>() -> ParentHandler<C> {
                     .result?;
                 enable_kiosk().await
             })
+            .with_metadata(EFFECT, Effect::Write.into())
             .no_display()
             .with_about("about.enable-kiosk-mode")
             .with_call_remote::<CliContext>(),
@@ -443,6 +446,7 @@ pub fn kiosk<C: Context>() -> ParentHandler<C> {
                     .result?;
                 disable_kiosk().await
             })
+            .with_metadata(EFFECT, Effect::Write.into())
             .no_display()
             .with_about("about.disable-kiosk-mode")
             .with_call_remote::<CliContext>(),

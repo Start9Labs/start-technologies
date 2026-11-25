@@ -16,6 +16,7 @@ use tracing::instrument;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::{NetworkInterfaceType, WifiInfo};
+use crate::mcp::{EFFECT, Effect};
 use crate::net::{AUTO_DEFAULT_RULE_PRIORITY, AUTO_MAIN_RULE_PRIORITY};
 use crate::prelude::*;
 use crate::util::Invoke;
@@ -112,6 +113,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-enabled",
             from_fn_async(set_enabled)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.enable-disable-wifi")
                 .with_call_remote::<CliContext>(),
@@ -119,6 +121,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.add-wifi-ssid-password")
                 .with_call_remote::<CliContext>(),
@@ -126,6 +129,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "connect",
             from_fn_async(connect)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.connect-wifi-network")
                 .with_call_remote::<CliContext>(),
@@ -133,6 +137,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-wifi-network")
                 .with_call_remote::<CliContext>(),
@@ -140,6 +145,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "get",
             from_fn_async(get)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| display_wifi_info(handle.params, result))
                 .with_about("about.list-wifi-info")
@@ -202,6 +208,7 @@ pub fn available<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "get",
         from_fn_async(get_available)
+            .with_metadata(EFFECT, Effect::Read.into())
             .with_display_serializable()
             .with_custom_display_fn(|handle, result| display_wifi_list(handle.params, result))
             .with_about("about.list-available-wifi-networks")
@@ -213,6 +220,7 @@ pub fn country<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "set",
         from_fn_async(set_country)
+            .with_metadata(EFFECT, Effect::Destructive.into())
             .no_display()
             .with_about("about.set-country")
             .with_call_remote::<CliContext>(),

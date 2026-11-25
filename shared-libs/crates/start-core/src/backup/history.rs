@@ -7,6 +7,7 @@ use super::BackupReport;
 use super::target::BackupTargetId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::HandlerExtSerde;
@@ -75,6 +76,7 @@ pub fn handler<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "list",
         from_fn_async(list)
+            .with_metadata(EFFECT, Effect::Read.into())
             .with_display_serializable()
             .with_about("about.list-backup-history")
             .with_call_remote::<CliContext>(),
