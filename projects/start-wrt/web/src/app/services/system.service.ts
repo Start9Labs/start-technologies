@@ -98,6 +98,9 @@ export class SystemService {
   }
 
   async startUpdate(targetVersion: string): Promise<void> {
+    if (this.connection.unreachable()) {
+      throw new Error(this.i18n.transform('Trying to reach the router'))
+    }
     this.targetVersion = targetVersion
     this.updating.set(true)
     // Mute background FormService poll errors for the whole update window —

@@ -3047,6 +3047,7 @@ function wrtUpdateObserver(systemUpdate) {
       },
     }),
     connection: {
+      unreachable: () => false,
       suppress() {},
       resume: () => outcomes.push('resumed'),
     },
@@ -3097,6 +3098,42 @@ for (const [name, end, outcome] of [
     assert.deepEqual(fixture.outcomes, [outcome])
   })
 }
+
+test('WRT update refuses to start while the reconnect indicator is up', async () => {
+  const { load } = wrtFlowHarness()
+  const service = Object.create(
+    load('projects/start-wrt/web/src/app/services/system.service.ts')
+      .SystemService.prototype,
+  )
+  let requested = 0
+  let suppressed = 0
+  let updating = false
+  Object.assign(service, {
+    api: {
+      systemUpdate: async () => {
+        requested++
+        return { initial: { target: null, progress: null } }
+      },
+    },
+    updating: Object.assign(() => updating, {
+      set: value => {
+        updating = value
+      },
+    }),
+    connection: {
+      unreachable: () => true,
+      suppress: () => suppressed++,
+      resume() {},
+    },
+    i18n: { transform: value => value },
+  })
+  await assert.rejects(service.startUpdate('1.5.1'), {
+    message: 'Trying to reach the router',
+  })
+  assert.equal(requested, 0)
+  assert.equal(suppressed, 0)
+  assert.equal(updating, false)
+})
 
 test('WRT update without a target releases the update state without observing', async () => {
   const fixture = wrtUpdateObserver(async () => ({

@@ -10,7 +10,8 @@ import { SystemService } from 'src/app/services/system.service'
 
 /**
  * Blocking progress dialog for a system update. Starts the update on open and
- * closes once SystemService is neither updating nor rebooting.
+ * closes when it cannot start or once SystemService is neither updating nor
+ * rebooting.
  */
 @Component({
   template: `
@@ -59,6 +60,7 @@ export class UpdateProgressDialog implements OnInit {
 
   ngOnInit(): void {
     this.system.startUpdate(this.context.data).catch((e: any) => {
+      this.context.completeWith()
       this.alerts
         .open(e?.message || this.i18n.transform('Failed to start update'), {
           appearance: 'negative',

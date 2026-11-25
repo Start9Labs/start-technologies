@@ -46,6 +46,7 @@ import {
   Theme,
 } from 'src/app/services/api/api.service'
 import { SystemService } from 'src/app/services/system.service'
+import { ConnectionService } from 'src/app/services/connection.service'
 import { UPDATE_PROGRESS_DIALOG } from './update-progress-dialog'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { i18nService } from 'src/app/i18n/i18n.service'
@@ -77,7 +78,7 @@ const getTheme = (theme: string): Theme =>
               tuiButton
               appearance="positive"
               type="button"
-              [disabled]="system.updating()"
+              [disabled]="system.updating() || connection.unreachable()"
               (click)="onUpdate()"
             >
               {{ 'Update now' | i18n }}
@@ -292,6 +293,7 @@ export default class General {
   private readonly i18n = inject(i18nPipe)
 
   protected readonly system = inject(SystemService)
+  protected readonly connection = inject(ConnectionService)
   protected readonly gitHash = inject(GIT_HASH)
   protected readonly languages = LANGUAGES
   protected readonly rootCaHref = ROOT_CA_DOWNLOAD_HREF
