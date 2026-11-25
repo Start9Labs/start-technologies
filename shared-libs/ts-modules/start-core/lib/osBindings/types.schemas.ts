@@ -312,6 +312,9 @@ export const ContactInfo: z.ZodUnion<
   .meta({
     id: 'ContactInfo',
   })
+export const ContainerSlot: typeof literal_9 = /* @__PURE__ */ literal_9.meta({
+  id: 'ContainerSlot',
+})
 
 /**
  * Lifecycle of a daemon-owned conversion attempt.
@@ -3109,11 +3112,19 @@ export const GetActionInputParams: z.ZodObject<{
   id: 'GetActionInputParams',
 })
 export const GetContainerIpParams: z.ZodObject<{
-  packageId: z.ZodDefault<z.ZodNullable<typeof PackageId>>
+  /**
+   * Ignored: the address is fixed for the installation.
+   */
   callback: z.ZodDefault<z.ZodNullable<typeof CallbackId>>
 }> = /* @__PURE__ */ object({
-  packageId: PackageId.nullable().default(() => null),
-  callback: CallbackId.nullable().default(() => null),
+  /**
+   * Ignored: the address is fixed for the installation.
+   */
+  callback: CallbackId.nullable()
+    .default(() => null)
+    .meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
 }).meta({
   id: 'GetContainerIpParams',
 })
@@ -7435,6 +7446,7 @@ export const NetworkInfo: z.ZodObject<{
 export const PackageDataEntry: z.ZodObject<{
   stateInfo: typeof PackageState
   s9pk: z.ZodString
+  containerSlot: typeof ContainerSlot
   statusInfo: typeof StatusInfo
   registry: z.ZodDefault<z.ZodNullable<z.ZodString>>
   developerKey: typeof literal_0
@@ -7450,6 +7462,7 @@ export const PackageDataEntry: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   stateInfo: PackageState,
   s9pk: z.string(),
+  containerSlot: ContainerSlot,
   statusInfo: StatusInfo,
   registry: z
     .string()

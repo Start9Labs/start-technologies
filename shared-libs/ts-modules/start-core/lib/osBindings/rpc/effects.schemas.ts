@@ -1148,11 +1148,19 @@ export const GetActionInputParams: z.ZodObject<{
   id: 'GetActionInputParams',
 })
 export const GetContainerIpParams: z.ZodObject<{
-  packageId: z.ZodDefault<z.ZodNullable<typeof PackageId>>
+  /**
+   * Ignored: the address is fixed for the installation.
+   */
   callback: z.ZodDefault<z.ZodNullable<typeof CallbackId>>
 }> = /* @__PURE__ */ object({
-  packageId: PackageId.nullable().default(() => null),
-  callback: CallbackId.nullable().default(() => null),
+  /**
+   * Ignored: the address is fixed for the installation.
+   */
+  callback: CallbackId.nullable()
+    .default(() => null)
+    .meta({
+      description: 'Ignored: the address is fixed for the installation.',
+    }),
 }).meta({
   id: 'GetContainerIpParams',
 })
@@ -3208,7 +3216,7 @@ export const Api = {
         ),
         GetContainerIpParams,
       ),
-      _RETURN: /* @__PURE__ */ z.string().nullable(),
+      _RETURN: /* @__PURE__ */ z.string(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),
     },
