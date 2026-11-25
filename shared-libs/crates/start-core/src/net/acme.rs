@@ -29,6 +29,7 @@ use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::model::{Database, DatabaseModel};
 use crate::db::{DbAccess, DbAccessByKey, DbAccessMut};
 use crate::error::ErrorData;
+use crate::mcp::{EFFECT, Effect};
 use crate::net::gateway::{
     CheckPortParams, CheckPortRes, CheckPortV6Res, check_port, check_port_v6,
 };
@@ -494,6 +495,7 @@ pub fn acme_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "init",
             from_fn_async(init)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.setup-acme-certificate-acquisition")
@@ -502,6 +504,7 @@ pub fn acme_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-acme-certificate-acquisition-configuration")
@@ -510,6 +513,7 @@ pub fn acme_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "check-challenge",
             from_fn_async(check_challenge)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.check-acme-challenge-reachability")
                 .with_call_remote::<CliContext>(),

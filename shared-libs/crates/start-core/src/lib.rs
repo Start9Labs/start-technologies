@@ -122,6 +122,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, DiagnosticContext, InitContext, RpcContext};
 use crate::disk::fsck::RequiresReboot;
+use crate::mcp::{EFFECT, Effect};
 use crate::system::kiosk;
 use crate::util::output::print_table;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
@@ -182,11 +183,14 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
     let mut api = ParentHandler::new()
         .subcommand(
             "git-info",
-            from_fn(|_: C| version::git_info()).with_about("about.display-githash"),
+            from_fn(|_: C| version::git_info())
+                .with_metadata(EFFECT, Effect::Read.into())
+                .with_about("about.display-githash"),
         )
         .subcommand(
             "echo",
             from_fn(echo::<RpcContext>)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_about("about.echo-message")
                 .with_call_remote::<CliContext>(),
@@ -194,6 +198,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "state",
             from_fn(|_: RpcContext| Ok::<_, Error>(ApiState::Running))
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_metadata("authenticated", Value::Bool(false))
                 .with_about("about.display-current-api")
                 .no_cli(),
@@ -233,6 +238,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                 .subcommand(
                     "reset-password",
                     from_fn_async(auth::reset_password_impl)
+                        .with_metadata(EFFECT, Effect::Destructive.into())
                         .with_metadata(crate::mcp::MCP, Value::Bool(false))
                         .no_cli(),
                 )
@@ -245,6 +251,7 @@ pub fn main_api<C: Context>() -> ParentHandler<C> {
                 .subcommand(
                     "get-pubkey",
                     from_fn_async(auth::get_pubkey)
+                        .with_metadata(EFFECT, Effect::Read.into())
                         .with_metadata("authenticated", Value::Bool(false))
                         .with_metadata(crate::mcp::MCP, Value::Bool(false))
                         .no_display()
@@ -341,6 +348,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "time",
             from_fn_async(system::time)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     system::display_time(handle.params, result)
@@ -352,6 +360,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             "device-info",
             ParentHandler::<C, WithIoFormat<Empty>>::new().root_handler(
                 from_fn_async(system::device_info)
+                    .with_metadata(EFFECT, Effect::Read.into())
                     .with_display_serializable()
                     .with_custom_display_fn(|handle, result| {
                         system::display_device_info(handle.params, result)
@@ -363,6 +372,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "governor",
             from_fn_async(system::governor)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     system::display_governor_info(handle.params, result)
@@ -373,6 +383,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "epp",
             from_fn_async(system::epp)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     system::display_epp_info(handle.params, result)
@@ -399,6 +410,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-log-level",
             from_fn(system::log_level::set_log_level)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.set-log-level")
                 .with_call_remote::<CliContext>(),
@@ -420,6 +432,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
             ParentHandler::<C, WithIoFormat<Empty>>::new()
                 .root_handler(
                     from_fn_async(system::metrics)
+                        .with_metadata(EFFECT, Effect::Read.into())
                         .with_display_serializable()
                         .with_about("about.display-server-metrics")
                         .with_call_remote::<CliContext>(),
@@ -427,6 +440,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .subcommand(
                     "follow",
                     from_fn_async(system::metrics_follow)
+                        .with_metadata(EFFECT, Effect::Read.into())
                         .with_metadata("get_signer", Value::Bool(true))
                         .with_metadata(crate::mcp::MCP, Value::Bool(false))
                         .no_cli(),
@@ -435,6 +449,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "shutdown",
             from_fn_async(shutdown::shutdown)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.shutdown-server")
                 .with_call_remote::<CliContext>(),
@@ -442,6 +457,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "restart",
             from_fn_async(shutdown::restart)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.restart-server")
                 .with_call_remote::<CliContext>(),
@@ -449,6 +465,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "rebuild",
             from_fn_async(shutdown::rebuild)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.teardown-rebuild-containers")
                 .with_call_remote::<CliContext>(),
@@ -456,6 +473,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "update",
             from_fn_async(update::update_system)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_metadata("get_signer", Value::Bool(true))
                 .no_cli(),
@@ -484,6 +502,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                     Ok(RequiresReboot(false))
                 }
             })
+            .with_metadata(EFFECT, Effect::Destructive.into())
             .with_custom_display_fn(|_handle, result| {
                 Ok(firmware::display_firmware_update_result(result))
             })
@@ -493,6 +512,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "trust-ca",
             from_fn_async(system::trust_ca::install)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     system::trust_ca::display(handle.params, result)
@@ -503,6 +523,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-smtp",
             from_fn_async(system::set_system_smtp)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.set-smtp")
                 .with_call_remote::<CliContext>(),
@@ -510,6 +531,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "test-smtp",
             from_fn_async(system::test_smtp)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.test-smtp")
                 .with_call_remote::<CliContext>(),
@@ -517,11 +539,17 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "clear-smtp",
             from_fn_async(system::clear_system_smtp)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.clear-smtp")
                 .with_call_remote::<CliContext>(),
         )
-        .subcommand("set-nut", from_fn_async(nut::set_nut).no_cli())
+        .subcommand(
+            "set-nut",
+            from_fn_async(nut::set_nut)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "set-nut",
             from_fn_async(nut::cli_set_nut)
@@ -532,6 +560,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "clear-nut",
             from_fn_async(nut::clear_nut)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.clear-nut")
                 .with_call_remote::<CliContext>(),
@@ -539,6 +568,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "nut-status",
             from_fn_async(nut::get_nut_status)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.nut-status")
                 .with_call_remote::<CliContext>(),
@@ -546,6 +576,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "nut-scan",
             from_fn_async(nut::scan_nut)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.nut-scan")
                 .with_call_remote::<CliContext>(),
@@ -553,6 +584,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "nut-list-ups",
             from_fn_async(nut::list_nut_ups)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.nut-list-ups")
                 .with_call_remote::<CliContext>(),
@@ -564,6 +596,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-hostname",
             from_fn_async(hostname::set_hostname_rpc)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.set-hostname")
                 .with_call_remote::<CliContext>(),
@@ -571,6 +604,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-echoip-urls",
             from_fn_async(system::set_echoip_urls)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.set-echoip-urls")
                 .with_call_remote::<CliContext>(),
@@ -578,6 +612,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-keyboard",
             from_fn_async(system::set_keyboard)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.set-keyboard")
                 .with_call_remote::<CliContext>(),
@@ -585,6 +620,7 @@ pub fn server<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-language",
             from_fn_async(system::set_language)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.set-language")
                 .with_call_remote::<CliContext>(),
@@ -600,12 +636,14 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "install",
             from_fn_async(install::install)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
         .subcommand(
             "sideload",
             from_fn_async(install::sideload)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),
@@ -620,6 +658,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "cancel-install",
             from_fn(install::cancel_install)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.cancel-install-package")
                 .with_call_remote::<CliContext>(),
@@ -627,6 +666,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "uninstall",
             from_fn_async(install::uninstall)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-package")
@@ -635,6 +675,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(install::list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-installed-packages")
                 .with_call_remote::<CliContext>(),
@@ -642,6 +683,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "installed-version",
             from_fn_async(install::installed_version)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.display-installed-version")
                 .with_call_remote::<CliContext>(),
@@ -649,6 +691,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "start",
             from_fn_async(control::start)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
@@ -661,6 +704,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "stop",
             from_fn_async(control::stop)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.stop-service")
@@ -669,6 +713,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "restart",
             from_fn_async(control::restart)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.restart-service")
@@ -677,6 +722,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "rebuild",
             from_fn_async(service::rebuild)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.rebuild-service-container")
@@ -685,6 +731,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "stats",
             from_fn_async(lxc::stats)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|args, res| {
                     if let Some(format) = args.params.format {
@@ -741,6 +788,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "attach",
             from_fn_async(service::attach)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .with_about("about.execute-commands-container")
@@ -749,6 +797,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "exec",
             from_fn_async(service::exec::exec)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_display_serializable()
                 .with_custom_display_fn::<CliContext, _>(|args, result| {
                     service::exec::display_exec(args.params, result)
@@ -770,6 +819,7 @@ pub fn package<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-outbound-gateway",
             from_fn_async(net::gateway::set_outbound_gateway)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.set-outbound-gateway-package")

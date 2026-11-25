@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::NetworkInterfaceInfo;
+use crate::mcp::{EFFECT, Effect};
 use crate::net::port_map::{PortMapController, candidate_gateways};
 use crate::net::transport::{Transport, TransportProtocol};
 use crate::prelude::*;
@@ -172,6 +173,7 @@ pub fn forward_api<C: Context>() -> ParentHandler<C> {
         from_fn_async(
             |ctx: RpcContext| async move { ctx.net_controller.forward.dump_table().await },
         )
+        .with_metadata(EFFECT, Effect::Read.into())
         .with_display_serializable()
         .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
             use prettytable::*;
