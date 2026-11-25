@@ -24,6 +24,7 @@ import {
   parseSelectorKey,
   parseSubscriptionKey,
   Projection,
+  projectNarrowed,
   projectOperations,
   projectRoot,
   Selection,
@@ -84,8 +85,10 @@ export type SubtreeOptions = {
  * Each watch is reference-counted and released a short delay after its last watcher
  * leaves. The document is a replica of the server's under the requested selection, which
  * is the union of the watches' selectors. A selection change prunes the replica at once
- * and fills it from the stream's `extend` revision, which also confirms the change; a watch
- * is served once the confirmed selection covers it. Selected array positions remain
+ * and fills it from the stream's `extend` revision, which also confirms the change. Pruning
+ * keeps the identity of every subtree it leaves unchanged and notifies only the watches
+ * whose subtree changed; widening notifies none. A watch is served once the confirmed
+ * selection covers it. Selected array positions remain
  * correct across selection changes and preceding revisions. Selection updates remain
  * serialized through synchronous watcher callbacks. The document cursor is the
  * subscription's. A failed subscription is reported on {@link failures$}; {@link start}
@@ -283,6 +286,7 @@ export class SubtreePatchDB<
       return
     }
     this.beforeUpdate = { ...this.cache$.value }
+    const held = this.held
     this.held = desired
     const confirmed = this.confirmed ?? NOTHING
     const retained = minimalSelection([
@@ -292,13 +296,30 @@ export class SubtreePatchDB<
     this.confirmed = retained.length ? retained : NOTHING
     this.updating = desired
     const cache = this.cache$.value
-    this.handleDump(
-      { id: cache.id, value: projectRoot(desired, cache.value) as T },
+    this.replaceValue(
       cache,
+      projectNarrowed(
+        desired,
+        held.filter(s => !selectionContains(desired, s)),
+        cache.value,
+      ) as T | null,
     )
     this.emit(cache)
     this.source.update(subscription, desired).catch(error => {
       if (this.subscription === subscription) this.fail(error)
+    })
+  }
+
+  /** Notifies the watches whose subtree the new value replaces. */
+  private replaceValue(cache: Dump<T>, value: T | null) {
+    const before = cache.value
+    cache.value = value ?? ({} as T)
+    Object.entries(this.watchedNodes).forEach(([key, { pathArr }]) => {
+      const path = pathFromArray(pathArr)
+      if (
+        getValueByPointer(before, path) !== getValueByPointer(cache.value, path)
+      )
+        this.updateWatchedNode(key, cache.value)
     })
   }
 

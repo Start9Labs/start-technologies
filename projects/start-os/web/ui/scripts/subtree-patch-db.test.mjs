@@ -7,10 +7,12 @@ import {
   minimalSelection,
   NOTHING,
   normalizeSelector,
+  projectNarrowed,
   projectOperations,
   projectRoot,
   projectScoped,
   scopeOperations,
+  selectionContains,
   SubtreePatchDB,
   watchSelectors,
 } from 'patch-db-client'
@@ -167,6 +169,44 @@ test('a released watch narrows the selection after the delay and prunes its data
   f.extend(f.calls[0], 4)
   assert.deepEqual(f.cache.value.value, { serverInfo: { name: 'box' } })
   assert.equal(f.cache.value.id, 4)
+})
+
+test('widening keeps the document and notifies no existing watch', t => {
+  const f = fixture(t)
+  const info = f.watch('serverInfo')
+  const listing = f.project({ include: ['/*/title'] }, 'packages')
+  f.db.start()
+  f.start(f.calls[0], 3, {
+    serverInfo: { name: 'box' },
+    packages: { a: { title: 'A', notes: 'n' } },
+  })
+  const before = f.cache.value.value
+  f.project({ include: ['/a/notes'] }, 'packages')
+  assert.equal(f.cache.value.value, before)
+  assert.equal(info.values.length, 1)
+  assert.deepEqual(listing.values, [{ a: { title: 'A' } }])
+})
+
+test('narrowing notifies only the watches whose subtree it prunes', t => {
+  const f = fixture(t)
+  const info = f.watch('serverInfo')
+  const listing = f.project({ include: ['/*/title'] }, 'packages')
+  const notes = f.project({ include: ['/a/notes'] }, 'packages')
+  f.db.start()
+  f.start(f.calls[0], 3, {
+    serverInfo: { name: 'box' },
+    packages: { a: { title: 'A', notes: 'n' } },
+  })
+  const serverInfo = f.cache.value.value.serverInfo
+  notes.subscription.unsubscribe()
+  t.mock.timers.tick(5000)
+  assert.deepEqual(f.cache.value.value, {
+    serverInfo: { name: 'box' },
+    packages: { a: { title: 'A' } },
+  })
+  assert.equal(f.cache.value.value.serverInfo, serverInfo)
+  assert.equal(info.values.length, 1)
+  assert.deepEqual(listing.values.at(-1), { a: { title: 'A' } })
 })
 
 test('narrowing a whole-document watch retains only confirmed subset coverage', t => {
@@ -676,4 +716,30 @@ test('extensions add exactly what a wider selection keeps, as the server extends
       }
     }
   }
+})
+
+test('narrowing a replica projects as a whole re-projection would, sharing what it keeps', () => {
+  for (const held of SELECTIONS.filter(s => s.length)) {
+    for (const selection of SELECTIONS) {
+      const dropped = held.filter(s => !selectionContains(selection, s))
+      for (const value of STATES) {
+        const replica = projectRoot(held, value)
+        const narrowed = projectNarrowed(selection, dropped, replica)
+        assert.deepEqual(
+          narrowed,
+          projectRoot(selection, replica),
+          JSON.stringify({ held, selection, value }),
+        )
+        if (!dropped.length) assert.equal(narrowed, replica)
+      }
+    }
+  }
+  const replica = { a: { x: 1 }, b: { y: 2 } }
+  const narrowed = projectNarrowed(
+    [{ include: '/a' }],
+    [{ include: '/b' }],
+    replica,
+  )
+  assert.deepEqual(narrowed, { a: { x: 1 } })
+  assert.equal(narrowed.a, replica.a)
 })

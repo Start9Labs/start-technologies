@@ -16,7 +16,7 @@ import {
   i18nPipe,
   MARKDOWN,
 } from '@start9labs/shared'
-import { TuiLoader, TuiNotification, TuiTitle } from '@taiga-ui/core'
+import { TuiButton, TuiLoader, TuiNotification, TuiTitle } from '@taiga-ui/core'
 import { TuiAvatar, TuiFade, TuiSkeleton } from '@taiga-ui/kit'
 import {
   tuiCardOptionsProvider,
@@ -81,15 +81,20 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
         <ng-container
           *ngTemplateOutlet="controls(); context: { $implicit: pkg }"
         />
-        <marketplace-about
-          [pkg]="pkg"
-          [versions]="versions$ | async"
-          (static)="onStatic()"
-          (onVersion)="selectedVersion.set($event)"
-        />
-      } @else {
-        <tui-loader [textContent]="'Loading' | i18n" />
+      } @else if (controls()) {
+        <div class="g-buttons">
+          <button tuiButton type="button" [tuiSkeleton]="true">
+            {{ 'Install' | i18n }}
+          </button>
+        </div>
       }
+      <marketplace-about
+        [pkg]="shown"
+        [loading]="!pkg()"
+        [versions]="versions$ | async"
+        (static)="onStatic()"
+        (onVersion)="selectedVersion.set($event)"
+      />
       <marketplace-release-notes [pkg]="shown" />
       @if (flavors$ | async; as flavors) {
         <marketplace-flavors [pkgs]="flavors" />
@@ -124,6 +129,7 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
   imports: [
     CommonModule,
     EmptyPipe,
+    TuiButton,
     TuiLoader,
     TuiNotification,
     TuiTitle,

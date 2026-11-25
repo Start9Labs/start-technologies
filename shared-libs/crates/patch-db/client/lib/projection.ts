@@ -208,14 +208,23 @@ export function projectValue(
   path: readonly string[],
   value: unknown,
 ): unknown {
-  if (wholeBelow(selection, path)) return value
+  return project(selection, path, value, () => false)
+}
+
+function project(
+  selection: Selection,
+  path: readonly string[],
+  value: unknown,
+  unchanged: (path: readonly string[]) => boolean,
+): unknown {
+  if (unchanged(path) || wholeBelow(selection, path)) return value
   if (Array.isArray(value)) {
     if (cutsBelow(selection, path)) return []
     return value.map((child, i) => {
       const at = [...path, String(i)]
       return reach(selection, at) === 'out'
         ? null
-        : projectValue(selection, at, child)
+        : project(selection, at, child, unchanged)
     })
   }
   if (isObject(value))
@@ -224,7 +233,7 @@ export function projectValue(
         const at = [...path, key]
         return reach(selection, at) === 'out'
           ? []
-          : [[key, projectValue(selection, at, child)]]
+          : [[key, project(selection, at, child, unchanged)]]
       }),
     )
   return value
@@ -235,6 +244,21 @@ export function projectRoot(selection: Selection, value: unknown): unknown {
   return reach(selection, []) === 'out'
     ? null
     : projectValue(selection, [], value)
+}
+
+/**
+ * A replica's projection to a selection it narrows to, from the projection it holds of a
+ * wider one. Subtrees no dropped selector reaches keep their identity.
+ */
+export function projectNarrowed(
+  selection: Selection,
+  dropped: Selection,
+  value: unknown,
+): unknown {
+  if (!dropped.length) return value
+  return reach(selection, []) === 'out'
+    ? null
+    : project(selection, [], value, path => reach(dropped, path) === 'out')
 }
 
 function projectOperation(
