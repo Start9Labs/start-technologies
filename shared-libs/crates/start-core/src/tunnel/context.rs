@@ -521,6 +521,8 @@ impl TunnelContext {
         tokio::spawn(crate::tunnel::forward::pcp::run(ctx.clone()));
         tokio::spawn(crate::tunnel::forward::igd::run(ctx.clone()));
         tokio::spawn(crate::tunnel::forward::lease::run(ctx.clone()));
+        #[cfg(target_os = "linux")]
+        tokio::spawn(crate::tunnel::legacy_iptables::warn_if_blocking());
 
         Ok(ctx)
     }
