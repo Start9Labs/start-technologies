@@ -15,7 +15,7 @@ use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::db::model::public::{GatewayType, NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::hostname::ServerHostname;
-use crate::net::forward::AvailablePorts;
+use crate::net::forward::{AvailablePorts, START9_BRIDGE_HOSTNAME, START9_BRIDGE_IFACE};
 use crate::net::host::address::{HostAddress, PublicDomainConfig, address_api};
 use crate::net::host::binding::{
     BindInfo, BindOptions, BindingRanges, Bindings, RangeBindInfo, binding, internal_span,
@@ -216,6 +216,9 @@ impl Model<Host> {
     ) -> Result<(), Error> {
         let this = self.destructure_mut();
         this.private_domains.remove(&mdns.local_domain_name())?;
+        let bridge_hostname = InternedString::from_static(START9_BRIDGE_HOSTNAME);
+        this.private_domains.remove(&bridge_hostname)?;
+        this.public_domains.remove(&bridge_hostname)?;
 
         // ips
         for (_, bind) in this.bindings.as_entries_mut()? {
@@ -264,6 +267,30 @@ impl Model<Host> {
                             ssl: true,
                             public: false,
                             hostname: host.clone(),
+                            port: Some(port),
+                            metadata,
+                        });
+                    }
+                }
+                if gid.as_str() == START9_BRIDGE_IFACE {
+                    let host = bridge_hostname.clone();
+                    let metadata = HostnameMetadata::PrivateDomain {
+                        gateways: BTreeSet::from([gid.clone()]),
+                    };
+                    if let Some(port) = net.assigned_port.filter(|_| opt.wants_plain_port()) {
+                        available.insert(HostnameInfo {
+                            ssl: opt.secure.map_or(false, |s| s.ssl),
+                            public: false,
+                            hostname: host.clone(),
+                            port: Some(port),
+                            metadata: metadata.clone(),
+                        });
+                    }
+                    if let Some(port) = net.assigned_ssl_port {
+                        available.insert(HostnameInfo {
+                            ssl: true,
+                            public: false,
+                            hostname: host,
                             port: Some(port),
                             metadata,
                         });
@@ -1131,6 +1158,70 @@ mod tests {
             add_ssl: None,
             secure: Some(crate::net::host::binding::Security { ssl: false }),
             proxy: None,
+        }
+    }
+
+    #[test]
+    fn the_bridge_serves_the_server_name_on_the_bindings_own_ports() {
+        use crate::net::forward::{START9_BRIDGE_HOSTNAME, START9_BRIDGE_IFACE};
+        use crate::net::host::binding::Security;
+
+        let bridge = NetworkInterfaceInfo {
+            ip_info: Some(Arc::new(IpInfo {
+                device_type: Some(NetworkInterfaceType::Bridge),
+                subnets: ["10.0.3.1/24".parse::<IpNet>().unwrap()]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let gateways: OrdMap<_, _> = [(gw(START9_BRIDGE_IFACE), bridge)].into_iter().collect();
+        let mut ports = AvailablePorts::new();
+        ports.set_ssl(443, true);
+        let mut host = host();
+        host.add_binding(
+            &mut ports,
+            10009,
+            BindOptions {
+                transport: Default::default(),
+                preferred_external_port: 443,
+                secure: Some(Security { ssl: true }),
+                add_ssl: None,
+                proxy: None,
+            },
+            false,
+        )
+        .unwrap();
+        host.add_binding(&mut ports, 8332, plain(8332), false)
+            .unwrap();
+        host.as_private_domains_mut()
+            .insert(
+                &InternedString::intern(START9_BRIDGE_HOSTNAME),
+                &BTreeSet::from([gw("eth0")]),
+            )
+            .unwrap();
+        converge(&mut host, &gateways, &ports);
+        let host = host.de().unwrap();
+        assert!(host.private_domains.is_empty());
+
+        for (port, ssl) in [(10009, true), (8332, false)] {
+            let binding = &host.bindings[&port];
+            let named: Vec<_> = binding
+                .enabled_addresses()
+                .into_iter()
+                .filter(|a| a.hostname == START9_BRIDGE_HOSTNAME)
+                .collect();
+            assert_eq!(named.len(), 1, "{port}");
+            let row = named[0];
+            assert!(row.is_internal());
+            assert_eq!(row.ssl, ssl);
+            let expected = if ssl {
+                binding.net.assigned_ssl_port
+            } else {
+                binding.net.assigned_port
+            };
+            assert_eq!(row.port, expected);
         }
     }
 

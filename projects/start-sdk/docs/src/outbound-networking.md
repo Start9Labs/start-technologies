@@ -20,7 +20,7 @@ Every service container ships an `/etc/resolv.conf` containing exactly:
 nameserver <the address sdk.getOsIp returns>
 ```
 
-That is the OS itself, on the bridge gateway, running a recursive resolver on UDP and TCP port 53. It answers private names locally and forwards everything else to whatever upstream resolvers the box is configured with, preserving the query type — so `TXT`, `SRV` and `MX` lookups all work.
+That is the OS itself, on the bridge gateway, running a recursive resolver on UDP and TCP port 53. It answers `startos.internal` and private names locally and forwards everything else to whatever upstream resolvers the box is configured with, preserving the query type — so `TXT`, `SRV` and `MX` lookups all work.
 
 Use it. Any library that reads `/etc/resolv.conf` — `getaddrinfo`, Go's resolver, `httpx`, `requests`, `reqwest`, Node's `dns` — is already correct and needs no configuration.
 

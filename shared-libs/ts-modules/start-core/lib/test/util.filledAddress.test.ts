@@ -116,6 +116,25 @@ describe('fillHost', () => {
       'relay.local',
     ])
   })
+
+  test('the bridge name is a bridge address, not a non-local one', () => {
+    const h = host('AAAA=')
+    h.bindings[5223].addresses.available.push({
+      ssl: true,
+      public: false,
+      hostname: 'startos.internal',
+      port: 5223,
+      metadata: { kind: 'private-domain', gateways: ['lxcbr0'] },
+    })
+    const address = addressOf(h)
+    expect(address.bridge.hostnames.map(a => a.hostname)).toEqual([
+      'startos.internal',
+    ])
+    expect(address.nonLocal.hostnames.map(a => a.hostname)).toEqual([
+      'relay.onion',
+      'relay.local',
+    ])
+  })
 })
 
 describe('legacy server LAN address overrides', () => {
