@@ -45,11 +45,7 @@ export interface DisruptionOptions {
   navigateTo?: string
 }
 
-/**
- * The single sticky toast shown while the router is unreachable. Its subtitle
- * tracks {@link ConnectionService.message} so callers can tailor the copy (e.g.
- * the address being moved to) without spawning a second toast.
- */
+/** The single sticky toast shown while the router is unreachable; its subtitle is {@link ConnectionService.message}. */
 @Component({
   template: `
     <tui-loader size="m" [inheritColor]="true" />

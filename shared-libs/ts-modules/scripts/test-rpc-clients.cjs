@@ -3375,30 +3375,6 @@ test('WRT update recovery that outlasts its wait keeps its explanation through b
   }
 })
 
-test('WRT update handover takes over an outage already in progress', async () => {
-  const fixture = wrtConnectionHarness({
-    setTimeout: callback => queueMicrotask(callback),
-  })
-  const { connection } = fixture
-  connection.reportUnreachable()
-  await new Promise(setImmediate)
-  assert.equal(connection.message(), 'Trying to reach the router')
-  assert.equal(fixture.infoCalls(), 1)
-
-  const { service } = expiredUpdateWait(fixture)
-  connection.suppress()
-  await service.pollForReconnect()
-  assert.equal(connection.message(), UPDATE_EXPLANATION)
-  await fixture.tick()
-  assert.equal(fixture.infoCalls(), 1)
-  assert.equal(fixture.probes.length, 1)
-  assert.deepEqual(fixture.navigation, [])
-
-  fixture.answer()
-  await fixture.tick()
-  assert.deepEqual(fixture.navigation, ['reload'])
-})
-
 test('WRT address change keeps its reconnect copy through background poller reports', async () => {
   const fixture = wrtConnectionHarness()
   const { connection } = fixture

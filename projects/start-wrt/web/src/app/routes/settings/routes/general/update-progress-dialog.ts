@@ -10,8 +10,7 @@ import { SystemService } from 'src/app/services/system.service'
 
 /**
  * Blocking progress dialog for a system update. Starts the update on open and
- * closes when it cannot start or once SystemService is neither updating nor
- * rebooting.
+ * closes when it cannot start or once it has finished.
  */
 @Component({
   template: `
@@ -43,8 +42,7 @@ export class UpdateProgressDialog implements OnInit {
   private readonly i18n = inject(i18nPipe)
   protected readonly context = injectContext<TuiDialogContext<void, string>>()
 
-  // Latches once the update is underway, so the completion effect does not
-  // fire on the initial idle state before `startUpdate` flips `updating`.
+  // Set once the update is underway; the idle state before it never closes.
   private active = false
 
   constructor() {
