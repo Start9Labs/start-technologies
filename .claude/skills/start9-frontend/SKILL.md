@@ -1,12 +1,14 @@
 ---
 name: start9-frontend
-description: Start9 house style for every Angular + Taiga UI web frontend (StartOS ui/setup-wizard, StartWRT, StartTunnel, brochure-marketplace, start9-store, ops-server, support-server, start-equity). Use BEFORE writing or reviewing any frontend code in these apps — components, templates, styles/CSS, forms, dialogs/toasts, routing, state, DI, i18n — and when bootstrapping a new Start9 web UI or upgrading Angular/Taiga. Includes doctrine, recipes, an antipattern catalog distilled from the fleet's refactor history, and a verified Taiga 5 API reference.
+description: Start9 house style for every Angular + Taiga UI web frontend whose source Start9 controls, listed or not (StartOS ui/setup-wizard, StartWRT, StartTunnel, brochure-marketplace, start9-store, ops-server, support-server, start-equity, Helix's console, …); a new Start9 web UI is Angular + Taiga unless someone specifies otherwise. Use BEFORE writing or reviewing any frontend code in these apps — components, templates, styles/CSS, forms, dialogs/toasts, routing, state, DI, i18n — and when bootstrapping a new Start9 web UI or upgrading Angular/Taiga. Includes doctrine, recipes, an antipattern catalog distilled from the fleet's refactor history, and a verified Taiga 5 API reference.
 ---
 
 # Start9 Frontend — Angular + Taiga UI house style
 
-Canonical for **every Start9 web UI**, distilled from the fleet's codebases and from the
-refactor and review history that shaped them. Follow it and new code matches the fleet;
+Canonical for **every Angular + Taiga web UI whose source Start9 controls**, whether or not
+the fleet table below lists it, distilled from the fleet's codebases and from the
+refactor and review history that shaped them. A new Start9 web UI is Angular + Taiga
+unless someone specifies otherwise. Follow it and new code matches the fleet;
 deviate and expect it to be rewritten in review.
 
 **Authority order: Taiga UI docs > this skill > neighboring code.** The codebases are
@@ -50,12 +52,15 @@ unrelated redesigns in a separate PR; do not turn touching a component into a st
 | `ops-server`           | `ops/ops-server/web`                            | 22      | 5.29  | **zoneless**               | dark, `#07a4ff`, Montserrat          | no                 | REST `/_api`, same-origin Express                   |
 | `support-server`       | `ops/support-server/portal/web`                 | 22      | 5.34  | **zoneless**               | dual (theme setting), StartOS tokens | yes (local dicts)  | RPC `/api` + socket.io, same-origin; `mock/` in dev |
 | `start-equity`         | `ops/start-equity/web`                          | 22      | 5.29  | **zoneless**               | dual (OS, `TUI_DARK_MODE` toggle)    | no                 | REST `/_api`, same-origin Express; `MockApiService` |
+| Helix console          | `helix-startos-internal` `app/web`              | 22      | 5.28  | **zoneless**               | dual (OS)                            | no                 | REST `/_api` + WebSocket push, same-origin Express  |
 
 TypeScript ~6.0, rxjs ~7.8 everywhere. Taiga is **pinned exact** — bump only with the
 maintainer's blessing. Monorepo apps share **one Angular workspace rooted at the repo root**;
 ops repos are standalone. Zoneless is the target state — write all new code zoneless-safe.
 This table is the **only** place in the fleet where stack versions are written down — update
 it with every Angular/Taiga bump (other repos' docs deliberately carry no version specifics).
+It records stacks, not scope: an app missing from it is still governed by this skill — add
+its row.
 
 ## Doctrine
 
@@ -140,7 +145,8 @@ it with every Angular/Taiga bump (other repos' docs deliberately carry no versio
 
 ## Review checklist (greppable)
 
-Any hit is a finding unless it matches a documented exception in the reference files:
+Run it against your diff before you push. Any hit is a finding unless it matches a
+documented exception in the reference files:
 
 ```
 NgModule                    constructor(private           *ngIf / *ngFor

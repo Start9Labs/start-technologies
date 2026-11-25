@@ -17,3 +17,8 @@ only what this skill's rules need to know about each one.
   never branches on the role outside the shell and the route guards. There is no
   `MockApiService`: the dev backend is the Express + socket.io server in `mock/`, so extend
   that. Its `web/AGENTS.md` carries the rest.
+- **Helix console** (`helix-startos-internal` `app/web`) — imports the server's contract
+  types and pure helpers from `app/src/web`. No `MockApiService`: `src/web/browser.test.ts`
+  drives the built console against an isolated server, so it locates elements by role and
+  accessible name; keep those stable or update the test. Verify: `npm run check:web` and
+  `npm run test:browser` from `app/`.
