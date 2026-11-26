@@ -117,15 +117,16 @@ static DOMAIN_NAMES: LazyLock<[Regex; 5]> = LazyLock::new(|| {
         compile(r"(: `)([^`'\[\]]+?)(:\d+'\. Trying again)"),
     ]
 });
-/// A dnsmasq query-log entry; the second group is the name looked up.
 static DNS_QUERY: LazyLock<Regex> = LazyLock::new(|| {
     compile(
-        r"((?:query|dnssec-query)\[[A-Za-z0-9]+\] |(?:forwarded|reply|cached|cached-stale|config|validation|DHCP|DHCPv6|ipset add|nftset add) |/\S+ )(\S+)( (?:from|to|is) )",
+        r"((?:query|dnssec-query)\[[A-Za-z0-9_=]+\] |(?:forwarded|reply|cached|cached-stale|config|validation|DHCP|DHCPv6|auth) |/\S+ )(\S+)( (?:from|to|is) )(\S+)",
     )
 });
-/// A reverse-lookup name for a whole IPv6 address or a prefix of one.
-static IP6_ARPA: LazyLock<Regex> =
-    LazyLock::new(|| compile(r"(?i)(?:[0-9a-f]\.){1,32}ip6\.arpa\b"));
+static DNS_SET: LazyLock<Regex> =
+    LazyLock::new(|| compile(r"((?:ipset|nftset) add \S+ \S+ )(\S+)"));
+static REVERSE_NAME: LazyLock<Regex> = LazyLock::new(|| {
+    compile(r"(?i)(?:(?:[0-9a-f]\.){0,32}ip6|(?:[0-9]{1,3}\.){0,4}in-addr)\.arpa\b")
+});
 static PROFILE_NETWORK: LazyLock<Regex> = LazyLock::new(|| compile(r"\((.+?) profile(, VPN)?\)"));
 
 /// Values read from the router's configuration.
@@ -309,7 +310,7 @@ impl Redactor {
         local_suffixes.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         local_suffixes.dedup();
         let local_names = RegexBuilder::new(&format!(
-            r"(?:[a-z0-9-]+\.)+(?:{})\.?",
+            r"(?:[a-z0-9_-]+\.)+(?:{})\.?",
             local_suffixes.iter().map(|s| regex::escape(s)).join("|")
         ))
         .case_insensitive(true)
@@ -411,26 +412,55 @@ impl Redactor {
         if s.contains("dnsmasq") {
             update(&mut s, |s| {
                 DNS_QUERY.replace_all(s, |c: &Captures| {
-                    format!("{}{}{}", &c[1], self.looked_up(&c[2]), &c[3])
+                    let name = match (&c[1], &c[2]) {
+                        ("reply ", "error" | "query") | ("validation ", "result") => {
+                            c[2].to_owned()
+                        }
+                        _ => self.looked_up(&c[2]),
+                    };
+                    let answer = if &c[3] == " is "
+                        && c[2].parse::<IpAddr>().is_ok()
+                        && !matches!(
+                            &c[4],
+                            "NXDOMAIN" | "NODATA" | "NODATA-IPv4" | "NODATA-IPv6"
+                        )
+                    {
+                        self.looked_up(&c[4])
+                    } else {
+                        c[4].to_owned()
+                    };
+                    format!("{}{name}{}{answer}", &c[1], &c[3])
+                })
+            });
+            update(&mut s, |s| {
+                DNS_SET.replace_all(s, |c: &Captures| {
+                    format!("{}{}", &c[1], self.looked_up(&c[2]))
                 })
             });
         }
         update(&mut s, |s| {
             replace_with(&self.local_names, s, |s, r| {
                 let label = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_');
-                (!prev(s, r.start).is_some_and(|c| label(c) || matches!(c, '.' | '/' | '<'))
+                (!prev(s, r.start).is_some_and(|c| label(c) || matches!(c, '.' | '<'))
+                    && (prev(s, r.start) != Some('/') || s[..r.start].ends_with("://"))
                     && !next(s, r.end).is_some_and(|c| label(c) || c == '.'))
                 .then(|| self.host(&s[r]))
             })
         });
-        if s.contains("ip6.arpa") || s.contains("IP6.ARPA") {
-            update(&mut s, |s| {
-                replace_with(&IP6_ARPA, s, |s, r| {
-                    let label = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '.');
-                    (!prev(s, r.start).is_some_and(label)).then(|| self.ip6_arpa(&s[r]))?
-                })
-            });
-        }
+        update(&mut s, |s| {
+            replace_with(&REVERSE_NAME, s, |s, r| {
+                let label = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
+                if prev(s, r.start).is_some_and(label) {
+                    return None;
+                }
+                let name = &s[r];
+                if name.to_ascii_lowercase().ends_with("ip6.arpa") {
+                    self.ip6_arpa(name)
+                } else {
+                    self.ip4_arpa(name)
+                }
+            })
+        });
         update(&mut s, |s| {
             SSH_FINGERPRINT.replace_all(s, |c: &Captures| {
                 format!("SHA256:{}", self.token("key", &c[0]))
@@ -516,8 +546,11 @@ impl Redactor {
         }
     }
 
-    /// Keeps the router's default names and the local suffix.
+    /// Configured local domains remain private, including beneath default router names.
     fn host(&self, name: &str) -> String {
+        if name.starts_with('<') {
+            return name.to_owned();
+        }
         let (base, suffix) = self.split_local(name);
         let default = base == "localhost"
             || base.strip_prefix("router").is_some_and(|n| {
@@ -525,10 +558,22 @@ impl Redactor {
                     || n.strip_prefix('-')
                         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
             });
-        if default || name.starts_with('<') {
-            name.to_owned()
+        let rendered = if default {
+            base.to_owned()
         } else {
-            format!("{}{suffix}", self.name(base))
+            self.name(base)
+        };
+        let Some(domain) = suffix.strip_prefix('.') else {
+            return rendered;
+        };
+        if LOCAL_SUFFIXES
+            .iter()
+            .any(|s| domain.trim_end_matches('.').eq_ignore_ascii_case(s))
+        {
+            format!("{rendered}{suffix}")
+        } else {
+            let trailing = if suffix.ends_with('.') { "." } else { "" };
+            format!("{rendered}.{}{trailing}", self.domain(domain))
         }
     }
 
@@ -550,27 +595,52 @@ impl Redactor {
         (name, "")
     }
 
-    /// The replacement for a name in a DNS query.
+    /// DNS names remain private in queries and PTR answers, including single-label names.
     fn looked_up(&self, name: &str) -> String {
         let bare = name.trim_end_matches('.');
-        let lower = bare.to_ascii_lowercase();
         if name.starts_with('<')
             || bare.is_empty()
-            || !bare.contains('.')
             || bare.parse::<IpAddr>().is_ok()
-            || lower.ends_with(".arpa") && !lower.ends_with(".home.arpa")
+            || REVERSE_NAME
+                .find(bare)
+                .is_some_and(|m| m.start() == 0 && m.end() == bare.len())
         {
             return name.to_owned();
         }
-        if self.split_local(name).1.is_empty() {
+        if !bare.contains('.') {
+            format!("{}{}", self.host(bare), &name[bare.len()..])
+        } else if self.split_local(name).1.is_empty() {
             self.domain(name)
         } else {
             self.host(name)
         }
     }
 
-    /// A reverse-lookup name with its address rendered as elsewhere; a short
-    /// prefix is kept.
+    /// IPv4 reverse names share forward-address exemptions and tokens.
+    fn ip4_arpa(&self, name: &str) -> Option<String> {
+        let labels = name.rsplitn(3, '.').nth(2)?;
+        let labels: Vec<u8> = labels
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        let mut octets = [0; 4];
+        for (octet, value) in octets.iter_mut().zip(labels.iter().rev()) {
+            *octet = *value;
+        }
+        let address = Ipv4Addr::from(octets);
+        if kept_ipv4(address) {
+            return None;
+        }
+        let rendered = if labels.len() == 4 {
+            self.token("ip4", &address.to_string())
+        } else {
+            self.token("ptr", &format!("{address}/{}", labels.len() * 8))
+        };
+        Some(format!("{rendered}.in-addr.arpa"))
+    }
+
+    /// IPv6 reverse names share forward-address tokens; short zones stay literal.
     fn ip6_arpa(&self, name: &str) -> Option<String> {
         let nibbles: Vec<u8> = name
             .split('.')
@@ -740,14 +810,13 @@ impl Redactor {
                 (Some('.'), Some(c)) if c.is_ascii_digit() => return None,
                 _ => {}
             }
-            let ip: Ipv4Addr = s[r.clone()].parse().ok()?;
-            let reverse = s[r.end..].to_ascii_lowercase().starts_with(".in-addr.arpa");
-            let ip = if reverse {
-                let [a, b, c, d] = ip.octets();
-                Ipv4Addr::new(d, c, b, a)
-            } else {
-                ip
-            };
+            if REVERSE_NAME
+                .find(&s[r.start..])
+                .is_some_and(|name| name.start() == 0)
+            {
+                return None;
+            }
+            let ip: Ipv4Addr = s[r].parse().ok()?;
             (!kept_ipv4(ip)).then(|| self.token("ip4", &ip.to_string()))
         })
     }

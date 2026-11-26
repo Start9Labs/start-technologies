@@ -685,3 +685,183 @@ fn reverse_lookups_hide_the_address_they_spell() {
     let private = "dnsmasq[9]: query[PTR] 20.1.168.192.in-addr.arpa from 192.168.1.20";
     assert_eq!(redactor.line(private, false), private);
 }
+
+#[test]
+fn single_label_dns_names_share_the_device_token() {
+    let redactor = plain();
+    for (line, expected) in [
+        (
+            "dnsmasq[9]: query[A] personal-laptop from 192.168.1.20",
+            format!(
+                "dnsmasq[9]: query[A] {} from 192.168.1.20",
+                redactor.name("personal-laptop")
+            ),
+        ),
+        (
+            "dnsmasq[9]: DHCP personal-laptop is 192.168.1.20",
+            format!(
+                "dnsmasq[9]: DHCP {} is 192.168.1.20",
+                redactor.name("personal-laptop")
+            ),
+        ),
+        (
+            "dnsmasq[9]: query[A] personal-laptop. from 192.168.1.20",
+            format!(
+                "dnsmasq[9]: query[A] {}. from 192.168.1.20",
+                redactor.name("personal-laptop")
+            ),
+        ),
+    ] {
+        assert_eq!(redactor.line(line, false), expected);
+    }
+    for kept in [
+        "dnsmasq[9]: query[A] router from 192.168.1.20",
+        "dnsmasq[9]: query[A] router. from 192.168.1.20",
+        "dnsmasq[9]: query[NS] . from 192.168.1.20",
+        "dnsmasq[9]: reply error is REFUSED",
+        "dnsmasq[9]: reply query is duplicate",
+        "dnsmasq[9]: validation result is SECURE",
+    ] {
+        assert_eq!(redactor.line(kept, false), kept);
+    }
+}
+
+#[test]
+fn ptr_answers_redact_names_and_keep_statuses() {
+    let redactor = plain();
+    assert_eq!(
+        redactor.line(
+            "dnsmasq[9]: reply 192.168.1.20 is personal-laptop",
+            false
+        ),
+        format!(
+            "dnsmasq[9]: reply 192.168.1.20 is {}",
+            redactor.name("personal-laptop")
+        )
+    );
+    assert_eq!(
+        redactor.line(
+            "dnsmasq[9]: cached 192.168.1.20 is nas.family.example.org",
+            false
+        ),
+        format!(
+            "dnsmasq[9]: cached 192.168.1.20 is {}",
+            redactor.domain("nas.family.example.org")
+        )
+    );
+    assert_eq!(
+        redactor.line(
+            "dnsmasq[9]: reply 84.12.34.56 is nas.family.example.org",
+            false
+        ),
+        format!(
+            "dnsmasq[9]: reply {} is {}",
+            redactor.line("84.12.34.56", false),
+            redactor.domain("nas.family.example.org")
+        )
+    );
+    for status in ["NXDOMAIN", "NODATA", "NODATA-IPv4", "NODATA-IPv6"] {
+        let line = format!("dnsmasq[9]: cached 192.168.1.20 is {status}");
+        assert_eq!(redactor.line(&line, false), line);
+    }
+}
+
+#[test]
+fn dns_log_formats_share_name_redaction() {
+    let redactor = plain();
+    for line in [
+        "dnsmasq[9]: query[type=65400] private.example.org from 192.168.1.20",
+        "dnsmasq[9]: query[NSAP_PTR] private.example.org from 192.168.1.20",
+        "dnsmasq[9]: auth private.example.org is 192.168.1.20",
+        "dnsmasq[9]: ipset add selected 84.12.34.56 private.example.org",
+        "dnsmasq[9]: nftset add 4#inet#fw4#selected 84.12.34.56 private.example.org",
+    ] {
+        let out = redactor.line(line, false);
+        assert!(!out.contains("private.example"), "{out}");
+        assert!(
+            out.contains(&redactor.domain("private.example.org")),
+            "{out}"
+        );
+    }
+    let out = redactor.line(
+        "dnsmasq[9]: query[NAPTR] 6.5.4.3.2.1.e164.arpa from 192.168.1.20",
+        false,
+    );
+    assert!(!out.contains("6.5.4.3.2.1"), "{out}");
+    assert!(
+        out.contains(&redactor.domain("6.5.4.3.2.1.e164.arpa")),
+        "{out}"
+    );
+}
+
+#[test]
+fn configured_local_domains_remain_private() {
+    let redactor = redactor(
+        &[(
+            "dhcp",
+            "config dnsmasq\n\toption domain 'family.example.org'\n",
+        )],
+        &[],
+    );
+    for line in [
+        "netifd: personal-laptop.family.example.org went away",
+        "dnsmasq[9]: query[A] personal-laptop.family.example.org from 192.168.1.20",
+        "dnsmasq[9]: query[A] router.family.example.org from 192.168.1.20",
+    ] {
+        let out = redactor.line(line, false);
+        assert!(
+            !out.contains("family") && !out.contains("personal"),
+            "{out}"
+        );
+        assert!(
+            out.contains(&redactor.domain("family.example.org")),
+            "{out}"
+        );
+    }
+    assert_eq!(
+        redactor.line(
+            "netifd: personal-laptop.family.example.org. went away",
+            false
+        ),
+        format!(
+            "netifd: {}.{}. went away",
+            redactor.name("personal-laptop"),
+            redactor.domain("family.example.org")
+        )
+    );
+}
+
+#[test]
+fn local_name_matching_accepts_underscores_and_url_authorities() {
+    let redactor = plain();
+    for line in [
+        "dnsmasq[9]: possible DNS-rebind attack detected: personal_pc.local",
+        "request http://personal-pc.lan:8080/ failed",
+        "request https://personal_pc.local/ failed",
+    ] {
+        let out = redactor.line(line, false);
+        assert!(!out.contains("personal"), "{out}");
+        assert!(out.contains("<name-"), "{out}");
+    }
+    let kept = "procd: running /etc/rc.local and /tmp/script.local";
+    assert_eq!(redactor.line(kept, false), kept);
+}
+
+#[test]
+fn reverse_zones_redact_public_ipv4_prefixes_and_accept_mixed_case() {
+    let redactor = plain();
+    for line in [
+        "dnsmasq[9]: query[SOA] 34.12.84.in-addr.arpa from 192.168.1.20",
+        "dnsmasq[9]: query[SOA] 34.12.84.In-AdDr.ArPa from 192.168.1.20",
+        "dnsmasq[9]: query[SOA] 7.f.f.6.3.1.a.6.1.0.d.f.iP6.aRpA from ::1",
+    ] {
+        let out = redactor.line(line, false);
+        assert!(out.contains("<ptr-"), "{out}");
+        assert!(
+            !out.contains("34.12.84") && !out.contains("6.3.1.a.6"),
+            "{out}"
+        );
+    }
+    let kept = "dnsmasq[9]: query[SOA] 168.192.in-addr.arpa from 192.168.1.20";
+    assert_eq!(redactor.line(kept, false), kept);
+}
