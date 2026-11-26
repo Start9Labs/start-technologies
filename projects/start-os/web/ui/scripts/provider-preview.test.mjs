@@ -175,6 +175,23 @@ test('default previews follow the listing version without refetching for title-o
   assert.equal(f.component.pkg().version, '2.0.0:0')
 })
 
+test('destroying a preview releases its non-completing package observation', t => {
+  const f = preview(t)
+  assert.equal(f.releases(), 0)
+  f.destroy()
+  assert.equal(f.releases(), 1)
+})
+
+test('a remaining details consumer retains the observation only until it unsubscribes', t => {
+  const f = preview(t)
+  const details = f.component.pkg$.subscribe()
+  t.after(() => details.unsubscribe())
+  f.destroy()
+  assert.equal(f.releases(), 0)
+  details.unsubscribe()
+  assert.equal(f.releases(), 1)
+})
+
 test('an explicit version remains selected when the listing changes', t => {
   const f = preview(t)
   f.component.selectedVersion.set('0.5.0:0')

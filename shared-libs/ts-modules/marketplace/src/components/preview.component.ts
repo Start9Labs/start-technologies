@@ -231,7 +231,7 @@ export class MarketplacePreviewComponent {
           startWith<MarketplacePkg | null>(null),
         ),
     ),
-    shareReplay({ bufferSize: 1, refCount: false }),
+    shareReplay({ bufferSize: 1, refCount: true }),
   )
 
   protected readonly pkg = toSignal(this.pkg$, { initialValue: null })

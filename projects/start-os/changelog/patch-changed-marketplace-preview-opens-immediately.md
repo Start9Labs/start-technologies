@@ -2,4 +2,4 @@
 release-notes: false
 ---
 
-- Selecting a service in the Marketplace opens its details panel immediately, showing what the listing already knows with placeholders for the details still loading.
+- Selecting a service in the Marketplace opens its details panel immediately, showing what the listing already knows with placeholders for the details still loading. Closing previews avoids accumulating background registry activity.
