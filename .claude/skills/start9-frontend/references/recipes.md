@@ -9,7 +9,7 @@ Step lists that stitch the references together. Each step names where its rule l
 2. Route entry: `{ path: '<name>', loadComponent: () => import('./routes/<name>') }`
    (routing.md).
 3. Data via the app's service pattern and the three-arm `@if` (state.md); i18n every string in
-   monorepo apps (conventions.md).
+   apps with i18n (conventions.md).
 
 **Add a dialog** — overlays.md, Dialogs: a selectorless component in `routes/<feature>/dialog.ts`
 with `injectContext`, a form per forms.md, its validation messages in the dialog's `providers`,
@@ -32,8 +32,9 @@ or fonts.
 
 **Create a reusable control component** — components.md, Selectors.
 
-**Add an app to the monorepo / stand up a new repo** — bootstrap.md. Copy the newest sibling
-(start-wrt in-monorepo; support-server standalone), not the oldest.
+**Add an app to a workspace / stand up a new repo** — bootstrap.md. Copy the newest sibling,
+not the oldest; the repo-root `FRONTEND.md` may name it. Give the new app its `FRONTEND.md`
+(SKILL.md).
 
 **Restyle something** — walk the ladder in styling.md and stop at the first rung that works.
 If you're about to write CSS, say which rungs you ruled out and why.
@@ -41,6 +42,6 @@ If you're about to write CSS, say which rungs you ruled out and why.
 **Add an i18n string** — conventions.md.
 
 **Add a backend endpoint** — extend the abstract `ApiService` and both `LiveApiService` and
-`MockApiService` (skipping the mock breaks `npm run start:*`), with types from `T.*`/shared
-schemas. StartWRT also updates `API_CONTRACT.md` and the Rust handler in the same change;
-start9-store follows its `AGENTS.md` § Pattern: adding a new commerce endpoint.
+`MockApiService` (skipping the mock breaks the mock dev server), with types from the generated
+bindings or shared schemas, plus whatever else the app's `FRONTEND.md` or `AGENTS.md` lists for
+a new endpoint.

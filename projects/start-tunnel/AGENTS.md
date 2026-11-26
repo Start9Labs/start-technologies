@@ -21,7 +21,8 @@ entry/CLI dispatch in `shared-libs/crates/start-core/src/bins/tunnel.rs`.
 - `start-tunneld.service` — systemd unit running `/usr/bin/start-tunneld`.
 - `make start-tunnel` builds `tunnelbox` through the shared `build/build-rust-bins.sh` (release
   musl build in the `rust-zig-builder` container).
-- `web/` — Angular project `start-tunnel` (registered in the root `angular.json`).
+- `web/` — Angular project `start-tunnel` (registered in the root `angular.json`); its facts
+  for the `start9-frontend` skill are in `web/FRONTEND.md`.
 - `docs/` — mdbook (book title "StartTunnel"), output to `docs/book`.
 
 Where to make changes:

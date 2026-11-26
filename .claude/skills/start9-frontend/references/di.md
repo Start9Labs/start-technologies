@@ -5,7 +5,7 @@
   single use (`inject(ActivatedRoute).snapshot.queryParamMap.get('code') || ''` directly inside
   a form-group literal — don't name a value used once).
 - **`tuiProvide(TOKEN, Class)` for every `useExisting` binding** (type-safe):
-  `tuiProvide(AbstractMarketplaceService, MarketplaceService)`,
+  `tuiProvide(AbstractCatalogService, CatalogService)`,
   `tuiProvide(TuiLanguageSwitcherService, forwardRef(() => i18nService))`.
 - **Root and node injectors only.** Singletons in `app.config.ts` or `@Service()`/
   `@Injectable({providedIn: 'root'})`; everything scoped goes in a **component's** `providers`/
@@ -13,9 +13,9 @@
   per-dialog validation messages, per-subtree Taiga options. Never on a route (routing.md).
 - **Tokens**: `new InjectionToken('description', { factory })` — and the factory often returns
   live state: a signal (`HELP_OPEN`), a `toSignal` of composed streams (`STATUS`), a
-  `BehaviorSubject` (`PATCH_CACHE`). Consumers just `inject(STATUS)` and call it. Value tokens
+  `BehaviorSubject` (`CACHE`). Consumers just `inject(STATUS)` and call it. Value tokens
   (`RELATIVE_URL`, `GIT_HASH`) bind in config. Abstract classes double as tokens for app-swapped
-  implementations (`AbstractMarketplaceService`, `ApiService`); optional hook tokens use
+  implementations (`AbstractCatalogService`, `ApiService`); optional hook tokens use
   `inject(TOKEN, { optional: true })` so libs work without the app hook.
 - **Provider factories** are exported next to the thing they provide:
   `provideFormService(Impl)`, `provideSetupLogsService(ApiClass)`,
@@ -28,3 +28,10 @@
 - New services use **`@Service()`** (from `@angular/core`); `@Injectable({providedIn: 'root'})`
   is the older equivalent still present. Pipes that services also call imperatively are
   `@Pipe({...}) @Injectable({providedIn: 'root'})` and get injected (`inject(i18nPipe)`).
+
+## Shared-library authoring
+
+A component in a shared Angular library is configurable through these layers, in order: signal
+inputs → content projection, `contentChild(TemplateRef)` or `PolymorpheusContent` → an abstract
+class as the DI contract the app implements → optional hook tokens → `provide*` factories →
+Taiga option providers. Style with `--tui-*` vars and keep theme definitions out of components.
