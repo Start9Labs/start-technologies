@@ -16,7 +16,7 @@ import { injectContext, PolymorpheusComponent } from '@taiga-ui/polymorpheus'
 
 import {
   VOLUME_TYPES,
-  volumeName,
+  targetName,
   volumePath,
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
@@ -217,7 +217,7 @@ class BackupPicker {
     injectContext<TuiDialogContext<Picked, PickerMode>>()
   protected readonly service = inject(BackupService)
   protected readonly types = VOLUME_TYPES
-  protected readonly name = volumeName
+  protected readonly name = targetName
   protected readonly path = volumePath
   protected readonly oldFormat =
     'This backup uses an old format. It remains usable for restores. To enable stronger tamper detection and read-only snapshots, update it on the Backups page of the server this backup belongs to. Conversion may take a long time, and this backup is unavailable until it finishes.' as const
@@ -234,7 +234,7 @@ class BackupPicker {
             ...backup,
             targetId,
             serverId,
-            targetName: volumeName(target),
+            targetName: targetName(target),
             source: target.source,
             usable:
               target.availability !== 'unavailable' &&

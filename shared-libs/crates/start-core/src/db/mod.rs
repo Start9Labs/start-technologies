@@ -10,7 +10,10 @@ use clap::Parser;
 use imbl_value::{InternedString, Value};
 use itertools::Itertools;
 use patch_db::json_ptr::{JsonPointer, ROOT};
-use patch_db::{Catchup, DiffPatch, Dump, PatchDb, Revision, Subscriber};
+use patch_db::{
+    Catchup, DiffPatch, Dump, PatchDb, ProjectedSubscriber, Projection, Revision, Selector,
+    Subscriber, Update,
+};
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
@@ -19,6 +22,7 @@ use tokio::sync::watch;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
@@ -56,12 +60,30 @@ pub fn db<C: Context>() -> ParentHandler<C> {
                 .with_display_serializable()
                 .with_about("about.filter-query-db"),
         )
-        .subcommand("dump", from_fn_async(dump).no_cli())
+        .subcommand(
+            "dump",
+            from_fn_async(dump)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .no_cli(),
+        )
         .subcommand(
             "subscribe",
             from_fn_async(subscribe)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_cli(),
+        )
+        .subcommand(
+            "subscription",
+            ParentHandler::<C>::new()
+                .subcommand(
+                    "update",
+                    from_fn_async(update_subscription)
+                        .with_metadata(EFFECT, Effect::Read.into())
+                        .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                        .no_cli(),
+                )
                 .no_cli(),
         )
         .subcommand(
@@ -75,7 +97,13 @@ pub fn db<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.update-db-record"),
         )
-        .subcommand("apply", from_fn_async(apply).no_cli())
+        .subcommand(
+            "apply",
+            from_fn_async(apply)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_cli(),
+        )
 }
 
 #[derive(Deserialize, Serialize)]
@@ -83,6 +111,77 @@ pub fn db<C: Context>() -> ParentHandler<C> {
 pub enum RevisionsRes {
     Revisions(Vec<Arc<Revision>>),
     Dump(Dump),
+}
+
+/// Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
+#[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
+pub struct ProjectionParams {
+    /// Levels kept below the pointer; deeper objects and arrays become empty.
+    #[arg(long, help = "help.arg.db-depth")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<usize>,
+    /// Subtrees kept, as pointers relative to the subtree where `*` matches any one key or index.
+    /// Empty keeps everything. A numeric segment matches that key or array position.
+    #[arg(long, help = "help.arg.db-include")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<JsonPointer>,
+    /// Subtrees removed from what `include` keeps, in the same form.
+    #[arg(long, help = "help.arg.db-exclude")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<JsonPointer>,
+    /// More subtrees, each with its own exclusions and depth, kept alongside the above.
+    /// An explicit root inclusion in the simple form keeps the entire subtree.
+    #[arg(skip)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selectors: Vec<SelectorParams>,
+}
+
+rpc_toolkit::reflect_ts!(ProjectionParams);
+
+/// One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectorParams {
+    pub include: JsonPointer,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<JsonPointer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<usize>,
+}
+
+rpc_toolkit::reflect_ts!(SelectorParams);
+
+impl From<ProjectionParams> for Projection {
+    fn from(
+        ProjectionParams {
+            depth,
+            include,
+            exclude,
+            selectors,
+        }: ProjectionParams,
+    ) -> Self {
+        let explicit = depth.is_some() || !include.is_empty() || !exclude.is_empty();
+        let simple = Projection::new(depth, include, exclude);
+        if selectors.is_empty() {
+            return simple;
+        }
+        let mut union = if explicit && simple.is_identity() {
+            vec![Selector::new(ROOT.to_owned(), Vec::new(), None)]
+        } else {
+            simple.into_selectors()
+        };
+        union.extend(selectors.into_iter().map(
+            |SelectorParams {
+                 include,
+                 exclude,
+                 depth,
+             }| Selector::new(include, exclude, depth),
+        ));
+        Projection::union(union)
+    }
 }
 
 #[derive(Deserialize, Serialize, Parser)]
@@ -97,6 +196,9 @@ pub struct CliDumpParams {
     )]
     #[serde(default)]
     include_private: bool,
+    #[command(flatten)]
+    #[serde(flatten)]
+    projection: ProjectionParams,
     #[arg(help = "help.arg.db-path")]
     path: Option<PathBuf>,
 }
@@ -107,28 +209,35 @@ async fn cli_dump(
         context,
         parent_method,
         method,
-        params: CliDumpParams {
-            include_private,
-            path,
-        },
+        params:
+            CliDumpParams {
+                include_private,
+                projection,
+                path,
+            },
         ..
     }: HandlerArgs<CliContext, CliDumpParams>,
 ) -> Result<Dump, RpcError> {
     let dump = if let Some(path) = path {
-        PatchDb::open(path).await?.dump(&ROOT).await
+        PatchDb::open(path)
+            .await?
+            .dump_projected(&ROOT, &projection.into())
+            .await
     } else {
         let method = parent_method.into_iter().chain(method).join(".");
+        let pointer = if include_private {
+            ROOT.to_owned()
+        } else {
+            PUBLIC.clone()
+        };
         from_value::<Dump>(
             context
                 .call_remote::<RpcContext>(
                     &method,
-                    imbl_value::json!({
-                        "pointer": if include_private {
-                            AsRef::<str>::as_ref(&ROOT)
-                        } else {
-                            AsRef::<str>::as_ref(&*PUBLIC)
-                        }
-                    }),
+                    to_value(&DumpParams {
+                        pointer: Some(pointer),
+                        projection,
+                    })?,
                 )
                 .await?,
         )?
@@ -141,15 +250,26 @@ async fn cli_dump(
 #[serde(rename_all = "camelCase")]
 pub struct DumpParams {
     pub pointer: Option<JsonPointer>,
+    #[serde(flatten)]
+    pub projection: ProjectionParams,
 }
 
 rpc_toolkit::reflect_ts!(DumpParams);
 
-pub async fn dump(ctx: RpcContext, DumpParams { pointer }: DumpParams) -> Result<Dump, Error> {
-    Ok(ctx.db.dump(pointer.as_ref().unwrap_or(&*PUBLIC)).await)
+pub async fn dump(
+    ctx: RpcContext,
+    DumpParams {
+        pointer,
+        projection,
+    }: DumpParams,
+) -> Result<Dump, Error> {
+    Ok(ctx
+        .db
+        .dump_projected(pointer.as_ref().unwrap_or(&*PUBLIC), &projection.into())
+        .await)
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct DbCursor {
     pub epoch: InternedString,
@@ -164,6 +284,8 @@ pub struct SubscribeParams {
     pub pointer: Option<JsonPointer>,
     /// The subscriber's last revision; resumes only within the epoch that reported it.
     pub since: Option<DbCursor>,
+    #[serde(flatten)]
+    pub projection: ProjectionParams,
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     pub signer: Option<InternedString>,
@@ -188,6 +310,9 @@ pub struct SubscribeStart {
     pub id: u64,
     pub value: Option<Value>,
     pub revisions: Option<Vec<Revision>>,
+    /// Names the stream to `db.subscription.update`; absent where its projection is fixed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription: Option<Guid>,
 }
 
 rpc_toolkit::reflect_ts!(SubscribeStart);
@@ -195,26 +320,17 @@ rpc_toolkit::reflect_ts!(SubscribeStart);
 pub(crate) async fn subscribe_start(
     db: &PatchDb,
     pointer: JsonPointer,
+    projection: Projection,
     since: Option<&DbCursor>,
 ) -> (SubscribeStart, Subscriber) {
     let (epoch, catchup, sub) = db
-        .catch_up_and_sub(pointer, since.map(|since| (&*since.epoch, since.id)))
+        .catch_up_and_sub_projected(
+            pointer,
+            projection,
+            since.map(|since| (&*since.epoch, since.id)),
+        )
         .await;
-    let start = match catchup {
-        Catchup::Dump(Dump { id, value }) => SubscribeStart {
-            epoch,
-            id,
-            value: Some(value),
-            revisions: None,
-        },
-        Catchup::Replay { id, revisions } => SubscribeStart {
-            epoch,
-            id,
-            value: None,
-            revisions: Some(revisions),
-        },
-    };
-    (start, sub)
+    (subscribe_start_from(epoch, catchup), sub)
 }
 
 /// Opted-in rpcstream requests receive the dump directly; other callers receive a GUID.
@@ -237,20 +353,49 @@ pub enum SubscribeStartResult {
 
 rpc_toolkit::reflect_ts!(SubscribeStartResult);
 
-struct DbSubscriber {
+/// A stream item that carries a revision id, which a sync fence can stand in for.
+trait Sequenced: Sized {
+    fn id(&self) -> u64;
+    fn fence(id: u64) -> Self;
+}
+
+impl Sequenced for Revision {
+    fn id(&self) -> u64 {
+        self.id
+    }
+    fn fence(id: u64) -> Self {
+        Revision {
+            id,
+            patch: DiffPatch::default(),
+        }
+    }
+}
+
+impl Sequenced for Update {
+    fn id(&self) -> u64 {
+        match self {
+            Update::Revision(revision) | Update::Extend(revision) => revision.id,
+        }
+    }
+    fn fence(id: u64) -> Self {
+        Update::Revision(Revision::fence(id))
+    }
+}
+
+struct DbSubscriber<T> {
     rev: u64,
-    sub: UnboundedReceiver<Revision>,
+    sub: UnboundedReceiver<T>,
     sync_db: watch::Receiver<u64>,
 }
-impl DbSubscriber {
-    async fn recv(&mut self) -> Option<Revision> {
+impl<T: Sequenced> DbSubscriber<T> {
+    async fn recv(&mut self) -> Option<T> {
         loop {
             tokio::select! {
-                rev = self.sub.recv() => {
-                    if let Some(rev) = rev.as_ref() {
-                        self.rev = rev.id;
+                item = self.sub.recv() => {
+                    if let Some(item) = item.as_ref() {
+                        self.rev = self.rev.max(item.id());
                     }
-                    return rev
+                    return item
                 }
                 changed = self.sync_db.changed() => {
                     if changed.is_err() {
@@ -259,21 +404,83 @@ impl DbSubscriber {
                     let id = *self.sync_db.borrow();
                     if id > self.rev {
                         match self.sub.try_recv() {
-                            Ok(rev) => {
-                                self.rev = rev.id;
-                                return Some(rev)
+                            Ok(item) => {
+                                self.rev = self.rev.max(item.id());
+                                return Some(item)
                             }
                             Err(mpsc::error::TryRecvError::Disconnected) => {
                                 return None
                             }
                             Err(mpsc::error::TryRecvError::Empty) => {
-                                return Some(Revision { id, patch: DiffPatch::default() })
+                                return Some(T::fence(id))
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/// Unregisters a stream from `db.subscription.update` when the stream ends.
+struct RegisteredSubscription {
+    ctx: RpcContext,
+    guid: Guid,
+}
+impl Drop for RegisteredSubscription {
+    fn drop(&mut self) {
+        self.ctx.db_subscriptions.mutate(|subscriptions| {
+            subscriptions.remove(&self.guid);
+        });
+    }
+}
+
+/// A projected revision; with `extend`, what the latest `db.subscription.update` added,
+/// current as of `id`, sent once per update before any later revision.
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionUpdate {
+    pub id: u64,
+    pub patch: DiffPatch,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub extend: bool,
+}
+
+rpc_toolkit::reflect_ts!(SubscriptionUpdate);
+
+impl From<Update> for SubscriptionUpdate {
+    fn from(update: Update) -> Self {
+        match update {
+            Update::Revision(Revision { id, patch }) => Self {
+                id,
+                patch,
+                extend: false,
+            },
+            Update::Extend(Revision { id, patch }) => Self {
+                id,
+                patch,
+                extend: true,
+            },
+        }
+    }
+}
+
+fn subscribe_start_from(epoch: InternedString, catchup: Catchup) -> SubscribeStart {
+    match catchup {
+        Catchup::Dump(Dump { id, value }) => SubscribeStart {
+            epoch,
+            id,
+            value: Some(value),
+            revisions: None,
+            subscription: None,
+        },
+        Catchup::Replay { id, revisions } => SubscribeStart {
+            epoch,
+            id,
+            value: None,
+            revisions: Some(revisions),
+            subscription: None,
+        },
     }
 }
 
@@ -284,31 +491,54 @@ pub async fn subscribe(
             SubscribeParams {
                 pointer,
                 since,
+                projection,
                 signer,
             },
         rpc_stream,
         ..
-    }: HandlerArgs<RpcContext, SubscribeParams, rpc_toolkit::Empty, Revision>,
+    }: HandlerArgs<RpcContext, SubscribeParams, rpc_toolkit::Empty, SubscriptionUpdate>,
 ) -> Result<SubscribeStartResult, Error> {
     let pointer = pointer.unwrap_or_else(|| PUBLIC.clone());
     if let Some(stream) = rpc_stream {
-        let (start, sub) = subscribe_start(&ctx.db, pointer, since.as_ref()).await;
+        let (epoch, catchup, ProjectedSubscriber { id, receiver }) = ctx
+            .db
+            .catch_up_and_sub_mutable(
+                pointer,
+                projection.into(),
+                since.as_ref().map(|since| (&*since.epoch, since.id)),
+            )
+            .await;
+        let mut start = subscribe_start_from(epoch, catchup);
+        let guid = Guid::new();
+        ctx.db_subscriptions.mutate(|subscriptions| {
+            subscriptions.insert(guid.clone(), id);
+        });
+        start.subscription = Some(guid.clone());
         let sub = DbSubscriber {
             rev: start.id,
-            sub,
+            sub: receiver,
             sync_db: ctx.sync_db.subscribe(),
+        };
+        let registered = RegisteredSubscription {
+            ctx: ctx.clone(),
+            guid,
         };
         crate::auth::continuation_subscription(&ctx, signer)
             .await?
             .forward_stream(
                 stream,
-                futures::stream::unfold(sub, |mut sub| async move {
-                    sub.recv().await.map(|revision| (Ok(revision), sub))
+                futures::stream::unfold((sub, registered), |(mut sub, registered)| async move {
+                    sub.recv()
+                        .await
+                        .map(|update| (Ok(SubscriptionUpdate::from(update)), (sub, registered)))
                 }),
             );
         return Ok(SubscribeStartResult::Stream(start));
     }
-    let (dump, sub) = ctx.db.dump_and_sub(pointer).await;
+    let (dump, sub) = ctx
+        .db
+        .dump_and_sub_projected(pointer, projection.into())
+        .await;
     let mut sub = DbSubscriber {
         rev: dump.id,
         sub,
@@ -364,6 +594,50 @@ pub async fn subscribe(
         dump,
         guid,
     }))
+}
+
+#[derive(Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSubscriptionParams {
+    /// The `subscription` of the stream's start.
+    pub subscription: Guid,
+    /// The stream's new projection, replacing the previous one.
+    #[serde(flatten)]
+    pub projection: ProjectionParams,
+}
+
+rpc_toolkit::reflect_ts!(UpdateSubscriptionParams);
+
+/// Changes a `db.subscribe` stream's projection; the stream receives what it adds first.
+pub async fn update_subscription(
+    ctx: RpcContext,
+    UpdateSubscriptionParams {
+        subscription,
+        projection,
+    }: UpdateSubscriptionParams,
+) -> Result<(), Error> {
+    let projection = projection.into();
+    let id = ctx
+        .db_subscriptions
+        .peek(|subscriptions| subscriptions.get(&subscription).copied());
+    if let Some(id) = id {
+        if ctx.db.reproject(id, projection).await {
+            return Ok(());
+        }
+    }
+    ctx.db_subscriptions.mutate(|subscriptions| {
+        subscriptions.remove(&subscription);
+    });
+    Err(Error::new(
+        eyre!(
+            "{}",
+            t!(
+                "db.subscription-not-found",
+                subscription = subscription.as_ref()
+            )
+        ),
+        ErrorKind::NotFound,
+    ))
 }
 
 #[derive(Deserialize, Serialize, Parser)]
@@ -486,6 +760,8 @@ pub fn put<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "ui",
         from_fn_async(ui)
+            .with_metadata(EFFECT, Effect::Destructive.into())
+            .with_metadata(crate::mcp::MCP, Value::Bool(false))
             .with_display_serializable()
             .with_about("about.add-path-value-db")
             .with_call_remote::<CliContext>(),

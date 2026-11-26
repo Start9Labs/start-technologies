@@ -4,13 +4,22 @@
 .SH NAME
 start\-cli\-tunnel\-db\-dump \- Filter and query the database, display tables and records
 .SH SYNOPSIS
-\fBstart\-cli tunnel db dump\fR [\fB\-p\fR|\fB\-\-pointer\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIPATH\fR]
+\fBstart\-cli tunnel db dump\fR [\fB\-p\fR|\fB\-\-pointer\fR] [\fB\-\-depth\fR] [\fB\-\-include\fR] [\fB\-\-exclude\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIPATH\fR]
 .SH DESCRIPTION
 Filter and query the database, display tables and records
 .SH OPTIONS
 .TP
 \fB\-p\fR, \fB\-\-pointer\fR \fI<POINTER>\fR
 JSON pointer to specific value
+.TP
+\fB\-\-depth\fR \fI<DEPTH>\fR
+Levels kept below the dumped subtree; deeper objects and arrays become empty
+.TP
+\fB\-\-include\fR \fI<INCLUDE>\fR
+JSON pointer to keep, relative to the dumped subtree; \*(Aq*\*(Aq matches any one segment. Omitted keeps everything
+.TP
+\fB\-\-exclude\fR \fI<EXCLUDE>\fR
+JSON pointer to remove from the included data, relative to the dumped subtree; \*(Aq*\*(Aq matches any one segment
 .TP
 \fB\-\-format\fR
 

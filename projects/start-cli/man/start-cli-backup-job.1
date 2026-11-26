@@ -19,6 +19,9 @@ Add an automatic backup job
 start\-cli\-backup\-job\-delete(1)
 Delete an automatic backup job
 .TP
+start\-cli\-backup\-job\-delete\-with\-backups(1)
+Delete an automatic backup job and its unshared checkpoints (JSON from stdin)
+.TP
 start\-cli\-backup\-job\-disable(1)
 Disable an automatic backup job without deleting its checkpoints
 .TP
@@ -39,3 +42,12 @@ Reconnect an automatic backup target and resume its jobs
 .TP
 start\-cli\-backup\-job\-run\-now(1)
 Run an automatic backup job now
+.TP
+start\-cli\-backup\-job\-set\-enabled(1)
+Enable or disable an automatic backup job
+.TP
+start\-cli\-backup\-job\-set\-enabled\-bulk(1)
+Enable or disable multiple automatic backup jobs together
+.TP
+start\-cli\-backup\-job\-validate(1)
+Validate automatic backup settings (JSON from stdin)

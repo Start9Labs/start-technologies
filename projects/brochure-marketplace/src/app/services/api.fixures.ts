@@ -68,7 +68,10 @@ export namespace Mock {
     description: 'Needed to run',
   }
 
-  export const RegistryPackages: GetPackagesRes = {
+  export const RegistryPackages: Record<
+    T.PackageId,
+    T.GetPackageResponse & GetPackagesRes[string]
+  > = {
     bitcoind: {
       best: {
         '27.0.0:1.0.0': {

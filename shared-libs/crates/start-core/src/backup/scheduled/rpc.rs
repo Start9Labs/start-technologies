@@ -19,6 +19,7 @@ use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::guard::GenericMountGuard;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::HandlerExtSerde;
@@ -29,6 +30,7 @@ pub fn job<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-automatic-backup-jobs")
                 .with_call_remote::<crate::context::CliContext>(),
@@ -49,15 +51,60 @@ pub fn job<C: Context>() -> ParentHandler<C> {
                 .with_about("about.edit-automatic-backup-job")
                 .with_call_remote::<crate::context::CliContext>(),
         )
-        .subcommand("create", from_fn_async(create).no_cli())
-        .subcommand("update", from_fn_async(update).no_cli())
-        .subcommand("validate", from_fn_async(validate).no_cli())
+        .subcommand(
+            "create",
+            from_fn_async(create)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "update",
+            from_fn_async(update)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "validate",
+            from_fn_async(validate)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "validate",
+            from_fn_async(crate::backup::forward_stdin)
+                .no_ts()
+                .no_display()
+                .with_about("about.validate-automatic-backup-job"),
+        )
         .subcommand(
             "delete-with-backups",
-            from_fn_async(delete_with_backups).no_cli(),
+            from_fn_async(delete_with_backups)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
         )
-        .subcommand("set-enabled", from_fn_async(set_enabled).no_cli())
-        .subcommand("set-enabled-bulk", from_fn_async(set_enabled_bulk).no_cli())
+        .subcommand(
+            "delete-with-backups",
+            from_fn_async(crate::backup::forward_stdin)
+                .no_ts()
+                .no_display()
+                .with_about("about.delete-automatic-backup-job-with-checkpoints"),
+        )
+        .subcommand(
+            "set-enabled",
+            from_fn_async(set_enabled)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .with_display_serializable()
+                .with_about("about.set-automatic-backup-job-enabled")
+                .with_call_remote::<crate::context::CliContext>(),
+        )
+        .subcommand(
+            "set-enabled-bulk",
+            from_fn_async(set_enabled_bulk)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .with_display_serializable()
+                .with_about("about.set-automatic-backup-jobs-enabled")
+                .with_call_remote::<crate::context::CliContext>(),
+        )
         .subcommand(
             "enable",
             from_fn_async(enable_cli)
@@ -77,6 +124,7 @@ pub fn job<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "delete",
             from_fn_async(delete)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.delete-automatic-backup-job")
                 .with_call_remote::<crate::context::CliContext>(),
@@ -84,6 +132,7 @@ pub fn job<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "run-now",
             from_fn_async(run_now)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_display_serializable()
                 .with_about("about.run-automatic-backup-job-now")
                 .with_call_remote::<crate::context::CliContext>(),
@@ -91,6 +140,7 @@ pub fn job<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "retry-target",
             from_fn_async(retry_target)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_display_serializable()
                 .with_about("about.retry-automatic-backup-target")
                 .with_call_remote::<crate::context::CliContext>(),
@@ -98,6 +148,7 @@ pub fn job<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "reassign-target",
             from_fn_async(reassign_target)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_display_serializable()
                 .with_about("about.reassign-automatic-backup-target")
                 .with_call_remote::<crate::context::CliContext>(),
@@ -109,6 +160,7 @@ pub fn history<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list_histories)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-automatic-backup-history")
                 .with_call_remote::<crate::context::CliContext>(),
@@ -116,18 +168,37 @@ pub fn history<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "discover",
             from_fn_async(discover_histories)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_display_serializable()
                 .with_about("about.discover-automatic-backup-history")
                 .with_call_remote::<crate::context::CliContext>(),
         )
-        .subcommand("refresh", from_fn_async(refresh_histories).no_cli())
+        .subcommand(
+            "refresh",
+            from_fn_async(refresh_histories)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .with_display_serializable()
+                .with_about("about.refresh-automatic-backup-history")
+                .with_call_remote::<crate::context::CliContext>(),
+        )
         .subcommand(
             "delete-archived-snapshots",
-            from_fn_async(delete_archived_snapshots).no_cli(),
+            from_fn_async(delete_archived_snapshots)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
         )
         .subcommand(
             "delete-archived-snapshots-bulk",
-            from_fn_async(delete_archived_snapshots_bulk).no_cli(),
+            from_fn_async(delete_archived_snapshots_bulk)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "delete-archived-snapshots-bulk",
+            from_fn_async(crate::backup::forward_stdin)
+                .no_ts()
+                .with_display_serializable()
+                .with_about("about.delete-archived-backup-checkpoints-bulk"),
         )
         .subcommand(
             "delete-archived",
@@ -141,9 +212,31 @@ pub fn history<C: Context>() -> ParentHandler<C> {
 
 pub fn policy<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("estimate", from_fn_async(estimate_capacity).no_cli())
-        .subcommand("preview", from_fn_async(preview_policy_change).no_cli())
-        .subcommand("update", from_fn_async(update_policy).no_cli())
+        .subcommand(
+            "estimate",
+            from_fn_async(estimate_capacity)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "estimate",
+            from_fn_async(crate::backup::forward_stdin)
+                .no_ts()
+                .with_display_serializable()
+                .with_about("about.estimate-backup-capacity"),
+        )
+        .subcommand(
+            "preview",
+            from_fn_async(preview_policy_change)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "update",
+            from_fn_async(update_policy)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "preview-change",
             from_fn_async(preview_policy_change_cli)
@@ -451,9 +544,11 @@ pub async fn list_histories(ctx: RpcContext) -> Result<Vec<ServiceTargetHistory>
         .collect()
 }
 
-#[derive(Deserialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 struct RefreshScheduledBackupHistoriesParams {
+    #[arg(help = "help.arg.backup-target-id")]
     target_id: BackupTargetId,
 }
 
@@ -843,7 +938,7 @@ rpc_toolkit::ts_export!(DeleteArchivedSnapshotsBulkParams, namespaces = [""]);
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
+#[command(rename_all = "kebab-case", visible_alias = "delete-archived-snapshots")]
 pub struct DeleteArchivedSnapshotsCliParams {
     #[arg(help = "help.arg.backup-target-id")]
     pub target_id: BackupTargetId,
@@ -1413,7 +1508,7 @@ pub async fn preview_policy_change(
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
+#[command(rename_all = "kebab-case", visible_alias = "preview")]
 pub struct PreviewRetentionPolicyCliParams {
     #[arg(help = "help.arg.backup-target-id")]
     pub target_id: BackupTargetId,
@@ -1472,7 +1567,7 @@ rpc_toolkit::ts_export!(UpdateRetentionPolicyParams, namespaces = [""]);
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
+#[command(rename_all = "kebab-case", visible_alias = "update")]
 pub struct ApplyRetentionPolicyCliParams {
     #[arg(help = "help.arg.backup-target-id")]
     pub target_id: BackupTargetId,
@@ -1688,7 +1783,7 @@ rpc_toolkit::ts_export!(ValidateBackupJobParams, namespaces = [""]);
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
+#[command(rename_all = "kebab-case", visible_alias = "create")]
 pub struct AddBackupJobCliParams {
     #[arg(help = "help.arg.automatic-backup-job-name")]
     pub name: String,
@@ -1800,7 +1895,7 @@ pub async fn add_cli(
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
+#[command(rename_all = "kebab-case", visible_alias = "update")]
 pub struct EditBackupJobCliParams {
     #[arg(help = "help.arg.automatic-backup-job-id")]
     pub id: BackupJobId,
@@ -2086,7 +2181,7 @@ pub fn parse_review_decision(value: &str) -> Result<(BackupJobId, bool), String>
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
+#[command(rename_all = "kebab-case", visible_alias = "resolve")]
 pub struct ResolveBackupReviewCliParams {
     #[arg(help = "help.arg.package-id")]
     pub package_id: PackageId,
@@ -2118,7 +2213,7 @@ pub async fn resolve_review_cli(
 #[derive(Deserialize, Serialize, Parser)]
 #[group(skip)]
 #[serde(rename_all = "camelCase")]
-#[command(rename_all = "kebab-case")]
+#[command(rename_all = "kebab-case", visible_alias = "restore-scheduled")]
 pub struct RestoreAutomaticCheckpointCliParams {
     #[arg(help = "help.arg.backup-target-id")]
     pub target_id: BackupTargetId,
@@ -2369,20 +2464,26 @@ pub async fn update(
     Ok(job)
 }
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetBackupJobEnabledParams {
+    #[arg(help = "help.arg.automatic-backup-job-id")]
     pub id: BackupJobId,
+    #[arg(long, action = clap::ArgAction::Set, required = true, help = "help.arg.automatic-backup-enabled")]
     pub enabled: bool,
 }
 
 rpc_toolkit::reflect_ts!(SetBackupJobEnabledParams);
 rpc_toolkit::ts_export!(SetBackupJobEnabledParams, namespaces = [""]);
 
-#[derive(Deserialize, Serialize, VisitFields)]
+#[derive(Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 pub struct SetBackupJobsEnabledParams {
+    #[arg(required = true, help = "help.arg.automatic-backup-job-ids")]
     pub ids: Vec<BackupJobId>,
+    #[arg(long, action = clap::ArgAction::Set, required = true, help = "help.arg.automatic-backup-enabled")]
     pub enabled: bool,
 }
 

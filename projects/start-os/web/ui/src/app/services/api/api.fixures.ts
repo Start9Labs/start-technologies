@@ -1,4 +1,3 @@
-import { GetPackagesRes } from '@start9labs/marketplace'
 import { ISB, IST, T, utils } from '@start9labs/start-core'
 import type { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import {
@@ -557,7 +556,7 @@ export namespace Mock {
   }
 
   export const OtherPackageVersions: {
-    [id: T.PackageId]: GetPackagesRes
+    [id: T.PackageId]: Record<string, T.GetPackageResponse>
   } = {
     bitcoind: {
       '=26.1.0:0.1.0': {
@@ -902,7 +901,7 @@ export namespace Mock {
     },
   }
 
-  export const RegistryPackages: GetPackagesRes = {
+  export const RegistryPackages: Record<T.PackageId, T.GetPackageResponse> = {
     bitcoind: {
       best: {
         '27.0.0:1.0.0': {

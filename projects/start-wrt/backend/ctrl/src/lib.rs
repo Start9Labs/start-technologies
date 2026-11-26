@@ -46,8 +46,10 @@ pub use startos::sign;
 pub mod ssh_keys;
 pub mod ssh_sessions;
 pub mod ssl;
+pub mod subnets;
 pub mod system;
 pub mod tls;
+pub mod trunk;
 pub mod uci;
 pub mod update;
 pub mod usb_ports;
@@ -122,6 +124,14 @@ pub trait CtrlContext: Context + Clone {
             Vec::new()
         }
     }
+    /// The router's WAN IPv4 networks. Empty when unknown.
+    fn wan_ipv4_networks(&self) -> Vec<ipnet::Ipv4Net> {
+        if self.effectful() {
+            crate::system::read_wan_ipv4_networks().unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 fn id_key_path() -> PathBuf {
@@ -137,7 +147,7 @@ pub struct CliArgs {
     pub config_root: PathBuf,
     #[clap(long)]
     pub configs_only: bool,
-    /// Server URL [default: http://127.0.0.1/rpc/v1 on the router, else https://router.lan/rpc/v1]
+    /// Server base URL [default: http://127.0.0.1 on the router, else https://router.lan]
     #[clap(long)]
     pub host: Option<Url>,
     /// PEM certificate authority for HTTP and WebSocket RPC, such as the router's from /static/local-root-ca.crt. Repeatable.
@@ -170,9 +180,9 @@ impl Deref for CliContext {
 
 fn default_host(on_router: bool) -> Url {
     if on_router {
-        "http://127.0.0.1/rpc/v1"
+        "http://127.0.0.1"
     } else {
-        "https://router.lan/rpc/v1"
+        "https://router.lan"
     }
     .parse()
     .unwrap()
@@ -260,7 +270,7 @@ impl CliContext {
         self.rpc_client
             .call(
                 &signer,
-                startos::middleware::auth::session::client::websocket_url(self.host.clone())?,
+                startos::middleware::auth::session::RpcSessionUpgrader::url(self.host.clone())?,
                 self.host.host_str().unwrap_or_default(),
                 headers,
                 method,

@@ -1,8 +1,8 @@
 import * as net from 'net'
-import { schemas } from '@start9labs/start-core'
 
 import {
   ExtendedVersion,
+  schemas,
   types as T,
   utils,
   VersionRange,

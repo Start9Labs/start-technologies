@@ -14,6 +14,13 @@ about.apply-backup-retention-policy:
   fr_FR: "Appliquer une politique de rétention des sauvegardes automatiques"
   pl_PL: "Zastosuj zasady przechowywania automatycznych kopii zapasowych"
 
+about.clear-nut:
+  en_US: "Disable UPS monitoring and clear its settings"
+  de_DE: "UPS-Überwachung deaktivieren und ihre Einstellungen löschen"
+  es_ES: "Desactivar la supervisión del SAI y borrar su configuración"
+  fr_FR: "Désactiver la surveillance de l'onduleur et effacer ses paramètres"
+  pl_PL: "Wyłącz monitorowanie UPS i wyczyść jego ustawienia"
+
 about.commands-automatic-backup-jobs:
   en_US: "Commands to manage automatic backup jobs"
   de_DE: "Befehle zum Verwalten automatischer Sicherungsaufträge"
@@ -28,7 +35,7 @@ about.commands-backup-activity:
   fr_FR: "Commandes pour consulter l’activité des sauvegardes et restaurations"
   pl_PL: "Polecenia do sprawdzania aktywności kopii i przywracania"
 
-about.commands-backup-history:
+about.commands-backup-checkpoint-history:
   en_US: "Commands to inspect automatic backup checkpoint history"
   de_DE: "Befehle zum Prüfen des Verlaufs automatischer Sicherungspunkte"
   es_ES: "Comandos para consultar el historial de puntos de copias automáticas"
@@ -49,6 +56,489 @@ about.commands-backup-review:
   fr_FR: "Commandes pour résoudre les décisions de sauvegarde automatique des nouveaux services"
   pl_PL: "Polecenia do rozstrzygania decyzji o automatycznych kopiach nowych usług"
 
+about.commands-push-subscriptions:
+  en_US: "Commands for managing browser push notification subscriptions"
+  de_DE: "Befehle zur Verwaltung von Browser-Push-Benachrichtigungsabonnements"
+  es_ES: "Comandos para gestionar las suscripciones a notificaciones push del navegador"
+  fr_FR: "Commandes pour gérer les abonnements aux notifications push du navigateur"
+  pl_PL: "Polecenia do zarządzania subskrypcjami powiadomień push przeglądarki"
+
+about.commands-shared-volumes:
+  en_US: "Commands for managing shared volumes"
+  de_DE: "Befehle zur Verwaltung gemeinsamer Volumes"
+  es_ES: "Comandos para gestionar volúmenes compartidos"
+  fr_FR: "Commandes pour gérer les volumes partagés"
+  pl_PL: "Polecenia do zarządzania współdzielonymi woluminami"
+
+about.container-action-clear:
+  en_US: "Remove registered actions"
+  de_DE: "Registrierte Aktionen entfernen"
+  es_ES: "Eliminar acciones registradas"
+  fr_FR: "Supprimer les actions enregistrées"
+  pl_PL: "Usuń zarejestrowane akcje"
+
+about.container-action-clear-tasks:
+  en_US: "Remove tasks this service created"
+  de_DE: "Von diesem Dienst erstellte Aufgaben entfernen"
+  es_ES: "Eliminar las tareas que creó este servicio"
+  fr_FR: "Supprimer les tâches créées par ce service"
+  pl_PL: "Usuń zadania utworzone przez tę usługę"
+
+about.container-action-create-task:
+  en_US: "Create a task for a service action (JSON parameters on stdin)"
+  de_DE: "Eine Aufgabe für eine Dienstaktion erstellen (JSON-Parameter über stdin)"
+  es_ES: "Crear una tarea para una acción de servicio (parámetros JSON por stdin)"
+  fr_FR: "Créer une tâche pour une action de service (paramètres JSON sur stdin)"
+  pl_PL: "Utwórz zadanie dla akcji usługi (parametry JSON na stdin)"
+
+about.container-action-export:
+  en_US: "Register an action (JSON parameters on stdin)"
+  de_DE: "Eine Aktion registrieren (JSON-Parameter über stdin)"
+  es_ES: "Registrar una acción (parámetros JSON por stdin)"
+  fr_FR: "Enregistrer une action (paramètres JSON sur stdin)"
+  pl_PL: "Zarejestruj akcję (parametry JSON na stdin)"
+
+about.container-action-get-input:
+  en_US: "Display an action's input form"
+  de_DE: "Das Eingabeformular einer Aktion anzeigen"
+  es_ES: "Mostrar el formulario de entrada de una acción"
+  fr_FR: "Afficher le formulaire de saisie d'une action"
+  pl_PL: "Wyświetl formularz danych wejściowych akcji"
+
+about.container-action-run:
+  en_US: "Run an action"
+  de_DE: "Eine Aktion ausführen"
+  es_ES: "Ejecutar una acción"
+  fr_FR: "Exécuter une action"
+  pl_PL: "Uruchom akcję"
+
+about.container-bind:
+  en_US: "Bind a host port to this service (JSON parameters on stdin)"
+  de_DE: "Einen Host-Port an diesen Dienst binden (JSON-Parameter über stdin)"
+  es_ES: "Vincular un puerto del host a este servicio (parámetros JSON por stdin)"
+  fr_FR: "Lier un port de l'hôte à ce service (paramètres JSON sur stdin)"
+  pl_PL: "Powiąż port hosta z tą usługą (parametry JSON na stdin)"
+
+about.container-bind-mount:
+  en_US: "Bind-mount a path inside this container"
+  de_DE: "Einen Pfad in diesem Container per Bind-Mount einhängen"
+  es_ES: "Montar una ruta con bind dentro de este contenedor"
+  fr_FR: "Monter un chemin en bind dans ce conteneur"
+  pl_PL: "Zamontuj ścieżkę (bind) wewnątrz tego kontenera"
+
+about.container-bind-range:
+  en_US: "Bind a range of host ports to this service (JSON parameters on stdin)"
+  de_DE: "Einen Bereich von Host-Ports an diesen Dienst binden (JSON-Parameter über stdin)"
+  es_ES: "Vincular un rango de puertos del host a este servicio (parámetros JSON por stdin)"
+  fr_FR: "Lier une plage de ports de l'hôte à ce service (paramètres JSON sur stdin)"
+  pl_PL: "Powiąż zakres portów hosta z tą usługą (parametry JSON na stdin)"
+
+about.container-check-dependencies:
+  en_US: "Check whether dependencies are satisfied"
+  de_DE: "Prüfen, ob Abhängigkeiten erfüllt sind"
+  es_ES: "Comprobar si se cumplen las dependencias"
+  fr_FR: "Vérifier si les dépendances sont satisfaites"
+  pl_PL: "Sprawdź, czy zależności są spełnione"
+
+about.container-clear-bindings:
+  en_US: "Remove this service's bindings"
+  de_DE: "Die Bindungen dieses Dienstes entfernen"
+  es_ES: "Eliminar los vínculos de este servicio"
+  fr_FR: "Supprimer les liaisons de ce service"
+  pl_PL: "Usuń powiązania tej usługi"
+
+about.container-clear-service-interfaces:
+  en_US: "Remove this service's exported interfaces"
+  de_DE: "Die exportierten Schnittstellen dieses Dienstes entfernen"
+  es_ES: "Eliminar las interfaces exportadas de este servicio"
+  fr_FR: "Supprimer les interfaces exportées de ce service"
+  pl_PL: "Usuń wyeksportowane interfejsy tej usługi"
+
+about.container-commands-action:
+  en_US: "Commands for this service's actions and tasks"
+  de_DE: "Befehle für die Aktionen und Aufgaben dieses Dienstes"
+  es_ES: "Comandos para las acciones y tareas de este servicio"
+  fr_FR: "Commandes pour les actions et tâches de ce service"
+  pl_PL: "Polecenia dla akcji i zadań tej usługi"
+
+about.container-commands-notification:
+  en_US: "Commands for this service's notifications"
+  de_DE: "Befehle für die Benachrichtigungen dieses Dienstes"
+  es_ES: "Comandos para las notificaciones de este servicio"
+  fr_FR: "Commandes pour les notifications de ce service"
+  pl_PL: "Polecenia dla powiadomień tej usługi"
+
+about.container-commands-plugin:
+  en_US: "Commands for this service's plugins"
+  de_DE: "Befehle für die Plugins dieses Dienstes"
+  es_ES: "Comandos para los complementos de este servicio"
+  fr_FR: "Commandes pour les plugins de ce service"
+  pl_PL: "Polecenia dla wtyczek tej usługi"
+
+about.container-commands-plugin-url:
+  en_US: "Commands for the URL plugin"
+  de_DE: "Befehle für das URL-Plugin"
+  es_ES: "Comandos para el complemento de URL"
+  fr_FR: "Commandes pour le plugin d'URL"
+  pl_PL: "Polecenia dla wtyczki URL"
+
+about.container-commands-subcontainer:
+  en_US: "Commands for this service's subcontainers"
+  de_DE: "Befehle für die Subcontainer dieses Dienstes"
+  es_ES: "Comandos para los subcontenedores de este servicio"
+  fr_FR: "Commandes pour les sous-conteneurs de ce service"
+  pl_PL: "Polecenia dla podkontenerów tej usługi"
+
+about.container-echo:
+  en_US: "Echo a message through the host"
+  de_DE: "Eine Nachricht über den Host zurückgeben"
+  es_ES: "Devolver un mensaje a través del host"
+  fr_FR: "Renvoyer un message via l'hôte"
+  pl_PL: "Odeślij wiadomość przez hosta"
+
+about.container-export-range-service-interface:
+  en_US: "Export a service interface over a port range (JSON parameters on stdin)"
+  de_DE: "Eine Dienstschnittstelle über einen Portbereich exportieren (JSON-Parameter über stdin)"
+  es_ES: "Exportar una interfaz de servicio en un rango de puertos (parámetros JSON por stdin)"
+  fr_FR: "Exporter une interface de service sur une plage de ports (paramètres JSON sur stdin)"
+  pl_PL: "Wyeksportuj interfejs usługi w zakresie portów (parametry JSON na stdin)"
+
+about.container-export-service-interface:
+  en_US: "Export a service interface (JSON parameters on stdin)"
+  de_DE: "Eine Dienstschnittstelle exportieren (JSON-Parameter über stdin)"
+  es_ES: "Exportar una interfaz de servicio (parámetros JSON por stdin)"
+  fr_FR: "Exporter une interface de service (paramètres JSON sur stdin)"
+  pl_PL: "Wyeksportuj interfejs usługi (parametry JSON na stdin)"
+
+about.container-get-container-ip:
+  en_US: "Display a service container's IP address"
+  de_DE: "Die IP-Adresse eines Dienstcontainers anzeigen"
+  es_ES: "Mostrar la dirección IP del contenedor de un servicio"
+  fr_FR: "Afficher l'adresse IP du conteneur d'un service"
+  pl_PL: "Wyświetl adres IP kontenera usługi"
+
+about.container-get-data-version:
+  en_US: "Display this service's data version"
+  de_DE: "Die Datenversion dieses Dienstes anzeigen"
+  es_ES: "Mostrar la versión de datos de este servicio"
+  fr_FR: "Afficher la version des données de ce service"
+  pl_PL: "Wyświetl wersję danych tej usługi"
+
+about.container-get-dependencies:
+  en_US: "Display this service's declared dependencies"
+  de_DE: "Die festgelegten Abhängigkeiten dieses Dienstes anzeigen"
+  es_ES: "Mostrar las dependencias declaradas de este servicio"
+  fr_FR: "Afficher les dépendances déclarées de ce service"
+  pl_PL: "Wyświetl zadeklarowane zależności tej usługi"
+
+about.container-get-host-info:
+  en_US: "Display a host's addresses and bindings"
+  de_DE: "Die Adressen und Bindungen eines Hosts anzeigen"
+  es_ES: "Mostrar las direcciones y vínculos de un host"
+  fr_FR: "Afficher les adresses et liaisons d'un hôte"
+  pl_PL: "Wyświetl adresy i powiązania hosta"
+
+about.container-get-installed-packages:
+  en_US: "List installed packages"
+  de_DE: "Installierte Pakete auflisten"
+  es_ES: "Listar los paquetes instalados"
+  fr_FR: "Lister les paquets installés"
+  pl_PL: "Wyświetl zainstalowane pakiety"
+
+about.container-get-os-ip:
+  en_US: "Display the StartOS host's IP address"
+  de_DE: "Die IP-Adresse des StartOS-Hosts anzeigen"
+  es_ES: "Mostrar la dirección IP del host StartOS"
+  fr_FR: "Afficher l'adresse IP de l'hôte StartOS"
+  pl_PL: "Wyświetl adres IP hosta StartOS"
+
+about.container-get-outbound-gateway:
+  en_US: "Display this service's outbound gateway"
+  de_DE: "Das ausgehende Gateway dieses Dienstes anzeigen"
+  es_ES: "Mostrar la puerta de enlace de salida de este servicio"
+  fr_FR: "Afficher la passerelle sortante de ce service"
+  pl_PL: "Wyświetl bramę wychodzącą tej usługi"
+
+about.container-get-service-interface:
+  en_US: "Display a service interface"
+  de_DE: "Eine Dienstschnittstelle anzeigen"
+  es_ES: "Mostrar una interfaz de servicio"
+  fr_FR: "Afficher une interface de service"
+  pl_PL: "Wyświetl interfejs usługi"
+
+about.container-get-service-manifest:
+  en_US: "Display a service's manifest"
+  de_DE: "Das Manifest eines Dienstes anzeigen"
+  es_ES: "Mostrar el manifiesto de un servicio"
+  fr_FR: "Afficher le manifeste d'un service"
+  pl_PL: "Wyświetl manifest usługi"
+
+about.container-get-service-port-forward:
+  en_US: "Display the network details of a binding"
+  de_DE: "Die Netzwerkdetails einer Bindung anzeigen"
+  es_ES: "Mostrar los detalles de red de un vínculo"
+  fr_FR: "Afficher les détails réseau d'une liaison"
+  pl_PL: "Wyświetl szczegóły sieciowe powiązania"
+
+about.container-get-shared-volumes:
+  en_US: "List the shared volumes granted to this service"
+  de_DE: "Die diesem Dienst gewährten gemeinsamen Volumes auflisten"
+  es_ES: "Listar los volúmenes compartidos concedidos a este servicio"
+  fr_FR: "Lister les volumes partagés accordés à ce service"
+  pl_PL: "Wyświetl współdzielone woluminy przyznane tej usłudze"
+
+about.container-get-ssl-certificate:
+  en_US: "Display a certificate chain for hostnames (JSON parameters on stdin)"
+  de_DE: "Eine Zertifikatskette für Hostnamen anzeigen (JSON-Parameter über stdin)"
+  es_ES: "Mostrar una cadena de certificados para nombres de host (parámetros JSON por stdin)"
+  fr_FR: "Afficher une chaîne de certificats pour des noms d'hôte (paramètres JSON sur stdin)"
+  pl_PL: "Wyświetl łańcuch certyfikatów dla nazw hostów (parametry JSON na stdin)"
+
+about.container-get-ssl-key:
+  en_US: "Display the private key for hostnames' certificate (JSON parameters on stdin)"
+  de_DE: "Den privaten Schlüssel des Zertifikats für Hostnamen anzeigen (JSON-Parameter über stdin)"
+  es_ES: "Mostrar la clave privada del certificado de los nombres de host (parámetros JSON por stdin)"
+  fr_FR: "Afficher la clé privée du certificat des noms d'hôte (paramètres JSON sur stdin)"
+  pl_PL: "Wyświetl klucz prywatny certyfikatu dla nazw hostów (parametry JSON na stdin)"
+
+about.container-get-status:
+  en_US: "Display a service's status"
+  de_DE: "Den Status eines Dienstes anzeigen"
+  es_ES: "Mostrar el estado de un servicio"
+  fr_FR: "Afficher l'état d'un service"
+  pl_PL: "Wyświetl stan usługi"
+
+about.container-get-system-smtp:
+  en_US: "Display the server's SMTP settings"
+  de_DE: "Die SMTP-Einstellungen des Servers anzeigen"
+  es_ES: "Mostrar la configuración SMTP del servidor"
+  fr_FR: "Afficher les paramètres SMTP du serveur"
+  pl_PL: "Wyświetl ustawienia SMTP serwera"
+
+about.container-git-info:
+  en_US: "Display the git hash of the running StartOS build"
+  de_DE: "Den Git-Hash des laufenden StartOS-Builds anzeigen"
+  es_ES: "Mostrar el hash de git de la compilación de StartOS en ejecución"
+  fr_FR: "Afficher le hash git de la version de StartOS en cours"
+  pl_PL: "Wyświetl hash git uruchomionej kompilacji StartOS"
+
+about.container-list-service-interfaces:
+  en_US: "List a service's interfaces"
+  de_DE: "Die Schnittstellen eines Dienstes auflisten"
+  es_ES: "Listar las interfaces de un servicio"
+  fr_FR: "Lister les interfaces d'un service"
+  pl_PL: "Wyświetl interfejsy usługi"
+
+about.container-mount:
+  en_US: "Mount a dependency's volume (JSON parameters on stdin)"
+  de_DE: "Ein Volume einer Abhängigkeit einhängen (JSON-Parameter über stdin)"
+  es_ES: "Montar un volumen de una dependencia (parámetros JSON por stdin)"
+  fr_FR: "Monter un volume d'une dépendance (paramètres JSON sur stdin)"
+  pl_PL: "Zamontuj wolumin zależności (parametry JSON na stdin)"
+
+about.container-mount-shared-volume:
+  en_US: "Mount a granted shared volume into a subcontainer"
+  de_DE: "Ein gewährtes gemeinsames Volume in einen Subcontainer einhängen"
+  es_ES: "Montar un volumen compartido concedido en un subcontenedor"
+  fr_FR: "Monter un volume partagé accordé dans un sous-conteneur"
+  pl_PL: "Zamontuj przyznany współdzielony wolumin w podkontenerze"
+
+about.container-notification-create:
+  en_US: "Send a notification from this service"
+  de_DE: "Eine Benachrichtigung von diesem Dienst senden"
+  es_ES: "Enviar una notificación desde este servicio"
+  fr_FR: "Envoyer une notification depuis ce service"
+  pl_PL: "Wyślij powiadomienie z tej usługi"
+
+about.container-pipe-wrap:
+  en_US: "Relay a command's standard streams through pipes"
+  de_DE: "Die Standardströme eines Befehls über Pipes weiterleiten"
+  es_ES: "Retransmitir los flujos estándar de un comando por tuberías"
+  fr_FR: "Relayer les flux standard d'une commande via des tubes"
+  pl_PL: "Przekaż standardowe strumienie polecenia przez potoki"
+
+about.container-plugin-url-clear-urls:
+  en_US: "Remove URLs this plugin exported (JSON parameters on stdin)"
+  de_DE: "Von diesem Plugin exportierte URLs entfernen (JSON-Parameter über stdin)"
+  es_ES: "Eliminar las URL que exportó este complemento (parámetros JSON por stdin)"
+  fr_FR: "Supprimer les URL exportées par ce plugin (paramètres JSON sur stdin)"
+  pl_PL: "Usuń adresy URL wyeksportowane przez tę wtyczkę (parametry JSON na stdin)"
+
+about.container-plugin-url-export-url:
+  en_US: "Export a URL to a host (JSON parameters on stdin)"
+  de_DE: "Eine URL an einen Host exportieren (JSON-Parameter über stdin)"
+  es_ES: "Exportar una URL a un host (parámetros JSON por stdin)"
+  fr_FR: "Exporter une URL vers un hôte (paramètres JSON sur stdin)"
+  pl_PL: "Wyeksportuj adres URL do hosta (parametry JSON na stdin)"
+
+about.container-plugin-url-register:
+  en_US: "Register this service as a URL plugin (JSON parameters on stdin)"
+  de_DE: "Diesen Dienst als URL-Plugin registrieren (JSON-Parameter über stdin)"
+  es_ES: "Registrar este servicio como complemento de URL (parámetros JSON por stdin)"
+  fr_FR: "Enregistrer ce service comme plugin d'URL (paramètres JSON sur stdin)"
+  pl_PL: "Zarejestruj tę usługę jako wtyczkę URL (parametry JSON na stdin)"
+
+about.container-rebuild:
+  en_US: "Rebuild this service's container"
+  de_DE: "Den Container dieses Dienstes neu erstellen"
+  es_ES: "Reconstruir el contenedor de este servicio"
+  fr_FR: "Reconstruire le conteneur de ce service"
+  pl_PL: "Odbuduj kontener tej usługi"
+
+about.container-restart:
+  en_US: "Restart this service"
+  de_DE: "Diesen Dienst neu starten"
+  es_ES: "Reiniciar este servicio"
+  fr_FR: "Redémarrer ce service"
+  pl_PL: "Uruchom ponownie tę usługę"
+
+about.container-retire-binding:
+  en_US: "Retire one of a host's bindings"
+  de_DE: "Eine Bindung eines Hosts stilllegen"
+  es_ES: "Retirar uno de los vínculos de un host"
+  fr_FR: "Retirer une des liaisons d'un hôte"
+  pl_PL: "Wycofaj jedno z powiązań hosta"
+
+about.container-retire-host:
+  en_US: "Retire one of this service's hosts"
+  de_DE: "Einen Host dieses Dienstes stilllegen"
+  es_ES: "Retirar uno de los hosts de este servicio"
+  fr_FR: "Retirer un des hôtes de ce service"
+  pl_PL: "Wycofaj jeden z hostów tej usługi"
+
+about.container-set-backup-progress:
+  en_US: "Report backup progress (JSON parameters on stdin)"
+  de_DE: "Sicherungsfortschritt melden (JSON-Parameter über stdin)"
+  es_ES: "Informar del progreso de la copia de seguridad (parámetros JSON por stdin)"
+  fr_FR: "Signaler la progression de la sauvegarde (paramètres JSON sur stdin)"
+  pl_PL: "Zgłoś postęp kopii zapasowej (parametry JSON na stdin)"
+
+about.container-set-data-version:
+  en_US: "Record this service's data version"
+  de_DE: "Die Datenversion dieses Dienstes festhalten"
+  es_ES: "Registrar la versión de datos de este servicio"
+  fr_FR: "Enregistrer la version des données de ce service"
+  pl_PL: "Zapisz wersję danych tej usługi"
+
+about.container-set-dependencies:
+  en_US: "Declare this service's current dependencies"
+  de_DE: "Die aktuellen Abhängigkeiten dieses Dienstes festlegen"
+  es_ES: "Declarar las dependencias actuales de este servicio"
+  fr_FR: "Déclarer les dépendances actuelles de ce service"
+  pl_PL: "Zadeklaruj bieżące zależności tej usługi"
+
+about.container-set-health:
+  en_US: "Report a health check result (JSON parameters on stdin)"
+  de_DE: "Ein Ergebnis einer Zustandsprüfung melden (JSON-Parameter über stdin)"
+  es_ES: "Informar del resultado de una comprobación de estado (parámetros JSON por stdin)"
+  fr_FR: "Signaler le résultat d'une vérification de santé (paramètres JSON sur stdin)"
+  pl_PL: "Zgłoś wynik kontroli stanu (parametry JSON na stdin)"
+
+about.container-set-init-progress:
+  en_US: "Report initialization progress (JSON parameters on stdin)"
+  de_DE: "Initialisierungsfortschritt melden (JSON-Parameter über stdin)"
+  es_ES: "Informar del progreso de la inicialización (parámetros JSON por stdin)"
+  fr_FR: "Signaler la progression de l'initialisation (paramètres JSON sur stdin)"
+  pl_PL: "Zgłoś postęp inicjalizacji (parametry JSON na stdin)"
+
+about.container-set-main-status:
+  en_US: "Report whether the main daemon is running"
+  de_DE: "Melden, ob der Hauptdienst läuft"
+  es_ES: "Informar si el proceso principal está en ejecución"
+  fr_FR: "Indiquer si le démon principal est en cours d'exécution"
+  pl_PL: "Zgłoś, czy główny proces działa"
+
+about.container-shutdown:
+  en_US: "Stop this service"
+  de_DE: "Diesen Dienst stoppen"
+  es_ES: "Detener este servicio"
+  fr_FR: "Arrêter ce service"
+  pl_PL: "Zatrzymaj tę usługę"
+
+about.container-subcontainer-create-fs:
+  en_US: "Create a subcontainer filesystem from an image"
+  de_DE: "Ein Subcontainer-Dateisystem aus einem Image erstellen"
+  es_ES: "Crear un sistema de archivos de subcontenedor a partir de una imagen"
+  fr_FR: "Créer un système de fichiers de sous-conteneur à partir d'une image"
+  pl_PL: "Utwórz system plików podkontenera z obrazu"
+
+about.container-subcontainer-destroy-fs:
+  en_US: "Destroy a subcontainer filesystem"
+  de_DE: "Ein Subcontainer-Dateisystem entfernen"
+  es_ES: "Destruir un sistema de archivos de subcontenedor"
+  fr_FR: "Détruire un système de fichiers de sous-conteneur"
+  pl_PL: "Usuń system plików podkontenera"
+
+about.container-subcontainer-exec:
+  en_US: "Run a command in a running subcontainer"
+  de_DE: "Einen Befehl in einem laufenden Subcontainer ausführen"
+  es_ES: "Ejecutar un comando en un subcontenedor en ejecución"
+  fr_FR: "Exécuter une commande dans un sous-conteneur en cours"
+  pl_PL: "Wykonaj polecenie w działającym podkontenerze"
+
+about.container-subcontainer-exec-command:
+  en_US: "Run a command in a subcontainer and wait for it"
+  de_DE: "Einen Befehl in einem Subcontainer ausführen und darauf warten"
+  es_ES: "Ejecutar un comando en un subcontenedor y esperar a que termine"
+  fr_FR: "Exécuter une commande dans un sous-conteneur et attendre sa fin"
+  pl_PL: "Wykonaj polecenie w podkontenerze i poczekaj na nie"
+
+about.container-subcontainer-launch:
+  en_US: "Launch a command in a subcontainer"
+  de_DE: "Einen Befehl in einem Subcontainer starten"
+  es_ES: "Lanzar un comando en un subcontenedor"
+  fr_FR: "Lancer une commande dans un sous-conteneur"
+  pl_PL: "Uruchom polecenie w podkontenerze"
+
+about.container-subcontainer-launch-init:
+  en_US: "Launch a subcontainer's init process"
+  de_DE: "Den Init-Prozess eines Subcontainers starten"
+  es_ES: "Lanzar el proceso init de un subcontenedor"
+  fr_FR: "Lancer le processus init d'un sous-conteneur"
+  pl_PL: "Uruchom proces init podkontenera"
+
+about.convert-backup:
+  en_US: "Convert a server's backup on a target to the current format"
+  de_DE: "Die Sicherung eines Servers auf einem Ziel in das aktuelle Format umwandeln"
+  es_ES: "Convertir la copia de seguridad de un servidor en un destino al formato actual"
+  fr_FR: "Convertir la sauvegarde d'un serveur sur une cible au format actuel"
+  pl_PL: "Przekonwertuj kopię zapasową serwera w miejscu docelowym do bieżącego formatu"
+
+about.create-backup-target:
+  en_US: "Create a backup target"
+  de_DE: "Ein Sicherungsziel erstellen"
+  es_ES: "Crear un destino de copia de seguridad"
+  fr_FR: "Créer une cible de sauvegarde"
+  pl_PL: "Utwórz miejsce docelowe kopii zapasowej"
+
+about.create-cifs-shared-volume:
+  en_US: "Create the volume on a CIFS network share"
+  de_DE: "Das Volume auf einer CIFS-Netzwerkfreigabe erstellen"
+  es_ES: "Crear el volumen en un recurso compartido de red CIFS"
+  fr_FR: "Créer le volume sur un partage réseau CIFS"
+  pl_PL: "Utwórz wolumin w udziale sieciowym CIFS"
+
+about.create-disk-shared-volume:
+  en_US: "Create the volume on an external drive partition"
+  de_DE: "Das Volume auf einer Partition eines externen Laufwerks erstellen"
+  es_ES: "Crear el volumen en una partición de una unidad externa"
+  fr_FR: "Créer le volume sur une partition d'un disque externe"
+  pl_PL: "Utwórz wolumin na partycji dysku zewnętrznego"
+
+about.create-local-shared-volume:
+  en_US: "Create the volume on the data drive"
+  de_DE: "Das Volume auf dem Datenlaufwerk erstellen"
+  es_ES: "Crear el volumen en la unidad de datos"
+  fr_FR: "Créer le volume sur le disque de données"
+  pl_PL: "Utwórz wolumin na dysku danych"
+
+about.create-shared-volume:
+  en_US: "Create a shared volume"
+  de_DE: "Ein gemeinsames Volume erstellen"
+  es_ES: "Crear un volumen compartido"
+  fr_FR: "Créer un volume partagé"
+  pl_PL: "Utwórz współdzielony wolumin"
+
 about.delete-archived-backup-checkpoints:
   en_US: "Delete selected archived automatic backup checkpoints"
   de_DE: "Ausgewählte archivierte automatische Sicherungspunkte löschen"
@@ -56,12 +546,26 @@ about.delete-archived-backup-checkpoints:
   fr_FR: "Supprimer les points archivés sélectionnés des sauvegardes automatiques"
   pl_PL: "Usuń wybrane zarchiwizowane punkty automatycznych kopii zapasowych"
 
+about.delete-archived-backup-checkpoints-bulk:
+  en_US: "Delete archived checkpoints for multiple services (JSON from stdin)"
+  de_DE: "Archivierte Prüfpunkte mehrerer Dienste löschen (JSON von stdin)"
+  es_ES: "Eliminar puntos de control archivados de varios servicios (JSON de stdin)"
+  fr_FR: "Supprimer les points de contrôle archivés de plusieurs services (JSON depuis stdin)"
+  pl_PL: "Usuń zarchiwizowane punkty kontrolne wielu usług (JSON ze stdin)"
+
 about.delete-automatic-backup-job:
   en_US: "Delete an automatic backup job"
   de_DE: "Automatischen Sicherungsauftrag löschen"
   es_ES: "Eliminar una tarea de copia de seguridad automática"
   fr_FR: "Supprimer une tâche de sauvegarde automatique"
   pl_PL: "Usuń zadanie automatycznej kopii zapasowej"
+
+about.delete-automatic-backup-job-with-checkpoints:
+  en_US: "Delete an automatic backup job and its unshared checkpoints (JSON from stdin)"
+  de_DE: "Einen automatischen Sicherungsauftrag und seine ungeteilten Prüfpunkte löschen (JSON von stdin)"
+  es_ES: "Eliminar una tarea de copia automática y sus puntos de control no compartidos (JSON de stdin)"
+  fr_FR: "Supprimer une tâche de sauvegarde automatique et ses points de contrôle non partagés (JSON depuis stdin)"
+  pl_PL: "Usuń zadanie automatycznej kopii i jego niewspółdzielone punkty kontrolne (JSON ze stdin)"
 
 about.disable-automatic-backup-job:
   en_US: "Disable an automatic backup job without deleting its checkpoints"
@@ -77,12 +581,26 @@ about.discover-automatic-backup-history:
   fr_FR: "Découvrir l’historique des sauvegardes automatiques stocké sur une cible"
   pl_PL: "Odkryj historię automatycznych kopii zapisaną w lokalizacji kopii"
 
+about.dns-status:
+  en_US: "Display the active DNS authority"
+  de_DE: "Die aktive DNS-Autorität anzeigen"
+  es_ES: "Mostrar la autoridad DNS activa"
+  fr_FR: "Afficher l'autorité DNS active"
+  pl_PL: "Wyświetl aktywne źródło DNS"
+
 about.edit-automatic-backup-job:
   en_US: "Edit an automatic backup job"
   de_DE: "Automatischen Sicherungsauftrag bearbeiten"
   es_ES: "Editar una tarea de copia de seguridad automática"
   fr_FR: "Modifier une tâche de sauvegarde automatique"
   pl_PL: "Edytuj zadanie automatycznej kopii zapasowej"
+
+about.edit-gateway:
+  en_US: "Rename a gateway or change its DNS servers"
+  de_DE: "Ein Gateway umbenennen oder seine DNS-Server ändern"
+  es_ES: "Renombrar una puerta de enlace o cambiar sus servidores DNS"
+  fr_FR: "Renommer une passerelle ou modifier ses serveurs DNS"
+  pl_PL: "Zmień nazwę bramy lub jej serwery DNS"
 
 about.enable-automatic-backup-job:
   en_US: "Enable an automatic backup job"
@@ -97,6 +615,34 @@ about.estimate-backup-capacity:
   es_ES: "Estimar los requisitos de almacenamiento de las copias de seguridad automáticas"
   fr_FR: "Estimer les besoins de stockage des sauvegardes automatiques"
   pl_PL: "Oszacuj wymagania dotyczące miejsca dla automatycznych kopii zapasowych"
+
+about.exec-command-in-container:
+  en_US: "Run a command in a service container and print its output"
+  de_DE: "Einen Befehl in einem Dienstcontainer ausführen und seine Ausgabe anzeigen"
+  es_ES: "Ejecutar un comando en un contenedor de servicio y mostrar su salida"
+  fr_FR: "Exécuter une commande dans un conteneur de service et afficher sa sortie"
+  pl_PL: "Uruchom polecenie w kontenerze usługi i wyświetl jego wynik"
+
+about.find-backup-targets:
+  en_US: "Register attached partitions that contain StartOS backups"
+  de_DE: "Angeschlossene Partitionen mit StartOS-Sicherungen registrieren"
+  es_ES: "Registrar particiones conectadas que contienen copias de seguridad de StartOS"
+  fr_FR: "Enregistrer les partitions connectées contenant des sauvegardes StartOS"
+  pl_PL: "Zarejestruj podłączone partycje zawierające kopie zapasowe StartOS"
+
+about.inspect-backup-target:
+  en_US: "Check a backup target's availability and free space"
+  de_DE: "Verfügbarkeit und freien Speicher eines Sicherungsziels prüfen"
+  es_ES: "Comprobar la disponibilidad y el espacio libre de un destino de copia de seguridad"
+  fr_FR: "Vérifier la disponibilité et l'espace libre d'une cible de sauvegarde"
+  pl_PL: "Sprawdź dostępność i wolne miejsce miejsca docelowego kopii zapasowej"
+
+about.inspect-shared-volume:
+  en_US: "Check a shared volume's availability and free space"
+  de_DE: "Verfügbarkeit und freien Speicher eines gemeinsamen Volumes prüfen"
+  es_ES: "Comprobar la disponibilidad y el espacio libre de un volumen compartido"
+  fr_FR: "Vérifier la disponibilité et l'espace libre d'un volume partagé"
+  pl_PL: "Sprawdź dostępność i wolne miejsce współdzielonego woluminu"
 
 about.list-automatic-backup-history:
   en_US: "List automatic backup checkpoint history"
@@ -126,6 +672,41 @@ about.list-backup-service-reviews:
   fr_FR: "Lister les décisions de sauvegarde automatique en attente pour les nouveaux services"
   pl_PL: "Wyświetl oczekujące decyzje o automatycznych kopiach nowych usług"
 
+about.list-push-subscriptions:
+  en_US: "List browser push notification subscriptions"
+  de_DE: "Browser-Push-Benachrichtigungsabonnements auflisten"
+  es_ES: "Listar las suscripciones a notificaciones push del navegador"
+  fr_FR: "Lister les abonnements aux notifications push du navigateur"
+  pl_PL: "Wyświetl subskrypcje powiadomień push przeglądarki"
+
+about.list-shared-volumes:
+  en_US: "List shared volumes"
+  de_DE: "Gemeinsame Volumes auflisten"
+  es_ES: "Listar volúmenes compartidos"
+  fr_FR: "Lister les volumes partagés"
+  pl_PL: "Wyświetl współdzielone woluminy"
+
+about.nut-list-ups:
+  en_US: "List the UPS devices a NUT server serves"
+  de_DE: "Die von einem NUT-Server bereitgestellten USV-Geräte auflisten"
+  es_ES: "Listar los SAI que sirve un servidor NUT"
+  fr_FR: "Lister les onduleurs servis par un serveur NUT"
+  pl_PL: "Wyświetl urządzenia UPS udostępniane przez serwer NUT"
+
+about.nut-scan:
+  en_US: "Scan USB for UPS devices"
+  de_DE: "USB nach USV-Geräten durchsuchen"
+  es_ES: "Buscar dispositivos SAI en USB"
+  fr_FR: "Rechercher des onduleurs sur USB"
+  pl_PL: "Wyszukaj urządzenia UPS na USB"
+
+about.nut-status:
+  en_US: "Display the variables the monitored UPS reports"
+  de_DE: "Die von der überwachten USV gemeldeten Variablen anzeigen"
+  es_ES: "Mostrar las variables que informa el SAI supervisado"
+  fr_FR: "Afficher les variables signalées par l'onduleur surveillé"
+  pl_PL: "Wyświetl zmienne zgłaszane przez monitorowany UPS"
+
 about.preview-backup-retention-change:
   en_US: "Preview an automatic backup retention policy change"
   de_DE: "Änderung einer Aufbewahrungsrichtlinie für automatische Sicherungen in der Vorschau anzeigen"
@@ -139,6 +720,62 @@ about.reassign-automatic-backup-target:
   es_ES: "Mover una tarea de copia automática a otro destino"
   fr_FR: "Déplacer une tâche de sauvegarde automatique vers une autre cible"
   pl_PL: "Przenieś zadanie automatycznej kopii do innej lokalizacji"
+
+about.refresh-automatic-backup-history:
+  en_US: "Refresh automatic backup history for a target"
+  de_DE: "Automatischen Sicherungsverlauf für ein Ziel aktualisieren"
+  es_ES: "Actualizar el historial de copias automáticas de un destino"
+  fr_FR: "Actualiser l’historique des sauvegardes automatiques d’une cible"
+  pl_PL: "Odśwież historię automatycznych kopii dla lokalizacji"
+
+about.refresh-registry:
+  en_US: "Refresh a connected registry's information and signers"
+  de_DE: "Informationen und Signierer einer verbundenen Registry aktualisieren"
+  es_ES: "Actualizar la información y los firmantes de un registro conectado"
+  fr_FR: "Actualiser les informations et les signataires d'un registre connecté"
+  pl_PL: "Odśwież informacje i podpisujących połączonego rejestru"
+
+about.remove-backup-target:
+  en_US: "Remove a backup target; deletes the data of a local target"
+  de_DE: "Ein Sicherungsziel entfernen; löscht die Daten eines lokalen Ziels"
+  es_ES: "Eliminar un destino de copia de seguridad; borra los datos de un destino local"
+  fr_FR: "Supprimer une cible de sauvegarde ; efface les données d'une cible locale"
+  pl_PL: "Usuń miejsce docelowe kopii zapasowej; usuwa dane lokalnego miejsca docelowego"
+
+about.remove-push-subscription:
+  en_US: "Remove a browser push notification subscription"
+  de_DE: "Ein Browser-Push-Benachrichtigungsabonnement entfernen"
+  es_ES: "Eliminar una suscripción a notificaciones push del navegador"
+  fr_FR: "Supprimer un abonnement aux notifications push du navigateur"
+  pl_PL: "Usuń subskrypcję powiadomień push przeglądarki"
+
+about.remove-shared-volume:
+  en_US: "Remove a shared volume; deletes the data of a local volume"
+  de_DE: "Ein gemeinsames Volume entfernen; löscht die Daten eines lokalen Volumes"
+  es_ES: "Eliminar un volumen compartido; borra los datos de un volumen local"
+  fr_FR: "Supprimer un volume partagé ; efface les données d'un volume local"
+  pl_PL: "Usuń współdzielony wolumin; usuwa dane woluminu lokalnego"
+
+about.remove-trusted-keys:
+  en_US: "Remove several trusted keys"
+  de_DE: "Mehrere vertrauenswürdige Schlüssel entfernen"
+  es_ES: "Eliminar varias claves de confianza"
+  fr_FR: "Supprimer plusieurs clés de confiance"
+  pl_PL: "Usuń kilka zaufanych kluczy"
+
+about.rename-backup-target:
+  en_US: "Rename a backup target"
+  de_DE: "Ein Sicherungsziel umbenennen"
+  es_ES: "Renombrar un destino de copia de seguridad"
+  fr_FR: "Renommer une cible de sauvegarde"
+  pl_PL: "Zmień nazwę miejsca docelowego kopii zapasowej"
+
+about.rename-shared-volume:
+  en_US: "Rename a shared volume"
+  de_DE: "Ein gemeinsames Volume umbenennen"
+  es_ES: "Renombrar un volumen compartido"
+  fr_FR: "Renommer un volume partagé"
+  pl_PL: "Zmień nazwę współdzielonego woluminu"
 
 about.resolve-backup-service-review:
   en_US: "Resolve automatic backup decisions for a newly installed service"
@@ -175,12 +812,62 @@ about.run-automatic-backup-job-now:
   fr_FR: "Exécuter maintenant une tâche de sauvegarde automatique"
   pl_PL: "Uruchom teraz zadanie automatycznej kopii zapasowej"
 
+about.set-automatic-backup-job-enabled:
+  en_US: "Enable or disable an automatic backup job"
+  de_DE: "Automatischen Sicherungsauftrag aktivieren oder deaktivieren"
+  es_ES: "Activar o desactivar una tarea de copia automática"
+  fr_FR: "Activer ou désactiver une tâche de sauvegarde automatique"
+  pl_PL: "Włącz lub wyłącz zadanie automatycznej kopii"
+
+about.set-automatic-backup-jobs-enabled:
+  en_US: "Enable or disable multiple automatic backup jobs together"
+  de_DE: "Mehrere automatische Sicherungsaufträge gemeinsam aktivieren oder deaktivieren"
+  es_ES: "Activar o desactivar varias tareas de copia automática a la vez"
+  fr_FR: "Activer ou désactiver plusieurs tâches de sauvegarde automatique ensemble"
+  pl_PL: "Włącz lub wyłącz kilka zadań automatycznych kopii naraz"
+
+about.set-nut:
+  en_US: "Configure UPS monitoring with Network UPS Tools"
+  de_DE: "UPS-Überwachung mit Network UPS Tools konfigurieren"
+  es_ES: "Configurar la supervisión del SAI con Network UPS Tools"
+  fr_FR: "Configurer la surveillance de l'onduleur avec Network UPS Tools"
+  pl_PL: "Skonfiguruj monitorowanie UPS za pomocą Network UPS Tools"
+
+about.set-nut-client:
+  en_US: "Monitor a UPS served by another NUT server"
+  de_DE: "Eine von einem anderen NUT-Server bereitgestellte USV überwachen"
+  es_ES: "Supervisar un SAI servido por otro servidor NUT"
+  fr_FR: "Surveiller un onduleur servi par un autre serveur NUT"
+  pl_PL: "Monitoruj UPS udostępniany przez inny serwer NUT"
+
+about.set-nut-server:
+  en_US: "Monitor a UPS connected directly to this server"
+  de_DE: "Eine direkt an diesen Server angeschlossene USV überwachen"
+  es_ES: "Supervisar un SAI conectado directamente a este servidor"
+  fr_FR: "Surveiller un onduleur connecté directement à ce serveur"
+  pl_PL: "Monitoruj UPS podłączony bezpośrednio do tego serwera"
+
+about.set-shared-volume-grant:
+  en_US: "Grant or revoke a package's access to a shared volume"
+  de_DE: "Den Zugriff eines Pakets auf ein gemeinsames Volume gewähren oder entziehen"
+  es_ES: "Conceder o revocar el acceso de un paquete a un volumen compartido"
+  fr_FR: "Accorder ou révoquer l'accès d'un paquet à un volume partagé"
+  pl_PL: "Przyznaj lub odbierz pakietowi dostęp do współdzielonego woluminu"
+
 about.sign-s9pk:
   en_US: "Add a supplemental package signature using the identity key"
   de_DE: "Eine zusätzliche Paketsignatur mit dem Identitätsschlüssel hinzufügen"
   es_ES: "Añadir una firma adicional al paquete con la clave de identidad"
   fr_FR: "Ajouter une signature supplémentaire au paquet avec la clé d’identité"
   pl_PL: "Dodaj dodatkowy podpis pakietu kluczem tożsamości"
+
+about.validate-automatic-backup-job:
+  en_US: "Validate automatic backup settings (JSON from stdin)"
+  de_DE: "Einstellungen für automatische Sicherungen prüfen (JSON von stdin)"
+  es_ES: "Validar la configuración de copias automáticas (JSON de stdin)"
+  fr_FR: "Valider les paramètres de sauvegarde automatique (JSON depuis stdin)"
+  pl_PL: "Sprawdź ustawienia automatycznych kopii (JSON ze stdin)"
+
 acme.invalid-contact:
   en_US: "Invalid ACME contact %{contact}: must be a 'mailto:' URI containing an email address (e.g. 'mailto:you@example.com')"
   de_DE: "Ungültiger ACME-Kontakt %{contact}: Muss eine „mailto:“-URI mit einer E-Mail-Adresse sein (z. B. „mailto:du@example.com“)"
@@ -658,11 +1345,11 @@ bins.mod.does-not-exist:
   pl_PL: "%{name} nie istnieje w MultiExecutable"
 
 bins.start-init.updating-firmware:
-  en_US: "Updating Firmware"
-  de_DE: "Firmware wird aktualisiert"
-  es_ES: "Actualizando firmware"
-  fr_FR: "Mise à jour du firmware"
-  pl_PL: "Aktualizacja oprogramowania"
+  en_US: "Updating firmware. Do not power off your server"
+  de_DE: "Firmware wird aktualisiert. Schalten Sie Ihren Server nicht aus"
+  es_ES: "Actualizando firmware. No apague su servidor"
+  fr_FR: "Mise à jour du firmware. N'éteignez pas votre serveur"
+  pl_PL: "Aktualizacja oprogramowania układowego. Nie wyłączaj serwera"
 
 bins.start-init.rebooting:
   en_US: "Rebooting"
@@ -712,6 +1399,42 @@ bins.start-init.failed-to-kill-kiosk:
   es_ES: "Error al cerrar el kiosco: %{error}"
   fr_FR: "Échec de la fermeture du kiosque : %{error}"
   pl_PL: "Nie udało się zamknąć kiosku: %{error}"
+
+# firmware.rs
+firmware.failed-message:
+  en_US: "Updating server firmware to %{id} failed: %{error}. Contact Start9 support before restarting your server."
+  de_DE: "Die Aktualisierung der Server-Firmware auf %{id} ist fehlgeschlagen: %{error}. Wenden Sie sich an den Start9-Support, bevor Sie Ihren Server neu starten."
+  es_ES: "La actualización del firmware del servidor a %{id} falló: %{error}. Contacte con el soporte de Start9 antes de reiniciar su servidor."
+  fr_FR: "La mise à jour du firmware du serveur vers %{id} a échoué : %{error}. Contactez le support Start9 avant de redémarrer votre serveur."
+  pl_PL: "Aktualizacja oprogramowania układowego serwera do %{id} nie powiodła się: %{error}. Skontaktuj się z pomocą techniczną Start9 przed ponownym uruchomieniem serwera."
+
+firmware.failed-title:
+  en_US: "Firmware update failed"
+  de_DE: "Firmware-Aktualisierung fehlgeschlagen"
+  es_ES: "Error al actualizar el firmware"
+  fr_FR: "Échec de la mise à jour du firmware"
+  pl_PL: "Aktualizacja oprogramowania układowego nie powiodła się"
+
+firmware.interrupted-message:
+  en_US: "Updating server firmware to %{id} was interrupted before it finished. Contact Start9 support before restarting your server."
+  de_DE: "Die Aktualisierung der Server-Firmware auf %{id} wurde unterbrochen, bevor sie abgeschlossen war. Wenden Sie sich an den Start9-Support, bevor Sie Ihren Server neu starten."
+  es_ES: "La actualización del firmware del servidor a %{id} se interrumpió antes de terminar. Contacte con el soporte de Start9 antes de reiniciar su servidor."
+  fr_FR: "La mise à jour du firmware du serveur vers %{id} a été interrompue avant la fin. Contactez le support Start9 avant de redémarrer votre serveur."
+  pl_PL: "Aktualizacja oprogramowania układowego serwera do %{id} została przerwana przed zakończeniem. Skontaktuj się z pomocą techniczną Start9 przed ponownym uruchomieniem serwera."
+
+firmware.updated-message:
+  en_US: "Server firmware was updated from %{from} to %{id}."
+  de_DE: "Die Server-Firmware wurde von %{from} auf %{id} aktualisiert."
+  es_ES: "El firmware del servidor se actualizó de %{from} a %{id}."
+  fr_FR: "Le firmware du serveur a été mis à jour de %{from} vers %{id}."
+  pl_PL: "Oprogramowanie układowe serwera zostało zaktualizowane z %{from} do %{id}."
+
+firmware.updated-title:
+  en_US: "Firmware updated"
+  de_DE: "Firmware aktualisiert"
+  es_ES: "Firmware actualizado"
+  fr_FR: "Firmware mis à jour"
+  pl_PL: "Oprogramowanie układowe zaktualizowane"
 
 bins.startd.metrics-daemon-panicked:
   en_US: "Metrics daemon panicked!"
@@ -805,6 +1528,13 @@ help.arg.automatic-backup-disabled:
   fr_FR: "Créer la tâche de sauvegarde automatique en pause"
   pl_PL: "Utwórz wstrzymane zadanie automatycznej kopii"
 
+help.arg.automatic-backup-enabled:
+  en_US: "Whether to enable the selected jobs"
+  de_DE: "Ob die ausgewählten Aufträge aktiviert werden"
+  es_ES: "Si se activan las tareas seleccionadas"
+  fr_FR: "Indique si les tâches sélectionnées sont activées"
+  pl_PL: "Czy włączyć wybrane zadania"
+
 help.arg.automatic-backup-excluded-package-ids:
   en_US: "Package IDs to exclude from current and future services"
   de_DE: "Paket-IDs, die von aktuellen und zukünftigen Diensten ausgeschlossen werden"
@@ -818,6 +1548,13 @@ help.arg.automatic-backup-job-id:
   es_ES: "Identificador de la tarea de copia automática"
   fr_FR: "Identifiant de la tâche de sauvegarde automatique"
   pl_PL: "Identyfikator zadania automatycznej kopii"
+
+help.arg.automatic-backup-job-ids:
+  en_US: "Automatic backup job identifiers"
+  de_DE: "IDs automatischer Sicherungsaufträge"
+  es_ES: "Identificadores de tareas de copia automática"
+  fr_FR: "Identifiants des tâches de sauvegarde automatique"
+  pl_PL: "Identyfikatory zadań automatycznych kopii"
 
 help.arg.automatic-backup-job-name:
   en_US: "Human-readable automatic backup job name"
@@ -1932,6 +2669,14 @@ error.backup-password-mismatch:
   fr_FR: "Mot de Passe de Sauvegarde Non Concordant"
   pl_PL: "Niezgodne Hasło Kopii Zapasowej"
 
+# db/mod.rs
+db.subscription-not-found:
+  en_US: "Database subscription %{subscription} has ended or does not exist"
+  de_DE: "Das Datenbankabonnement %{subscription} ist beendet oder existiert nicht"
+  es_ES: "La suscripción a la base de datos %{subscription} ha terminado o no existe"
+  fr_FR: "L'abonnement à la base de données %{subscription} est terminé ou n'existe pas"
+  pl_PL: "Subskrypcja bazy danych %{subscription} zakończyła się lub nie istnieje"
+
 # disk/main.rs
 disk.main.defrag-failed:
   en_US: "Filesystem optimization failed; continuing with the converted filesystem."
@@ -2044,6 +2789,13 @@ disk.mount.filesystem.cifs.no-dns-addresses:
   es_ES: "DNS no devolvió ninguna dirección"
   fr_FR: "DNS n'a renvoyé aucune adresse"
   pl_PL: "DNS nie zwrócił żadnych adresów"
+
+disk.mount.filesystem.cifs.prompt-password:
+  en_US: "CIFS Password: "
+  de_DE: "CIFS-Passwort: "
+  es_ES: "Contraseña CIFS: "
+  fr_FR: "Mot de passe CIFS : "
+  pl_PL: "Hasło CIFS: "
 
 disk.util.missing-filesystem-uuid:
   en_US: "This partition has no persistent filesystem UUID. Format the drive before using it as a volume."
@@ -2352,6 +3104,12 @@ os-install.partitioned-pool-unsupported-layout:
   pl_PL: "Dane StartOS na %{disk} znajdują się na partycji %{partition} obok starszej instalacji systemu i nie można ich zachować na tym urządzeniu. Aby wymazać dysk i zacząć od nowa, wybierz „Nadpisz”."
 
 # os_install/gpt.rs
+os-install.preserved-data-from-newer-version:
+  en_US: "The StartOS data on %{disk} was last used by StartOS %{version}, which this installer (StartOS %{current}) cannot set up. Nothing has been changed. Flash a USB drive with StartOS %{version} or newer, boot from it, and choose \"Preserve\" again."
+  de_DE: "Die StartOS-Daten auf %{disk} wurden zuletzt von StartOS %{version} verwendet, das dieses Installationsprogramm (StartOS %{current}) nicht einrichten kann. Es wurde nichts verändert. Schreiben Sie StartOS %{version} oder neuer auf einen USB-Stick, starten Sie davon und wählen Sie erneut \"Beibehalten\"."
+  es_ES: "Los datos de StartOS en %{disk} los usó por última vez StartOS %{version}, que este instalador (StartOS %{current}) no puede configurar. No se ha cambiado nada. Grabe StartOS %{version} o una versión más reciente en una unidad USB, arranque desde ella y vuelva a elegir \"Conservar\"."
+  fr_FR: "Les données StartOS sur %{disk} ont été utilisées en dernier par StartOS %{version}, que ce programme d'installation (StartOS %{current}) ne peut pas configurer. Rien n'a été modifié. Flashez StartOS %{version} ou une version plus récente sur une clé USB, démarrez dessus et choisissez à nouveau « Conserver »."
+  pl_PL: "Dane StartOS na %{disk} były ostatnio używane przez StartOS %{version}, którego ten instalator (StartOS %{current}) nie może skonfigurować. Nic nie zostało zmienione. Nagraj StartOS %{version} lub nowszy na dysk USB, uruchom z niego komputer i ponownie wybierz „Zachowaj”."
 os-install.protected-partition-overlaps-os-root-bytes:
   en_US: "Protected partition %{path} starts at sector %{first_lba}, leaving only %{available_bytes} bytes for the OS root partition (minimum is %{min_bytes} bytes)"
   de_DE: "Geschützte Partition %{path} beginnt bei Sektor %{first_lba} und lässt nur %{available_bytes} Bytes für die OS-Root-Partition übrig (Minimum ist %{min_bytes} Bytes)"
@@ -2797,13 +3555,6 @@ backup.restore.package-installed:
   es_ES: "No se puede restaurar %{id}: ya está instalado. Desinstálalo primero."
   fr_FR: "Impossible de restaurer %{id} : il est déjà installé. Désinstallez-le d’abord."
   pl_PL: "Nie można przywrócić %{id}: jest już zainstalowany. Najpierw go odinstaluj."
-
-backup.target.cifs.prompt-password:
-  en_US: "CIFS Password: "
-  de_DE: "CIFS-Passwort: "
-  es_ES: "Contraseña CIFS: "
-  fr_FR: "Mot de passe CIFS : "
-  pl_PL: "Hasło CIFS: "
 
 backup.target.partial-mount:
   en_US: "The base filesystem mounted successfully at %{path}."
@@ -3274,6 +4025,13 @@ nut.monitor-not-running:
   es_ES: "El monitor de apagado de NUT no está en ejecución. Compruebe la configuración de NUT y reinicie la monitorización."
   fr_FR: "Le moniteur d’arrêt NUT ne fonctionne pas. Vérifiez la configuration NUT et redémarrez la surveillance."
   pl_PL: "Monitor wyłączania NUT nie działa. Sprawdź konfigurację NUT i uruchom ponownie monitorowanie."
+
+nut.prompt-password:
+  en_US: "NUT Password: "
+  de_DE: "NUT-Passwort: "
+  es_ES: "Contraseña de NUT: "
+  fr_FR: "Mot de passe NUT : "
+  pl_PL: "Hasło NUT: "
 
 nut.scan-failed:
   en_US: "Could not scan for UPS devices: %{error}"
@@ -4091,12 +4849,26 @@ registry.sync.not-saved:
   fr_FR: "%{registry} n'est pas un registre enregistré"
   pl_PL: "%{registry} nie jest zapisanym rejestrem"
 
+registry.sync.revision-before-start:
+  en_US: "Registry sent a revision before the subscription's initial response"
+  de_DE: "Die Registry hat vor der ersten Antwort des Abonnements eine Revision gesendet"
+  es_ES: "El registro envió una revisión antes de la respuesta inicial de la suscripción"
+  fr_FR: "Le registre a envoyé une révision avant la réponse initiale de l'abonnement"
+  pl_PL: "Rejestr wysłał rewizję przed początkową odpowiedzią subskrypcji"
+
 registry.sync.unreachable:
   en_US: "%{registry} is unreachable: %{error}"
   de_DE: "%{registry} ist nicht erreichbar: %{error}"
   es_ES: "%{registry} no está accesible: %{error}"
   fr_FR: "%{registry} est injoignable : %{error}"
   pl_PL: "%{registry} jest nieosiągalny: %{error}"
+
+registry.sync.unrequested-replay:
+  en_US: "Registry resumed a subscription from a revision this server does not hold"
+  de_DE: "Die Registry hat ein Abonnement ab einer Revision fortgesetzt, die dieser Server nicht besitzt"
+  es_ES: "El registro reanudó una suscripción desde una revisión que este servidor no tiene"
+  fr_FR: "Le registre a repris un abonnement à partir d'une révision que ce serveur ne possède pas"
+  pl_PL: "Rejestr wznowił subskrypcję od rewizji, której ten serwer nie posiada"
 
 # sign/commitment/request.rs
 sign.commitment.request.unsupported-type:
@@ -4164,6 +4936,20 @@ sign.gpg.invalid-public-key:
   es_ES: "Use una clave pública de firma Ed25519 en formato PEM o GPG"
   fr_FR: "Utilisez une clé publique de signature Ed25519 au format PEM ou GPG"
   pl_PL: "Użyj publicznego klucza podpisującego Ed25519 w formacie PEM lub GPG"
+
+service.exec.failed:
+  en_US: "Command exited with code %{code}"
+  de_DE: "Befehl wurde mit Code %{code} beendet"
+  es_ES: "El comando terminó con el código %{code}"
+  fr_FR: "La commande s'est terminée avec le code %{code}"
+  pl_PL: "Polecenie zakończyło się kodem %{code}"
+
+service.exec.timed-out:
+  en_US: "Command timed out and was terminated"
+  de_DE: "Zeitüberschreitung des Befehls; er wurde beendet"
+  es_ES: "El comando agotó el tiempo de espera y se terminó"
+  fr_FR: "La commande a expiré et a été arrêtée"
+  pl_PL: "Przekroczono limit czasu polecenia; zostało zakończone"
 
 service.mod.service-actor-held-after-shutdown:
   en_US: "ServiceActor held somewhere after actor shutdown"
@@ -4672,6 +5458,22 @@ middleware.auth.unauthorized:
   fr_FR: "NON AUTORISÉ"
   pl_PL: "BRAK AUTORYZACJI"
 
+# diagnostic.rs
+diagnostic.prompt-server-password:
+  en_US: "Server password: "
+  de_DE: "Serverpasswort: "
+  es_ES: "Contraseña del servidor: "
+  fr_FR: "Mot de passe du serveur : "
+  pl_PL: "Hasło serwera: "
+
+# middleware/auth/password.rs
+middleware.auth.password-required:
+  en_US: "The server password is required."
+  de_DE: "Das Serverpasswort ist erforderlich."
+  es_ES: "Se requiere la contraseña del servidor."
+  fr_FR: "Le mot de passe du serveur est requis."
+  pl_PL: "Wymagane jest hasło serwera."
+
 # middleware/auth/session.rs
 middleware.auth.rate-limited-login:
   en_US: "Please limit login attempts to 3 per 20 seconds."
@@ -4939,12 +5741,26 @@ shared-volumes.invalid-path:
   fr_FR: "Les chemins des volumes doivent rester dans leur répertoire autorisé"
   pl_PL: "Ścieżki woluminów muszą pozostawać w dozwolonym katalogu"
 
+shared-volumes.name-not-folder:
+  en_US: "A volume name must work as a folder name: no / and not . or .."
+  de_DE: "Ein Volume-Name muss als Ordnername taugen: kein / und nicht . oder .."
+  es_ES: "El nombre del volumen debe servir como nombre de carpeta: sin / y distinto de . o .."
+  fr_FR: "Le nom du volume doit pouvoir servir de nom de dossier : sans / et différent de . ou .."
+  pl_PL: "Nazwa woluminu musi nadawać się na nazwę folderu: bez / i inna niż . lub .."
+
 shared-volumes.name-required:
   en_US: "Enter a volume name"
   de_DE: "Einen Namen für das Volume eingeben"
   es_ES: "Introduce un nombre para el volumen"
   fr_FR: "Saisissez un nom de volume"
   pl_PL: "Podaj nazwę woluminu"
+
+shared-volumes.name-taken:
+  en_US: "Another volume is already named %{name}"
+  de_DE: "Ein anderes Volume heißt bereits %{name}"
+  es_ES: "Ya existe otro volumen llamado %{name}"
+  fr_FR: "Un autre volume s'appelle déjà %{name}"
+  pl_PL: "Inny wolumin ma już nazwę %{name}"
 
 shared-volumes.not-cifs:
   en_US: "Only CIFS share volumes can change their connection details"
@@ -5079,6 +5895,118 @@ tunnel.api.invalid-name:
   es_ES: 'Los nombres no pueden estar vacíos ni contener solo espacios, no deben contener caracteres de control y deben tener como máximo %{max} caracteres'
   fr_FR: 'Les noms ne doivent pas être vides ni composés uniquement d’espaces, ne doivent contenir aucun caractère de contrôle et doivent comporter au maximum %{max} caractères'
   pl_PL: 'Nazwy nie mogą być puste ani składać się wyłącznie z białych znaków, nie mogą zawierać znaków sterujących i mogą mieć najwyżej %{max} znaków'
+
+tunnel.forward.pcp.already-auto-dnat-other-client:
+  en_US: '%{source} is already an automatic DNAT forward for another client'
+  de_DE: '%{source} ist bereits eine automatische DNAT-Weiterleitung für einen anderen Client'
+  es_ES: '%{source} ya es un reenvío DNAT automático para otro cliente'
+  fr_FR: '%{source} est déjà une redirection DNAT automatique pour un autre client'
+  pl_PL: '%{source} jest już automatycznym przekierowaniem DNAT dla innego klienta'
+
+tunnel.forward.pcp.already-auto-dnat-range:
+  en_US: '%{source} is already an automatic DNAT range forward'
+  de_DE: '%{source} ist bereits eine automatische DNAT-Bereichsweiterleitung'
+  es_ES: '%{source} ya es un reenvío de rango DNAT automático'
+  fr_FR: '%{source} est déjà une redirection de plage DNAT automatique'
+  pl_PL: '%{source} jest już automatycznym przekierowaniem zakresu DNAT'
+
+tunnel.forward.pcp.already-dnat:
+  en_US: '%{source} is already a DNAT forward'
+  de_DE: '%{source} ist bereits eine DNAT-Weiterleitung'
+  es_ES: '%{source} ya es un reenvío DNAT'
+  fr_FR: '%{source} est déjà une redirection DNAT'
+  pl_PL: '%{source} jest już przekierowaniem DNAT'
+
+tunnel.forward.pcp.already-dnat-other-client:
+  en_US: '%{source} is already a DNAT forward for another client'
+  de_DE: '%{source} ist bereits eine DNAT-Weiterleitung für einen anderen Client'
+  es_ES: '%{source} ya es un reenvío DNAT para otro cliente'
+  fr_FR: '%{source} est déjà une redirection DNAT pour un autre client'
+  pl_PL: '%{source} jest już przekierowaniem DNAT dla innego klienta'
+
+tunnel.forward.pcp.already-dnat-range:
+  en_US: '%{source} is already a DNAT range forward'
+  de_DE: '%{source} ist bereits eine DNAT-Bereichsweiterleitung'
+  es_ES: '%{source} ya es un reenvío de rango DNAT'
+  fr_FR: '%{source} est déjà une redirection de plage DNAT'
+  pl_PL: '%{source} jest już przekierowaniem zakresu DNAT'
+
+tunnel.forward.pcp.diversion-setup-failed:
+  en_US: 'SNI diversion setup failed (code %{code})'
+  de_DE: 'Einrichtung der SNI-Umleitung fehlgeschlagen (Code %{code})'
+  es_ES: 'Error al configurar el desvío SNI (código %{code})'
+  fr_FR: 'Échec de la configuration du détournement SNI (code %{code})'
+  pl_PL: 'Nie udało się skonfigurować przekierowania SNI (kod %{code})'
+
+tunnel.forward.pcp.fallback-automatic-route:
+  en_US: 'fallback on %{source} is already an automatic route to %{target}'
+  de_DE: 'Fallback auf %{source} ist bereits eine automatische Route zu %{target}'
+  es_ES: 'el respaldo en %{source} ya es una ruta automática hacia %{target}'
+  fr_FR: 'le repli sur %{source} est déjà une route automatique vers %{target}'
+  pl_PL: 'trasa zapasowa na %{source} jest już automatyczną trasą do %{target}'
+
+tunnel.forward.pcp.fallback-held-by-other-client:
+  en_US: 'fallback on %{source} is held by another client'
+  de_DE: 'Fallback auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'el respaldo en %{source} pertenece a otro cliente'
+  fr_FR: 'le repli sur %{source} est détenu par un autre client'
+  pl_PL: 'trasa zapasowa na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.fallback-manual-route:
+  en_US: 'fallback on %{source} is already a manual route to %{target}'
+  de_DE: 'Fallback auf %{source} ist bereits eine manuelle Route zu %{target}'
+  es_ES: 'el respaldo en %{source} ya es una ruta manual hacia %{target}'
+  fr_FR: 'le repli sur %{source} est déjà une route manuelle vers %{target}'
+  pl_PL: 'trasa zapasowa na %{source} jest już ręczną trasą do %{target}'
+
+tunnel.forward.pcp.hostname-automatic-route:
+  en_US: 'SNI hostname %{hostname} on %{source} is already an automatic route to %{target}'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} ist bereits eine automatische Route zu %{target}'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} ya es una ruta automática hacia %{target}'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est déjà une route automatique vers %{target}'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest już automatyczną trasą do %{target}'
+
+tunnel.forward.pcp.hostname-held-by-other-client:
+  en_US: 'SNI hostname %{hostname} on %{source} is held by another client'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} pertenece a otro cliente'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est détenu par un autre client'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.hostname-manual-route:
+  en_US: 'SNI hostname %{hostname} on %{source} is already a manual route to %{target}'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} ist bereits eine manuelle Route zu %{target}'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} ya es una ruta manual hacia %{target}'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est déjà une route manuelle vers %{target}'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest już ręczną trasą do %{target}'
+
+tunnel.forward.pcp.not-sni-port:
+  en_US: '%{source} is not an SNI-demuxed port'
+  de_DE: '%{source} ist kein SNI-demultiplexter Port'
+  es_ES: '%{source} no es un puerto con demultiplexación SNI'
+  fr_FR: '%{source} n’est pas un port démultiplexé par SNI'
+  pl_PL: '%{source} nie jest portem z demultipleksacją SNI'
+
+tunnel.forward.pcp.overlaps-existing:
+  en_US: '%{source} overlaps an existing forward at %{conflict}'
+  de_DE: '%{source} überschneidet sich mit einer bestehenden Weiterleitung auf %{conflict}'
+  es_ES: '%{source} se superpone con un reenvío existente en %{conflict}'
+  fr_FR: '%{source} chevauche une redirection existante sur %{conflict}'
+  pl_PL: '%{source} nakłada się na istniejące przekierowanie na %{conflict}'
+
+tunnel.forward.pcp.sni-hostname-taken:
+  en_US: 'SNI hostname on %{source} is held by another client'
+  de_DE: 'SNI-Hostname auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'El nombre de host SNI en %{source} pertenece a otro cliente'
+  fr_FR: 'Le nom d’hôte SNI sur %{source} est détenu par un autre client'
+  pl_PL: 'Nazwa hosta SNI na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.sni-listener-failed:
+  en_US: 'SNI listener on %{source} could not bind'
+  de_DE: 'SNI-Listener auf %{source} konnte nicht gebunden werden'
+  es_ES: 'No se pudo enlazar el puerto de escucha SNI en %{source}'
+  fr_FR: 'L’écouteur SNI sur %{source} n’a pas pu être lié'
+  pl_PL: 'Nie udało się powiązać nasłuchiwania SNI na %{source}'
 
 util.actor.runtime-exited:
   en_US: The task processor has stopped.
@@ -5303,6 +6231,41 @@ help.arg.auth-key-name:
   es_ES: "Nombre que se muestra para la clave en la lista de claves"
   fr_FR: "Nom affiché pour la clé dans la liste des clés"
   pl_PL: "Nazwa klucza wyświetlana na liście kluczy"
+
+help.arg.backup-target-name:
+  en_US: "Backup target name"
+  de_DE: "Name des Sicherungsziels"
+  es_ES: "Nombre del destino de copia de seguridad"
+  fr_FR: "Nom de la cible de sauvegarde"
+  pl_PL: "Nazwa miejsca docelowego kopii zapasowej"
+
+help.arg.exec-stdin:
+  en_US: "Text written to the command's standard input"
+  de_DE: "Text, der in die Standardeingabe des Befehls geschrieben wird"
+  es_ES: "Texto escrito en la entrada estándar del comando"
+  fr_FR: "Texte écrit sur l'entrée standard de la commande"
+  pl_PL: "Tekst zapisywany na standardowe wejście polecenia"
+
+help.arg.exec-timeout-secs:
+  en_US: "Seconds before the command is terminated; defaults to 120"
+  de_DE: "Sekunden bis zum Beenden des Befehls; Standard ist 120"
+  es_ES: "Segundos antes de terminar el comando; por defecto 120"
+  fr_FR: "Secondes avant l'arrêt de la commande ; 120 par défaut"
+  pl_PL: "Sekundy do zakończenia polecenia; domyślnie 120"
+
+help.arg.gateway-automatic-dns:
+  en_US: "Use the DNS servers the gateway provides"
+  de_DE: "Die vom Gateway bereitgestellten DNS-Server verwenden"
+  es_ES: "Usar los servidores DNS que proporciona la puerta de enlace"
+  fr_FR: "Utiliser les serveurs DNS fournis par la passerelle"
+  pl_PL: "Używaj serwerów DNS dostarczanych przez bramę"
+
+help.arg.gateway-dns-server:
+  en_US: "Static DNS server; repeat for several"
+  de_DE: "Statischer DNS-Server; für mehrere wiederholen"
+  es_ES: "Servidor DNS estático; repetir para varios"
+  fr_FR: "Serveur DNS statique ; répéter pour plusieurs"
+  pl_PL: "Statyczny serwer DNS; powtórz dla kilku"
 
 help.arg.gua-wan:
   en_US: "Expose the IPv6 GUA to the WAN (false = LAN-only)"
@@ -5696,6 +6659,13 @@ help.arg.json-pointer:
   fr_FR: "Pointeur JSON vers une valeur spécifique"
   pl_PL: "Wskaźnik JSON do konkretnej wartości"
 
+help.arg.keep-cifs-password:
+  en_US: "Keep the stored password instead of prompting for one"
+  de_DE: "Das gespeicherte Passwort beibehalten statt danach zu fragen"
+  es_ES: "Conservar la contraseña guardada en lugar de solicitarla"
+  fr_FR: "Conserver le mot de passe enregistré au lieu de le demander"
+  pl_PL: "Zachowaj zapisane hasło zamiast o nie pytać"
+
 help.arg.keyboard-option:
   en_US: "Additional keyboard option"
   de_DE: "Zusätzliche Tastaturoption"
@@ -5808,6 +6778,20 @@ help.arg.mount-beneath:
   fr_FR: "Insérer sous le montage supérieur ; son démontage révèle ce montage"
   pl_PL: "Umieść pod najwyższym montowaniem; jego odmontowanie odsłoni to montowanie"
 
+help.arg.mount-readonly:
+  en_US: "Mount read-only"
+  de_DE: "Schreibgeschützt einhängen"
+  es_ES: "Montar en solo lectura"
+  fr_FR: "Monter en lecture seule"
+  pl_PL: "Zamontuj tylko do odczytu"
+
+help.arg.mountpoint:
+  en_US: "Path to mount at inside the subcontainer"
+  de_DE: "Einhängepfad im Subcontainer"
+  es_ES: "Ruta de montaje dentro del subcontenedor"
+  fr_FR: "Chemin de montage dans le sous-conteneur"
+  pl_PL: "Ścieżka montowania wewnątrz podkontenera"
+
 help.arg.multi-arch-s9pks:
   en_US: "Enable multi-architecture s9pk support"
   de_DE: "Multi-Architektur-s9pk-Unterstützung aktivieren"
@@ -5857,12 +6841,131 @@ help.arg.no-verify-sign:
   fr_FR: "Signer les engagements listés par le registre au lieu d'un s9pk local"
   pl_PL: "Podpisz zobowiązania wymienione w rejestrze zamiast lokalnego s9pk"
 
+help.arg.notification-data:
+  en_US: "Markdown details shown with the notification"
+  de_DE: "Markdown-Details, die mit der Benachrichtigung angezeigt werden"
+  es_ES: "Detalles en Markdown que se muestran con la notificación"
+  fr_FR: "Détails Markdown affichés avec la notification"
+  pl_PL: "Szczegóły w Markdown wyświetlane z powiadomieniem"
+
 help.arg.nowait:
   en_US: "Return immediately instead of waiting for graceful shutdown to complete"
   de_DE: "Sofort zurückkehren, anstatt auf den Abschluss des ordnungsgemäßen Herunterfahrens zu warten"
   es_ES: "Volver inmediatamente en lugar de esperar a que se complete el apagado controlado"
   fr_FR: "Renvoyer immédiatement au lieu d'attendre la fin de l'arrêt propre"
   pl_PL: "Zwróć natychmiast zamiast czekać na zakończenie kontrolowanego zamykania"
+
+help.arg.nut-bus:
+  en_US: "USB bus"
+  de_DE: "USB-Bus"
+  es_ES: "Bus USB"
+  fr_FR: "Bus USB"
+  pl_PL: "Magistrala USB"
+
+help.arg.nut-bus-port:
+  en_US: "USB port that pins a device without a serial number"
+  de_DE: "USB-Port, der ein Gerät ohne Seriennummer festlegt"
+  es_ES: "Puerto USB que fija un dispositivo sin número de serie"
+  fr_FR: "Port USB qui fixe un périphérique sans numéro de série"
+  pl_PL: "Port USB przypinający urządzenie bez numeru seryjnego"
+
+help.arg.nut-device-port:
+  en_US: "Device port, as reported by nut-scan"
+  de_DE: "Geräteport, wie von nut-scan gemeldet"
+  es_ES: "Puerto del dispositivo, tal como lo indica nut-scan"
+  fr_FR: "Port du périphérique, tel que signalé par nut-scan"
+  pl_PL: "Port urządzenia zgłoszony przez nut-scan"
+
+help.arg.nut-disabled:
+  en_US: "Store the settings without starting monitoring"
+  de_DE: "Die Einstellungen speichern, ohne die Überwachung zu starten"
+  es_ES: "Guardar la configuración sin iniciar la supervisión"
+  fr_FR: "Enregistrer les paramètres sans démarrer la surveillance"
+  pl_PL: "Zapisz ustawienia bez uruchamiania monitorowania"
+
+help.arg.nut-driver:
+  en_US: "NUT driver, as reported by nut-scan"
+  de_DE: "NUT-Treiber, wie von nut-scan gemeldet"
+  es_ES: "Controlador NUT, tal como lo indica nut-scan"
+  fr_FR: "Pilote NUT, tel que signalé par nut-scan"
+  pl_PL: "Sterownik NUT zgłoszony przez nut-scan"
+
+help.arg.nut-host:
+  en_US: "NUT server hostname or IP address"
+  de_DE: "Hostname oder IP-Adresse des NUT-Servers"
+  es_ES: "Nombre de host o dirección IP del servidor NUT"
+  fr_FR: "Nom d'hôte ou adresse IP du serveur NUT"
+  pl_PL: "Nazwa hosta lub adres IP serwera NUT"
+
+help.arg.nut-listen-all:
+  en_US: "Serve the UPS to other NUT clients on the network"
+  de_DE: "Die USV anderen NUT-Clients im Netzwerk bereitstellen"
+  es_ES: "Servir el SAI a otros clientes NUT de la red"
+  fr_FR: "Servir l'onduleur aux autres clients NUT du réseau"
+  pl_PL: "Udostępniaj UPS innym klientom NUT w sieci"
+
+help.arg.nut-monitor-username:
+  en_US: "Username for monitoring the remote UPS"
+  de_DE: "Benutzername für die Überwachung der entfernten USV"
+  es_ES: "Nombre de usuario para supervisar el SAI remoto"
+  fr_FR: "Nom d'utilisateur pour surveiller l'onduleur distant"
+  pl_PL: "Nazwa użytkownika do monitorowania zdalnego UPS"
+
+help.arg.nut-port:
+  en_US: "NUT server port"
+  de_DE: "Port des NUT-Servers"
+  es_ES: "Puerto del servidor NUT"
+  fr_FR: "Port du serveur NUT"
+  pl_PL: "Port serwera NUT"
+
+help.arg.nut-product:
+  en_US: "UPS product name"
+  de_DE: "Produktname der USV"
+  es_ES: "Nombre del producto del SAI"
+  fr_FR: "Nom du produit de l'onduleur"
+  pl_PL: "Nazwa produktu UPS"
+
+help.arg.nut-product-id:
+  en_US: "USB product ID"
+  de_DE: "USB-Produkt-ID"
+  es_ES: "ID de producto USB"
+  fr_FR: "Identifiant produit USB"
+  pl_PL: "Identyfikator produktu USB"
+
+help.arg.nut-remote-username:
+  en_US: "Username remote NUT clients authenticate with"
+  de_DE: "Benutzername, mit dem sich entfernte NUT-Clients anmelden"
+  es_ES: "Nombre de usuario con el que se autentican los clientes NUT remotos"
+  fr_FR: "Nom d'utilisateur des clients NUT distants"
+  pl_PL: "Nazwa użytkownika zdalnych klientów NUT"
+
+help.arg.nut-serial:
+  en_US: "UPS serial number"
+  de_DE: "Seriennummer der USV"
+  es_ES: "Número de serie del SAI"
+  fr_FR: "Numéro de série de l'onduleur"
+  pl_PL: "Numer seryjny UPS"
+
+help.arg.nut-ups-name:
+  en_US: "UPS name on the NUT server"
+  de_DE: "USV-Name auf dem NUT-Server"
+  es_ES: "Nombre del SAI en el servidor NUT"
+  fr_FR: "Nom de l'onduleur sur le serveur NUT"
+  pl_PL: "Nazwa UPS na serwerze NUT"
+
+help.arg.nut-vendor:
+  en_US: "UPS vendor name"
+  de_DE: "Herstellername der USV"
+  es_ES: "Nombre del fabricante del SAI"
+  fr_FR: "Nom du fabricant de l'onduleur"
+  pl_PL: "Nazwa producenta UPS"
+
+help.arg.nut-vendor-id:
+  en_US: "USB vendor ID"
+  de_DE: "USB-Hersteller-ID"
+  es_ES: "ID de fabricante USB"
+  fr_FR: "Identifiant fabricant USB"
+  pl_PL: "Identyfikator producenta USB"
 
 help.arg.nvidia-container:
   en_US: "Enable NVIDIA container support"
@@ -5970,6 +7073,13 @@ help.arg.pty-size:
   pl_PL: "Rozmiar terminala PTY (<wiersze>:<kolumny>[:<x>:<y>])"
 
 
+help.arg.push-endpoint:
+  en_US: "Push subscription endpoint URL"
+  de_DE: "Endpunkt-URL des Push-Abonnements"
+  es_ES: "URL del punto final de la suscripción push"
+  fr_FR: "URL du point de terminaison de l'abonnement push"
+  pl_PL: "Adres URL punktu końcowego subskrypcji push"
+
 help.arg.registry-hostname:
   en_US: "Registry server hostname"
   de_DE: "Registry-Server-Hostname"
@@ -6068,6 +7178,13 @@ help.arg.server-id:
   fr_FR: "Identifiant unique du serveur"
   pl_PL: "Unikalny identyfikator serwera"
 
+help.arg.service-interface-id:
+  en_US: "Service interface identifier"
+  de_DE: "Kennung der Dienstschnittstelle"
+  es_ES: "Identificador de la interfaz de servicio"
+  fr_FR: "Identifiant de l'interface de service"
+  pl_PL: "Identyfikator interfejsu usługi"
+
 help.arg.set-as-default-outbound:
   en_US: "Set as the default outbound gateway"
   de_DE: "Als Standard-Ausgangs-Gateway festlegen"
@@ -6081,6 +7198,55 @@ help.arg.set-signer-name:
   es_ES: "Establecer el nombre del firmante"
   fr_FR: "Définir le nom du signataire"
   pl_PL: "Ustaw nazwę sygnatariusza"
+
+help.arg.shared-volume-disk-path:
+  en_US: "Directory on the partition, created if missing"
+  de_DE: "Verzeichnis auf der Partition, wird bei Bedarf erstellt"
+  es_ES: "Directorio en la partición; se crea si no existe"
+  fr_FR: "Répertoire sur la partition, créé s'il n'existe pas"
+  pl_PL: "Katalog na partycji, tworzony, jeśli nie istnieje"
+
+help.arg.shared-volume-grant-readonly:
+  en_US: "Grant read-only access"
+  de_DE: "Nur-Lese-Zugriff gewähren"
+  es_ES: "Conceder acceso de solo lectura"
+  fr_FR: "Accorder un accès en lecture seule"
+  pl_PL: "Przyznaj dostęp tylko do odczytu"
+
+help.arg.shared-volume-grant-revoke:
+  en_US: "Revoke the package's access"
+  de_DE: "Den Zugriff des Pakets entziehen"
+  es_ES: "Revocar el acceso del paquete"
+  fr_FR: "Révoquer l'accès du paquet"
+  pl_PL: "Odbierz pakietowi dostęp"
+
+help.arg.shared-volume-id:
+  en_US: "Shared volume ID"
+  de_DE: "Gemeinsame Volume-ID"
+  es_ES: "ID del volumen compartido"
+  fr_FR: "Identifiant du volume partagé"
+  pl_PL: "Identyfikator współdzielonego woluminu"
+
+help.arg.shared-volume-logicalname:
+  en_US: "Partition device path, e.g. /dev/sdb1"
+  de_DE: "Gerätepfad der Partition, z. B. /dev/sdb1"
+  es_ES: "Ruta del dispositivo de la partición, p. ej. /dev/sdb1"
+  fr_FR: "Chemin du périphérique de la partition, par ex. /dev/sdb1"
+  pl_PL: "Ścieżka urządzenia partycji, np. /dev/sdb1"
+
+help.arg.shared-volume-name:
+  en_US: "Shared volume name"
+  de_DE: "Name des gemeinsamen Volumes"
+  es_ES: "Nombre del volumen compartido"
+  fr_FR: "Nom du volume partagé"
+  pl_PL: "Nazwa współdzielonego woluminu"
+
+help.arg.shared-volume-subpath:
+  en_US: "Directory within the volume to mount"
+  de_DE: "Zu einhängendes Verzeichnis innerhalb des Volumes"
+  es_ES: "Directorio del volumen que se montará"
+  fr_FR: "Répertoire du volume à monter"
+  pl_PL: "Katalog woluminu do zamontowania"
 
 help.arg.signature-hash:
   en_US: "Hash for signature verification"
@@ -6194,6 +7360,13 @@ help.arg.squashfs-image-path:
   fr_FR: "Chemin vers le fichier image squashfs"
   pl_PL: "Ścieżka do pliku obrazu squashfs"
 
+help.arg.subcontainer-id:
+  en_US: "Subcontainer identifier"
+  de_DE: "Kennung des Subcontainers"
+  es_ES: "Identificador del subcontenedor"
+  fr_FR: "Identifiant du sous-conteneur"
+  pl_PL: "Identyfikator podkontenera"
+
 help.arg.subcontainer-name:
   en_US: "Guid of the subcontainer, or a prefix; use --name to select by name"
   de_DE: "Guid des Subcontainers oder ein Präfix davon; --name wählt nach Name aus"
@@ -6270,6 +7443,13 @@ help.arg.trusted-key-id:
   es_ES: "ID de la clave de confianza, tal como aparece en la lista"
   fr_FR: "Identifiant de la clé de confiance, tel qu'il apparaît dans la liste"
   pl_PL: "Identyfikator zaufanego klucza, taki jak na liście"
+
+help.arg.trusted-key-ids:
+  en_US: "Trusted key identifiers"
+  de_DE: "Kennungen vertrauenswürdiger Schlüssel"
+  es_ES: "Identificadores de claves de confianza"
+  fr_FR: "Identifiants des clés de confiance"
+  pl_PL: "Identyfikatory zaufanych kluczy"
 
 help.arg.trusted-key-name:
   en_US: "Name for the key; blank names each GPG key after its identity"
@@ -6515,6 +7695,27 @@ help.arg.db-apply-expr:
   es_ES: "Expresión de parche de base de datos a aplicar"
   fr_FR: "Expression de patch de base de données à appliquer"
   pl_PL: "Wyrażenie łatki bazy danych do zastosowania"
+
+help.arg.db-depth:
+  en_US: "Levels kept below the dumped subtree; deeper objects and arrays become empty"
+  de_DE: "Beibehaltene Ebenen unterhalb des ausgegebenen Teilbaums; tiefere Objekte und Arrays werden leer"
+  es_ES: "Niveles conservados bajo el subárbol volcado; los objetos y arreglos más profundos quedan vacíos"
+  fr_FR: "Niveaux conservés sous le sous-arbre exporté ; les objets et tableaux plus profonds deviennent vides"
+  pl_PL: "Poziomy zachowane poniżej zrzucanego poddrzewa; głębsze obiekty i tablice stają się puste"
+
+help.arg.db-exclude:
+  en_US: "JSON pointer to remove from the included data, relative to the dumped subtree; '*' matches any one segment"
+  de_DE: "JSON-Zeiger, der aus den einbezogenen Daten entfernt wird, relativ zum ausgegebenen Teilbaum; '*' passt auf ein beliebiges Segment"
+  es_ES: "Puntero JSON que se elimina de los datos incluidos, relativo al subárbol volcado; '*' coincide con cualquier segmento"
+  fr_FR: "Pointeur JSON à retirer des données incluses, relatif au sous-arbre exporté ; '*' correspond à un segment quelconque"
+  pl_PL: "Wskaźnik JSON usuwany z uwzględnionych danych, względem zrzucanego poddrzewa; '*' pasuje do dowolnego segmentu"
+
+help.arg.db-include:
+  en_US: "JSON pointer to keep, relative to the dumped subtree; '*' matches any one segment. Omitted keeps everything"
+  de_DE: "Beizubehaltender JSON-Zeiger, relativ zum ausgegebenen Teilbaum; '*' passt auf ein beliebiges Segment. Ohne Angabe bleibt alles erhalten"
+  es_ES: "Puntero JSON que se conserva, relativo al subárbol volcado; '*' coincide con cualquier segmento. Si se omite, se conserva todo"
+  fr_FR: "Pointeur JSON à conserver, relatif au sous-arbre exporté ; '*' correspond à un segment quelconque. Sans valeur, tout est conservé"
+  pl_PL: "Wskaźnik JSON do zachowania, względem zrzucanego poddrzewa; '*' pasuje do dowolnego segmentu. Pominięcie zachowuje wszystko"
 
 help.arg.db-path:
   en_US: "Path to the database"
@@ -8858,6 +10059,13 @@ about.set-os-registry:
   fr_FR: "Utiliser un registre connecté pour les mises à jour de StartOS"
   pl_PL: "Używaj połączonego rejestru do aktualizacji StartOS"
 
+about.test-push-subscription:
+  en_US: "Send a test notification to a push subscription"
+  de_DE: "Eine Testbenachrichtigung an ein Push-Abonnement senden"
+  es_ES: "Enviar una notificación de prueba a una suscripción push"
+  fr_FR: "Envoyer une notification de test à un abonnement push"
+  pl_PL: "Wyślij powiadomienie testowe do subskrypcji push"
+
 about.uninitialize-webserver:
   en_US: "Uninitialize the webserver"
   de_DE: "Den Webserver deinitialisieren"
@@ -9285,6 +10493,20 @@ about.update-categories-registry:
   es_ES: "Actualizar categorías en el registro"
   fr_FR: "Mettre à jour les catégories dans le registre"
   pl_PL: "Zaktualizuj kategorie w rejestrze"
+
+about.update-cifs-backup-target:
+  en_US: "Update the connection details of a CIFS backup target"
+  de_DE: "Die Verbindungsdaten eines CIFS-Sicherungsziels aktualisieren"
+  es_ES: "Actualizar los datos de conexión de un destino de copia de seguridad CIFS"
+  fr_FR: "Mettre à jour les informations de connexion d'une cible de sauvegarde CIFS"
+  pl_PL: "Zaktualizuj dane połączenia miejsca docelowego kopii zapasowej CIFS"
+
+about.update-cifs-shared-volume:
+  en_US: "Update the connection details of a CIFS shared volume"
+  de_DE: "Die Verbindungsdaten eines gemeinsamen CIFS-Volumes aktualisieren"
+  es_ES: "Actualizar los datos de conexión de un volumen compartido CIFS"
+  fr_FR: "Mettre à jour les informations de connexion d'un volume partagé CIFS"
+  pl_PL: "Zaktualizuj dane połączenia współdzielonego woluminu CIFS"
 
 about.update-db-record:
   en_US: "Update a database record"

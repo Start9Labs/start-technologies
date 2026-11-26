@@ -12,6 +12,7 @@ use crate::backup::PackageBackupReport;
 use crate::backup::target::BackupTargetId;
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::util::serde::HandlerExtSerde;
 
@@ -19,6 +20,7 @@ pub fn activity<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "list",
         from_fn_async(list)
+            .with_metadata(EFFECT, Effect::Read.into())
             .with_display_serializable()
             .with_about("about.list-backup-activity")
             .with_call_remote::<crate::context::CliContext>(),

@@ -19,41 +19,135 @@ Print version
 .SH SUBCOMMANDS
 .TP
 start\-container\-action(1)
+Commands for this service\*(Aqs actions and tasks
+.TP
+start\-container\-bind(1)
+Bind a host port to this service (JSON parameters on stdin)
 .TP
 start\-container\-bind\-mount(1)
+Bind\-mount a path inside this container
+.TP
+start\-container\-bind\-range(1)
+Bind a range of host ports to this service (JSON parameters on stdin)
 .TP
 start\-container\-check\-dependencies(1)
+Check whether dependencies are satisfied
+.TP
+start\-container\-clear\-bindings(1)
+Remove this service\*(Aqs bindings
+.TP
+start\-container\-clear\-service\-interfaces(1)
+Remove this service\*(Aqs exported interfaces
 .TP
 start\-container\-echo(1)
+Echo a message through the host
+.TP
+start\-container\-export\-range\-service\-interface(1)
+Export a service interface over a port range (JSON parameters on stdin)
+.TP
+start\-container\-export\-service\-interface(1)
+Export a service interface (JSON parameters on stdin)
+.TP
+start\-container\-get\-container\-ip(1)
+Display a service container\*(Aqs IP address
 .TP
 start\-container\-get\-data\-version(1)
+Display this service\*(Aqs data version
 .TP
 start\-container\-get\-dependencies(1)
+Display this service\*(Aqs declared dependencies
+.TP
+start\-container\-get\-host\-info(1)
+Display a host\*(Aqs addresses and bindings
+.TP
+start\-container\-get\-installed\-packages(1)
+List installed packages
 .TP
 start\-container\-get\-os\-ip(1)
+Display the StartOS host\*(Aqs IP address
+.TP
+start\-container\-get\-outbound\-gateway(1)
+Display this service\*(Aqs outbound gateway
+.TP
+start\-container\-get\-service\-interface(1)
+Display a service interface
+.TP
+start\-container\-get\-service\-manifest(1)
+Display a service\*(Aqs manifest
+.TP
+start\-container\-get\-service\-port\-forward(1)
+Display the network details of a binding
+.TP
+start\-container\-get\-shared\-volumes(1)
+List the shared volumes granted to this service
+.TP
+start\-container\-get\-ssl\-certificate(1)
+Display a certificate chain for hostnames (JSON parameters on stdin)
+.TP
+start\-container\-get\-ssl\-key(1)
+Display the private key for hostnames\*(Aq certificate (JSON parameters on stdin)
 .TP
 start\-container\-get\-status(1)
+Display a service\*(Aqs status
+.TP
+start\-container\-get\-system\-smtp(1)
+Display the server\*(Aqs SMTP settings
 .TP
 start\-container\-git\-info(1)
+Display the git hash of the running StartOS build
+.TP
+start\-container\-list\-service\-interfaces(1)
+List a service\*(Aqs interfaces
+.TP
+start\-container\-mount(1)
+Mount a dependency\*(Aqs volume (JSON parameters on stdin)
+.TP
+start\-container\-mount\-shared\-volume(1)
+Mount a granted shared volume into a subcontainer
 .TP
 start\-container\-notification(1)
+Commands for this service\*(Aqs notifications
 .TP
 start\-container\-pipe\-wrap(1)
+Relay a command\*(Aqs standard streams through pipes
 .TP
 start\-container\-plugin(1)
+Commands for this service\*(Aqs plugins
 .TP
 start\-container\-rebuild(1)
+Rebuild this service\*(Aqs container
 .TP
 start\-container\-restart(1)
+Restart this service
+.TP
+start\-container\-retire\-binding(1)
+Retire one of a host\*(Aqs bindings
+.TP
+start\-container\-retire\-host(1)
+Retire one of this service\*(Aqs hosts
+.TP
+start\-container\-set\-backup\-progress(1)
+Report backup progress (JSON parameters on stdin)
 .TP
 start\-container\-set\-data\-version(1)
+Record this service\*(Aqs data version
 .TP
 start\-container\-set\-dependencies(1)
+Declare this service\*(Aqs current dependencies
+.TP
+start\-container\-set\-health(1)
+Report a health check result (JSON parameters on stdin)
+.TP
+start\-container\-set\-init\-progress(1)
+Report initialization progress (JSON parameters on stdin)
 .TP
 start\-container\-set\-main\-status(1)
+Report whether the main daemon is running
 .TP
 start\-container\-shutdown(1)
+Stop this service
 .TP
 start\-container\-subcontainer(1)
+Commands for this service\*(Aqs subcontainers
 .SH VERSION
 v0.4.3

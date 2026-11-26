@@ -616,17 +616,18 @@ password directly.
 
 ### Retention policies
 
-Preview every retention change before applying it:
+Find the backup location ID with `start-cli backup target list` and set
+`target_id` to that ID. Preview every retention change before applying it:
 
 ```sh
-start-cli backup policy preview-change cifs-0 bitcoind --keep-rule 1h:1d --keep-rule 1d:1w
+start-cli backup policy preview-change "$target_id" bitcoind --keep-rule 1h:1d --keep-rule 1d:1w
 ```
 
 Then apply the identical policy and repeat `--confirm-removal` for every
 checkpoint ID listed in the preview:
 
 ```sh
-start-cli backup policy apply cifs-0 bitcoind --keep-rule 1h:1d --keep-rule 1d:1w \
+start-cli backup policy apply "$target_id" bitcoind --keep-rule 1h:1d --keep-rule 1d:1w \
   --confirm-removal <CHECKPOINT_ID>
 ```
 
@@ -638,13 +639,13 @@ which prevents stale or unintended deletion.
 
 Most UI backup actions have a direct `start-cli` command:
 
-- backup locations use `backup target list`, `backup target cifs add|update|remove`,
-  and `backup target delete-legacy`;
+- backup locations use `backup target list|create|find|inspect|rename|remove`,
+  `backup target update-cifs`, and `backup target delete-legacy`;
 - one-time backups use `backup create`;
 - automatic schedules use `backup job list|add|edit|enable|disable|run-now|delete`,
-  with `retry-target` and `reassign-target` for repair. The UI's **Pause all**
-  and **Resume all** controls correspond to running `disable` or `enable` for
-  each job ID;
+  with `retry-target` and `reassign-target` for repair. Use
+  `backup job set-enabled-bulk <JOB_ID>... --enabled false` to pause several
+  jobs together, or `--enabled true` to resume them;
 - estimates, activity, history, version-history changes, and new-service
   decisions use `backup estimate-capacity`, `backup activity`, `backup checkpoint`,
   `backup policy`, and `backup review`;
@@ -653,12 +654,14 @@ backup restore-checkpoint`, and a UI-style selection mixing manual and
   automatic checkpoints uses `package backup restore-mixed` with repeatable
   `--checkpoint PACKAGE_ID=SNAPSHOT_ID` values and `--manual-ids`.
 
-The UI can delete a schedule and its related backups in one confirmation. The
-CLI keeps those destructive operations separate: record the applicable target,
-package, and checkpoint IDs from `backup checkpoint list`, run `backup job delete
-<ID>`, then remove the archived checkpoints with `backup checkpoint
-delete-archived <TARGET_ID> <PACKAGE_ID> <SNAPSHOT_IDS>` for each affected
-package.
+Use `backup checkpoint refresh <TARGET_ID>` to refresh history on a known
+target using its saved unlock credentials.
+
+`backup job validate`, `backup job delete-with-backups`,
+`backup checkpoint delete-archived-snapshots-bulk`, and `backup policy estimate`
+read their JSON-RPC parameters from standard input. To remove only a schedule,
+use `backup job delete <JOB_ID>`. To delete archived checkpoints for one
+service, use `backup checkpoint delete-archived`.
 
 ### New-service reviews
 
@@ -1017,6 +1020,8 @@ Restart the server from diagnostic mode.
 ### `start-cli diagnostic rebuild`
 
 Rebuild all containers from diagnostic mode.
+
+Off the server, prompts for the server password once one is set.
 
 ### `start-cli diagnostic disk forget <GUID>`
 

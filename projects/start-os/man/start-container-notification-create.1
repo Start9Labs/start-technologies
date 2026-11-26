@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-container-notification-create 1  "create "
+.SH NAME
+start\-container\-notification\-create \- Send a notification from this service
+.SH SYNOPSIS
+\fBstart\-container notification create\fR [\fB\-\-data\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fILEVEL\fR> <\fITITLE\fR> <\fIMESSAGE\fR>
+.SH DESCRIPTION
+Send a notification from this service
+.SH OPTIONS
+.TP
+\fB\-\-data\fR \fI<DATA>\fR
+Markdown details shown with the notification
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fILEVEL\fR>
+Notification severity level
+.TP
+<\fITITLE\fR>
+Notification title
+.TP
+<\fIMESSAGE\fR>
+Notification message content

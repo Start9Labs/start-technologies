@@ -13,7 +13,7 @@ use crate::util::logger::LOGGER;
 #[cfg(test)]
 mod tests;
 
-fn app() -> CliApp<CliContext, ClientConfig> {
+pub(crate) fn app() -> CliApp<CliContext, ClientConfig> {
     CliApp::new(
         |cfg: ClientConfig| Ok(CliContext::init(cfg.load()?)?),
         crate::main_api(),

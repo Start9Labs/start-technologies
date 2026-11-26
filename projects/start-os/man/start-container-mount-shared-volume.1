@@ -1,0 +1,31 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-container-mount-shared-volume 1  "mount-shared-volume "
+.SH NAME
+start\-container\-mount\-shared\-volume \- Mount a granted shared volume into a subcontainer
+.SH SYNOPSIS
+\fBstart\-container mount\-shared\-volume\fR [\fB\-\-subpath\fR] [\fB\-\-readonly\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> <\fISUBCONTAINER\fR> <\fIMOUNTPOINT\fR>
+.SH DESCRIPTION
+Mount a granted shared volume into a subcontainer
+.SH OPTIONS
+.TP
+\fB\-\-subpath\fR \fI<SUBPATH>\fR
+Directory within the volume to mount
+.TP
+\fB\-\-readonly\fR
+Mount read\-only
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Shared volume ID
+.TP
+<\fISUBCONTAINER\fR>
+Subcontainer identifier
+.TP
+<\fIMOUNTPOINT\fR>
+Path to mount at inside the subcontainer

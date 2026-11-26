@@ -3,7 +3,7 @@ import { T } from '@start9labs/start-core'
 
 export type DataModel = Pick<
   T.Public,
-  'registryCache' | 'osUpdateCache' | 'sshPubkeys'
+  'registryCache' | 'registryIndexes' | 'osUpdateCache' | 'sshPubkeys'
 > & {
   ui: UIData
   serverInfo: T.ServerInfo & {

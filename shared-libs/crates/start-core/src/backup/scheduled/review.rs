@@ -8,6 +8,7 @@ use super::{BackupJob, BackupJobId, BackupServiceScope, NewServiceBackupReview};
 use crate::context::RpcContext;
 use crate::db::model::DatabaseModel;
 use crate::db::model::package::{Task, TaskEntry, TaskSeverity};
+use crate::mcp::{EFFECT, Effect};
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
 use crate::util::serde::HandlerExtSerde;
@@ -23,6 +24,7 @@ pub fn review<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-backup-service-reviews")
                 .with_call_remote::<crate::context::CliContext>(),
@@ -35,7 +37,12 @@ pub fn review<C: Context>() -> ParentHandler<C> {
                 .with_about("about.resolve-backup-service-review")
                 .with_call_remote::<crate::context::CliContext>(),
         )
-        .subcommand("resolve", from_fn_async(resolve).no_cli())
+        .subcommand(
+            "resolve",
+            from_fn_async(resolve)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_cli(),
+        )
 }
 
 /// Lists pending new-service reviews using the current schedule set.

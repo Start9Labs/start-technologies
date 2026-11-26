@@ -1019,7 +1019,7 @@ pub struct AttachParams {
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     signer: Option<InternedString>,
-    subcontainer: Option<Guid>,
+    subcontainer: Option<InternedString>,
     name: Option<InternedString>,
     image_id: Option<ImageId>,
     user: Option<InternedString>,

@@ -41,7 +41,7 @@ impl VersionT for Version {
         V0_4_3.clone()
     }
     fn migration_revision(self) -> usize {
-        4
+        5
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
@@ -59,6 +59,7 @@ impl VersionT for Version {
                 }
             }
         });
+        suffix_duplicate_shared_volume_names(db);
         Ok(Value::Null)
     }
     async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
@@ -302,6 +303,35 @@ fn group_enabled_plain_domains(addresses: &mut Value) {
     }
 }
 
+/// Gives every shared volume a valid folder name, suffixing repeats to keep names unique.
+fn suffix_duplicate_shared_volume_names(db: &mut Value) {
+    let Some(volumes) = db
+        .get_mut("public")
+        .and_then(|public| public.get_mut("sharedVolumes"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let mut taken: BTreeSet<String> = volumes
+        .values()
+        .filter_map(|volume| volume["name"].as_str().map(str::to_owned))
+        .collect();
+    let mut seen = BTreeSet::new();
+    for (_, volume) in volumes.iter_mut() {
+        let Some(name) = volume["name"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        let valid = crate::shared_volumes::folder_name(&name);
+        if valid == name && seen.insert(name.clone()) {
+            continue;
+        }
+        let unused = crate::shared_volumes::unused_name(&valid, |name| taken.contains(name));
+        taken.insert(unused.clone());
+        seen.insert(unused.clone());
+        volume["name"] = json!(unused);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use patch_db::json_ptr::ROOT;
@@ -408,13 +438,19 @@ mod tests {
         let version = super::super::Version::from_exver_version(Version.semver())
             .as_version_t()
             .unwrap();
-        for applied in [0, 1, 2, 3] {
-            let mut db = json!({ "public": { "serverInfo": {
-                "version": "0.4.3",
-                "packageVersionCompat": ">=0.3.0 <0.5.0",
-                "postInitMigrationTodos": {},
-                "latestMigrationRevision": applied,
-            } } });
+        for applied in [0, 1, 2, 3, 4] {
+            let mut db = json!({ "public": {
+                "serverInfo": {
+                    "version": "0.4.3",
+                    "packageVersionCompat": ">=0.3.0 <0.5.0",
+                    "postInitMigrationTodos": {},
+                    "latestMigrationRevision": applied,
+                },
+                "sharedVolumes": {
+                    "A": { "name": "Photos" },
+                    "B": { "name": "Photos" },
+                },
+            } });
             for queued in [true, false] {
                 db["public"]["serverInfo"]["postInitMigrationTodos"] = json!({});
                 let revision = super::super::applied_migration_revision(&mut db).unwrap();
@@ -429,6 +465,10 @@ mod tests {
                         .unwrap()
                         .contains_key("0.4.3"),
                     queued
+                );
+                assert_eq!(
+                    db["public"]["sharedVolumes"]["B"]["name"],
+                    json!("Photos (2)")
                 );
             }
         }
@@ -513,6 +553,42 @@ mod tests {
         );
         Version.pre_init(&db).await.unwrap();
         assert_eq!(db.dump(&ROOT).await.value, migrated);
+    }
+
+    #[test]
+    fn repeated_shared_volume_names_gain_unused_suffixes() {
+        let volume = |name: &str| json!({"name": name, "source": {"kind": "local"}, "grants": {}});
+        let mut db = json!({"public": {"sharedVolumes": {
+            "A": volume("Photos"),
+            "B": volume("Photos"),
+            "C": volume("Photos (2)"),
+            "D": volume("Music"),
+            "E": volume("Photos"),
+            "F": volume("media/photos"),
+            "G": volume(".."),
+        }}});
+        suffix_duplicate_shared_volume_names(&mut db);
+        let names: Vec<_> = db["public"]["sharedVolumes"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|volume| volume["name"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Photos",
+                "Photos (3)",
+                "Photos (2)",
+                "Music",
+                "Photos (4)",
+                "media-photos",
+                "Volume"
+            ]
+        );
+        let migrated = db.clone();
+        suffix_duplicate_shared_volume_names(&mut db);
+        assert_eq!(db, migrated);
     }
 
     fn row(hostname: &str, public: bool, metadata: Value) -> Value {

@@ -105,6 +105,8 @@ tui-dialog :not([tuiForm]) > [tuiNotification]:not(:last-child) {
 // Body of markdown rendered through `| markdown | dompurify`. The innerHTML it
 // produces is unencapsulated, so these rules have to be global.
 .g-markdown {
+  white-space: normal;
+
   > :first-child {
     margin-block-start: 0;
   }

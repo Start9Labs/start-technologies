@@ -92,13 +92,22 @@ deserialization shape and whose `z.output` is the serialization shape;
 `z.toJSONSchema(schema, { io: 'input' | 'output' })` renders either side. Where
 the two shapes agree the schema is plain zod. Where they differ, the
 narrowest differing part is wrapped in `wire(input, output)`, an identity
-`z.codec` the schema module defines: a field with `#[serde(default)]` becomes
-`wire(z.string().optional(), z.string())`; a split rename, an input alias or a
-directional skip wraps the whole struct or enum.
+`z.codec` the schema module defines: a field with `#[serde(default = "path")]`
+becomes `wire(z.string().optional(), z.string())`; a split rename, an input alias
+or a directional skip wraps the whole struct or enum.
+
+A field whose missing input serde fills with its type's `Default` renders as
+`.default(...)` instead, so decoding fills the same value: a field-level
+`#[serde(default)]` or an omitted `Option`, rendered from its own type rather than
+a wire override, a literal hint or `deserialize_with`. The value is `TS::DEFAULT`,
+set where the type fixes it: `null` for `Option`, `[]` for sequences and sets,
+`{}` for maps, `false`, `0` and `""` for `bool`, integers and `String`, passed
+through `Box`, `Arc`, `Rc` and `Cow`. Any other type, and a container-level
+`#[serde(default)]`, keeps the identity codec.
 
 `parse` runs the input side and then the output side, so it accepts values
 valid in both directions. Input-only required fields, split renames, aliases,
-omitted defaults and serialized non-finite floats can prevent parsing a value
+omitted defaults the identity codec carries and serialized non-finite floats can prevent parsing a value
 that is valid in one direction. The schemas are structural JSON validators,
 not serde: numeric precision, unknown-field rejection and application
 predicates stay with serde or the handler.

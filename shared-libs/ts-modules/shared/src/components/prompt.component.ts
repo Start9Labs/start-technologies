@@ -28,7 +28,7 @@ import { i18nKey } from '../i18n/i18n.providers'
         [placeholder]="options.placeholder || ''"
         [type]="options.useMask && masked ? 'password' : 'text'"
         [autocomplete]="options.useMask ? 'off' : ''"
-        (keyup.enter)="submit(value.trim())"
+        (keyup.enter)="submit(value)"
       />
       @if (options.useMask) {
         <button
@@ -54,7 +54,7 @@ import { i18nKey } from '../i18n/i18n.providers'
         tuiButton
         type="button"
         [disabled]="!value && options.required !== false"
-        (click)="submit(value.trim())"
+        (click)="submit(value)"
       >
         {{ options.buttonText || ('Submit' | i18n) }}
       </button>
@@ -88,7 +88,8 @@ export class PromptModal {
   }
 
   submit(value: string) {
-    if (value || !this.options.required) {
+    if (!this.options.useMask) value = value.trim()
+    if (value || this.options.required === false) {
       const { pattern, patternError } = this.options
       if (pattern && !new RegExp(pattern).test(value)) {
         this.error = patternError || 'Invalid input'
@@ -109,6 +110,7 @@ export interface PromptOptions {
   buttonText?: i18nKey
   placeholder?: i18nKey
   required?: boolean
+  /** Masked input preserves leading and trailing whitespace. */
   useMask?: boolean
   initialValue?: string | null
   pattern?: string

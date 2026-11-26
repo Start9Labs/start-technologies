@@ -1,14 +1,15 @@
 use std::collections::BTreeMap;
 
-use itertools::Itertools;
+use clap::Parser;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;
-use crate::context::{CliContext, RpcContext};
+use crate::context::CliContext;
+use crate::mcp::{EFFECT, Effect};
 #[allow(unused_imports)]
 use crate::prelude::*;
-use crate::util::serde::HandlerExtSerde;
+use crate::util::serde::{HandlerExtSerde, StdinDeserializable};
 
 pub mod backup_bulk;
 pub mod history;
@@ -119,9 +120,22 @@ rpc_toolkit::ts_export!(PackageBackupReport, namespaces = [""]);
 async fn call_remote<P: Serialize + Send + Sync>(
     args: HandlerArgs<CliContext, P>,
 ) -> Result<Value, Error> {
-    let method = args.parent_method.into_iter().chain(args.method).join(".");
     args.context
-        .call_remote::<RpcContext>(&method, to_value(&args.params)?)
+        .call_fronted(args.parent_method, args.method, &args.params)
+        .await
+}
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[serde(transparent)]
+struct StdinParams {
+    #[command(flatten)]
+    params: StdinDeserializable<Value>,
+}
+
+async fn forward_stdin(args: HandlerArgs<CliContext, StdinParams>) -> Result<Value, Error> {
+    args.context
+        .call_fronted(args.parent_method, args.method, &args.params.params.0)
         .await
 }
 
@@ -138,6 +152,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "create",
             from_fn_async(backup_bulk::backup_all)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.create-backup-all-packages")
                 .with_call_remote::<CliContext>(),
@@ -156,6 +171,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
                 .subcommand(
                     "restore",
                     from_fn_async(volume::restore_volumes_rpc)
+                        .with_metadata(EFFECT, Effect::Destructive.into())
                         .with_metadata("sync_db", Value::Bool(true))
                         .with_about("about.restore-volumes-from-backup")
                         .no_cli(),
@@ -176,6 +192,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "targets",
             from_fn_async(target::list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-existing-backup-targets")
                 .with_call_remote::<CliContext>(),
@@ -190,7 +207,7 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "checkpoint",
-            scheduled::history::<C>().with_about("about.commands-backup-history"),
+            scheduled::history::<C>().with_about("about.commands-backup-checkpoint-history"),
         )
         .subcommand(
             "policy",
@@ -206,7 +223,9 @@ pub fn package_backup<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
         .subcommand(
             "restore",
-            from_fn_async(restore::restore_packages_rpc).no_cli(),
+            from_fn_async(restore::restore_packages_rpc)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
         )
         .subcommand(
             "restore",
@@ -233,11 +252,15 @@ pub fn package_backup<C: Context>() -> ParentHandler<C> {
         )
         .subcommand(
             "restore-scheduled",
-            from_fn_async(restore::restore_scheduled_packages_rpc).no_cli(),
+            from_fn_async(restore::restore_scheduled_packages_rpc)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
         )
         .subcommand(
             "restore-selection",
-            from_fn_async(restore::restore_selection_rpc).no_cli(),
+            from_fn_async(restore::restore_selection_rpc)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
         )
 }
 
