@@ -122,6 +122,8 @@ static DNS_QUERY: LazyLock<Regex> = LazyLock::new(|| {
         r"((?:query|dnssec-query)\[[A-Za-z0-9_=]+\] |(?:forwarded|reply|cached|cached-stale|config|validation|DHCP|DHCPv6|auth) |/\S+ )(\S+)( (?:from|to|is) )(\S+)",
     )
 });
+static DNS_REBIND: LazyLock<Regex> =
+    LazyLock::new(|| compile(r"(possible DNS-rebind attack detected: )(\S+)"));
 static DNS_SET: LazyLock<Regex> =
     LazyLock::new(|| compile(r"((?:ipset|nftset) add \S+ \S+ )(\S+)"));
 static REVERSE_NAME: LazyLock<Regex> = LazyLock::new(|| {
@@ -275,6 +277,8 @@ pub struct Redactor {
     mac_hex: Option<(Regex, HashMap<String, [u8; 6]>)>,
     local_suffixes: Vec<String>,
     local_names: Regex,
+    /// Configured local domains outside [`LOCAL_SUFFIXES`], matched bare.
+    configured_domains: Option<Regex>,
 }
 
 impl Redactor {
@@ -302,10 +306,16 @@ impl Redactor {
             .map(|mac| (mac.iter().map(|b| format!("{b:02x}")).collect(), *mac))
             .collect();
         let mac_hex = alternation(hex.keys().cloned(), true).map(|re| (re, hex));
+        let configured: Vec<String> = known
+            .local_domains
+            .into_iter()
+            .filter(|d| !d.is_empty() && !LOCAL_SUFFIXES.contains(&d.as_str()))
+            .collect();
+        let configured_domains = alternation(configured.iter().cloned(), true);
         let mut local_suffixes: Vec<String> = LOCAL_SUFFIXES
             .iter()
             .map(|s| s.to_string())
-            .chain(known.local_domains.into_iter().filter(|d| !d.is_empty()))
+            .chain(configured)
             .collect();
         local_suffixes.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         local_suffixes.dedup();
@@ -325,6 +335,7 @@ impl Redactor {
             mac_hex,
             local_suffixes,
             local_names,
+            configured_domains,
         }
     }
 
@@ -430,6 +441,11 @@ impl Redactor {
                 })
             });
             update(&mut s, |s| {
+                DNS_REBIND.replace_all(s, |c: &Captures| {
+                    format!("{}{}", &c[1], self.looked_up(&c[2]))
+                })
+            });
+            update(&mut s, |s| {
                 DNS_SET.replace_all(s, |c: &Captures| {
                     format!("{}{}", &c[1], self.looked_up(&c[2]))
                 })
@@ -444,6 +460,16 @@ impl Redactor {
                 .then(|| self.host(&s[r]))
             })
         });
+        if let Some(re) = &self.configured_domains {
+            update(&mut s, |s| {
+                replace_with(re, s, |s, r| {
+                    let label = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_');
+                    (!prev(s, r.start).is_some_and(|c| label(c) || matches!(c, '.' | '<'))
+                        && !next(s, r.end).is_some_and(label))
+                    .then(|| self.domain(&s[r]))
+                })
+            });
+        }
         update(&mut s, |s| {
             replace_with(&REVERSE_NAME, s, |s, r| {
                 let label = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');

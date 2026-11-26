@@ -862,3 +862,45 @@ fn reverse_zones_redact_public_ipv4_prefixes_and_accept_mixed_case() {
     let kept = "dnsmasq[9]: query[SOA] 168.192.in-addr.arpa from 192.168.1.20";
     assert_eq!(redactor.line(kept, false), kept);
 }
+
+#[test]
+fn rebind_warnings_hide_the_name() {
+    let redactor = plain();
+    for (line, secret) in [
+        (
+            "dnsmasq[1234]: possible DNS-rebind attack detected: fd01-6a13-6ff7-4650-1a66-96ff-fea2-6282.0123456789abcdef0123456789abcdef.plex.direct",
+            "1a66-96ff",
+        ),
+        ("dnsmasq[1234]: possible DNS-rebind attack detected: nas.smith-family.com", "smith"),
+    ] {
+        let out = redactor.line(line, false);
+        assert!(!out.contains(secret) && out.contains("<dom-"), "{out}");
+    }
+    let out = redactor.line(
+        "dnsmasq[1234]: possible DNS-rebind attack detected: nas.lan",
+        false,
+    );
+    assert!(
+        out.ends_with(&format!("{}.lan", redactor.name("nas"))),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_bare_configured_domain_shares_its_names_domain_token() {
+    let redactor = redactor(
+        &[(
+            "dhcp",
+            "config dnsmasq\n\toption domain 'family.example.org'\n\toption local '/family.example.org/'\n",
+        )],
+        &[],
+    );
+    let bare = redactor.line(
+        "dnsmasq[1234]: using only locally-known addresses for family.example.org",
+        false,
+    );
+    assert!(!bare.contains("family") && bare.contains("<dom-"), "{bare}");
+    let named = redactor.line("netifd: laptop.family.example.org went away", false);
+    let domain = token_after(&bare, "for ");
+    assert!(named.contains(&format!(".{domain}.org went")), "{named}");
+}
