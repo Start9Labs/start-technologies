@@ -420,10 +420,7 @@ impl Redactor {
                     };
                     let answer = if &c[3] == " is "
                         && c[2].parse::<IpAddr>().is_ok()
-                        && !matches!(
-                            &c[4],
-                            "NXDOMAIN" | "NODATA" | "NODATA-IPv4" | "NODATA-IPv6"
-                        )
+                        && !matches!(&c[4], "NXDOMAIN" | "NODATA" | "NODATA-IPv4" | "NODATA-IPv6")
                     {
                         self.looked_up(&c[4])
                     } else {
@@ -621,7 +618,7 @@ impl Redactor {
         let labels = name.rsplitn(3, '.').nth(2)?;
         let labels: Vec<u8> = labels
             .split('.')
-            .map(str::parse)
+            .map(str::parse::<u8>)
             .collect::<Result<_, _>>()
             .ok()?;
         let mut octets = [0; 4];

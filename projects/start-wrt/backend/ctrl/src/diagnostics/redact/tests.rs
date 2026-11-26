@@ -730,10 +730,7 @@ fn single_label_dns_names_share_the_device_token() {
 fn ptr_answers_redact_names_and_keep_statuses() {
     let redactor = plain();
     assert_eq!(
-        redactor.line(
-            "dnsmasq[9]: reply 192.168.1.20 is personal-laptop",
-            false
-        ),
+        redactor.line("dnsmasq[9]: reply 192.168.1.20 is personal-laptop", false),
         format!(
             "dnsmasq[9]: reply 192.168.1.20 is {}",
             redactor.name("personal-laptop")
