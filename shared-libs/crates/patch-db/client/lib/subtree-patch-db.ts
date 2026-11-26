@@ -24,8 +24,11 @@ import {
   parseSelectorKey,
   parseSubscriptionKey,
   Projection,
+  projectNarrowed,
   projectOperations,
   projectRoot,
+  reconcile,
+  reprojectRoot,
   Selection,
   selectionContains,
   selectionKey,
@@ -48,8 +51,7 @@ export type SubtreeStart = {
   id: number
   subscription?: string | null
 } & (
-  | { value: unknown; revisions?: null }
-  | { value?: null; revisions: Revision[] }
+  { value: unknown; revisions?: null } | { value?: null; revisions: Revision[] }
 )
 
 /** A projected revision; with `extend`, what the latest selection change added. */
@@ -84,8 +86,10 @@ export type SubtreeOptions = {
  * Each watch is reference-counted and released a short delay after its last watcher
  * leaves. The document is a replica of the server's under the requested selection, which
  * is the union of the watches' selectors. A selection change prunes the replica at once
- * and fills it from the stream's `extend` revision, which also confirms the change; a watch
- * is served once the confirmed selection covers it. Selected array positions remain
+ * and fills it from the stream's `extend` revision, which also confirms the change. A watch
+ * is served once the confirmed selection covers it. Every update, dumps included, keeps the
+ * identity of each subtree it leaves unchanged in the document and in watched values, and
+ * a watch is notified only when its value is a new object. Selected array positions remain
  * correct across selection changes and preceding revisions. Selection updates remain
  * serialized through synchronous watcher callbacks. The document cursor is the
  * subscription's. A failed subscription is reported on {@link failures$}; {@link start}
@@ -95,6 +99,11 @@ export class SubtreePatchDB<
   T extends { [key: string]: any },
 > extends PatchDB<T> {
   private readonly watchers = new Map<string, number>()
+  /** Each watch's pointer, selection and the source its value projects. */
+  private readonly views = new Map<
+    string,
+    { pointer: string; selection: Selection; source: unknown }
+  >()
   private readonly releases = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly changes$ = new BehaviorSubject<void>(undefined)
   private stream?: Subscription
@@ -135,9 +144,14 @@ export class SubtreePatchDB<
       entries.every(
         ([, c]) => c.epoch === first[1].epoch && c.id === first[1].id,
       )
-    this.cache$.next({ id: dump.id, value: { ...dump.value } })
+    this.cache$.next({
+      id: dump.id,
+      value: reconcile(this.cache$.value.value, dump.value) as T,
+    })
     if (agreed) {
-      this.held = minimalSelection(entries.map(([key]) => parseSelectorKey(key)))
+      this.held = minimalSelection(
+        entries.map(([key]) => parseSelectorKey(key)),
+      )
       this.confirmed = this.held
       this.cursor = first[1]
     }
@@ -168,6 +182,7 @@ export class SubtreePatchDB<
     this.confirmed = null
     Object.values(this.watchedNodes).forEach(node => node.subject.complete())
     this.watchedNodes = {}
+    this.views.clear()
     this.releases.forEach(timer => clearTimeout(timer))
     this.releases.clear()
     this.watchers.forEach((count, key) => {
@@ -203,8 +218,30 @@ export class SubtreePatchDB<
     return this.watchKey$(subscriptionKey(pathFromArray(args), projection))
   }
 
+  /** Re-projects only what changed, notifying the watch when its value is a new object. */
   protected override updateWatchedNode(key: string, data: T): void {
-    this.watchedNodes[key]?.subject.next(read(key, data))
+    const node = this.watchedNodes[key]
+    const view = this.views.get(key)
+    if (!node || !view) return
+    const source = getValueByPointer(data, view.pointer)
+    if (source === view.source) return
+    const value = reprojectRoot(view.selection, source, {
+      source: view.source,
+      value: node.subject.value,
+    })
+    view.source = source
+    if (value !== node.subject.value) node.subject.next(value)
+  }
+
+  private createNode(key: string) {
+    const { pointer, projection } = parseSubscriptionKey(key)
+    const selection = watchSelection(projection)
+    const source = getValueByPointer(this.cache$.value.value, pointer)
+    this.views.set(key, { pointer, selection, source })
+    return {
+      subject: new BehaviorSubject(projectRoot(selection, source)),
+      pathArr: arrayFromPath(pointer),
+    }
   }
 
   private watchKey$(key: string): Observable<any> {
@@ -215,10 +252,7 @@ export class SubtreePatchDB<
           filter(() => this.covered(key)),
           take(1),
           switchMap(() => {
-            this.watchedNodes[key] ??= {
-              subject: new BehaviorSubject(read(key, this.cache$.value.value)),
-              pathArr: arrayFromPath(parseSubscriptionKey(key).pointer),
-            }
+            this.watchedNodes[key] ??= this.createNode(key)
             return this.watchedNodes[key].subject
           }),
         )
@@ -233,8 +267,9 @@ export class SubtreePatchDB<
   private acquire(key: string): () => void {
     clearTimeout(this.releases.get(key))
     this.releases.delete(key)
-    this.watchers.set(key, (this.watchers.get(key) ?? 0) + 1)
-    this.reselect()
+    const held = this.watchers.get(key)
+    this.watchers.set(key, (held ?? 0) + 1)
+    if (held === undefined) this.reselect()
     let released = false
     return () => {
       if (released) return
@@ -246,7 +281,11 @@ export class SubtreePatchDB<
         key,
         setTimeout(() => {
           this.releases.delete(key)
-          if (!this.watchers.get(key)) this.watchers.delete(key)
+          if (this.watchers.get(key)) return
+          this.watchers.delete(key)
+          this.watchedNodes[key]?.subject.complete()
+          delete this.watchedNodes[key]
+          this.views.delete(key)
           this.reselect()
         }, this.releaseDelay),
       )
@@ -283,6 +322,7 @@ export class SubtreePatchDB<
       return
     }
     this.beforeUpdate = { ...this.cache$.value }
+    const held = this.held
     this.held = desired
     const confirmed = this.confirmed ?? NOTHING
     const retained = minimalSelection([
@@ -293,7 +333,14 @@ export class SubtreePatchDB<
     this.updating = desired
     const cache = this.cache$.value
     this.handleDump(
-      { id: cache.id, value: projectRoot(desired, cache.value) as T },
+      {
+        id: cache.id,
+        value: projectNarrowed(
+          desired,
+          held.filter(s => !selectionContains(desired, s)),
+          cache.value,
+        ) as T,
+      },
       cache,
     )
     this.emit(cache)
@@ -361,12 +408,19 @@ export class SubtreePatchDB<
             Array.isArray(getValueByPointer(cache.value, pathFromArray(path))),
           )
         : revision.patch
+    const source = target.value
     patch.forEach(op => applyOperation(target, op as Operation<unknown>))
     if (target === cache) {
       this.publishRevision({ id: revision.id, patch }, cache)
     } else {
       this.handleDump(
-        { id: revision.id, value: projectRoot(this.held!, target.value) as T },
+        {
+          id: revision.id,
+          value: reprojectRoot(this.held!, target.value, {
+            source,
+            value: cache.value,
+          }) as T,
+        },
         cache,
       )
     }
@@ -381,11 +435,19 @@ export class SubtreePatchDB<
     this.subscription = null
     if (this.updating) {
       this.updating = null
-      this.held = this.confirmed
+      const wider = this.held
+      const held = (this.held = this.confirmed)
       const cache = this.cache$.value
-      if (this.held)
+      if (held)
         this.handleDump(
-          { id: cache.id, value: projectRoot(this.held, cache.value) as T },
+          {
+            id: cache.id,
+            value: projectNarrowed(
+              held,
+              (wider ?? []).filter(s => !selectionContains(held, s)),
+              cache.value,
+            ) as T,
+          },
           cache,
         )
       this.cache$.next(cache)
@@ -412,13 +474,4 @@ export class SubtreePatchDB<
       watchSelectors(key).every(s => selectionContains(confirmed, s))
     )
   }
-}
-
-/** The watched value of a watch key: its projection of the document at its pointer. */
-function read(key: string, data: unknown): unknown {
-  const { pointer, projection } = parseSubscriptionKey(key)
-  return projectRoot(
-    watchSelection(projection),
-    getValueByPointer(data as any, pointer),
-  )
 }
