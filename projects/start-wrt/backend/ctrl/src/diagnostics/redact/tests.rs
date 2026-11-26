@@ -567,3 +567,121 @@ fn a_log_split_into_chunks_is_redacted_whole() {
     assert_eq!(line_chunks(b"", 4), Vec::<&[u8]>::new());
     assert_eq!(line_chunks(b"no newline", 4), vec![&b"no newline"[..]]);
 }
+
+#[test]
+fn looked_up_names_become_tokens() {
+    let redactor = redactor(
+        &[("dhcp", "config dnsmasq\n\toption domain 'home.example'\n")],
+        &[],
+    );
+    for (line, secret) in [
+        (
+            "dnsmasq[9]: query[A] www.bank-of-smith.com from 192.168.1.20",
+            "bank-of-smith",
+        ),
+        (
+            "dnsmasq[9]: 12 192.168.1.20/5353 query[AAAA] chat.smith.slack.com from 192.168.1.20",
+            "smith",
+        ),
+        (
+            "dnsmasq[9]: forwarded www.bank-of-smith.com to 1.1.1.1",
+            "bank-of-smith",
+        ),
+        (
+            "dnsmasq[9]: reply www.bank-of-smith.com is 203.0.113.7",
+            "bank-of-smith",
+        ),
+        ("dnsmasq[9]: cached Shop.Example.co.uk is <CNAME>", "Shop"),
+        (
+            "dnsmasq[9]: /tmp/hosts/odhcpd johns-laptop.lan is 192.168.1.20",
+            "johns",
+        ),
+        (
+            "dnsmasq[9]: query[A] johns-laptop.home.example from 192.168.1.20",
+            "johns",
+        ),
+    ] {
+        let out = redactor.line(line, false);
+        assert!(!out.contains(secret), "{out}");
+        assert!(out.contains("<dom-") || out.contains("<name-"), "{out}");
+    }
+    let out = redactor.line(
+        "dnsmasq[9]: query[A] www.bank-of-smith.com from 192.168.1.20",
+        false,
+    );
+    assert!(out.ends_with(".com from 192.168.1.20"), "{out}");
+    let kept = "dnsmasq[9]: query[A] router.lan from 192.168.1.20";
+    assert_eq!(redactor.line(kept, false), kept);
+}
+
+#[test]
+fn local_names_become_tokens_in_any_message() {
+    let redactor = plain();
+    let tor = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcd";
+    for line in [
+        format!("avahi-daemon[2]: resolved {tor}.local on br-lan"),
+        "startwrt: name for 10:2a:3b:4c:5d:6e is smith-server.local.".to_string(),
+        "netifd: johns-laptop.lan went away".to_string(),
+    ] {
+        let out = redactor.line(&line, false);
+        assert!(
+            !out.contains(tor) && !out.contains("smith") && !out.contains("johns"),
+            "{out}"
+        );
+    }
+    let out = redactor.line("netifd: johns-laptop.lan went away", false);
+    assert!(out.contains("<name-") && out.contains(".lan went"), "{out}");
+    assert_eq!(
+        token_after(&out, "netifd: "),
+        redactor.name("johns-laptop"),
+        "a .lan name shares its device's token"
+    );
+    for kept in [
+        "procd: running /etc/rc.local",
+        "router.local and localhost.lan",
+    ] {
+        assert_eq!(redactor.line(kept, false), kept);
+    }
+}
+
+#[test]
+fn reverse_lookups_hide_the_address_they_spell() {
+    let redactor = plain();
+    let forward = redactor.line(
+        "avahi: record for fd01:6a13:6ff7:4650:1a66:96ff:fea2:6282",
+        false,
+    );
+    let reverse = redactor.line(
+        "dnsmasq[9]: query[PTR] 2.8.2.6.2.a.e.f.f.f.6.9.6.6.a.1.0.5.6.4.7.f.f.6.3.1.a.6.1.0.d.f.ip6.arpa from 192.168.1.20",
+        false,
+    );
+    assert!(
+        !reverse.contains("6.a.1") && !reverse.contains("2.a.e.f"),
+        "{reverse}"
+    );
+    let rendered = forward.rsplit(' ').next().unwrap();
+    assert!(
+        reverse.contains(&format!("{rendered}.ip6.arpa from")),
+        "{reverse}"
+    );
+
+    let zone = "dnsmasq[9]: query[SOA] 7.f.f.6.3.1.a.6.1.0.d.f.ip6.arpa from ::1";
+    let out = redactor.line(zone, false);
+    assert!(out.contains("<ptr-") && !out.contains("6.a.1"), "{out}");
+    let short = "dnsmasq[9]: config d.f.ip6.arpa is NXDOMAIN";
+    assert_eq!(redactor.line(short, false), short);
+
+    let out = redactor.line(
+        "dnsmasq[9]: query[PTR] 56.34.12.84.in-addr.arpa from 192.168.1.20",
+        false,
+    );
+    assert!(
+        out.contains(&format!(
+            "{}.in-addr.arpa",
+            redactor.line("84.12.34.56", false)
+        )),
+        "{out}"
+    );
+    let private = "dnsmasq[9]: query[PTR] 20.1.168.192.in-addr.arpa from 192.168.1.20";
+    assert_eq!(redactor.line(private, false), private);
+}
