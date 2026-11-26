@@ -2291,6 +2291,12 @@ os-install.partitioned-pool-unsupported-layout:
   pl_PL: "Dane StartOS na %{disk} znajdują się na partycji %{partition} obok starszej instalacji systemu i nie można ich zachować na tym urządzeniu. Aby wymazać dysk i zacząć od nowa, wybierz „Nadpisz”."
 
 # os_install/gpt.rs
+os-install.preserved-data-from-newer-version:
+  en_US: "The StartOS data on %{disk} was last used by StartOS %{version}, which this installer (StartOS %{current}) cannot set up. Nothing has been changed. Flash a USB drive with StartOS %{version} or newer, boot from it, and choose \"Preserve\" again."
+  de_DE: "Die StartOS-Daten auf %{disk} wurden zuletzt von StartOS %{version} verwendet, das dieses Installationsprogramm (StartOS %{current}) nicht einrichten kann. Es wurde nichts verändert. Schreiben Sie StartOS %{version} oder neuer auf einen USB-Stick, starten Sie davon und wählen Sie erneut \"Beibehalten\"."
+  es_ES: "Los datos de StartOS en %{disk} los usó por última vez StartOS %{version}, que este instalador (StartOS %{current}) no puede configurar. No se ha cambiado nada. Grabe StartOS %{version} o una versión más reciente en una unidad USB, arranque desde ella y vuelva a elegir \"Conservar\"."
+  fr_FR: "Les données StartOS sur %{disk} ont été utilisées en dernier par StartOS %{version}, que ce programme d'installation (StartOS %{current}) ne peut pas configurer. Rien n'a été modifié. Flashez StartOS %{version} ou une version plus récente sur une clé USB, démarrez dessus et choisissez à nouveau « Conserver »."
+  pl_PL: "Dane StartOS na %{disk} były ostatnio używane przez StartOS %{version}, którego ten instalator (StartOS %{current}) nie może skonfigurować. Nic nie zostało zmienione. Nagraj StartOS %{version} lub nowszy na dysk USB, uruchom z niego komputer i ponownie wybierz „Zachowaj”."
 os-install.protected-partition-overlaps-os-root-bytes:
   en_US: "Protected partition %{path} starts at sector %{first_lba}, leaving only %{available_bytes} bytes for the OS root partition (minimum is %{min_bytes} bytes)"
   de_DE: "Geschützte Partition %{path} beginnt bei Sektor %{first_lba} und lässt nur %{available_bytes} Bytes für die OS-Root-Partition übrig (Minimum ist %{min_bytes} Bytes)"
