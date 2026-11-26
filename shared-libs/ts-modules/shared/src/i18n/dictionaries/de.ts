@@ -1106,4 +1106,11 @@ export default {
   1312: 'Zuletzt synchronisiert',
   1313: 'gerade eben',
   1314: 'Geben Sie Ihr Master-Passwort ein, um fortzufahren.',
+  1315: 'Prozessor',
+  1316: 'Grafikeinheit',
+  1317: 'Speicherlaufwerk',
+  1318: 'Netzwerkadapter',
+  1319: 'Chipsatz',
+  1320: 'Sensor',
+  1321: 'Keine Temperatursensoren gefunden',
 } satisfies i18n
