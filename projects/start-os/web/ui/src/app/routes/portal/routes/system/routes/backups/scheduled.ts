@@ -598,9 +598,14 @@ class JobEditor
             }
           </div>
 
-          <fieldset class="capacity-estimates">
-            <div class="heading estimate-heading">
-              <legend>{{ 'Capacity estimates' | i18n }}</legend>
+          <section
+            class="capacity-estimates"
+            aria-labelledby="backup-capacity-heading"
+          >
+            <header class="estimate-heading">
+              <h3 id="backup-capacity-heading" tuiHeader="h6">
+                {{ 'Capacity estimates' | i18n }}
+              </h3>
               <button
                 tuiButton
                 type="button"
@@ -610,7 +615,7 @@ class JobEditor
               >
                 {{ 'Refresh estimates' | i18n }}
               </button>
-            </div>
+            </header>
             <div class="capacity-list">
               @for (pkg of selectedPackages(form); track pkg.id) {
                 <tui-accordion class="capacity-service">
@@ -626,9 +631,13 @@ class JobEditor
                       <span tuiSubtitle>
                         {{ 'Maximum required space' | i18n }}:
                         @if (capacityEstimate(pkg.id); as estimate) {
-                          {{
-                            bytes(estimate.conservativePeakExcludingManualBytes)
-                          }}
+                          <span class="capacity-value">
+                            {{
+                              bytes(
+                                estimate.conservativePeakExcludingManualBytes
+                              )
+                            }}
+                          </span>
                         } @else {
                           {{ 'Unknown' | i18n }}
                         }
@@ -668,7 +677,7 @@ class JobEditor
                 </tui-accordion>
               }
             </div>
-          </fieldset>
+          </section>
 
           @if (projectedCount(form) > 1) {
             <div tuiNotification appearance="warning">
@@ -1072,14 +1081,6 @@ class JobEditor
       color: var(--tui-text-secondary);
     }
 
-    fieldset {
-      display: grid;
-      gap: 0.65rem;
-      min-inline-size: 0;
-      border: 1px solid var(--tui-border-normal);
-      border-radius: 0.5rem;
-    }
-
     .check-row,
     .switch-row {
       display: flex;
@@ -1133,11 +1134,20 @@ class JobEditor
     }
 
     .estimate-heading {
-      margin: 0 0 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
+      margin-block-end: 1rem;
+    }
+
+    .estimate-heading h3 {
+      margin: 0;
     }
 
     .capacity-estimates {
-      grid-template-columns: minmax(0, 1fr);
+      margin-block: 0.5rem;
     }
 
     .capacity-list,
@@ -1147,13 +1157,12 @@ class JobEditor
     }
 
     .capacity-list {
-      gap: 0.5rem;
+      gap: 0.75rem;
     }
 
     .capacity-service {
       min-inline-size: 0;
       overflow: hidden;
-      border: 1px solid var(--tui-border-normal);
       border-radius: var(--tui-radius-m);
     }
 
@@ -1162,7 +1171,12 @@ class JobEditor
       min-inline-size: 0;
       min-block-size: 3.5rem;
       block-size: auto;
+      padding: 0.75rem 1rem;
       white-space: normal;
+    }
+
+    .capacity-service > tui-expand {
+      padding-inline: 1rem;
     }
 
     .capacity-summary [tuiTitle] {
@@ -1177,6 +1191,10 @@ class JobEditor
       white-space: normal;
     }
 
+    .capacity-value {
+      white-space: nowrap;
+    }
+
     .more-info {
       flex: 0 0 auto;
       margin-inline-start: auto;
@@ -1185,14 +1203,16 @@ class JobEditor
 
     .capacity-details {
       margin: 0;
-      padding: 0 1rem 1rem;
     }
 
     .capacity-details div {
       display: grid;
-      grid-template-columns: minmax(10rem, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 1rem;
       padding-block: 0.65rem;
+    }
+
+    .capacity-details div + div {
       border-block-start: 1px solid var(--tui-border-normal);
     }
 
@@ -1208,7 +1228,6 @@ class JobEditor
 
     .capacity-unknown {
       margin: 0;
-      padding: 0 1rem 1rem;
       color: var(--tui-text-secondary);
     }
 
@@ -1278,20 +1297,15 @@ class JobEditor
 
       .capacity-details div {
         grid-template-columns: 1fr;
-        gap: 0.2rem;
+        gap: 0.375rem;
       }
 
       .capacity-details dd {
         text-align: start;
       }
 
-      .capacity-summary {
-        flex-wrap: wrap;
-      }
-
       .capacity-summary .more-info {
-        flex-basis: 100%;
-        text-align: end;
+        display: none;
       }
     }
   `,
