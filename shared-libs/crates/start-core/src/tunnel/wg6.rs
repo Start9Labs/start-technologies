@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use ipnet::Ipv6Net;
+use ipnet::{Ipv4Net, Ipv6Net};
 
 /// The IPv6 address for a host whose tunnel IPv4 is `v4`, on a subnet whose
 /// delegated prefix is `prefix`: the prefix's network bits OR'd with the tunnel
@@ -28,6 +28,12 @@ pub fn host_v6(prefix: Ipv6Net, v4: Ipv4Addr) -> Ipv6Addr {
     };
     let host = (u32::from(v4) & mask) as u128;
     Ipv6Addr::from(u128::from(prefix.network()) | host)
+}
+
+/// The smallest block holding [`host_v6`] of every tunnel IPv4 in `subnet`.
+pub fn subnet_v6(prefix: Ipv6Net, subnet: Ipv4Net) -> Ipv6Net {
+    let host_bits = (128 - prefix.prefix_len()).min(32 - subnet.prefix_len());
+    Ipv6Net::new_assert(host_v6(prefix, subnet.network()), 128 - host_bits).trunc()
 }
 
 /// An existing host (a tunnel IPv4 in `existing`) whose IPv6 under `prefix`
@@ -151,6 +157,25 @@ mod tests {
                 .unwrap();
         assert_eq!((a, b), (v4("10.59.0.2"), v4("10.59.0.18")));
         assert_eq!(addr, "2001:db8:abcd:1::f2".parse::<Ipv6Addr>().unwrap());
+    }
+
+    #[test]
+    fn subnets_sharing_a_prefix_get_disjoint_blocks() {
+        let p = net("2001:db8:abcd::/64");
+        let a = subnet_v6(p, "10.59.0.0/24".parse().unwrap());
+        let b = subnet_v6(p, "10.59.1.0/24".parse().unwrap());
+        assert_eq!(a, net("2001:db8:abcd::a3b:0/120"));
+        assert_eq!(b, net("2001:db8:abcd::a3b:100/120"));
+        let in_a = host_v6(p, "10.59.0.7".parse().unwrap());
+        let in_b = host_v6(p, "10.59.1.7".parse().unwrap());
+        assert!(a.contains(&in_a) && !a.contains(&in_b));
+        assert!(b.contains(&in_b) && !b.contains(&in_a));
+    }
+
+    #[test]
+    fn subnet_block_is_the_prefix_when_the_prefix_is_smaller() {
+        let p = net("2001:db8:abcd:1::f0/124");
+        assert_eq!(subnet_v6(p, "10.59.0.0/24".parse().unwrap()), p);
     }
 
     fn wg6_conflict(prefix: Ipv6Net, candidate: &str, existing: &[&str]) -> Option<Ipv4Addr> {
