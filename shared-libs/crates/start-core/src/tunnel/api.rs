@@ -1309,6 +1309,28 @@ pub struct AddPortForwardParams {
 rpc_toolkit::reflect_ts!(AddPortForwardParams);
 rpc_toolkit::ts_export!(AddPortForwardParams, namespaces = ["tunnel"]);
 
+async fn check_http_redirect_conflict(
+    ctx: &TunnelContext,
+    external_ip: Ipv4Addr,
+    external_port: u16,
+    count: u16,
+) -> Result<(), Error> {
+    if external_port <= 80 && 80 <= external_port.saturating_add(count.saturating_sub(1)) {
+        let peek = ctx.db.peek().await;
+        let disabled = peek.as_http_redirects().de()?.disabled;
+        let public = crate::tunnel::redirect::public_ipv4s(&peek.as_gateways().de()?);
+        if public.contains(&external_ip) && !disabled.contains(&external_ip) {
+            return Err(Error::new(
+                eyre!(
+                    "port 80 on {external_ip} is used by the HTTP→HTTPS redirect; disable it first (Settings → HTTP Redirect, or `http-redirect set-enabled {external_ip}`)"
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn add_forward(
     ctx: TunnelContext,
     AddPortForwardParams {
@@ -1327,30 +1349,6 @@ pub async fn add_forward(
         ));
     }
 
-    let external_ip = ctx.external_ipv4(*target.ip()).await.ok_or_else(|| {
-        Error::new(
-            eyre!("no WAN IP available for device {}", target.ip()),
-            ErrorKind::Network,
-        )
-    })?;
-    let source = ForwardAddress::from(SocketAddrV4::new(external_ip, external_port));
-
-    let covers_80 =
-        external_port <= 80 && 80 <= external_port.saturating_add(count.saturating_sub(1));
-    if covers_80 {
-        let peek = ctx.db.peek().await;
-        let disabled = peek.as_http_redirects().de()?.disabled;
-        let public = crate::tunnel::redirect::public_ipv4s(&peek.as_gateways().de()?);
-        if public.contains(&external_ip) && !disabled.contains(&external_ip) {
-            return Err(Error::new(
-                eyre!(
-                    "port 80 on {external_ip} is used by the HTTP→HTTPS redirect; disable it first (Settings → HTTP Redirect, or `http-redirect set-enabled {external_ip}`)"
-                ),
-                ErrorKind::InvalidRequest,
-            ));
-        }
-    }
-
     if !sni.is_empty() {
         if count > 1 {
             return Err(Error::new(
@@ -1358,8 +1356,22 @@ pub async fn add_forward(
                 ErrorKind::InvalidRequest,
             ));
         }
-        ctx.persist_sni_forward(source.address, target, &sni, None, false, label)
-            .await?;
+        let external_ip = ctx.external_ipv4(*target.ip()).await.ok_or_else(|| {
+            Error::new(
+                eyre!("no WAN IP available for device {}", target.ip()),
+                ErrorKind::Network,
+            )
+        })?;
+        check_http_redirect_conflict(&ctx, external_ip, external_port, count).await?;
+        ctx.persist_sni_forward(
+            SocketAddrV4::new(external_ip, external_port),
+            target,
+            &sni,
+            None,
+            false,
+            label,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -1375,6 +1387,15 @@ pub async fn add_forward(
         ));
     }
 
+    let _guard = ctx.forward_write_lock.lock().await;
+    let external_ip = ctx.external_ipv4(*target.ip()).await.ok_or_else(|| {
+        Error::new(
+            eyre!("no WAN IP available for device {}", target.ip()),
+            ErrorKind::Network,
+        )
+    })?;
+    let source = ForwardAddress::from(SocketAddrV4::new(external_ip, external_port));
+    check_http_redirect_conflict(&ctx, external_ip, external_port, count).await?;
     ctx.db
         .mutate(|db| {
             db.as_webserver().de()?.check_plain_forward(source.address, count)?;
@@ -1516,13 +1537,26 @@ async fn remove_forward_at(
             Ok(())
         }
         Some(PortForward::Dnat { .. }) => {
-            ctx.db
-                .mutate(|db| db.as_port_forwards_mut().remove(&source))
+            let _guard = ctx.forward_write_lock.lock().await;
+            let removed = ctx
+                .db
+                .mutate(|db| {
+                    db.as_port_forwards_mut().mutate(|pf| {
+                        if matches!(pf.0.get(&source), Some(PortForward::Dnat { .. })) {
+                            pf.0.remove(&source);
+                            Ok(true)
+                        } else {
+                            Ok(false)
+                        }
+                    })
+                })
                 .await
                 .result?;
-            if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
-                drop(rc);
-                ctx.forward.gc().await?;
+            if removed {
+                if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
+                    drop(rc);
+                    ctx.forward.gc().await?;
+                }
             }
             Ok(())
         }

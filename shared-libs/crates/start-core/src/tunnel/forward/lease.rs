@@ -15,7 +15,6 @@ use std::collections::BTreeMap;
 use std::net::SocketAddrV4;
 use std::time::{Duration, Instant};
 
-use crate::net::port_map::server::GatewayBackend;
 use crate::prelude::*;
 use crate::tunnel::context::TunnelContext;
 use crate::tunnel::db::PortForward;
@@ -127,51 +126,73 @@ fn expired_keys(leases: &Leases, now: Instant) -> Vec<LeaseKey> {
         .collect()
 }
 
+const REAP_RETRY_BACKOFF: Duration = Duration::from_secs(5);
+
+fn remove_if_expired(ctx: &TunnelContext, key: &LeaseKey, now: Instant) {
+    ctx.leases.mutate(|l| {
+        if l.get(key).is_some_and(|exp| *exp <= now) {
+            l.remove(key);
+        }
+    });
+}
+
+fn defer_if_expired(ctx: &TunnelContext, key: &LeaseKey, now: Instant) {
+    let retry_at = now + REAP_RETRY_BACKOFF;
+    ctx.leases.mutate(|l| {
+        if l.get(key).is_some_and(|exp| *exp <= now) {
+            l.insert(key.clone(), retry_at);
+        }
+    });
+}
+
 /// Reap every lapsed auto mapping, returning the soonest still-pending expiry
 /// (the reaper's next wake-up), or `None` if no leases remain.
 async fn reap_expired(ctx: &TunnelContext) -> Option<Instant> {
     let now = Instant::now();
     let expired = ctx.leases.peek(|l| expired_keys(l, now));
     for key in expired {
-        // Re-check under the lock: a renewal between the snapshot and here
-        // re-stamps a later expiry, in which case the client still wants it.
-        if ctx
-            .leases
-            .peek(|l| l.get(&key).is_none_or(|exp| *exp > now))
-        {
-            continue;
-        }
         match &key {
-            LeaseKey::Dnat(source) => reap_dnat(ctx, source.clone()).await,
-            LeaseKey::Sni { source, hostname } => reap_sni(ctx, *source, hostname).await,
-            LeaseKey::SniFallback(source) => reap_sni_fallback(ctx, *source).await,
-            LeaseKey::Pinhole(k) => reap_pinhole(ctx, k.clone()).await,
-        }
-        // Drop the lease unless a renewal extended it while we reaped.
-        ctx.leases.mutate(|l| {
-            if l.get(&key).is_some_and(|exp| *exp <= now) {
-                l.remove(&key);
+            LeaseKey::Dnat(source) => reap_dnat(ctx, source.clone(), now).await,
+            LeaseKey::Sni { source, hostname } => reap_sni(ctx, *source, hostname, now).await,
+            LeaseKey::SniFallback(source) => reap_sni_fallback(ctx, *source, now).await,
+            LeaseKey::Pinhole(k) => {
+                if ctx
+                    .leases
+                    .peek(|l| l.get(&key).is_none_or(|exp| *exp > now))
+                {
+                    continue;
+                }
+                reap_pinhole(ctx, k.clone()).await;
+                remove_if_expired(ctx, &key, now);
             }
-        });
+        }
     }
     ctx.leases.peek(|l| l.values().min().copied())
 }
 
-async fn reap_dnat(ctx: &TunnelContext, source: ForwardAddress) {
-    // Never touch a manual forward or an SNI-occupied port; only auto DNAT.
-    let auto = ctx
-        .db
-        .peek()
-        .await
-        .as_port_forwards()
-        .de()
-        .ok()
-        .and_then(|pf| pf.0.get(&source).cloned())
-        .is_some_and(|e| matches!(e, PortForward::Dnat { auto: true, .. }));
-    if !auto {
+async fn reap_dnat(ctx: &TunnelContext, source: ForwardAddress, now: Instant) {
+    let _guard = ctx.forward_write_lock.lock().await;
+    let lease_key = LeaseKey::Dnat(source.clone());
+    if ctx
+        .leases
+        .peek(|l| l.get(&lease_key).is_none_or(|exp| *exp > now))
+    {
         return;
     }
-    if ctx
+    // Never touch a manual forward or an SNI-occupied port; only auto DNAT.
+    let Some(forwards) = ctx.db.peek().await.as_port_forwards().de().log_err() else {
+        defer_if_expired(ctx, &lease_key, now);
+        return;
+    };
+    let auto = forwards
+        .0
+        .get(&source)
+        .is_some_and(|e| matches!(e, PortForward::Dnat { auto: true, .. }));
+    if !auto {
+        remove_if_expired(ctx, &lease_key, now);
+        return;
+    }
+    let committed = ctx
         .db
         .mutate(|db| {
             db.as_port_forwards_mut().mutate(|pf| {
@@ -181,57 +202,92 @@ async fn reap_dnat(ctx: &TunnelContext, source: ForwardAddress) {
         })
         .await
         .result
-        .is_ok()
-    {
+        .log_err()
+        .is_some()
+        || ctx
+            .db
+            .peek()
+            .await
+            .as_port_forwards()
+            .de()
+            .ok()
+            .is_some_and(|pf| !pf.0.contains_key(&source));
+    if committed {
+        remove_if_expired(ctx, &lease_key, now);
         if let Some(rc) = ctx.active_forwards.mutate(|m| m.remove(&source)) {
             drop(rc);
             ctx.forward.gc().await.log_err();
         }
         tracing::info!("PCP lease lapsed: removed auto forward {source}");
+    } else {
+        defer_if_expired(ctx, &lease_key, now);
     }
 }
 
-async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str) {
-    let target = ctx
-        .db
-        .peek()
-        .await
-        .as_port_forwards()
-        .de()
-        .ok()
-        .and_then(|pf| match pf.0.get(&source.into()) {
-            Some(PortForward::Sni { routes, .. }) => {
-                routes.get(hostname).filter(|r| r.auto).map(|r| r.target)
-            }
-            _ => None,
-        });
-    let Some(target) = target else {
+async fn reap_sni(ctx: &TunnelContext, source: SocketAddrV4, hostname: &str, now: Instant) {
+    let _guard = ctx.forward_write_lock.lock().await;
+    let lease_key = LeaseKey::Sni {
+        source,
+        hostname: hostname.to_owned(),
+    };
+    if ctx
+        .leases
+        .peek(|l| l.get(&lease_key).is_none_or(|exp| *exp > now))
+    {
+        return;
+    }
+    let Some(forwards) = ctx.db.peek().await.as_port_forwards().de().log_err() else {
+        defer_if_expired(ctx, &lease_key, now);
         return;
     };
-    ctx.remove_sni_forward(source, target, &[hostname.to_string()])
-        .await;
-    tracing::info!("PCP lease lapsed: removed auto SNI route {hostname} on {source}");
+    let target = match forwards.0.get(&source.into()) {
+        Some(PortForward::Sni { routes, .. }) => {
+            routes.get(hostname).filter(|r| r.auto).map(|r| r.target)
+        }
+        _ => None,
+    };
+    let Some(target) = target else {
+        remove_if_expired(ctx, &lease_key, now);
+        return;
+    };
+    if ctx
+        .remove_sni_routes_locked(source, target, &[hostname.to_owned()], true)
+        .await
+    {
+        tracing::info!("PCP lease lapsed: removed auto SNI route {hostname} on {source}");
+    } else {
+        defer_if_expired(ctx, &lease_key, now);
+    }
 }
 
-async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4) {
-    let target = ctx
-        .db
-        .peek()
-        .await
-        .as_port_forwards()
-        .de()
-        .ok()
-        .and_then(|pf| match pf.0.get(&source.into()) {
-            Some(PortForward::Sni { fallback, .. }) => {
-                fallback.as_ref().filter(|f| f.auto).map(|f| f.target)
-            }
-            _ => None,
-        });
-    let Some(target) = target else {
+async fn reap_sni_fallback(ctx: &TunnelContext, source: SocketAddrV4, now: Instant) {
+    let _guard = ctx.forward_write_lock.lock().await;
+    let lease_key = LeaseKey::SniFallback(source);
+    if ctx
+        .leases
+        .peek(|l| l.get(&lease_key).is_none_or(|exp| *exp > now))
+    {
+        return;
+    }
+    let Some(forwards) = ctx.db.peek().await.as_port_forwards().de().log_err() else {
+        defer_if_expired(ctx, &lease_key, now);
         return;
     };
-    ctx.remove_sni_fallback(source, target).await;
-    tracing::info!("PCP lease lapsed: removed auto SNI fallback on {source}");
+    let target = match forwards.0.get(&source.into()) {
+        Some(PortForward::Sni { fallback, .. }) => {
+            fallback.as_ref().filter(|f| f.auto).map(|f| f.target)
+        }
+        _ => None,
+    };
+    let Some(target) = target else {
+        remove_if_expired(ctx, &lease_key, now);
+        return;
+    };
+    if ctx.remove_sni_fallback_locked(source, target).await {
+        tracing::info!("PCP lease lapsed: removed auto SNI fallback on {source}");
+    } else {
+        defer_if_expired(ctx, &lease_key, now);
+    }
 }
 
 async fn reap_pinhole(ctx: &TunnelContext, key: PinholeAddress) {
@@ -288,5 +344,171 @@ mod tests {
         leases.insert(a.clone(), now - Duration::from_secs(1));
         leases.insert(b.clone(), now + Duration::from_secs(60));
         assert_eq!(expired_keys(&leases, now), vec![a]);
+    }
+
+    #[tokio::test]
+    async fn reap_expired_rechecks_each_lease_kind_under_lock_and_backs_off_on_db_error() {
+        use std::collections::BTreeMap;
+
+        use patch_db::json_ptr::ROOT;
+
+        use crate::tunnel::db::{SniRoute, TunnelDatabase};
+
+        let dnat_live: ForwardAddress = "1.2.3.4:443".parse().unwrap();
+        let dnat_dead: ForwardAddress = "1.2.3.4:444".parse().unwrap();
+        let sni_src: SocketAddrV4 = "5.6.7.8:443".parse().unwrap();
+        let live_route_key = LeaseKey::Sni {
+            source: sni_src,
+            hostname: "live.example.com".to_owned(),
+        };
+        let dead_route_key = LeaseKey::Sni {
+            source: sni_src,
+            hostname: "dead.example.com".to_owned(),
+        };
+        let fb_key = LeaseKey::SniFallback(sni_src);
+
+        for target_key in [
+            LeaseKey::Dnat(dnat_live.clone()),
+            live_route_key.clone(),
+            fb_key.clone(),
+        ] {
+            let mut db = TunnelDatabase::default();
+            db.port_forwards.0.insert(
+                dnat_live.clone(),
+                PortForward::Dnat {
+                    target: "10.59.0.2:443".parse().unwrap(),
+                    label: None,
+                    enabled: false,
+                    count: 1,
+                    auto: true,
+                },
+            );
+            db.port_forwards.0.insert(
+                sni_src.into(),
+                PortForward::Sni {
+                    routes: BTreeMap::from([(
+                        "live.example.com".to_owned(),
+                        SniRoute {
+                            target: "10.59.0.3:443".parse().unwrap(),
+                            label: None,
+                            enabled: false,
+                            auto: true,
+                        },
+                    )]),
+                    fallback: Some(SniRoute {
+                        target: "10.59.0.3:444".parse().unwrap(),
+                        label: None,
+                        enabled: false,
+                        auto: true,
+                    }),
+                },
+            );
+            let (_dir, ctx) = TunnelContext::for_test(db).await;
+            let past = Instant::now() - Duration::from_secs(1);
+            ctx.leases.mutate(|l| {
+                l.insert(target_key.clone(), past);
+            });
+
+            let guard = ctx.forward_write_lock.lock().await;
+            let ctx_bg = ctx.clone();
+            let mut reap = tokio::spawn(async move { reap_expired(&ctx_bg).await });
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), &mut reap)
+                    .await
+                    .is_err()
+            );
+            let future = Instant::now() + Duration::from_secs(60);
+            ctx.leases.mutate(|l| {
+                l.insert(target_key.clone(), future);
+            });
+            drop(guard);
+            assert_eq!(reap.await.unwrap(), Some(future));
+
+            let pf = ctx.db.peek().await.as_port_forwards().de().unwrap();
+            assert!(pf.0.contains_key(&dnat_live));
+            match pf.0.get(&sni_src.into()) {
+                Some(PortForward::Sni { routes, fallback }) => {
+                    assert!(routes.contains_key("live.example.com"));
+                    assert!(fallback.is_some());
+                }
+                other => panic!("expected Sni, got {other:?}"),
+            }
+            ctx.leases.peek(|l| {
+                assert_eq!(l.get(&target_key), Some(&future));
+            });
+        }
+
+        let mut db = TunnelDatabase::default();
+        db.port_forwards.0.insert(
+            dnat_dead.clone(),
+            PortForward::Dnat {
+                target: "10.59.0.2:444".parse().unwrap(),
+                label: None,
+                enabled: false,
+                count: 1,
+                auto: true,
+            },
+        );
+        db.port_forwards.0.insert(
+            sni_src.into(),
+            PortForward::Sni {
+                routes: BTreeMap::from([(
+                    "dead.example.com".to_owned(),
+                    SniRoute {
+                        target: "10.59.0.2:443".parse().unwrap(),
+                        label: None,
+                        enabled: false,
+                        auto: true,
+                    },
+                )]),
+                fallback: Some(SniRoute {
+                    target: "10.59.0.2:444".parse().unwrap(),
+                    label: None,
+                    enabled: false,
+                    auto: true,
+                }),
+            },
+        );
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+        let past = Instant::now() - Duration::from_secs(1);
+        ctx.leases.mutate(|l| {
+            l.insert(LeaseKey::Dnat(dnat_dead.clone()), past);
+            l.insert(dead_route_key.clone(), past);
+            l.insert(fb_key.clone(), past);
+        });
+        assert_eq!(reap_expired(&ctx).await, None);
+        assert!(
+            ctx.db
+                .peek()
+                .await
+                .as_port_forwards()
+                .de()
+                .unwrap()
+                .0
+                .is_empty()
+        );
+        assert!(ctx.leases.peek(|l| l.is_empty()));
+
+        let (_dir_err, ctx_err) = TunnelContext::for_test(TunnelDatabase::default()).await;
+        ctx_err
+            .db
+            .put(&ROOT, &imbl_value::json!({ "portForwards": "corrupt" }))
+            .await
+            .unwrap();
+        let before = Instant::now();
+        ctx_err.leases.mutate(|l| {
+            l.insert(
+                LeaseKey::Dnat(dnat_dead.clone()),
+                before - Duration::from_secs(1),
+            );
+            l.insert(dead_route_key.clone(), before - Duration::from_secs(1));
+            l.insert(fb_key.clone(), before - Duration::from_secs(1));
+        });
+        let next = reap_expired(&ctx_err).await.expect("backoff deadline");
+        assert!(next >= before + REAP_RETRY_BACKOFF);
+        ctx_err.leases.peek(|l| {
+            assert_eq!(l.len(), 3);
+            assert!(l.values().all(|exp| *exp >= before + REAP_RETRY_BACKOFF));
+        });
     }
 }
