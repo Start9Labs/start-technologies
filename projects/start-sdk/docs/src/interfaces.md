@@ -16,6 +16,8 @@ Two consequences worth internalizing before you write any interface code:
 > [!WARNING]
 > Never state — in `README.md`, `instructions.md`, a comment, or a plan — that a service "is exposed on Tor" or "is published to the internet." Your package cannot know: no binding type, and no value of `type`, causes an onion or a clearnet address to exist. Describe what the interface serves and let the user decide how to reach it.
 
+**Services on one server share browser cookies.** Every service is reachable at the server's shared addresses — its `.local` address and its IP addresses, which differ only by port — and browsers keep cookies per host, not per port. So a service's cookies are sent to every other service, and a page from one can read or set another's cookies unless they are HttpOnly. `SameSite` does not separate them: another service's page counts as same-site. Keep the application's own CSRF and `Origin` checks on, never configure it to treat another interface on the server as cross-site, and keep its session cookies HttpOnly. What users can do about it is in [Interfaces](/start-os/interfaces.html#shared-addresses-and-browser-cookies).
+
 ## Single Interface
 
 For a service with one web interface:
