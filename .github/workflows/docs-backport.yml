@@ -3,15 +3,12 @@ name: Backport live-docs to master
 # Anything merged into live-docs is a fix to already-published documentation, so
 # it has to reach master too or the next tag will quietly revert it. It was
 # already reviewed on the way into live-docs, so this lands it on master
-# directly rather than asking for a second approval. A conflict is the one case
-# that still needs a human: it falls back to a branch + PR so the change can't
-# be silently dropped.
+# directly rather than asking for a second approval. A change that cannot land
+# unattended falls back to a branch + PR so it can't be silently dropped.
 #
-# The commit is created through the GraphQL API rather than `git commit`, so
-# GitHub signs it as the docs bot — master's `required_signatures` rule is
-# satisfied honestly instead of being bypassed. The same call takes an
-# expectedHeadOid, which makes the write an atomic compare-and-swap against
-# master's head: a race loses cleanly and retries instead of clobbering.
+# scripts/commit-staged.mjs writes the commit through GitHub's REST API, which
+# signs it as the docs bot for master's `required_signatures` rule. Its ref
+# update is fast-forward-only from the head it built on: a race loses and retries.
 #
 # The tag sync (docs-sync-on-tag.yml) must NOT bounce back here — it copies a
 # tag's tree, which already came from master. Its commits carry [skip-backport],
@@ -100,6 +97,14 @@ jobs:
             exit 0
           fi
 
+          {
+            echo "docs: backport live-docs $(git rev-parse --short "$AFTER") to master"
+            echo
+            echo "Backports the following from live-docs:"
+            echo
+            git log --reverse --format='- %h %s' "$RANGE"
+          } > "$RUNNER_TEMP/backport-msg"
+
           for attempt in 1 2 3; do
             git fetch --no-tags origin master
             git reset --hard origin/master
@@ -127,36 +132,29 @@ jobs:
               exit 0
             fi
 
-            {
-              echo "docs: backport live-docs $(git rev-parse --short "$AFTER") to master"
-              echo
-              echo "Backports the following from live-docs:"
-              echo
-              git log --reverse --format='- %h %s' "$RANGE"
-            } > /tmp/backport-msg
-
-            if node scripts/commit-staged.mjs /tmp/backport-msg master "$BASE" > /tmp/commit-result; then
-              echo "Committed to master: $(cat /tmp/commit-result)"
+            if node scripts/commit-staged.mjs "$RUNNER_TEMP/backport-msg" master "$BASE" > "$RUNNER_TEMP/commit-result"; then
+              echo "Committed to master: $(cat "$RUNNER_TEMP/commit-result")"
               exit 0
             else
               status=$?
               if [ "$status" = 2 ]; then
-                echo "fallback=unsupported-mode" >> "$GITHUB_OUTPUT"
-                echo "::warning::Backport carries a file mode the signed commit API cannot represent — opening a PR instead."
+                echo "fallback=gitlink" >> "$GITHUB_OUTPUT"
+                echo "::warning::Backport changes a submodule (gitlink), which the commit API cannot carry — opening a PR instead."
+                exit 0
+              fi
+              if [ "$status" = 3 ]; then
+                echo "fallback=unverified" >> "$GITHUB_OUTPUT"
+                echo "::warning::GitHub did not verify the signature of the commit it created, so master was left alone — opening a PR instead."
                 exit 0
               fi
             fi
 
-            # Don't name a cause. A lost compare-and-swap is the common one, but
-            # every other API failure lands here too, and asserting contention is
-            # what hid the argv overflow above until someone read the raw log.
-            echo "::notice::Attempt $attempt did not land — retrying. The API said:"
-            cat /tmp/commit-result || true
+            # Every API failure lands here, a lost compare-and-swap among them.
+            echo "::notice::Attempt $attempt did not land — retrying. The API's response is above."
           done
 
           echo "fallback=api-failure" >> "$GITHUB_OUTPUT"
-          echo "::warning::The commit API refused this three times — opening a PR instead. Last response:"
-          cat /tmp/commit-result || true
+          echo "::warning::The commit API refused this three times — opening a PR instead. Its responses are above."
 
       # Only reached when the change could not land unattended. The commit is
       # preserved on a branch so a maintainer can resolve it by hand.
@@ -173,6 +171,7 @@ jobs:
           BRANCH="backport/live-docs-$(git rev-parse --short "$AFTER")"
           git fetch --no-tags origin master
           git reset --hard origin/master
+          MASTER=$(git rev-parse HEAD)
           git checkout -b "$BRANCH"
 
           # One commit at a time, and every conflict resolved by keeping the
@@ -195,7 +194,23 @@ jobs:
             fi
           done
 
-          git push -f origin "$BRANCH"
+          # The branch is rebuilt as one API commit, which GitHub signs.
+          signed_branch() {
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$MASTER" > /dev/null \
+              || gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$MASTER" -F force=true > /dev/null \
+              || return 1
+            git read-tree HEAD || return 1
+            node scripts/commit-staged.mjs "$RUNNER_TEMP/backport-msg" "$BRANCH" "$MASTER" > "$RUNNER_TEMP/branch-commit" || return 1
+            [ -s "$RUNNER_TEMP/branch-commit" ]
+          }
+          if signed_branch; then
+            SIGNED=1
+            echo "Signed backport branch: $(cat "$RUNNER_TEMP/branch-commit")"
+          else
+            SIGNED=0
+            echo "::warning::Could not build $BRANCH through the signed commit API — pushing it unsigned."
+            git push -f origin "$BRANCH"
+          fi
 
           # Keeping the markers leaves a branch GitHub still reports as
           # mergeable, so the body has to say so out loud. --all-match is the
@@ -212,11 +227,14 @@ jobs:
             echo "Automated backport of the documentation change published to docs.start9.com from \`live-docs\` (${AFTER})."
             echo
             case "$REASON" in
-              unsupported-mode)
-                echo "It carries a symlink or file-mode change, which the signed commit API cannot represent, so it comes as a branch instead. **Nothing is wrong with it** — review and merge normally."
+              gitlink)
+                echo "It changes a submodule (gitlink), which the commit API cannot carry, so it comes as a PR instead. **Nothing is wrong with the content.**"
+                ;;
+              unverified)
+                echo "GitHub did not verify the signature of the commit it created for master, so that commit was never put on master. The run log has GitHub's verification response. **Nothing is wrong with the content.**"
                 ;;
               api-failure)
-                echo "The signed-commit API refused it three times running — usually master moving underneath it, but the run log has the actual response. The branch is a clean cherry-pick either way: **nothing is wrong with the content** — review and merge normally."
+                echo "The commit API refused it three times running — usually master moving underneath it, but the run log has the actual responses. The branch is a clean cherry-pick either way: **nothing is wrong with the content.**"
                 ;;
               conflict)
                 echo "It could not be applied to master unattended — **resolve the conflicts before merging**."
@@ -225,6 +243,13 @@ jobs:
                 echo "It could not be applied to master unattended (\`$REASON\`) — check the run log before merging."
                 ;;
             esac
+            echo
+            if [ "$SIGNED" = 1 ]; then
+              echo "Its commit is signed by the docs bot, so once reviewed it merges like any PR. A commit added to the branch must be signed too: master refuses to merge a PR carrying an unsigned commit, squash merges included."
+            else
+              echo "> [!IMPORTANT]"
+              echo "> The signed commit API could not build this branch, so its commits are unsigned, and master refuses to merge a PR carrying an unsigned commit, squash merges included. **A maintainer must replace them with a signed commit before this can merge.**"
+            fi
             echo
             echo "Until this lands, master's copy of the docs is out of step and the next tag will revert the published fix."
             if [ -n "$MARKED" ]; then
@@ -243,11 +268,11 @@ jobs:
                 echo "> - \`$(git rev-parse --short "$commit")\` $(git log -1 --format=%s "$commit")"
               done
             fi
-          } > /tmp/pr-body.md
+          } > "$RUNNER_TEMP/pr-body.md"
 
           gh pr create \
             --base master \
             --head "$BRANCH" \
             --title "docs: backport live-docs $(git rev-parse --short "$AFTER") to master" \
-            --body-file /tmp/pr-body.md \
+            --body-file "$RUNNER_TEMP/pr-body.md" \
             || echo "::warning::A PR for $BRANCH already exists."
