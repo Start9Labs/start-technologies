@@ -4,7 +4,6 @@ import {
   computed,
   inject,
   input,
-  linkedSignal,
   signal,
   TemplateRef,
 } from '@angular/core'
@@ -17,7 +16,7 @@ import {
   i18nPipe,
   MARKDOWN,
 } from '@start9labs/shared'
-import { TuiLoader, TuiNotification, TuiTitle } from '@taiga-ui/core'
+import { TuiButton, TuiLoader, TuiNotification, TuiTitle } from '@taiga-ui/core'
 import { TuiAvatar, TuiFade, TuiSkeleton } from '@taiga-ui/kit'
 import {
   tuiCardOptionsProvider,
@@ -26,6 +25,7 @@ import {
 } from '@taiga-ui/layout'
 import {
   combineLatest,
+  distinctUntilChanged,
   filter,
   firstValueFrom,
   map,
@@ -62,12 +62,12 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
       @if (flavors$ | async; as flavors) {
         <marketplace-flavors [pkgs]="flavors" />
       }
-    } @else if (pkg$ | async; as pkg) {
+    } @else if (pkg() || placeholder(); as shown) {
       <header tuiHeader>
         <span tuiAvatar [round]="false" [tuiSkeleton]="icon.loading()">
-          <img #icon="marketplaceIcon" [marketplaceIcon]="pkg" />
+          <img #icon="marketplaceIcon" [marketplaceIcon]="shown" />
         </span>
-        <span tuiTitle tuiFade>{{ pkg.title }}</span>
+        <span tuiTitle tuiFade>{{ shown.title }}</span>
         <span tuiAccessories><ng-content /></span>
       </header>
       @if (flavorFallback) {
@@ -78,23 +78,34 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
           </div>
         </div>
       }
-      <ng-container
-        *ngTemplateOutlet="controls(); context: { $implicit: pkg }"
-      />
+      @if (pkg(); as pkg) {
+        <ng-container
+          *ngTemplateOutlet="controls(); context: { $implicit: pkg }"
+        />
+      } @else if (controls()) {
+        <div class="g-buttons">
+          <button tuiButton type="button" [tuiSkeleton]="true">
+            {{ 'Install' | i18n }}
+          </button>
+        </div>
+      }
       <marketplace-about
-        [pkg]="pkg"
+        [pkg]="shown"
+        [loading]="!pkg()"
         [versions]="versions$ | async"
         (static)="onStatic()"
         (onVersion)="selectedVersion.set($event)"
       />
-      <marketplace-release-notes [pkg]="pkg" />
+      <marketplace-release-notes [pkg]="shown" />
       @if (flavors$ | async; as flavors) {
         <marketplace-flavors [pkgs]="flavors" />
       }
-      @if (!(pkg.dependencyMetadata | empty)) {
-        <marketplace-dependencies [pkg]="pkg" />
+      @if (pkg(); as pkg) {
+        @if (!(pkg.dependencyMetadata | empty)) {
+          <marketplace-dependencies [pkg]="pkg" />
+        }
+        <marketplace-links [pkg]="pkg" />
       }
-      <marketplace-links [pkg]="pkg" />
     } @else {
       <tui-loader [textContent]="'Loading' | i18n" />
     }
@@ -119,6 +130,7 @@ import { MarketplaceReleaseNotesComponent } from './release-notes.component'
   imports: [
     CommonModule,
     EmptyPipe,
+    TuiButton,
     TuiLoader,
     TuiNotification,
     TuiTitle,
@@ -143,8 +155,8 @@ export class MarketplacePreviewComponent {
 
   readonly pkgId = input.required<string>()
 
-  /** The listed release to open; details resolve from the registry. */
-  readonly pkg = input<MarketplaceListing | null>(null)
+  /** The selected release's listing, shown while its full details load. */
+  readonly listing = input<MarketplaceListing>()
 
   /** Action buttons for the resolved package (install/update), rendered with
    * the resolved `MarketplacePkg` as `$implicit`. The brochure omits it. */
@@ -168,10 +180,7 @@ export class MarketplacePreviewComponent {
 
   private readonly provides = computed(() => this.params()?.get('requirePkg'))
 
-  readonly selectedVersion = linkedSignal({
-    source: this.pkg,
-    computation: (): string | null => null,
-  })
+  readonly selectedVersion = signal<string | null>(null)
 
   readonly noMatch = signal(false)
 
@@ -180,52 +189,63 @@ export class MarketplacePreviewComponent {
 
   readonly pkg$ = combineLatest([
     toObservable(this.selectedVersion),
+    toObservable(this.listing).pipe(
+      map(listing => listing?.version ?? null),
+      distinctUntilChanged(),
+    ),
     this.flavor$,
   ]).pipe(
-    switchMap(([version, flavor]) =>
-      this.package$(version, flavor).pipe(
-        tap(pkg => {
-          if (!pkg || version) return
-          const range = this.targetRange()
-          if (
-            !range ||
-            satisfiesWithAliases(this.exver, pkg, range, this.provides())
-          )
-            return
-          const candidate = compatibleVersions(
-            this.exver,
-            pkg,
-            range,
-            this.provides(),
-          )[0]
-          if (candidate) {
-            this.selectedVersion.set(candidate)
-          } else {
-            this.selectSatisfyingFlavor(pkg.flavor, range)
-          }
-        }),
-        filter(pkg => {
-          const range = this.targetRange()
+    switchMap(([version, listedVersion, flavor]) =>
+      this.marketplaceService
+        .getPackage$(this.pkgId(), version ?? listedVersion, flavor)
+        .pipe(
+          tap(pkg => {
+            if (!pkg || version) return
+            const range = this.targetRange()
+            if (
+              !range ||
+              satisfiesWithAliases(this.exver, pkg, range, this.provides())
+            )
+              return
+            const candidate = compatibleVersions(
+              this.exver,
+              pkg,
+              range,
+              this.provides(),
+            )[0]
+            if (candidate) {
+              this.selectedVersion.set(candidate)
+            } else {
+              this.selectSatisfyingFlavor(pkg.flavor, range)
+            }
+          }),
+          filter(pkg => {
+            const range = this.targetRange()
 
-          return (
-            !!pkg &&
-            (!range ||
-              satisfiesWithAliases(this.exver, pkg, range, this.provides()))
-          )
-        }),
-        startWith<MarketplacePkg | null>(null),
-      ),
+            return (
+              !!pkg &&
+              (!range ||
+                satisfiesWithAliases(this.exver, pkg, range, this.provides()))
+            )
+          }),
+          startWith<MarketplacePkg | null>(null),
+        ),
     ),
     shareReplay({ bufferSize: 1, refCount: false }),
   )
 
-  private package$(version: string | null, flavor: string | null) {
-    return this.marketplaceService.getPackage$(
-      this.pkgId(),
-      version ?? this.pkg()?.version ?? null,
-      flavor,
-    )
-  }
+  protected readonly pkg = toSignal(this.pkg$, { initialValue: null })
+
+  protected readonly placeholder = computed(() => {
+    const listing = this.listing()
+    const range = this.targetRange()
+    return !this.selectedVersion() &&
+      listing &&
+      (!range ||
+        satisfiesWithAliases(this.exver, listing, range, this.provides()))
+      ? listing
+      : null
+  })
 
   private async selectSatisfyingFlavor(current: string | null, range: string) {
     const { packages } = await firstValueFrom(

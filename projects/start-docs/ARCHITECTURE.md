@@ -84,7 +84,7 @@ support
 ```
 
 - `book=version` is the product's current version, built from this tree into `docs/<book>/<version>/`.
-- `book=version@tag` is an archived version, built from that release tag's tree into `docs/<book>/<version>/`. It gets a banner pointing at the current version and a link from `/archives/`.
+- `book=version@tag` is an archived version, built from that release tag's tree into `docs/<book>/<version>/`. It gets a banner pointing at the current version and a link from `/archives/`, and its product release links point at the release the current book links.
 - A bare `book` is built straight into `docs/<book>/`.
 
 `MDBOOK_OUTPUT__HTML__SITE_URL` is set per build so mdBook generates correct search indexes and canonical URLs for the versioned path.

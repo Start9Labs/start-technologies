@@ -5098,6 +5098,118 @@ tunnel.api.invalid-name:
   fr_FR: 'Les noms ne doivent pas être vides ni composés uniquement d’espaces, ne doivent contenir aucun caractère de contrôle et doivent comporter au maximum %{max} caractères'
   pl_PL: 'Nazwy nie mogą być puste ani składać się wyłącznie z białych znaków, nie mogą zawierać znaków sterujących i mogą mieć najwyżej %{max} znaków'
 
+tunnel.forward.pcp.already-auto-dnat-other-client:
+  en_US: '%{source} is already an automatic DNAT forward for another client'
+  de_DE: '%{source} ist bereits eine automatische DNAT-Weiterleitung für einen anderen Client'
+  es_ES: '%{source} ya es un reenvío DNAT automático para otro cliente'
+  fr_FR: '%{source} est déjà une redirection DNAT automatique pour un autre client'
+  pl_PL: '%{source} jest już automatycznym przekierowaniem DNAT dla innego klienta'
+
+tunnel.forward.pcp.already-auto-dnat-range:
+  en_US: '%{source} is already an automatic DNAT range forward'
+  de_DE: '%{source} ist bereits eine automatische DNAT-Bereichsweiterleitung'
+  es_ES: '%{source} ya es un reenvío de rango DNAT automático'
+  fr_FR: '%{source} est déjà une redirection de plage DNAT automatique'
+  pl_PL: '%{source} jest już automatycznym przekierowaniem zakresu DNAT'
+
+tunnel.forward.pcp.already-dnat:
+  en_US: '%{source} is already a DNAT forward'
+  de_DE: '%{source} ist bereits eine DNAT-Weiterleitung'
+  es_ES: '%{source} ya es un reenvío DNAT'
+  fr_FR: '%{source} est déjà une redirection DNAT'
+  pl_PL: '%{source} jest już przekierowaniem DNAT'
+
+tunnel.forward.pcp.already-dnat-other-client:
+  en_US: '%{source} is already a DNAT forward for another client'
+  de_DE: '%{source} ist bereits eine DNAT-Weiterleitung für einen anderen Client'
+  es_ES: '%{source} ya es un reenvío DNAT para otro cliente'
+  fr_FR: '%{source} est déjà une redirection DNAT pour un autre client'
+  pl_PL: '%{source} jest już przekierowaniem DNAT dla innego klienta'
+
+tunnel.forward.pcp.already-dnat-range:
+  en_US: '%{source} is already a DNAT range forward'
+  de_DE: '%{source} ist bereits eine DNAT-Bereichsweiterleitung'
+  es_ES: '%{source} ya es un reenvío de rango DNAT'
+  fr_FR: '%{source} est déjà une redirection de plage DNAT'
+  pl_PL: '%{source} jest już przekierowaniem zakresu DNAT'
+
+tunnel.forward.pcp.diversion-setup-failed:
+  en_US: 'SNI diversion setup failed (code %{code})'
+  de_DE: 'Einrichtung der SNI-Umleitung fehlgeschlagen (Code %{code})'
+  es_ES: 'Error al configurar el desvío SNI (código %{code})'
+  fr_FR: 'Échec de la configuration du détournement SNI (code %{code})'
+  pl_PL: 'Nie udało się skonfigurować przekierowania SNI (kod %{code})'
+
+tunnel.forward.pcp.fallback-automatic-route:
+  en_US: 'fallback on %{source} is already an automatic route to %{target}'
+  de_DE: 'Fallback auf %{source} ist bereits eine automatische Route zu %{target}'
+  es_ES: 'el respaldo en %{source} ya es una ruta automática hacia %{target}'
+  fr_FR: 'le repli sur %{source} est déjà une route automatique vers %{target}'
+  pl_PL: 'trasa zapasowa na %{source} jest już automatyczną trasą do %{target}'
+
+tunnel.forward.pcp.fallback-held-by-other-client:
+  en_US: 'fallback on %{source} is held by another client'
+  de_DE: 'Fallback auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'el respaldo en %{source} pertenece a otro cliente'
+  fr_FR: 'le repli sur %{source} est détenu par un autre client'
+  pl_PL: 'trasa zapasowa na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.fallback-manual-route:
+  en_US: 'fallback on %{source} is already a manual route to %{target}'
+  de_DE: 'Fallback auf %{source} ist bereits eine manuelle Route zu %{target}'
+  es_ES: 'el respaldo en %{source} ya es una ruta manual hacia %{target}'
+  fr_FR: 'le repli sur %{source} est déjà une route manuelle vers %{target}'
+  pl_PL: 'trasa zapasowa na %{source} jest już ręczną trasą do %{target}'
+
+tunnel.forward.pcp.hostname-automatic-route:
+  en_US: 'SNI hostname %{hostname} on %{source} is already an automatic route to %{target}'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} ist bereits eine automatische Route zu %{target}'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} ya es una ruta automática hacia %{target}'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est déjà une route automatique vers %{target}'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest już automatyczną trasą do %{target}'
+
+tunnel.forward.pcp.hostname-held-by-other-client:
+  en_US: 'SNI hostname %{hostname} on %{source} is held by another client'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} pertenece a otro cliente'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est détenu par un autre client'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.hostname-manual-route:
+  en_US: 'SNI hostname %{hostname} on %{source} is already a manual route to %{target}'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} ist bereits eine manuelle Route zu %{target}'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} ya es una ruta manual hacia %{target}'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est déjà une route manuelle vers %{target}'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest już ręczną trasą do %{target}'
+
+tunnel.forward.pcp.not-sni-port:
+  en_US: '%{source} is not an SNI-demuxed port'
+  de_DE: '%{source} ist kein SNI-demultiplexter Port'
+  es_ES: '%{source} no es un puerto con demultiplexación SNI'
+  fr_FR: '%{source} n’est pas un port démultiplexé par SNI'
+  pl_PL: '%{source} nie jest portem z demultipleksacją SNI'
+
+tunnel.forward.pcp.overlaps-existing:
+  en_US: '%{source} overlaps an existing forward at %{conflict}'
+  de_DE: '%{source} überschneidet sich mit einer bestehenden Weiterleitung auf %{conflict}'
+  es_ES: '%{source} se superpone con un reenvío existente en %{conflict}'
+  fr_FR: '%{source} chevauche une redirection existante sur %{conflict}'
+  pl_PL: '%{source} nakłada się na istniejące przekierowanie na %{conflict}'
+
+tunnel.forward.pcp.sni-hostname-taken:
+  en_US: 'SNI hostname on %{source} is held by another client'
+  de_DE: 'SNI-Hostname auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'El nombre de host SNI en %{source} pertenece a otro cliente'
+  fr_FR: 'Le nom d’hôte SNI sur %{source} est détenu par un autre client'
+  pl_PL: 'Nazwa hosta SNI na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.sni-listener-failed:
+  en_US: 'SNI listener on %{source} could not bind'
+  de_DE: 'SNI-Listener auf %{source} konnte nicht gebunden werden'
+  es_ES: 'No se pudo enlazar el puerto de escucha SNI en %{source}'
+  fr_FR: 'L’écouteur SNI sur %{source} n’a pas pu être lié'
+  pl_PL: 'Nie udało się powiązać nasłuchiwania SNI na %{source}'
+
 util.actor.runtime-exited:
   en_US: The task processor has stopped.
   de_DE: Die Aufgabenverarbeitung wurde gestoppt.

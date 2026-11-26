@@ -22,6 +22,7 @@ use tokio::sync::watch;
 use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
@@ -59,10 +60,16 @@ pub fn db<C: Context>() -> ParentHandler<C> {
                 .with_display_serializable()
                 .with_about("about.filter-query-db"),
         )
-        .subcommand("dump", from_fn_async(dump).no_cli())
+        .subcommand(
+            "dump",
+            from_fn_async(dump)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .no_cli(),
+        )
         .subcommand(
             "subscribe",
             from_fn_async(subscribe)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_metadata("get_signer", Value::Bool(true))
                 .with_metadata(crate::mcp::MCP, Value::Bool(false))
                 .no_cli(),
@@ -73,6 +80,7 @@ pub fn db<C: Context>() -> ParentHandler<C> {
                 .subcommand(
                     "update",
                     from_fn_async(update_subscription)
+                        .with_metadata(EFFECT, Effect::Read.into())
                         .with_metadata(crate::mcp::MCP, Value::Bool(false))
                         .no_cli(),
                 )
@@ -89,7 +97,13 @@ pub fn db<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.update-db-record"),
         )
-        .subcommand("apply", from_fn_async(apply).no_cli())
+        .subcommand(
+            "apply",
+            from_fn_async(apply)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .with_metadata(crate::mcp::MCP, Value::Bool(false))
+                .no_cli(),
+        )
 }
 
 #[derive(Deserialize, Serialize)]
@@ -746,6 +760,8 @@ pub fn put<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "ui",
         from_fn_async(ui)
+            .with_metadata(EFFECT, Effect::Destructive.into())
+            .with_metadata(crate::mcp::MCP, Value::Bool(false))
             .with_display_serializable()
             .with_about("about.add-path-value-db")
             .with_call_remote::<CliContext>(),

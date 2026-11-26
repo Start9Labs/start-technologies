@@ -56,6 +56,12 @@ export class MarketplaceService extends AbstractMarketplaceService {
 
   private readonly registryCache$ = this.patch.watch$('registryCache')
 
+  /** Listed releases, reused while a package's projection and selection are unchanged. */
+  private readonly listed = new WeakMap<
+    Partial<T.PackageInfo>,
+    { selection: Selection; releases: Map<string, MarketplacePkg> }
+  >()
+
   /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
   readonly registries$: Observable<
     (StoreIdentity & { status: T.RegistryStatus })[]
@@ -380,23 +386,15 @@ export class MarketplaceService extends AbstractMarketplaceService {
                 }).pipe(
                   map(
                     (packages: Record<string, Partial<T.PackageInfo>> | null) =>
-                      matches.flatMap(({ id, version, selection }) => {
-                        const info = packages?.[id]
-                        const release = info?.versions?.[version]
-                        return release
-                          ? [
-                              toPkg(
-                                this.exver,
-                                id,
-                                version,
-                                selection,
-                                info.categories ?? [],
-                                release,
-                                info.versions ?? {},
-                              ),
-                            ]
-                          : []
-                      }),
+                      matches.flatMap(
+                        ({ id, version, selection }) =>
+                          this.listedRelease(
+                            id,
+                            version,
+                            selection,
+                            packages?.[id],
+                          ) ?? [],
+                      ),
                   ),
                 )
               : of([]),
@@ -406,29 +404,40 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
+  private listedRelease(
+    id: string,
+    version: string,
+    selection: Selection | undefined,
+    info: Partial<T.PackageInfo> | undefined,
+  ): MarketplacePkg | null {
+    const found = info?.versions?.[version]
+    if (!selection || !info || !found) return null
+    let listed = this.listed.get(info)
+    if (listed?.selection !== selection)
+      this.listed.set(info, (listed = { selection, releases: new Map() }))
+    let pkg = listed.releases.get(version)
+    if (!pkg) {
+      pkg = toPkg(
+        this.exver,
+        id,
+        version,
+        selection,
+        info.categories ?? [],
+        found,
+        info.versions ?? {},
+      )
+      listed.releases.set(version, pkg)
+    }
+    return pkg
+  }
+
   private toStore(
     url: string,
     entry: T.RegistryCache,
     packages: Record<string, Partial<T.PackageInfo>>,
   ): StoreDataWithUrl {
-    const release = (id: string, version: string) => {
-      const selection = entry.selections[id]
-      const info = packages[id]
-      const found = info?.versions?.[version]
-      return selection && found
-        ? [
-            toPkg(
-              this.exver,
-              id,
-              version,
-              selection,
-              info.categories ?? [],
-              found,
-              info.versions ?? {},
-            ),
-          ]
-        : []
-    }
+    const release = (id: string, version: string) =>
+      this.listedRelease(id, version, entry.selections[id], packages[id]) ?? []
     const selections = Object.entries(entry.selections)
     return {
       url,

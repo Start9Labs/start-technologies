@@ -6143,6 +6143,36 @@ test('provider installability preference is per flavor and follows selection cha
   assert.deepEqual(f.queries, [])
 })
 
+test('provider listing reuse follows the same raw package and selection identities as ordinary listings', t => {
+  const entry = providerRegistryEntry()
+  const index = providerIndex()
+  const f = marketplaceFixture(t)
+  const info = index.package.packages.alternate
+  const selection = entry.selections.alternate
+  const first = f.service.listedRelease('alternate', '1.0.0:0', selection, info)
+  assert.equal(
+    f.service.listedRelease('alternate', '1.0.0:0', selection, info),
+    first,
+  )
+  const changedInfo = { ...info, categories: ['changed'] }
+  assert.notEqual(
+    f.service.listedRelease('alternate', '1.0.0:0', selection, changedInfo),
+    first,
+  )
+  const changedSelection = {
+    ...selection,
+    versions: { '1.0.0:0': { s9pks: [0], compatible: true } },
+  }
+  const remapped = f.service.listedRelease(
+    'alternate',
+    '1.0.0:0',
+    changedSelection,
+    info,
+  )
+  assert.notEqual(remapped, first)
+  assert.deepEqual(remapped.s9pks, [['unsupported', { urls: ['wrong'] }]])
+})
+
 test('provider claims react without selection changes and hydrate only matching raw version keys', t => {
   const url = 'https://registry.test/'
   const entry = providerRegistryEntry()

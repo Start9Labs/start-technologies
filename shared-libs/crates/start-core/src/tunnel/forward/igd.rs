@@ -341,7 +341,7 @@ pub(super) async fn apply_peer_forward_range(
             return ctx
                 .persist_fallback_forward_locked(source.address, target, lifetime, true, None)
                 .await
-                .map_err(|_| 718u16);
+                .map_err(|err| err.igd_code());
         }
         Some(PortForward::Dnat {
             target: existing,
