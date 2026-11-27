@@ -348,6 +348,8 @@ Every daemon has a `ready` property that tells StartOS when the daemon has start
 
 Use `display: null` for internal daemons (databases, caches) whose readiness check should not be shown to the user.
 
+A first `success` allows dependents to start. After success, up to two consecutive `failure` polls preserve readiness for `requires`; the third failure, or any other non-success status, pauses dependents. Success resets the count. The tolerance counts polls, not elapsed time; triggers and check runtimes determine its duration. Crashes, unexpected exits, failed starts, and upstream dependency loss pause dependents immediately, as do failures that end polling or park `statusTrigger` at `Infinity`. `runUntilSuccess()` requires every check's raw result to be `success`.
+
 ### Standalone Health Checks (`addHealthCheck`)
 
 For ongoing conditions beyond daemon readiness — sync progress, network reachability, secondary interface availability — use `.addHealthCheck()` in the daemon chain. These run continuously and are displayed to the user. Their IDs are what dependency packages reference in their `healthChecks` array.
