@@ -84,13 +84,13 @@ label is `hostDirectives: [TuiStatus]` with
 `tuiDirectiveBinding(TuiStatus, 'tuiStatus', computed(() => COLORS[this.status()]))` and its
 words as content, not a host around an inner `<span [tuiStatus]>`.
 
-Real fleet examples: `header[appHeader]`, `footer[appFooter]`, `button[marketplaceTile]`
+Examples: `header[appHeader]`, `footer[appFooter]`, `button[marketplaceTile]`
 (+`TuiCardLarge`), `button[server]` (+`TuiCell`), `table[appTable]`
 (+`{ directive: TuiTableDirective, inputs: ['sorter'] }`), `img[storeIcon]`,
 `tr[appService]`, `ng-template[title]`. Element selectors are for true leaf widgets
 (`check-icon`, `app-placeholder`); nobody enforces a prefix — clarity wins.
 
-`hostDirectives` is also the **composition** mechanism — the purest exemplar (start-wrt):
+`hostDirectives` is also the **composition** mechanism — the purest exemplar:
 
 ```ts
 @Directive({
@@ -101,11 +101,10 @@ Real fleet examples: `header[appHeader]`, `footer[appFooter]`, `button[marketpla
 export class Form {}
 ```
 
-One attribute = Taiga form + card + skeleton-on-loading, input forwarded. Twelve start-wrt
-dialogs attach contextual help the same way: `hostDirectives: [ModalHelp]`. A side effect that
-runs exactly while one component lives — support-server's paging sounds behind the staff rail —
-is a `@Directive()` in that component's `hostDirectives`, not a root service it injects only to
-start.
+One attribute = Taiga form + card + skeleton-on-loading, input forwarded. Dialogs attach
+contextual help the same way: `hostDirectives: [ModalHelp]`. A side effect that runs exactly
+while one component lives — paging sounds behind a staff rail — is a `@Directive()` in that
+component's `hostDirectives`, not a root service it injects only to start.
 
 ### `host: {}` carries all host concerns
 
@@ -173,7 +172,7 @@ Work happens in field initializers. Fetch kickoff is a bare constructor statemen
 `afterNextRender`; long-lived streams are **class-field subscriptions**:
 
 ```ts
-readonly subscription = merge(inject(PatchDataService), inject(PatchMonitorService))
+readonly subscription = merge(inject(DataSyncService), inject(MonitorService))
   .pipe(takeUntilDestroyed())
   .subscribe()
 ```
@@ -207,7 +206,7 @@ copy.
 - **The URL is component state** for anything shareable: drawers open when query params match
   (`?id=…&flavor=…`), pagination writes `queryParams` and reads them back as route-bound inputs
   (routing.md); search/registry/category selections live in query params (linkable + SSR-safe).
-- i18n (monorepo apps): **every** user-facing literal goes through `| i18n` (or
+- i18n (apps with i18n): **every** user-facing literal goes through `| i18n` (or
   `inject(i18nPipe).transform(...)` in TS); backend `LocaleString`s through `| localize`.
 - Rendered markdown is always the triple: `[innerHTML]="text | markdown | dompurify"` plus the
   `safeLinks` directive (forces `target="_blank" rel="noopener noreferrer"` on cross-origin links
@@ -226,7 +225,7 @@ copy.
 ### Sticky page headers
 
 A scrolling page puts its header **inside** the `tui-scrollbar`, as its first child, made
-sticky and translucent by a global utility (support-server's `g-header`: sticky, padded,
+sticky and translucent by a global utility (a `g-header`: sticky, padded,
 `backdrop-filter` over a `color-mix()` of the page background). A header in a flex column above
 the scrollbar, wrapped in a `.page`/`.chat` div, gets rewritten. When a child component owns the
 scrollbar, it renders the `<header tuiHeader class="g-header"><ng-content /></header>` and the

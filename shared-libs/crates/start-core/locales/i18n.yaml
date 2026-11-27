@@ -714,11 +714,11 @@ bins.mod.does-not-exist:
   pl_PL: "%{name} nie istnieje w MultiExecutable"
 
 bins.start-init.updating-firmware:
-  en_US: "Updating Firmware"
-  de_DE: "Firmware wird aktualisiert"
-  es_ES: "Actualizando firmware"
-  fr_FR: "Mise à jour du firmware"
-  pl_PL: "Aktualizacja oprogramowania"
+  en_US: "Updating firmware. Do not power off your server"
+  de_DE: "Firmware wird aktualisiert. Schalten Sie Ihren Server nicht aus"
+  es_ES: "Actualizando firmware. No apague su servidor"
+  fr_FR: "Mise à jour du firmware. N'éteignez pas votre serveur"
+  pl_PL: "Aktualizacja oprogramowania układowego. Nie wyłączaj serwera"
 
 bins.start-init.rebooting:
   en_US: "Rebooting"
@@ -768,6 +768,42 @@ bins.start-init.failed-to-kill-kiosk:
   es_ES: "Error al cerrar el kiosco: %{error}"
   fr_FR: "Échec de la fermeture du kiosque : %{error}"
   pl_PL: "Nie udało się zamknąć kiosku: %{error}"
+
+# firmware.rs
+firmware.failed-message:
+  en_US: "Updating server firmware to %{id} failed: %{error}. Contact Start9 support before restarting your server."
+  de_DE: "Die Aktualisierung der Server-Firmware auf %{id} ist fehlgeschlagen: %{error}. Wenden Sie sich an den Start9-Support, bevor Sie Ihren Server neu starten."
+  es_ES: "La actualización del firmware del servidor a %{id} falló: %{error}. Contacte con el soporte de Start9 antes de reiniciar su servidor."
+  fr_FR: "La mise à jour du firmware du serveur vers %{id} a échoué : %{error}. Contactez le support Start9 avant de redémarrer votre serveur."
+  pl_PL: "Aktualizacja oprogramowania układowego serwera do %{id} nie powiodła się: %{error}. Skontaktuj się z pomocą techniczną Start9 przed ponownym uruchomieniem serwera."
+
+firmware.failed-title:
+  en_US: "Firmware update failed"
+  de_DE: "Firmware-Aktualisierung fehlgeschlagen"
+  es_ES: "Error al actualizar el firmware"
+  fr_FR: "Échec de la mise à jour du firmware"
+  pl_PL: "Aktualizacja oprogramowania układowego nie powiodła się"
+
+firmware.interrupted-message:
+  en_US: "Updating server firmware to %{id} was interrupted before it finished. Contact Start9 support before restarting your server."
+  de_DE: "Die Aktualisierung der Server-Firmware auf %{id} wurde unterbrochen, bevor sie abgeschlossen war. Wenden Sie sich an den Start9-Support, bevor Sie Ihren Server neu starten."
+  es_ES: "La actualización del firmware del servidor a %{id} se interrumpió antes de terminar. Contacte con el soporte de Start9 antes de reiniciar su servidor."
+  fr_FR: "La mise à jour du firmware du serveur vers %{id} a été interrompue avant la fin. Contactez le support Start9 avant de redémarrer votre serveur."
+  pl_PL: "Aktualizacja oprogramowania układowego serwera do %{id} została przerwana przed zakończeniem. Skontaktuj się z pomocą techniczną Start9 przed ponownym uruchomieniem serwera."
+
+firmware.updated-message:
+  en_US: "Server firmware was updated from %{from} to %{id}."
+  de_DE: "Die Server-Firmware wurde von %{from} auf %{id} aktualisiert."
+  es_ES: "El firmware del servidor se actualizó de %{from} a %{id}."
+  fr_FR: "Le firmware du serveur a été mis à jour de %{from} vers %{id}."
+  pl_PL: "Oprogramowanie układowe serwera zostało zaktualizowane z %{from} do %{id}."
+
+firmware.updated-title:
+  en_US: "Firmware updated"
+  de_DE: "Firmware aktualisiert"
+  es_ES: "Firmware actualizado"
+  fr_FR: "Firmware mis à jour"
+  pl_PL: "Oprogramowanie układowe zaktualizowane"
 
 bins.startd.metrics-daemon-panicked:
   en_US: "Metrics daemon panicked!"
@@ -1196,13 +1232,6 @@ system.could-not-get-new-disk-metrics:
   fr_FR: "Impossible d'obtenir les nouvelles métriques disque : %{error}"
   pl_PL: "Nie można uzyskać nowych metryk dysku: %{error}"
 
-system.no-temperatures-available:
-  en_US: "No temperatures available"
-  de_DE: "Keine Temperaturen verfügbar"
-  es_ES: "No hay temperaturas disponibles"
-  fr_FR: "Aucune température disponible"
-  pl_PL: "Brak dostępnych temperatur"
-
 system.invalid-proc-stat-column:
   en_US: "Invalid /proc/stat column value: %{error}"
   de_DE: "Ungültiger /proc/stat-Spaltenwert: %{error}"
@@ -1230,6 +1259,90 @@ system.field-missing-from-meminfo:
   es_ES: "%{field} falta en /proc/meminfo"
   fr_FR: "%{field} manquant dans /proc/meminfo"
   pl_PL: "%{field} brakuje w /proc/meminfo"
+
+system.temperature.critical-message:
+  en_US: "%{sensor} (%{id}) is at %{temperature}, at or above its critical limit of %{critical}. Your server may slow itself down or shut off to protect its hardware. Stop resource-heavy services and check its cooling now."
+  de_DE: "%{sensor} (%{id}) hat %{temperature} erreicht und liegt damit bei oder über seinem kritischen Grenzwert von %{critical}. Ihr Server kann sich drosseln oder abschalten, um seine Hardware zu schützen. Beenden Sie ressourcenintensive Dienste und prüfen Sie sofort die Kühlung."
+  es_ES: "%{sensor} (%{id}) está a %{temperature}, igual o por encima de su límite crítico de %{critical}. Su servidor puede ralentizarse o apagarse para proteger su hardware. Detenga los servicios que consumen muchos recursos y revise la refrigeración ahora."
+  fr_FR: "%{sensor} (%{id}) est à %{temperature}, au niveau ou au-dessus de sa limite critique de %{critical}. Votre serveur peut ralentir ou s’éteindre pour protéger son matériel. Arrêtez les services gourmands en ressources et vérifiez son refroidissement dès maintenant."
+  pl_PL: "%{sensor} (%{id}) ma %{temperature}, czyli osiągnął lub przekroczył swój limit krytyczny %{critical}. Serwer może zwolnić lub się wyłączyć, aby chronić sprzęt. Zatrzymaj usługi intensywnie używające zasobów i natychmiast sprawdź chłodzenie."
+
+system.temperature.critical-title:
+  en_US: "%{sensor} is critically hot"
+  de_DE: "%{sensor} ist kritisch heiß"
+  es_ES: "%{sensor} está críticamente caliente"
+  fr_FR: "%{sensor} est dangereusement chaud"
+  pl_PL: "%{sensor} jest krytycznie gorący"
+
+system.temperature.high-message:
+  en_US: "%{sensor} (%{id}) has been above %{high} for over %{minutes} minutes and is now at %{temperature}. Sustained heat can slow your server and shorten the life of its hardware. Make sure its vents are clear and its fans are working, and stop services you are not using."
+  de_DE: "%{sensor} (%{id}) liegt seit über %{minutes} Minuten über %{high} und hat jetzt %{temperature}. Anhaltende Hitze kann Ihren Server verlangsamen und die Lebensdauer seiner Hardware verkürzen. Sorgen Sie für freie Lüftungsöffnungen und funktionierende Lüfter und beenden Sie Dienste, die Sie nicht nutzen."
+  es_ES: "%{sensor} (%{id}) lleva más de %{minutes} minutos por encima de %{high} y ahora está a %{temperature}. El calor sostenido puede ralentizar su servidor y acortar la vida de su hardware. Asegúrese de que las rejillas de ventilación estén despejadas y los ventiladores funcionen, y detenga los servicios que no utilice."
+  fr_FR: "%{sensor} (%{id}) dépasse %{high} depuis plus de %{minutes} minutes et est maintenant à %{temperature}. Une chaleur prolongée peut ralentir votre serveur et réduire la durée de vie de son matériel. Vérifiez que ses aérations sont dégagées et que ses ventilateurs fonctionnent, et arrêtez les services que vous n’utilisez pas."
+  pl_PL: "%{sensor} (%{id}) od ponad %{minutes} minut przekracza %{high} i ma teraz %{temperature}. Długotrwałe przegrzewanie może spowolnić serwer i skrócić żywotność sprzętu. Upewnij się, że otwory wentylacyjne są drożne, a wentylatory działają, i zatrzymaj nieużywane usługi."
+
+system.temperature.high-title:
+  en_US: "%{sensor} is running hot"
+  de_DE: "%{sensor} läuft heiß"
+  es_ES: "%{sensor} está funcionando caliente"
+  fr_FR: "%{sensor} chauffe"
+  pl_PL: "%{sensor} się przegrzewa"
+
+system.temperature.sensor.chipset:
+  en_US: "Chipset"
+  de_DE: "Chipsatz"
+  es_ES: "Chipset"
+  fr_FR: "Chipset"
+  pl_PL: "Chipset"
+
+system.temperature.sensor.cpu:
+  en_US: "Processor"
+  de_DE: "Prozessor"
+  es_ES: "Procesador"
+  fr_FR: "Processeur"
+  pl_PL: "Procesor"
+
+system.temperature.sensor.gpu:
+  en_US: "Graphics"
+  de_DE: "Grafikeinheit"
+  es_ES: "Gráficos"
+  fr_FR: "Processeur graphique"
+  pl_PL: "Układ graficzny"
+
+system.temperature.sensor.memory:
+  en_US: "Memory"
+  de_DE: "Arbeitsspeicher"
+  es_ES: "Memoria"
+  fr_FR: "Mémoire"
+  pl_PL: "Pamięć"
+
+system.temperature.sensor.network:
+  en_US: "Network adapter"
+  de_DE: "Netzwerkadapter"
+  es_ES: "Adaptador de red"
+  fr_FR: "Carte réseau"
+  pl_PL: "Karta sieciowa"
+
+system.temperature.sensor.other:
+  en_US: "Sensor"
+  de_DE: "Sensor"
+  es_ES: "Sensor"
+  fr_FR: "Capteur"
+  pl_PL: "Czujnik"
+
+system.temperature.sensor.storage:
+  en_US: "Storage drive"
+  de_DE: "Speicherlaufwerk"
+  es_ES: "Unidad de almacenamiento"
+  fr_FR: "Disque de stockage"
+  pl_PL: "Dysk"
+
+system.temperature.sensor.system:
+  en_US: "System"
+  de_DE: "System"
+  es_ES: "Sistema"
+  fr_FR: "Système"
+  pl_PL: "System"
 
 system.trust-ca.fingerprint:
   en_US: "SHA-256 fingerprint"
@@ -2255,6 +2368,12 @@ os-install.partitioned-pool-unsupported-layout:
   pl_PL: "Dane StartOS na %{disk} znajdują się na partycji %{partition} obok starszej instalacji systemu i nie można ich zachować na tym urządzeniu. Aby wymazać dysk i zacząć od nowa, wybierz „Nadpisz”."
 
 # os_install/gpt.rs
+os-install.preserved-data-from-newer-version:
+  en_US: "The StartOS data on %{disk} was last used by StartOS %{version}, which this installer (StartOS %{current}) cannot set up. Nothing has been changed. Flash a USB drive with StartOS %{version} or newer, boot from it, and choose \"Preserve\" again."
+  de_DE: "Die StartOS-Daten auf %{disk} wurden zuletzt von StartOS %{version} verwendet, das dieses Installationsprogramm (StartOS %{current}) nicht einrichten kann. Es wurde nichts verändert. Schreiben Sie StartOS %{version} oder neuer auf einen USB-Stick, starten Sie davon und wählen Sie erneut \"Beibehalten\"."
+  es_ES: "Los datos de StartOS en %{disk} los usó por última vez StartOS %{version}, que este instalador (StartOS %{current}) no puede configurar. No se ha cambiado nada. Grabe StartOS %{version} o una versión más reciente en una unidad USB, arranque desde ella y vuelva a elegir \"Conservar\"."
+  fr_FR: "Les données StartOS sur %{disk} ont été utilisées en dernier par StartOS %{version}, que ce programme d'installation (StartOS %{current}) ne peut pas configurer. Rien n'a été modifié. Flashez StartOS %{version} ou une version plus récente sur une clé USB, démarrez dessus et choisissez à nouveau « Conserver »."
+  pl_PL: "Dane StartOS na %{disk} były ostatnio używane przez StartOS %{version}, którego ten instalator (StartOS %{current}) nie może skonfigurować. Nic nie zostało zmienione. Nagraj StartOS %{version} lub nowszy na dysk USB, uruchom z niego komputer i ponownie wybierz „Zachowaj”."
 os-install.protected-partition-overlaps-os-root-bytes:
   en_US: "Protected partition %{path} starts at sector %{first_lba}, leaving only %{available_bytes} bytes for the OS root partition (minimum is %{min_bytes} bytes)"
   de_DE: "Geschützte Partition %{path} beginnt bei Sektor %{first_lba} und lässt nur %{available_bytes} Bytes für die OS-Root-Partition übrig (Minimum ist %{min_bytes} Bytes)"
@@ -5052,6 +5171,118 @@ tunnel.api.invalid-name:
   es_ES: 'Los nombres no pueden estar vacíos ni contener solo espacios, no deben contener caracteres de control y deben tener como máximo %{max} caracteres'
   fr_FR: 'Les noms ne doivent pas être vides ni composés uniquement d’espaces, ne doivent contenir aucun caractère de contrôle et doivent comporter au maximum %{max} caractères'
   pl_PL: 'Nazwy nie mogą być puste ani składać się wyłącznie z białych znaków, nie mogą zawierać znaków sterujących i mogą mieć najwyżej %{max} znaków'
+
+tunnel.forward.pcp.already-auto-dnat-other-client:
+  en_US: '%{source} is already an automatic DNAT forward for another client'
+  de_DE: '%{source} ist bereits eine automatische DNAT-Weiterleitung für einen anderen Client'
+  es_ES: '%{source} ya es un reenvío DNAT automático para otro cliente'
+  fr_FR: '%{source} est déjà une redirection DNAT automatique pour un autre client'
+  pl_PL: '%{source} jest już automatycznym przekierowaniem DNAT dla innego klienta'
+
+tunnel.forward.pcp.already-auto-dnat-range:
+  en_US: '%{source} is already an automatic DNAT range forward'
+  de_DE: '%{source} ist bereits eine automatische DNAT-Bereichsweiterleitung'
+  es_ES: '%{source} ya es un reenvío de rango DNAT automático'
+  fr_FR: '%{source} est déjà une redirection de plage DNAT automatique'
+  pl_PL: '%{source} jest już automatycznym przekierowaniem zakresu DNAT'
+
+tunnel.forward.pcp.already-dnat:
+  en_US: '%{source} is already a DNAT forward'
+  de_DE: '%{source} ist bereits eine DNAT-Weiterleitung'
+  es_ES: '%{source} ya es un reenvío DNAT'
+  fr_FR: '%{source} est déjà une redirection DNAT'
+  pl_PL: '%{source} jest już przekierowaniem DNAT'
+
+tunnel.forward.pcp.already-dnat-other-client:
+  en_US: '%{source} is already a DNAT forward for another client'
+  de_DE: '%{source} ist bereits eine DNAT-Weiterleitung für einen anderen Client'
+  es_ES: '%{source} ya es un reenvío DNAT para otro cliente'
+  fr_FR: '%{source} est déjà une redirection DNAT pour un autre client'
+  pl_PL: '%{source} jest już przekierowaniem DNAT dla innego klienta'
+
+tunnel.forward.pcp.already-dnat-range:
+  en_US: '%{source} is already a DNAT range forward'
+  de_DE: '%{source} ist bereits eine DNAT-Bereichsweiterleitung'
+  es_ES: '%{source} ya es un reenvío de rango DNAT'
+  fr_FR: '%{source} est déjà une redirection de plage DNAT'
+  pl_PL: '%{source} jest już przekierowaniem zakresu DNAT'
+
+tunnel.forward.pcp.diversion-setup-failed:
+  en_US: 'SNI diversion setup failed (code %{code})'
+  de_DE: 'Einrichtung der SNI-Umleitung fehlgeschlagen (Code %{code})'
+  es_ES: 'Error al configurar el desvío SNI (código %{code})'
+  fr_FR: 'Échec de la configuration du détournement SNI (code %{code})'
+  pl_PL: 'Nie udało się skonfigurować przekierowania SNI (kod %{code})'
+
+tunnel.forward.pcp.fallback-automatic-route:
+  en_US: 'fallback on %{source} is already an automatic route to %{target}'
+  de_DE: 'Fallback auf %{source} ist bereits eine automatische Route zu %{target}'
+  es_ES: 'el respaldo en %{source} ya es una ruta automática hacia %{target}'
+  fr_FR: 'le repli sur %{source} est déjà une route automatique vers %{target}'
+  pl_PL: 'trasa zapasowa na %{source} jest już automatyczną trasą do %{target}'
+
+tunnel.forward.pcp.fallback-held-by-other-client:
+  en_US: 'fallback on %{source} is held by another client'
+  de_DE: 'Fallback auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'el respaldo en %{source} pertenece a otro cliente'
+  fr_FR: 'le repli sur %{source} est détenu par un autre client'
+  pl_PL: 'trasa zapasowa na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.fallback-manual-route:
+  en_US: 'fallback on %{source} is already a manual route to %{target}'
+  de_DE: 'Fallback auf %{source} ist bereits eine manuelle Route zu %{target}'
+  es_ES: 'el respaldo en %{source} ya es una ruta manual hacia %{target}'
+  fr_FR: 'le repli sur %{source} est déjà une route manuelle vers %{target}'
+  pl_PL: 'trasa zapasowa na %{source} jest już ręczną trasą do %{target}'
+
+tunnel.forward.pcp.hostname-automatic-route:
+  en_US: 'SNI hostname %{hostname} on %{source} is already an automatic route to %{target}'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} ist bereits eine automatische Route zu %{target}'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} ya es una ruta automática hacia %{target}'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est déjà une route automatique vers %{target}'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest już automatyczną trasą do %{target}'
+
+tunnel.forward.pcp.hostname-held-by-other-client:
+  en_US: 'SNI hostname %{hostname} on %{source} is held by another client'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} pertenece a otro cliente'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est détenu par un autre client'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.hostname-manual-route:
+  en_US: 'SNI hostname %{hostname} on %{source} is already a manual route to %{target}'
+  de_DE: 'SNI-Hostname %{hostname} auf %{source} ist bereits eine manuelle Route zu %{target}'
+  es_ES: 'El nombre de host SNI %{hostname} en %{source} ya es una ruta manual hacia %{target}'
+  fr_FR: 'Le nom d’hôte SNI %{hostname} sur %{source} est déjà une route manuelle vers %{target}'
+  pl_PL: 'Nazwa hosta SNI %{hostname} na %{source} jest już ręczną trasą do %{target}'
+
+tunnel.forward.pcp.not-sni-port:
+  en_US: '%{source} is not an SNI-demuxed port'
+  de_DE: '%{source} ist kein SNI-demultiplexter Port'
+  es_ES: '%{source} no es un puerto con demultiplexación SNI'
+  fr_FR: '%{source} n’est pas un port démultiplexé par SNI'
+  pl_PL: '%{source} nie jest portem z demultipleksacją SNI'
+
+tunnel.forward.pcp.overlaps-existing:
+  en_US: '%{source} overlaps an existing forward at %{conflict}'
+  de_DE: '%{source} überschneidet sich mit einer bestehenden Weiterleitung auf %{conflict}'
+  es_ES: '%{source} se superpone con un reenvío existente en %{conflict}'
+  fr_FR: '%{source} chevauche une redirection existante sur %{conflict}'
+  pl_PL: '%{source} nakłada się na istniejące przekierowanie na %{conflict}'
+
+tunnel.forward.pcp.sni-hostname-taken:
+  en_US: 'SNI hostname on %{source} is held by another client'
+  de_DE: 'SNI-Hostname auf %{source} wird von einem anderen Client gehalten'
+  es_ES: 'El nombre de host SNI en %{source} pertenece a otro cliente'
+  fr_FR: 'Le nom d’hôte SNI sur %{source} est détenu par un autre client'
+  pl_PL: 'Nazwa hosta SNI na %{source} jest zajęta przez innego klienta'
+
+tunnel.forward.pcp.sni-listener-failed:
+  en_US: 'SNI listener on %{source} could not bind'
+  de_DE: 'SNI-Listener auf %{source} konnte nicht gebunden werden'
+  es_ES: 'No se pudo enlazar el puerto de escucha SNI en %{source}'
+  fr_FR: 'L’écouteur SNI sur %{source} n’a pas pu être lié'
+  pl_PL: 'Nie udało się powiązać nasłuchiwania SNI na %{source}'
 
 util.actor.runtime-exited:
   en_US: The task processor has stopped.

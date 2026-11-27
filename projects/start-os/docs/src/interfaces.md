@@ -118,3 +118,11 @@ The Tor table is empty by default. To add onion addresses:
 1. Optionally, you can upload a private key to use a [vanity `.onion` address](https://community.torproject.org/onion-services/advanced/vanity-addresses/).
 
 1. To view your onion addresses, go to **Actions > View Onion Addresses**. They will also appear in the Tor table for each service interface.
+
+## Shared Addresses and Browser Cookies
+
+Browsers keep cookies per hostname, not per port. Every service on your server can be reached at the server's shared addresses — its `.local` address and its IP addresses, each with the service's own port — so services you open at those addresses share browser cookies: each service's cookies are sent to the others, and a page from one service can read or change another's cookies, except those marked HttpOnly. The StartOS UI itself is not affected, because it does not use cookies.
+
+This only matters if you open service UIs at those addresses, and nothing needs to be turned off. If you would rather not use them for a particular service, switch off its `.local` and IP addresses in the interface's [gateway tables](#gateway-tables).
+
+To use services on your local network without sharing cookies, give each one a [private domain](private-domains.md). A domain belongs to one service only, so its cookies stay with that service. [Public domains](clearnet.md) and [onion addresses](#tor-onion-addresses) are likewise one per service. Domains under the same parent domain (`nextcloud.example.com`, `immich.example.com`) keep their cookies apart too, except that a page from one can set a cookie for the parent domain, which the others then receive.

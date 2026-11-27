@@ -6,7 +6,7 @@ There is exactly one supported way to do this, and three once-common patterns th
 
 ## The host bridge
 
-Every StartOS service runs in its own container on a single internal bridge, `lxcbr0`. The bridge gateway — the OS itself — always sits at a fixed address you read with:
+Every StartOS service runs in its own container on a single internal bridge, `lxcbr0`. Containers reach the bridge gateway — the OS itself — by the name `startos.internal`, which StartOS resolves and certifies for every container. Where a setting accepts only an IP address — a trusted-proxy list, a DNS server, an allowlist — read the gateway's fixed address with:
 
 ```typescript
 const osIp = await sdk.getOsIp(effects) // "10.0.3.1" — a plain Promise, not reactive
@@ -14,7 +14,7 @@ const osIp = await sdk.getOsIp(effects) // "10.0.3.1" — a plain Promise, not r
 
 `getOsIp` is a one-shot read of a compile-time constant. It never changes and never needs watching.
 
-Every port a service **binds** (via `sdk.MultiHost.of(...).bindPort(...)` in [interfaces.ts](interfaces.md)) is reachable from other containers at `10.0.3.1:<assigned external port>`. This holds even for a binding with **no exported interface** — binding a port is enough to make it reachable on the bridge (see [Exposing a bridge-only port](#exposing-a-bridge-only-port) below).
+Every port a service **binds** (via `sdk.MultiHost.of(...).bindPort(...)` in [interfaces.ts](interfaces.md)) is reachable from other containers at `startos.internal:<assigned external port>`. This holds even for a binding with **no exported interface** — binding a port is enough to make it reachable on the bridge (see [Exposing a bridge-only port](#exposing-a-bridge-only-port) below).
 
 The converse does not hold: not binding a port does not hide it. Every service's container sits on the same bridge, so a daemon listening on `0.0.0.0` or `::` is reachable from every other service at your container's IP, binding or no binding. **Bind every listener that only your own daemons use — a database, a cache, an internal API, a daemon init starts temporarily — to `127.0.0.1`.**
 
@@ -44,7 +44,7 @@ Three things make this correct, and each matters:
 
    `rpcHostId` and `rpcInternalPort` are imported from the dependency's package (`bitcoin-core-startos/startos/utils`), not hardcoded — the internal port and host id are the stable contract.
 
-   **On `ssl`:** most bindings publish one bridge address and need no discriminator. A binding that uses `protocol: 'http'`/`'ws'`, or `secure: null` with `addSsl`, publishes **two** — bitcoind's RPC is reachable at both `10.0.3.1:8332` (plaintext) and `10.0.3.1:54404` (TLS-terminated). Only there does filtering on `ssl` matter; adding it elsewhere selects nothing and re-introduces the very assumption this rule removes.
+   **On `ssl`:** most bindings publish one bridge address and need no discriminator. A binding that uses `protocol: 'http'`/`'ws'`, or `secure: null` with `addSsl`, publishes **two** — bitcoind's RPC is reachable at both `startos.internal:8332` (plaintext) and `startos.internal:54404` (TLS-terminated). Only there does filtering on `ssl` matter; adding it elsewhere selects nothing and re-introduces the very assumption this rule removes.
 
 2. **`.const()` on a minimal mapped value.** `.const()` re-runs `main` only when the **mapped** value changes, not on every churn of the dependency's host record. Because the mapped value is just the address string, the restart behavior is exactly what you want:
 

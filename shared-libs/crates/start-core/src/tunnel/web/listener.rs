@@ -115,14 +115,25 @@ mod tests {
         UiListener::check_available((Ipv6Addr::UNSPECIFIED, port).into()).unwrap();
     }
 
+    /// A probed port can be taken by a parallel test before it is bound again.
+    fn bind_on_free_port(ip: Ipv6Addr) -> (UiListener, u16) {
+        for _ in 0..16 {
+            let port = std::net::TcpListener::bind((ip, 0))
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            if let Ok(ui) = UiListener::bind((ip, port).into(), SniDemux::new()) {
+                return (ui, port);
+            }
+        }
+        panic!("no free port on {ip}");
+    }
+
     #[tokio::test]
     async fn ui_ipv6_and_dual_stack_listeners_remain_reachable() {
         for ip in [Ipv6Addr::LOCALHOST, Ipv6Addr::UNSPECIFIED] {
-            let probe = std::net::TcpListener::bind((ip, 0)).unwrap();
-            let port = probe.local_addr().unwrap().port();
-            drop(probe);
-            let demux = SniDemux::new();
-            let mut ui = UiListener::bind((ip, port).into(), demux).unwrap();
+            let (mut ui, port) = bind_on_free_port(ip);
             let mut destinations = vec![SocketAddr::from((Ipv6Addr::LOCALHOST, port))];
             if ip.is_unspecified() {
                 destinations.push((Ipv4Addr::LOCALHOST, port).into());

@@ -327,6 +327,7 @@ export type Security = z.output<typeof schemas.Security>
  * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
  */
 export type SelectorParamsInput = z.input<typeof schemas.SelectorParams>
+export type SensorKind = z.output<typeof schemas.SensorKind>
 export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>
@@ -514,7 +515,6 @@ export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type LshwDevice = z.output<typeof schemas.LshwDevice>
 export type MetricsCpu = z.output<typeof schemas.MetricsCpu>
 export type MetricsDisk = z.output<typeof schemas.MetricsDisk>
-export type MetricsGeneral = z.output<typeof schemas.MetricsGeneral>
 export type MetricsMemory = z.output<typeof schemas.MetricsMemory>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type Notification = z.output<typeof schemas.Notification>
@@ -614,6 +614,11 @@ export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TargetParamsInput = z.input<typeof schemas.TargetParams>
+
+/**
+ * One part's representative reading, with the limits it is judged against.
+ */
+export type TemperatureSensor = z.output<typeof schemas.TemperatureSensor>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
 export type TransportWire = z.output<typeof schemas.TransportWire>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
@@ -662,7 +667,7 @@ export type InstallParamsInput = z.input<typeof schemas.InstallParams>
  * Enrolled keys, including ephemeral ones, and the caller's own.
  */
 export type KeyList = z.output<typeof schemas.KeyList>
-export type Metrics = z.output<typeof schemas.Metrics>
+export type MetricsGeneral = z.output<typeof schemas.MetricsGeneral>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
 
@@ -720,9 +725,7 @@ export type DeviceInfo = z.output<typeof schemas.DeviceInfo>
  * Database-generated patches contain only add, remove and replace operations.
  */
 export type DiffPatch = z.output<typeof schemas.DiffPatch>
-export type MetricsFollowResponse = z.output<
-  typeof schemas.MetricsFollowResponse
->
+export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 
 /**
@@ -737,6 +740,9 @@ export type BackupHistory = z.output<typeof schemas.BackupHistory>
 export type DnsStatus = z.output<typeof schemas.DnsStatus>
 export type LegacyProxySslOptions = z.output<
   typeof schemas.LegacyProxySslOptions
+>
+export type MetricsFollowResponse = z.output<
+  typeof schemas.MetricsFollowResponse
 >
 export type Revision = z.output<typeof schemas.Revision>
 

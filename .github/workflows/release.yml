@@ -14,19 +14,15 @@ on:
       RELEASE_REGISTRY:
         description: "The registry to publish to. Defaults to the caller's RELEASE_REGISTRY variable."
         type: string
-        default: ${{ vars.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL:
         description: "S3 base URL for package uploads (e.g. https://bucket.region.digitaloceanspaces.com). Defaults to the caller's S3_S9PKS_BASE_URL variable."
         type: string
-        default: ${{ vars.S3_S9PKS_BASE_URL }}
       REGISTRY_PROXY:
         description: "Proxy URL start-cli uses to reach the registries, e.g. socks5h://proxy.example:9050 for .onion registries. The proxy must already be reachable from the runner. Defaults to the caller's REGISTRY_PROXY variable."
         type: string
-        default: ${{ vars.REGISTRY_PROXY }}
       PACKAGE_READER_KEYS:
         description: "Public keys of the registry reader keys (`start-cli registry admin reader add`) that may read a private repository's package, one per line, in DER Base64 or PEM. Defaults to the caller's PACKAGE_READER_KEYS variable."
         type: string
-        default: ${{ vars.PACKAGE_READER_KEYS }}
     secrets:
       DEV_KEY:
         description: 'Developer signing key'
@@ -40,6 +36,13 @@ on:
       PACKAGES_TOKEN:
         description: "Forgejo token that can write the repository owner's packages; publishes a private repository's package on Forgejo without S3"
         required: false
+
+# A `vars` input default reaches nested workflows unevaluated on Forgejo's runner.
+env:
+  RELEASE_REGISTRY: ${{ inputs.RELEASE_REGISTRY || vars.RELEASE_REGISTRY }}
+  S3_S9PKS_BASE_URL: ${{ inputs.S3_S9PKS_BASE_URL || vars.S3_S9PKS_BASE_URL }}
+  REGISTRY_PROXY: ${{ inputs.REGISTRY_PROXY || vars.REGISTRY_PROXY }}
+  PACKAGE_READER_KEYS: ${{ inputs.PACKAGE_READER_KEYS || vars.PACKAGE_READER_KEYS }}
 
 jobs:
   # Read the package's build matrix by running `make -s print-TARGETS`.
@@ -58,22 +61,20 @@ jobs:
       matrix: ${{ steps.discover.outputs.matrix }}
     steps:
       - name: Validate private publication
-        if: ${{ inputs.RELEASE_REGISTRY }}
+        if: ${{ env.RELEASE_REGISTRY }}
         env:
           PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
-          READER_KEYS: ${{ inputs.PACKAGE_READER_KEYS }}
-          S3_BASE: ${{ inputs.S3_S9PKS_BASE_URL }}
           ON_GITHUB: ${{ github.server_url == 'https://github.com' }}
           HAS_PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN != '' }}
         run: |
           if [ "$PRIVATE_REPOSITORY" != true ]; then
-            if [ -n "${READER_KEYS//[[:space:]]/}" ]; then
+            if [ -n "${PACKAGE_READER_KEYS//[[:space:]]/}" ]; then
               echo "::error::PACKAGE_READER_KEYS applies to private repositories only; a public repository's package is public."
               exit 1
             fi
             exit 0
           fi
-          if [ -n "$S3_BASE" ]; then
+          if [ -n "$S3_S9PKS_BASE_URL" ]; then
             exit 0
           fi
           if [ "$ON_GITHUB" = true ]; then
@@ -198,7 +199,7 @@ jobs:
       - name: Configure registry proxy
         uses: Start9Labs/start-technologies/.github/actions/configure-registry-proxy@master
         with:
-          proxy: ${{ inputs.REGISTRY_PROXY }}
+          proxy: ${{ env.REGISTRY_PROXY }}
 
       - name: Checkout services repository
         uses: actions/checkout@v6
@@ -240,7 +241,6 @@ jobs:
       - name: Filter s9pk files for GitHub release
         id: filter_s9pk
         env:
-          S3_BASE: ${{ inputs.S3_S9PKS_BASE_URL }}
           PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
           ON_GITHUB: ${{ github.server_url == 'https://github.com' }}
           HAS_PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN != '' }}
@@ -260,7 +260,7 @@ jobs:
               continue
             fi
             SIZE_HUMAN=$(numfmt --to=iec-i --suffix=B "$SIZE")
-            if [ -n "$S3_BASE" ]; then
+            if [ -n "$S3_S9PKS_BASE_URL" ]; then
               echo "::warning::${s9pk} (${SIZE_HUMAN}) exceeds the 2 GiB release-asset limit and will not be attached to the release (S3 will be used as its sole download URL)"
             elif [ "$ON_GITHUB" != true ] && [ "$HAS_PACKAGES_TOKEN" = true ]; then
               echo "::notice::${s9pk} (${SIZE_HUMAN}) exceeds the 2 GiB release-asset limit and will be hosted in the owner's Forgejo packages"
@@ -303,8 +303,7 @@ jobs:
         run: |
           FIRST_S9PK=$(ls *.s9pk | head -1)
           RELEASE_NOTES=$(start-cli s9pk inspect "$FIRST_S9PK" manifest | jq -r '.releaseNotes | if type == "object" then (.en_US // first(.[]) // "") else . end')
-          S3_BASE="${{ inputs.S3_S9PKS_BASE_URL }}"
-          S3_BASE="${S3_BASE%/}"
+          S3_BASE="${S3_S9PKS_BASE_URL%/}"
           PKG_ID="${{ steps.version.outputs.package_id }}"
           PKG_VER="${{ steps.version.outputs.version }}"
           PKG_VER="${PKG_VER#\#}"
@@ -344,10 +343,9 @@ jobs:
           files: ${{ steps.filter_s9pk.outputs.release_files }}
 
       - name: Configure S3
-        if: ${{ inputs.S3_S9PKS_BASE_URL }}
+        if: ${{ env.S3_S9PKS_BASE_URL }}
         run: |
           sudo apt-get install -y -qq s3cmd > /dev/null
-          S3_S9PKS_BASE_URL="${{ inputs.S3_S9PKS_BASE_URL }}"
           HOST="${S3_S9PKS_BASE_URL#https://}"
           ENDPOINT="${HOST#*.}"
           cat > ~/.s3cfg <<EOF
@@ -362,14 +360,13 @@ jobs:
 
       # A private repository's s9pks are published encrypted; `.private_args` holds the flags.
       - name: Resolve private publication arguments
-        if: ${{ inputs.RELEASE_REGISTRY }}
+        if: ${{ env.RELEASE_REGISTRY }}
         env:
           PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
-          READER_KEYS: ${{ inputs.PACKAGE_READER_KEYS }}
         run: |
           : > .private_args
           [ "$PRIVATE_REPOSITORY" = true ] || exit 0
-          mapfile -t KEYS < <(printf '%s\n' "$READER_KEYS" | grep -v -e '^-----' | tr -s ' \t\r' '\n' | sed '/^$/d')
+          mapfile -t KEYS < <(printf '%s\n' "$PACKAGE_READER_KEYS" | grep -v -e '^-----' | tr -s ' \t\r' '\n' | sed '/^$/d')
           echo --private >> .private_args
           for key in "${KEYS[@]}"; do
             printf -- '--reader\n%s\n' "$key" >> .private_args
@@ -378,9 +375,9 @@ jobs:
         shell: bash
 
       - name: Remove existing version from registry
-        if: ${{ inputs.RELEASE_REGISTRY }}
+        if: ${{ env.RELEASE_REGISTRY }}
         run: |
-          REGISTRY="${{ inputs.RELEASE_REGISTRY }}"
+          REGISTRY="$RELEASE_REGISTRY"
           PACKAGE_ID="${{ steps.version.outputs.package_id }}"
           VERSION="${{ steps.version.outputs.version }}"
 
@@ -395,15 +392,14 @@ jobs:
         shell: bash
 
       - name: Publish to Registry via S3
-        if: ${{ inputs.RELEASE_REGISTRY && inputs.S3_S9PKS_BASE_URL }}
+        if: ${{ env.RELEASE_REGISTRY && env.S3_S9PKS_BASE_URL }}
         run: |
-          REGISTRY="${{ inputs.RELEASE_REGISTRY }}"
-          S3_BASE="${{ inputs.S3_S9PKS_BASE_URL }}"
+          REGISTRY="$RELEASE_REGISTRY"
           mapfile -t PRIVATE_ARGS < .private_args
           pids=()
           for s9pk in *.s9pk; do
             echo "Publishing ${s9pk} via S3..."
-            ( start-cli --registry "$REGISTRY" --s9pk-s3base "$S3_BASE" s9pk publish "$s9pk" "${PRIVATE_ARGS[@]}" 2>&1 \
+            ( start-cli --registry "$REGISTRY" --s9pk-s3base "$S3_S9PKS_BASE_URL" s9pk publish "$s9pk" "${PRIVATE_ARGS[@]}" 2>&1 \
               | sed -u "s|^|[${s9pk}] |" ) &
             pids+=($!)
           done
@@ -415,11 +411,11 @@ jobs:
         shell: bash
 
       - name: Publish to Registry via Forgejo packages
-        if: ${{ inputs.RELEASE_REGISTRY && !inputs.S3_S9PKS_BASE_URL && github.event.repository.private && github.server_url != 'https://github.com' }}
+        if: ${{ env.RELEASE_REGISTRY && !env.S3_S9PKS_BASE_URL && github.event.repository.private && github.server_url != 'https://github.com' }}
         env:
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
         run: |
-          REGISTRY="${{ inputs.RELEASE_REGISTRY }}"
+          REGISTRY="$RELEASE_REGISTRY"
           BASE="${{ steps.filter_s9pk.outputs.packages_base }}"
           mapfile -t PRIVATE_ARGS < .private_args
           for s9pk in *.s9pk; do
@@ -432,9 +428,9 @@ jobs:
         shell: bash
 
       - name: Add GitHub release mirrors
-        if: ${{ inputs.RELEASE_REGISTRY && inputs.S3_S9PKS_BASE_URL && !github.event.repository.private }}
+        if: ${{ env.RELEASE_REGISTRY && env.S3_S9PKS_BASE_URL && !github.event.repository.private }}
         run: |
-          REGISTRY="${{ inputs.RELEASE_REGISTRY }}"
+          REGISTRY="$RELEASE_REGISTRY"
           TAG="${{ inputs.TAG || github.ref_name }}"
           GH_URL="${{ github.server_url }}/${{ github.repository }}/releases/download/${TAG}"
           # add-mirror downloads the whole s9pk to verify every file hash, so on a large
@@ -460,9 +456,9 @@ jobs:
         shell: bash
 
       - name: Publish to Registry via GitHub
-        if: ${{ inputs.RELEASE_REGISTRY && !inputs.S3_S9PKS_BASE_URL && !github.event.repository.private }}
+        if: ${{ env.RELEASE_REGISTRY && !env.S3_S9PKS_BASE_URL && !github.event.repository.private }}
         run: |
-          REGISTRY="${{ inputs.RELEASE_REGISTRY }}"
+          REGISTRY="$RELEASE_REGISTRY"
           TAG="${{ inputs.TAG || github.ref_name }}"
           GH_URL="${{ github.server_url }}/${{ github.repository }}/releases/download/${TAG}"
           for s9pk in *.s9pk; do

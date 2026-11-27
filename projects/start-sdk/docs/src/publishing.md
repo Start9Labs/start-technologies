@@ -37,7 +37,7 @@ The community registries, in promotion order:
 
 Once your fork exists inside Start9-Community:
 
-1. **Open a PR** against the fork with your changes.
+1. **Open a PR** against the fork with your changes. If an AI model wrote any of it, name each one on a line of its own in the PR description — `model: <model id>`, comma-separated for several (`model: claude-opus-5-5`) — so Start9 can pick the AI reviewer to match.
 2. **Merge** — when Start9 merges the PR, a workflow automatically builds, tags, and deploys the package to **community-beta**. You don't run any publish commands yourself; the automation handles it.
 3. **Test the beta build.** This is where a release soaks: install it from community-beta, exercise it, and give other users a chance to.
 4. **Promote to production** — when you're ready to ship broadly, email <submissions@start9.com> or open an issue on the fork. Start9 promotes the current beta build to **community**. The go-ahead is yours to give, not Start9's.

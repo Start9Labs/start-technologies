@@ -103,7 +103,7 @@ fn families_declare_once_and_instances_reference_them() {
     assert!(schemas
         .contains("export const Pair = <A extends z.ZodType, B extends z.ZodType>(A: A, B: B) =>"));
     assert!(schemas.contains("\"left\": Tree(z.array(A))"));
-    assert!(schemas.contains("\"count\": wire(z.int().optional(), z.int())"));
+    assert!(schemas.contains("\"count\": z.int().default(() => (0))"));
     assert!(schemas
         .contains("export const Source = <Password extends z.ZodType>(Password: Password) =>"));
     assert!(schemas.contains("\"tree\": Tree(z.string())"));

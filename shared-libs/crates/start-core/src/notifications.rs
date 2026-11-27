@@ -15,6 +15,7 @@ use crate::PackageId;
 use crate::backup::BackupReport;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::DatabaseModel;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::util::FromStrParser;
 use crate::util::serde::{HandlerExtSerde, const_true};
@@ -30,6 +31,7 @@ pub fn notification<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-notifications")
                 .with_call_remote::<CliContext>(),
@@ -37,6 +39,7 @@ pub fn notification<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-notification-for-ids")
                 .with_call_remote::<CliContext>(),
@@ -44,6 +47,7 @@ pub fn notification<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove-before",
             from_fn_async(remove_before)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-notifications-before-id")
                 .with_call_remote::<CliContext>(),
@@ -51,6 +55,7 @@ pub fn notification<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "mark-seen",
             from_fn_async(mark_seen)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.mark-notifications-seen")
                 .with_call_remote::<CliContext>(),
@@ -58,6 +63,7 @@ pub fn notification<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "mark-seen-before",
             from_fn_async(mark_seen_before)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.mark-notifications-seen-before-id")
                 .with_call_remote::<CliContext>(),
@@ -65,6 +71,7 @@ pub fn notification<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "mark-unseen",
             from_fn_async(mark_unseen)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.mark-notifications-unseen")
                 .with_call_remote::<CliContext>(),
@@ -72,6 +79,7 @@ pub fn notification<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "create",
             from_fn_async(create)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.persist-new-notification")
                 .with_call_remote::<CliContext>(),

@@ -458,6 +458,8 @@ export type RestartReason = z.output<typeof schemas.RestartReason>
 export type RestartReasonInput = z.input<typeof schemas.RestartReason>
 export type Security = z.output<typeof schemas.Security>
 export type SecurityInput = z.input<typeof schemas.Security>
+export type SensorKind = z.output<typeof schemas.SensorKind>
+export type SensorKindInput = z.input<typeof schemas.SensorKind>
 export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerBackupReportInput = z.input<typeof schemas.ServerBackupReport>
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
@@ -988,8 +990,6 @@ export type MetricsCpu = z.output<typeof schemas.MetricsCpu>
 export type MetricsCpuInput = z.input<typeof schemas.MetricsCpu>
 export type MetricsDisk = z.output<typeof schemas.MetricsDisk>
 export type MetricsDiskInput = z.input<typeof schemas.MetricsDisk>
-export type MetricsGeneral = z.output<typeof schemas.MetricsGeneral>
-export type MetricsGeneralInput = z.input<typeof schemas.MetricsGeneral>
 export type MetricsMemory = z.output<typeof schemas.MetricsMemory>
 export type MetricsMemoryInput = z.input<typeof schemas.MetricsMemory>
 export type MetricsSummary = z.output<typeof schemas.MetricsSummary>
@@ -1270,6 +1270,16 @@ export type TaskInput = z.output<typeof schemas.TaskInput>
 export type TaskInputInput = z.input<typeof schemas.TaskInput>
 export type TaskTrigger = z.output<typeof schemas.TaskTrigger>
 export type TaskTriggerInput = z.input<typeof schemas.TaskTrigger>
+
+/**
+ * One part's representative reading, with the limits it is judged against.
+ */
+export type TemperatureSensor = z.output<typeof schemas.TemperatureSensor>
+
+/**
+ * One part's representative reading, with the limits it is judged against.
+ */
+export type TemperatureSensorInput = z.input<typeof schemas.TemperatureSensor>
 export type TestSmtpParams = z.output<typeof schemas.TestSmtpParams>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
 export type TransportWire = z.output<typeof schemas.TransportWire>
@@ -1388,8 +1398,8 @@ export type KeyList = z.output<typeof schemas.KeyList>
 export type KeyListInput = z.input<typeof schemas.KeyList>
 export type MetadataSrc = z.output<typeof schemas.MetadataSrc>
 export type MetadataSrcInput = z.input<typeof schemas.MetadataSrc>
-export type Metrics = z.output<typeof schemas.Metrics>
-export type MetricsInput = z.input<typeof schemas.Metrics>
+export type MetricsGeneral = z.output<typeof schemas.MetricsGeneral>
+export type MetricsGeneralInput = z.input<typeof schemas.MetricsGeneral>
 export type MountParams = z.output<typeof schemas.MountParams>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type NamedHealthCheckResult = z.output<
@@ -1552,12 +1562,8 @@ export type DiskInfo = z.output<typeof schemas.DiskInfo>
 export type DiskInfoInput = z.input<typeof schemas.DiskInfo>
 export type ImageConfig = z.output<typeof schemas.ImageConfig>
 export type ImageConfigInput = z.input<typeof schemas.ImageConfig>
-export type MetricsFollowResponse = z.output<
-  typeof schemas.MetricsFollowResponse
->
-export type MetricsFollowResponseInput = z.input<
-  typeof schemas.MetricsFollowResponse
->
+export type Metrics = z.output<typeof schemas.Metrics>
+export type MetricsInput = z.input<typeof schemas.Metrics>
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type NetworkGatewayInfoInput = z.input<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
@@ -1629,6 +1635,12 @@ export type LegacyProxySslOptions = z.output<
 >
 export type LegacyProxySslOptionsInput = z.input<
   typeof schemas.LegacyProxySslOptions
+>
+export type MetricsFollowResponse = z.output<
+  typeof schemas.MetricsFollowResponse
+>
+export type MetricsFollowResponseInput = z.input<
+  typeof schemas.MetricsFollowResponse
 >
 export type PackageInfo = z.output<typeof schemas.PackageInfo>
 export type PackageInfoInput = z.input<typeof schemas.PackageInfo>
