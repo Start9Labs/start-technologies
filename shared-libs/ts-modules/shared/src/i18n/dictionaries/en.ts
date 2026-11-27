@@ -1114,4 +1114,5 @@ export const ENGLISH: Record<string, number> = {
   'Chipset': 1319,
   'Sensor': 1320, // as in, a temperature sensor
   'No temperature sensors found': 1321,
+  "The server rejected this device's clock; check this device's date, time and time zone": 1322,
 }

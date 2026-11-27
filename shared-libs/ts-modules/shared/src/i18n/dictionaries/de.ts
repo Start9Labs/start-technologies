@@ -1113,4 +1113,5 @@ export default {
   1319: 'Chipsatz',
   1320: 'Sensor',
   1321: 'Keine Temperatursensoren gefunden',
+  1322: 'Der Server hat die Uhr dieses Geräts abgelehnt; prüfen Sie Datum, Uhrzeit und Zeitzone dieses Geräts',
 } satisfies i18n

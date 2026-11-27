@@ -1113,4 +1113,5 @@ export default {
   1319: 'Chipset',
   1320: 'Czujnik',
   1321: 'Nie znaleziono czujników temperatury',
+  1322: 'Serwer odrzucił zegar tego urządzenia; sprawdź datę, godzinę i strefę czasową tego urządzenia',
 } satisfies i18n

@@ -1113,4 +1113,5 @@ export default {
   1319: 'Chipset',
   1320: 'Sensor',
   1321: 'No se encontraron sensores de temperatura',
+  1322: 'El servidor rechazó el reloj de este dispositivo; compruebe la fecha, la hora y la zona horaria de este dispositivo',
 } satisfies i18n
