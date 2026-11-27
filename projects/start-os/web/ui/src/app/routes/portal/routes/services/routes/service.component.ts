@@ -43,7 +43,7 @@ import { getManifest } from 'src/app/utils/get-package-data'
         @if (found.length) {
           <service-vulnerabilities
             [pkg]="pkg"
-            [status]="status()"
+            [connected]="!!connected()"
             [vulnerabilities]="found"
           />
         }

@@ -3,7 +3,7 @@ import { i18nPipe, LocalizePipe } from '@start9labs/shared'
 import { TuiButton, TuiNotification, TuiTitle } from '@taiga-ui/core'
 import { ControlsService } from 'src/app/services/controls.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
-import { PrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
+import { isStoppable } from 'src/app/services/pkg-status-rendering.service'
 import { getManifest } from 'src/app/utils/get-package-data'
 import { RegistryVulnerability } from 'src/app/utils/vulnerabilities'
 
@@ -32,7 +32,7 @@ import { RegistryVulnerability } from 'src/app/utils/vulnerabilities'
             | i18n
         }}
       </p>
-      @if (status() === 'running') {
+      @if (connected() && stoppable()) {
         <button
           tuiButton
           appearance="primary-destructive"
@@ -63,10 +63,13 @@ export class ServiceVulnerabilitiesComponent {
   protected readonly controls = inject(ControlsService)
 
   public readonly pkg = input.required<PackageDataEntry>()
-  public readonly status = input<PrimaryStatus | string>()
+  public readonly connected = input(false)
   public readonly vulnerabilities = input.required<RegistryVulnerability[]>()
 
   protected readonly manifest = computed(() => getManifest(this.pkg()))
+  protected readonly stoppable = computed(() =>
+    isStoppable(this.pkg().statusInfo),
+  )
   protected readonly stopRecommended = computed(() =>
     this.vulnerabilities().some(({ stopRecommended }) => stopRecommended),
   )

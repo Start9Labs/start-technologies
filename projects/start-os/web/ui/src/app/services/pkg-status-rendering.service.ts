@@ -12,6 +12,12 @@ export const INACTIVE_STATUSES: PrimaryStatus[] = [
   'error',
 ]
 
+export const STOPPABLE_STATUSES: PrimaryStatus[] = [
+  'running',
+  'starting',
+  'restarting',
+]
+
 export const ALLOWED_STATUSES: Record<T.AllowedStatuses, Set<string>> = {
   'only-running': new Set(['running']),
   'only-stopped': new Set(['stopped']),
@@ -66,6 +72,11 @@ export function getInstalledBaseStatus(statusInfo: T.StatusInfo): BaseStatus {
   }
 
   return statusInfo.desired.main
+}
+
+/** Whether the service is up, regardless of tasks it requires. */
+export function isStoppable(statusInfo: T.StatusInfo): boolean {
+  return STOPPABLE_STATUSES.includes(getInstalledBaseStatus(statusInfo))
 }
 
 export function getInstalledPrimaryStatus(

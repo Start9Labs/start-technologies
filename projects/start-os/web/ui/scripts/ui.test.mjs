@@ -5898,3 +5898,20 @@ test('patch cache discards its snapshot after a failed write and clears on deman
     value: {},
   })
 })
+
+test('stoppability follows the run state, which required tasks do not change', async () => {
+  const { isStoppable } =
+    await import('src/app/services/pkg-status-rendering.service')
+  const running = {
+    desired: { main: 'running' },
+    error: null,
+    health: {},
+    started: new Date().toISOString(),
+  }
+  assert.equal(isStoppable(running), true)
+  assert.equal(isStoppable({ ...running, started: null }), true)
+  assert.equal(
+    isStoppable({ ...running, desired: { main: 'stopped' }, started: null }),
+    false,
+  )
+})
