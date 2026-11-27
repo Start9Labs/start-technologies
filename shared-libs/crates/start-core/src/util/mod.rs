@@ -33,7 +33,7 @@ use crate::{Error, ErrorKind, ResultExt as _};
 #[cfg(test)]
 mod command_tests;
 #[cfg(test)]
-mod file_lock_tests;
+pub(crate) mod file_lock_tests;
 
 pub mod actor;
 pub mod btrfs;
@@ -696,7 +696,13 @@ impl<F: FnOnce() -> T, T> Drop for GeneralGuard<F, T> {
 
 /// The kernel lease lasts until its last inherited descriptor closes.
 /// Existing reservations open without writes, including on frozen filesystems.
-pub struct FileLock(#[allow(unused)] OwnedMutexGuard<()>, Option<File>);
+pub struct FileLock(#[allow(unused)] Option<OwnedMutexGuard<()>>, Option<File>);
+
+#[derive(Clone, Copy)]
+pub(crate) enum FileLockAccess {
+    Shared,
+    Exclusive,
+}
 impl Drop for FileLock {
     fn drop(&mut self) {
         drop(self.1.take());
@@ -734,6 +740,30 @@ impl FileLock {
             });
         }
         Ok(())
+    }
+
+    /// Attempts an inode reservation without creating or writing its backing object.
+    /// Shared holders exclude cooperating retirement, not ordinary content writes.
+    pub(crate) async fn existing(file: File, access: FileLockAccess) -> Result<Self, Error> {
+        Ok(Self(None, Some(Self::lock(file, access, false).await?)))
+    }
+
+    async fn lock(file: File, access: FileLockAccess, blocking: bool) -> Result<File, Error> {
+        tokio::task::spawn_blocking(move || {
+            use std::os::fd::AsRawFd;
+
+            let options = match access {
+                FileLockAccess::Shared => libc::LOCK_SH,
+                FileLockAccess::Exclusive => libc::LOCK_EX,
+            } | if blocking { 0 } else { libc::LOCK_NB };
+            if unsafe { libc::flock(file.as_raw_fd(), options) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(file)
+        })
+        .await
+        .with_kind(crate::ErrorKind::Unknown)?
+        .with_kind(crate::ErrorKind::Filesystem)
     }
 
     #[instrument(skip_all)]
@@ -782,19 +812,8 @@ impl FileLock {
             result => result,
         }
         .with_kind(ErrorKind::Filesystem)?;
-        let file_guard = tokio::task::spawn_blocking(move || {
-            use std::os::fd::AsRawFd;
-
-            let options = libc::LOCK_EX | if blocking { 0 } else { libc::LOCK_NB };
-            if unsafe { libc::flock(f.as_raw_fd(), options) } != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(f)
-        })
-        .await
-        .with_kind(crate::ErrorKind::Unknown)?
-        .with_kind(crate::ErrorKind::Filesystem)?;
-        Ok(FileLock(tex_guard, Some(file_guard)))
+        let file_guard = Self::lock(f, FileLockAccess::Exclusive, blocking).await?;
+        Ok(FileLock(Some(tex_guard), Some(file_guard)))
     }
     /// Releases this guard; inherited children retain their share.
     pub async fn unlock(mut self) -> Result<(), Error> {

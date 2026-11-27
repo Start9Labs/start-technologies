@@ -18,6 +18,7 @@
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use openssl::hash::MessageDigest;
@@ -37,7 +38,7 @@ pub use crate::util::crypto::gen_nistp256 as generate_signing_key;
 use crate::util::future::{complete_owned_operation, finish_with_cleanup};
 use crate::util::io::{create_file_mod, delete_dir, open_file};
 use crate::util::squashfs::Squashfs;
-use crate::util::{HashWriter, Invoke};
+use crate::util::{FileLock, HashWriter, Invoke};
 
 #[cfg(target_os = "linux")]
 pub(crate) mod image_store;
@@ -622,9 +623,14 @@ pub struct PreparedGeneration {
     destination: PathBuf,
     manifest: Manifest,
     public_key: PKey<Public>,
+    private_backing_uses: Vec<Arc<FileLock>>,
 }
 
 impl PreparedGeneration {
+    pub(crate) fn retain_private_backing_uses(&mut self, uses: &[Arc<FileLock>]) {
+        self.private_backing_uses.extend_from_slice(uses);
+    }
+
     /// Imports a quiescent raw legacy configuration tree, retaining root-deletion markers.
     /// The durable store must be outside all source trees; rootfs must be block-aligned.
     pub async fn import_raw(
@@ -724,6 +730,7 @@ impl PreparedGeneration {
                 staging: staging.clone(),
                 destination: store.join(format!("{GENERATION_PREFIX}{id}")),
                 manifest,
+                private_backing_uses: Vec::new(),
                 public_key: PKey::public_key_from_der(
                     &key.public_key_to_der().with_kind(ErrorKind::OpenSsl)?,
                 )
@@ -742,7 +749,9 @@ impl PreparedGeneration {
     /// The caller retires every reader, writer and mount before disposal.
     /// Retain the image-store reservation through completion.
     pub async fn discard(self) -> Result<(), Error> {
-        remove_unpublished_directory(&self.staging).await
+        let result = remove_unpublished_directory(&self.staging).await;
+        drop(self);
+        result
     }
 
     /// Additional TPM authorization files may be added here before publication.

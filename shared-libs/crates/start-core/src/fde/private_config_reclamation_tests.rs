@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use crate::util::future::complete_owned_operation;
 
-async fn prepare(projected: &ProjectedConfig, root: &Path) -> PreparedGeneration {
+pub(super) async fn prepare(projected: &ProjectedConfig, root: &Path) -> PreparedGeneration {
     let store = root.join("generations");
     tokio::fs::create_dir_all(&store).await.unwrap();
     let rootfs = root.join("rootfs");

@@ -11,6 +11,8 @@
 //! candidates only after their references retire and reclaims obsolete public extents.
 //! Backing reclamation must preserve live service and network availability.
 //! Its online ownership contract lives in `projects/start-os/FDE.md`.
+//! Projection directory reservations follow prepared generations and legacy replacement
+//! plans through publication or disposal. Runtime mounts retain independent lifetimes.
 
 #[cfg(test)]
 #[path = "private_config_tests.rs"]
@@ -18,6 +20,7 @@ mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use openssl::pkey::{PKeyRef, Private};
@@ -37,6 +40,7 @@ use crate::util::squashfs::{
     DirectoryContents, Entry, Metadata, Node, NodeContents, Squashfs, overlay_whiteout,
     resolve_hardlink, snapshot_entries,
 };
+use crate::util::{FileLock, FileLockAccess};
 
 pub(super) const DIRECTORY: &str = "fde-private-config";
 pub(crate) const RUNTIME: &str = "/run/startos-private-config";
@@ -82,6 +86,7 @@ pub(crate) struct ProjectedConfig {
     snapshot: Squashfs<DynFileSource>,
     replacements: BTreeMap<PathBuf, PathBuf>,
     new_backing: Option<PathBuf>,
+    private_backing_uses: Vec<Arc<FileLock>>,
 }
 
 fn invalid_layout(path: &Path) -> Error {
@@ -137,8 +142,22 @@ async fn resolve_backing(data: &Path, target: &Path) -> Result<(Guid, PathBuf), 
     Ok((id, file))
 }
 
+#[cfg(test)]
 async fn backing_file(data: &Path, target: &Path) -> Result<PathBuf, Error> {
     Ok(resolve_backing(data, target).await?.1)
+}
+
+async fn reserve_backing(path: &Path, access: FileLockAccess) -> Result<FileLock, Error> {
+    use std::os::unix::fs::MetadataExt;
+
+    let file = open_file(path).await?;
+    let opened = file.metadata().await?;
+    let reservation = FileLock::existing(file, access).await?;
+    let current = tokio::fs::symlink_metadata(path).await?;
+    if !current.is_dir() || (opened.dev(), opened.ino()) != (current.dev(), current.ino()) {
+        return Err(invalid_layout(path));
+    }
+    Ok(reservation)
 }
 
 fn reference_nodes(
@@ -332,8 +351,16 @@ impl ProjectedConfig {
         }
         let mut aliases: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
         let replacements = reference_nodes(&snapshot)?;
+        let mut reserved = BTreeSet::new();
+        let mut private_backing_uses = Vec::new();
         for (path, target) in &replacements {
-            let backing = backing_file(data, target).await?;
+            let (id, backing) = resolve_backing(data, target).await?;
+            let directory = data.join(DIRECTORY).join(id.to_string());
+            if reserved.insert(id) {
+                private_backing_uses.push(Arc::new(
+                    reserve_backing(&directory, FileLockAccess::Shared).await?,
+                ));
+            }
             open_file(&backing).await?.sync_all().await?;
             open_file(backing.parent().expect("credential parent"))
                 .await?
@@ -355,6 +382,7 @@ impl ProjectedConfig {
             snapshot,
             replacements,
             new_backing: None,
+            private_backing_uses,
         };
         if aliases.is_empty() {
             return Ok(projected);
@@ -369,6 +397,9 @@ impl ProjectedConfig {
         projected.new_backing = Some(backing.clone());
         let result = async {
             require_data_filesystem(data, &backing).await?;
+            projected.private_backing_uses.push(Arc::new(
+                reserve_backing(&backing, FileLockAccess::Shared).await?,
+            ));
             use std::os::unix::fs::PermissionsExt;
             tokio::fs::set_permissions(
                 data.join(DIRECTORY),
@@ -460,11 +491,16 @@ impl ProjectedConfig {
             snapshot,
             replacements,
             new_backing,
+            private_backing_uses,
         } = self;
         drop(snapshot);
         drop(replacements);
+        drop(private_backing_uses);
         if let Some(backing) = new_backing {
-            remove_unpublished_directory(&backing).await?;
+            let retirement = reserve_backing(&backing, FileLockAccess::Exclusive).await?;
+            let result = remove_unpublished_directory(&backing).await;
+            drop(retirement);
+            result?;
         }
         Ok(())
     }
@@ -493,7 +529,10 @@ impl ProjectedConfig {
         store: &Path,
         key: &PKeyRef<Private>,
     ) -> Result<PreparedGeneration, Error> {
-        PreparedGeneration::prepare_snapshot(self.snapshot.clone(), rootfs, store, key).await
+        let mut prepared =
+            PreparedGeneration::prepare_snapshot(self.snapshot.clone(), rootfs, store, key).await?;
+        prepared.retain_private_backing_uses(&self.private_backing_uses);
+        Ok(prepared)
     }
 
     pub(crate) fn legacy_replacements(&self) -> LegacyReplacements {
@@ -503,6 +542,7 @@ impl ProjectedConfig {
                 .map(|(path, _)| path)
                 .collect(),
             replacements: self.replacements.clone(),
+            _private_backing_uses: self.private_backing_uses.clone(),
         }
     }
 }
@@ -510,6 +550,7 @@ impl ProjectedConfig {
 pub(crate) struct LegacyReplacements {
     paths: BTreeSet<PathBuf>,
     replacements: BTreeMap<PathBuf, PathBuf>,
+    _private_backing_uses: Vec<Arc<FileLock>>,
 }
 
 impl LegacyReplacements {

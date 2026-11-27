@@ -30,6 +30,21 @@ fn variable() -> &'static str {
     .trim()
 }
 
+// Forking sibling tests inherit descriptors until exec.
+pub(crate) async fn isolated_test(name: &str) -> bool {
+    const CHILD: &str = "STARTOS_TEST_ISOLATED_LEASE";
+    if std::env::var(CHILD).as_deref() == Ok(name) {
+        return false;
+    }
+    tokio::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--nocapture"])
+        .env(CHILD, name)
+        .invoke(ErrorKind::Filesystem)
+        .await
+        .unwrap();
+    true
+}
+
 #[tokio::test]
 async fn locking_an_existing_file_preserves_its_contents() {
     let root = tempfile::tempdir().unwrap();
@@ -51,14 +66,11 @@ async fn locking_an_existing_file_preserves_its_contents() {
 async fn shared_descriptor_retains_the_kernel_lease_with_close_on_exec() {
     use std::os::fd::AsRawFd;
 
-    const CHILD: &str = "STARTOS_TEST_SHARED_LEASE_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        tokio::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "util::file_lock_tests::shared_descriptor_retains_the_kernel_lease_with_close_on_exec", "--nocapture"])
-            .env(CHILD, "1")
-            .invoke(ErrorKind::Filesystem)
-            .await
-            .unwrap();
+    if isolated_test(
+        "util::file_lock_tests::shared_descriptor_retains_the_kernel_lease_with_close_on_exec",
+    )
+    .await
+    {
         return;
     }
     let root = tempfile::tempdir().unwrap();
@@ -228,4 +240,59 @@ async fn image_store_native_parent_and_nested_scripts_share_one_kernel_lease() {
         .await
         .unwrap();
     lease.unlock().await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_directory_reservations_follow_inode_aliases_without_blocking_content_writes() {
+    if isolated_test("util::file_lock_tests::shared_directory_reservations_follow_inode_aliases_without_blocking_content_writes").await {
+        return;
+    }
+    use super::FileLockAccess;
+    use crate::util::io::open_file;
+
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("backing");
+    tokio::fs::create_dir(&path).await.unwrap();
+    let first = FileLock::existing(open_file(&path).await.unwrap(), FileLockAccess::Shared)
+        .await
+        .unwrap();
+    let second = FileLock::existing(open_file(&path).await.unwrap(), FileLockAccess::Shared)
+        .await
+        .unwrap();
+    let alias = root.path().join("renamed");
+    tokio::fs::rename(&path, &alias).await.unwrap();
+    tokio::fs::write(alias.join("credential"), b"live-write")
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read(alias.join("credential")).await.unwrap(),
+        b"live-write"
+    );
+    assert!(
+        FileLock::existing(open_file(&alias).await.unwrap(), FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    drop(first);
+    let inherited = second.share().unwrap();
+    drop(second);
+    assert!(
+        FileLock::existing(open_file(&alias).await.unwrap(), FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    drop(inherited);
+    let retirement =
+        FileLock::existing(open_file(&alias).await.unwrap(), FileLockAccess::Exclusive)
+            .await
+            .unwrap();
+    assert!(
+        FileLock::existing(open_file(&alias).await.unwrap(), FileLockAccess::Shared)
+            .await
+            .is_err()
+    );
+    drop(retirement);
+    FileLock::existing(open_file(&alias).await.unwrap(), FileLockAccess::Shared)
+        .await
+        .unwrap();
 }

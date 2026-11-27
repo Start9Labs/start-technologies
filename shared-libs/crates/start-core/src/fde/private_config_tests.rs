@@ -2,6 +2,9 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 use super::*;
 
+#[cfg(target_os = "linux")]
+#[path = "private_config_lifetime_tests.rs"]
+mod lifetimes;
 #[path = "private_config_permission_tests.rs"]
 mod permissions;
 #[path = "private_config_reclamation_tests.rs"]
