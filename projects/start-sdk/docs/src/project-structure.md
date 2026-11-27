@@ -263,8 +263,11 @@ and signing/S3 secrets described above. The workflows target Forgejo 16 with
 Forgejo Runner 13 or newer. Use isolated x86-64 Ubuntu runner environments labeled
 `ubuntu-latest`, with Node.js 24 for the imported JavaScript actions, Git, npm,
 jq, curl, and passwordless sudo. Build jobs install their Rust, Docker/Buildx,
-QEMU, and squashfs tooling; container-backed runners need privileged Docker
-access. Keep `FREE_DISK_SPACE` disabled on shared hosts: that optional action
+QEMU, and squashfs tooling. Container-backed runners need privileged Docker
+access and a dedicated Docker volume mounted at the job user's
+`$HOME/setup-docker-action` (for example, `/root/setup-docker-action` for root).
+The nested daemon's snapshotter data must be outside the job's overlay filesystem.
+Keep `FREE_DISK_SPACE` disabled on shared hosts: that optional action
 removes host tools and prunes Docker images.
 
 Cross-host reusable calls execute within the selected runner rather than expanding
@@ -286,6 +289,50 @@ Release assets keep a 2 GiB per-file ceiling. Without S3, a larger public `.s9pk
 goes to the owner's generic package registry, which requires the `PACKAGES_TOKEN`
 secret; the release notes link it under **Downloads** and the registry indexes it
 from there. Ensure the Forgejo instance's upload limit permits the remaining assets.
+
+### Gitea Actions
+
+Gitea users can opt into self-contained versions of the five package workflows.
+They live in the guide's `projects/start-sdk/docs/gitea-workflows/`, outside the
+package template, so scaffolding does not enable Gitea CI. The supported baseline
+is Gitea 28.1.0 with Gitea Runner 5.1.1 (formerly act_runner).
+
+From a package directly inside a packaging workspace, copy them before enabling
+[Actions on the Gitea repository](https://docs.gitea.com/usage/actions/overview):
+
+```bash
+mkdir -p .gitea/workflows
+cp ../start-technologies/projects/start-sdk/docs/gitea-workflows/*.yml .gitea/workflows/
+```
+
+Commit these files and adjust the base-branch lists for the package, just as for
+the GitHub workflows. Gitea prefers `.gitea/workflows/` over `.github/workflows/`
+and ignores `.forgejo/workflows/` by default; the other workflow directories can
+remain in the repo.
+
+On Gitea, `pr-retarget.yml` also rebuilds non-draft PRs after title/body edits.
+Gitea reports draft readiness as an ordinary edit without previous draft state.
+Retargets share the normal PR build's concurrency group; other edits use a separate
+group and leave an active normal build alone.
+
+Use the isolated `ubuntu-latest` runner environment described in the Forgejo
+section above. The embedded jobs read the registry variables and the `DEV_KEY`,
+S3 and `PACKAGES_TOKEN` secrets described above directly from the repository or
+its owner. Gitea enforces job `permissions:` within the repository/owner token
+policy; allow the requested repository write and pull-request access for release
+and sync jobs. PR builds receive no signing key. The automatic token handles
+checkout, tag pushes, releases, and sync pull requests. Artifact upload/download,
+in-place release asset replacement, and `PACKAGES_TOKEN` uploads to the owner's
+generic package registry work as on Forgejo, as do private repositories'
+encrypted packages and the 2 GiB per-file release-asset ceiling. The Gitea
+instance's upload limits must also permit the release assets and packages.
+
+Gitea restricts reusable-workflow imports to its own instance. These generated
+files therefore embed all shared jobs, including the nested tag-and-release
+pipeline, while step-level actions still use full remote URLs. After syncing the
+guide, copy the files again to pick up shared workflow fixes and reapply any
+package-specific branch filters. Unlike the GitHub/Forgejo callers' `@master`
+imports, the embedded jobs update only when the package's copies are refreshed.
 
 ### AGENTS.md and CLAUDE.md
 
