@@ -84,6 +84,8 @@ export type ClearCallbacksParams = z.output<typeof schemas.ClearCallbacksParams>
 export type ClearCallbacksParamsInput = z.input<
   typeof schemas.ClearCallbacksParams
 >
+export type ClearHealth = z.output<typeof schemas.ClearHealth>
+export type ClearHealthInput = z.input<typeof schemas.ClearHealth>
 export type ClearTasksParams = z.output<typeof schemas.ClearTasksParams>
 export type ClearTasksParamsInput = z.input<typeof schemas.ClearTasksParams>
 export type CliSetIconParams = z.output<typeof schemas.CliSetIconParams>

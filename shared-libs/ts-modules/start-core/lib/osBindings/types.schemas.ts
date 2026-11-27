@@ -281,6 +281,9 @@ export const ClearCallbacksParams: typeof literal_7 =
   /* @__PURE__ */ literal_7.meta({
     id: 'ClearCallbacksParams',
   })
+export const ClearHealth: typeof literal_8 = /* @__PURE__ */ literal_8.meta({
+  id: 'ClearHealth',
+})
 export const ClearTasksParams: typeof literal_8 =
   /* @__PURE__ */ literal_8.meta({
     id: 'ClearTasksParams',

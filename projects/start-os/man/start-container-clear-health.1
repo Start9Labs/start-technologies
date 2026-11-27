@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-container-clear-health 1  "clear-health " 
+.SH NAME
+start\-container\-clear\-health \- Remove this service\*(Aqs health check results
+.SH SYNOPSIS
+\fBstart\-container clear\-health\fR [\fB\-\-only\fR] [\fB\-\-except\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Remove this service\*(Aqs health check results
+.SH OPTIONS
+.TP
+\fB\-\-only\fR [\fI<ONLY>...\fR]
+Only clear these health check IDs
+.TP
+\fB\-\-except\fR [\fI<EXCEPT>...\fR]
+Health check IDs to exclude
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

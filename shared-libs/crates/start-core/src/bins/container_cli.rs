@@ -70,6 +70,7 @@ fn effects_without_callbacks_or_streams_have_commands() {
         &["bind"][..],
         &["bind-range"],
         &["set-health"],
+        &["clear-health"],
         &["set-init-progress"],
         &["set-backup-progress"],
         &["mount"],
@@ -106,6 +107,78 @@ fn effects_without_callbacks_or_streams_have_commands() {
     ] {
         assert!(cmd.find_subcommand(hidden).is_none(), "{hidden}");
     }
+}
+
+#[test]
+fn clear_health_command_parses_flags_and_translates_help() {
+    let cmd = app().into_command();
+    let sub = cmd
+        .find_subcommand("clear-health")
+        .expect("missing start-container clear-health");
+    assert_ne!(
+        sub.get_about().map(ToString::to_string).as_deref(),
+        Some("about.container-clear-health")
+    );
+    for (arg_id, raw_key) in [
+        ("only", "help.arg.only-health-checks"),
+        ("except", "help.arg.except-health-checks"),
+    ] {
+        let help = sub
+            .get_arguments()
+            .find(|a| a.get_id() == arg_id)
+            .and_then(|a| a.get_help())
+            .map(ToString::to_string);
+        assert!(help.is_some(), "missing help for --{arg_id}");
+        assert_ne!(help.as_deref(), Some(raw_key));
+    }
+
+    let only_matches = cmd
+        .clone()
+        .try_get_matches_from([
+            "start-container",
+            "clear-health",
+            "--only",
+            "worker-a",
+            "worker-b",
+        ])
+        .unwrap();
+    let (_, clear_matches) = only_matches.subcommand().unwrap();
+    let only: Vec<_> = clear_matches
+        .get_many::<crate::HealthCheckId>("only")
+        .unwrap()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(only, vec!["worker-a", "worker-b"]);
+
+    let except_all_matches = cmd
+        .clone()
+        .try_get_matches_from(["start-container", "clear-health", "--except"])
+        .unwrap();
+    let (_, clear_matches) = except_all_matches.subcommand().unwrap();
+    let except: Vec<_> = clear_matches
+        .get_many::<crate::HealthCheckId>("except")
+        .unwrap()
+        .map(ToString::to_string)
+        .collect();
+    assert!(except.is_empty());
+
+    assert!(
+        cmd.clone()
+            .try_get_matches_from(["start-container", "clear-health"])
+            .is_err()
+    );
+    assert!(
+        cmd.clone()
+            .try_get_matches_from([
+                "start-container",
+                "clear-health",
+                "--only",
+                "worker-a",
+                "--except",
+                "worker-b",
+            ])
+            .is_err()
+    );
 }
 
 #[test]

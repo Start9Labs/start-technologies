@@ -99,6 +99,9 @@ export const ClearCallbacksParams: typeof literal_6 =
   /* @__PURE__ */ literal_6.meta({
     id: 'ClearCallbacksParams',
   })
+export const ClearHealth: typeof literal_1 = /* @__PURE__ */ literal_1.meta({
+  id: 'ClearHealth',
+})
 export const ClearTasksParams: typeof literal_1 =
   /* @__PURE__ */ literal_1.meta({
     id: 'ClearTasksParams',
@@ -3172,6 +3175,12 @@ export const Api = {
     },
     'clear-callbacks': {
       _PARAMS: /* @__PURE__ */ ClearCallbacksParams,
+      _RETURN: /* @__PURE__ */ z.null(),
+      _ITEM: /* @__PURE__ */ z.never(),
+      _FINAL: /* @__PURE__ */ z.null(),
+    },
+    'clear-health': {
+      _PARAMS: /* @__PURE__ */ ClearHealth,
       _RETURN: /* @__PURE__ */ z.null(),
       _ITEM: /* @__PURE__ */ z.never(),
       _FINAL: /* @__PURE__ */ z.null(),

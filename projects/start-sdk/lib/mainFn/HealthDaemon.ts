@@ -23,6 +23,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   private resolvedReady: boolean = false
   private readyPromise: Promise<void>
   private session: AbortController | null = null
+  private pendingHealthWrites = new Set<Promise<void>>()
   constructor(
     readonly daemon: Daemon<Manifest> | null,
     readonly dependencies: HealthDaemon<Manifest>[],
@@ -37,7 +38,13 @@ export class HealthDaemon<Manifest extends SDKManifest> {
           this.resolvedReady = true
         }),
     )
-    this.dependencies.forEach(d => d.addWatcher(() => this.updateStatus()))
+    this.dependencies.forEach(d =>
+      d.addWatcher(() => {
+        this.updateStatus().catch(err =>
+          console.error(`Daemon ${this.id} status update failed:`, err),
+        )
+      }),
+    )
   }
 
   async term(termOptions?: {
@@ -53,6 +60,12 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     await this.daemon?.term({
       ...termOptions,
     })
+  }
+
+  async waitForHealthWrites(): Promise<void> {
+    while (this.pendingHealthWrites.size > 0) {
+      await Promise.all([...this.pendingHealthWrites])
+    }
   }
 
   addWatcher(watcher: () => unknown) {
@@ -121,20 +134,26 @@ export class HealthDaemon<Manifest extends SDKManifest> {
 
     const abort = new AbortController()
 
+    const reportExitHealth = (health: HealthCheckResult) => {
+      this.setHealth(health).catch(err =>
+        console.error(`Daemon ${this.id} exit health update failed:`, err),
+      )
+    }
+
     this.daemon?.onExit(success => {
       if (abort.signal.aborted) return
       if (success && this.ready === 'EXIT_SUCCESS') {
-        this.setHealth({ result: 'success', message: null })
+        reportExitHealth({ result: 'success', message: null })
       } else if (!success) {
         const cause = this.daemon?.lastExitError?.message
-        this.setHealth({
+        reportExitHealth({
           result: 'failure',
           message: cause
             ? `${this.id} daemon crashed: ${cause}`
             : `${this.id} daemon crashed`,
         })
       } else if (!this.daemon?.isOneshot()) {
-        this.setHealth({
+        reportExitHealth({
           result: 'failure',
           message: `${this.id} daemon exited`,
         })
@@ -201,6 +220,7 @@ export class HealthDaemon<Manifest extends SDKManifest> {
   }
 
   private async setHealth(health: HealthCheckResult) {
+    if (this.terminated) return
     const changed = this._health.result !== health.result
     this._health = health
     if (this.resolveReady && health.result === 'success') {
@@ -220,11 +240,18 @@ export class HealthDaemon<Manifest extends SDKManifest> {
     if (displayedHealth.result === 'failure') {
       console.error(`Health Check ${this.id} failed:`, health.message)
     }
-    await this.effects.setHealth({
+    const rpc = this.effects.setHealth({
       ...displayedHealth,
       id: this.id,
       name: display,
     })
+    const tracked = Promise.resolve(rpc).then(
+      () => {},
+      () => {},
+    )
+    this.pendingHealthWrites.add(tracked)
+    tracked.finally(() => this.pendingHealthWrites.delete(tracked))
+    await rpc
   }
 
   async updateStatus() {

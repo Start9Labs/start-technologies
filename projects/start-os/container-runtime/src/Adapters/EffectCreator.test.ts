@@ -459,6 +459,35 @@ describe('generated effects RPC boundary', () => {
     expect(ended).toHaveBeenCalled()
   })
 
+  test('clearHealth serializes only and except payloads with event scope', async () => {
+    const scoped = makeEffects({ eventId: 'event' })
+    const unscoped = makeEffects({ eventId: null })
+    await expect(scoped.clearHealth({ only: ['worker-b'] })).resolves.toBeNull()
+    await expect(
+      scoped.clearHealth({ except: ['worker-a'] }),
+    ).resolves.toBeNull()
+    await expect(
+      unscoped.clearHealth({ only: ['worker-c'] }),
+    ).resolves.toBeNull()
+    expect(requests).toEqual([
+      {
+        id: expect.any(Number),
+        method: 'clear-health',
+        params: { only: ['worker-b'], eventId: 'event' },
+      },
+      {
+        id: expect.any(Number),
+        method: 'clear-health',
+        params: { except: ['worker-a'], eventId: 'event' },
+      },
+      {
+        id: expect.any(Number),
+        method: 'clear-health',
+        params: { only: ['worker-c'] },
+      },
+    ])
+  })
+
   test('returns nullable IP and variable-length certificate results unchanged', async () => {
     const effects = makeEffects({ eventId: null })
     await expect(effects.getContainerIp({})).resolves.toBeNull()
