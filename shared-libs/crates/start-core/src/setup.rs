@@ -1263,16 +1263,16 @@ async fn migrate(
     ))
 }
 
-pub async fn set_language(
-    ctx: SetupContext,
-    SetLanguageParams { language }: SetLanguageParams,
-) -> Result<(), Error> {
+pub async fn set_language(ctx: SetupContext, params: SetLanguageParams) -> Result<(), Error> {
+    params.validate()?;
+    let SetLanguageParams { language } = params;
     set_locale(&*language);
     ctx.language.replace(Some(language));
     Ok(())
 }
 
 pub async fn set_keyboard(ctx: SetupContext, options: KeyboardOptions) -> Result<(), Error> {
+    options.validate()?;
     options.apply_to_session().await?;
     ctx.keyboard.replace(Some(options));
     Ok(())
