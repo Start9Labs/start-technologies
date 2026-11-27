@@ -469,6 +469,149 @@ async fn store_file_is_private() {
     assert_eq!(mode & 0o777, 0o600);
 }
 
+#[cfg(target_os = "linux")]
+fn open_fds_for<P: AsRef<std::path::Path>>(path: P) -> Vec<std::path::PathBuf> {
+    let path = path.as_ref();
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    std::fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+        .filter(|target| *target == canonical)
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_fds_for<P: AsRef<std::path::Path>>(_path: P) -> Vec<std::path::PathBuf> {
+    Vec::new()
+}
+
+#[tokio::test]
+async fn close_storage_releases_fd_and_lock_while_clones_exist_and_rejects_writes() {
+    let path = unique_db_path("close-storage");
+    cleanup_db(&path).await;
+    let db = PatchDb::open(&path).await.unwrap();
+    db.put(&ROOT, &json!({"state": "saved"})).await.unwrap();
+    let lingering = db.clone();
+
+    db.close_storage().await.unwrap();
+    db.close_storage().await.unwrap();
+
+    let open_fds = open_fds_for(&path);
+    assert!(
+        open_fds.is_empty(),
+        "backing file fd still open after close_storage: {:?}",
+        open_fds
+    );
+
+    assert!(lingering
+        .put(&ROOT, &json!({"state": "after-close"}))
+        .await
+        .is_err());
+    assert_eq!(lingering.get_value(&ROOT).await, json!({"state": "saved"}));
+
+    let reopened = PatchDb::open(&path).await.unwrap();
+    assert_eq!(reopened.get_value(&ROOT).await, json!({"state": "saved"}));
+    reopened.close().await;
+    drop(lingering);
+    drop(db);
+    cleanup_db(&path).await;
+}
+
+#[tokio::test]
+async fn cancelled_close_storage_still_releases_fd_and_lock() {
+    let path = unique_db_path("cancelled-close-storage");
+    cleanup_db(&path).await;
+    let db = PatchDb::open(&path).await.unwrap();
+    db.put(&ROOT, &json!({"state": "saved"})).await.unwrap();
+    let lingering = db.clone();
+
+    {
+        let write_guard = db.store_lock().write().await;
+        let mut close_fut = Box::pin(db.close_storage());
+        assert!(futures::poll!(close_fut.as_mut()).is_pending());
+        drop(close_fut);
+        drop(write_guard);
+    }
+
+    PatchDb::wait_until_closed(&path).await;
+    lingering.close_storage().await.unwrap();
+    assert!(lingering
+        .put(&ROOT, &json!({"state": "after-cancel"}))
+        .await
+        .is_err());
+
+    let open_fds = open_fds_for(&path);
+    assert!(
+        open_fds.is_empty(),
+        "backing file fd still open after cancelled close_storage: {:?}",
+        open_fds
+    );
+
+    let reopened = PatchDb::open(&path).await.unwrap();
+    assert_eq!(reopened.get_value(&ROOT).await, json!({"state": "saved"}));
+    reopened.close().await;
+    drop(lingering);
+    drop(db);
+    cleanup_db(&path).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn close_storage_after_aborted_write_does_not_panic() {
+    let path = unique_db_path("aborted-write-close");
+    cleanup_db(&path).await;
+    let payload = "x".repeat(64 * 1024);
+
+    for i in 0..8usize {
+        let db = PatchDb::open(&path).await.unwrap();
+        let writer_db = db.clone();
+        let value = json!({ "i": i, "payload": &payload });
+        let writer = tokio::spawn(async move {
+            let _ = writer_db.put(&ROOT, &value).await;
+        });
+        for _ in 0..i {
+            tokio::task::yield_now().await;
+        }
+        writer.abort();
+        let _ = writer.await;
+
+        db.close_storage().await.unwrap();
+        PatchDb::wait_until_closed(&path).await;
+
+        let open_fds = open_fds_for(&path);
+        assert!(
+            open_fds.is_empty(),
+            "backing file fd still open after aborted write close_storage: {:?}",
+            open_fds
+        );
+
+        drop(db);
+    }
+
+    let reopened = PatchDb::open(&path).await.unwrap();
+    reopened.close().await;
+    cleanup_db(&path).await;
+}
+
+#[tokio::test]
+async fn close_storage_on_in_memory_keeps_memory_storage_and_weak_handle_does_not_hold_file() {
+    let mem = PatchDb::in_memory();
+    mem.close_storage().await.unwrap();
+    mem.put(&ROOT, &json!({"ok": true})).await.unwrap();
+    assert_eq!(mem.get_value(&ROOT).await, json!({"ok": true}));
+
+    let path = unique_db_path("weak-handle");
+    cleanup_db(&path).await;
+    let db = PatchDb::open(&path).await.unwrap();
+    let weak = db.downgrade();
+    assert!(weak.upgrade().is_some());
+    drop(db);
+    assert!(weak.upgrade().is_none());
+    let reopened = PatchDb::open(&path).await.unwrap();
+    reopened.close().await;
+    cleanup_db(&path).await;
+}
+
 fn run_future<S: Into<String>, Fut: Future<Output = ()>>(name: S, fut: Fut) {
     Builder::new_multi_thread()
         .thread_name(name)

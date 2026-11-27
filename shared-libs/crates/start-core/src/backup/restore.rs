@@ -19,7 +19,7 @@ use crate::disk::mount::backup::BackupMountGuard;
 use crate::disk::mount::filesystem::ReadWrite;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::hostname::{ServerHostname, repair_hostname};
-use crate::init::init;
+use crate::init::init_for_setup;
 use crate::prelude::*;
 use crate::progress::ProgressUnits;
 use crate::s9pk::S9pk;
@@ -207,7 +207,7 @@ pub async fn recover_full_server(
 
     let config = ctx.config.peek(|c| c.clone());
 
-    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, init_phases).await?;
+    let init_result = init_for_setup(ctx, &config, init_phases).await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,

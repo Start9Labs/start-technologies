@@ -12,7 +12,7 @@ use tracing::instrument;
 
 use crate::account::AccountInfo;
 use crate::context::config::ServerConfig;
-use crate::context::{CliContext, InitContext, RpcContext};
+use crate::context::{CliContext, InitContext, RpcContext, SetupContext};
 use crate::db::model::Database;
 use crate::db::model::public::ServerStatus;
 use crate::developer::OS_ID_KEY_PATH;
@@ -171,6 +171,24 @@ pub async fn init(
     webserver: &WebServerAcceptorSetter<WildcardListener>,
     dns: Arc<crate::net::dns::DnsController>,
     cfg: &ServerConfig,
+    phases: InitPhases,
+) -> Result<InitResult, Error> {
+    init_with_db(webserver, dns, cfg, phases, cfg.db()).await
+}
+
+#[instrument(skip_all)]
+pub(crate) async fn init_for_setup(
+    ctx: &SetupContext,
+    cfg: &ServerConfig,
+    phases: InitPhases,
+) -> Result<InitResult, Error> {
+    init_with_db(&ctx.webserver, ctx.dns.clone(), cfg, phases, ctx.db()).await
+}
+
+async fn init_with_db(
+    webserver: &WebServerAcceptorSetter<WildcardListener>,
+    dns: Arc<crate::net::dns::DnsController>,
+    cfg: &ServerConfig,
     InitPhases {
         preinit,
         mut local_auth,
@@ -189,6 +207,7 @@ pub async fn init(
         mut validate_db,
         postinit,
     }: InitPhases,
+    open_db: impl std::future::Future<Output = Result<PatchDb, Error>>,
 ) -> Result<InitResult, Error> {
     if let Err(e) = persist_pstore_archive(
         Path::new("/var/lib/systemd/pstore"),
@@ -214,7 +233,7 @@ pub async fn init(
     }
 
     load_database.start();
-    let db = cfg.db().await?;
+    let db = open_db.await?;
     crate::version::Current::default().pre_init(&db).await?;
     let db = TypedPatchDb::<Database>::load_unchecked(db);
     db.mutate(crate::net::ssl::repair_root_cert).await.result?;

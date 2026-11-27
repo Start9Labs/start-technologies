@@ -6,7 +6,7 @@ use std::num::NonZeroUsize;
 use std::os::unix::fs::OpenOptionsExt;
 use std::panic::UnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use bytes::Bytes;
 use fd_lock_rs::FdLock;
@@ -35,22 +35,45 @@ lazy_static! {
         std::sync::Mutex::new(HashMap::new());
 }
 
-struct FileStorage {
+struct OpenStoreGuard {
     path: PathBuf,
+    _lock: OwnedMutexGuard<()>,
+}
+impl Drop for OpenStoreGuard {
+    fn drop(&mut self) {
+        // Removes the entry before releasing the mutex.
+        if let Ok(mut lock) = OPEN_STORES.lock() {
+            lock.remove(&self.path);
+        }
+    }
+}
+
+struct FileStorage {
     file: FdLock<File>,
     file_cursor: u64,
-    _lock: OwnedMutexGuard<()>,
+    // Drop order unlocks and closes `file` before releasing the `OPEN_STORES` guard.
+    open_store: OpenStoreGuard,
+}
+
+enum Storage {
+    InMemory,
+    Open(FileStorage),
+    Closed,
+}
+
+fn storage_closed_error() -> Error {
+    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "database storage is closed").into()
 }
 
 pub struct Store {
-    storage: Option<FileStorage>,
+    storage: Storage,
     persistent: Value,
     revision: u64,
     broadcast: Broadcast,
 }
 impl Store {
     pub(crate) async fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let (_lock, path) = {
+        let open_store = {
             if !path.as_ref().exists() {
                 tokio::fs::OpenOptions::new()
                     .create(true)
@@ -62,22 +85,20 @@ impl Store {
             }
             let path = tokio::fs::canonicalize(path).await?;
             let mut lock = OPEN_STORES.lock().unwrap();
-            (
-                if let Some(open) = lock.get(&path) {
-                    open.clone().try_lock_owned()?
-                } else {
-                    let tex = Arc::new(Mutex::new(()));
-                    lock.insert(path.clone(), tex.clone());
-                    tex.try_lock_owned()?
-                },
-                path,
-            )
+            let guard = if let Some(open) = lock.get(&path) {
+                open.clone().try_lock_owned()?
+            } else {
+                let tex = Arc::new(Mutex::new(()));
+                lock.insert(path.clone(), tex.clone());
+                tex.try_lock_owned()?
+            };
+            OpenStoreGuard { path, _lock: guard }
         };
         let mut res = tokio::task::spawn_blocking(move || {
             use std::io::Seek;
-            let bak = path.with_extension("bak");
+            let bak = open_store.path.with_extension("bak");
             if bak.exists() {
-                std::fs::rename(&bak, &path)?;
+                std::fs::rename(&bak, &open_store.path)?;
             }
             let mut f = FdLock::lock(
                 OpenOptions::new()
@@ -86,7 +107,7 @@ impl Store {
                     .write(true)
                     .truncate(false)
                     .mode(STORE_FILE_MODE)
-                    .open(&path)?,
+                    .open(&open_store.path)?,
                 fd_lock_rs::LockType::Exclusive,
                 false,
             )?;
@@ -105,7 +126,7 @@ impl Store {
                             .create(true)
                             .append(true)
                             .mode(STORE_FILE_MODE)
-                            .open(path.with_extension("failed"))?,
+                            .open(open_store.path.with_extension("failed"))?,
                         "{}",
                         imbl_value::to_value(&patch).map_err(Error::JSON)?,
                     )?;
@@ -115,11 +136,10 @@ impl Store {
             let file_cursor = f.stream_position()?;
 
             Ok::<_, Error>(Store {
-                storage: Some(FileStorage {
-                    path,
+                storage: Storage::Open(FileStorage {
                     file: f.map(File::from_std),
                     file_cursor,
-                    _lock,
+                    open_store,
                 }),
                 persistent,
                 revision,
@@ -131,15 +151,70 @@ impl Store {
         res.compress(&mut _committed).await?;
         Ok(res)
     }
-    pub async fn close(mut self) -> Result<(), Error> {
+    pub(crate) async fn close_storage(&mut self) -> Result<(), Error> {
         use tokio::io::AsyncWriteExt;
 
-        if let Some(storage) = &mut self.storage {
-            storage.file.flush().await?;
-            storage.file.shutdown().await?;
+        let storage = match std::mem::replace(&mut self.storage, Storage::Closed) {
+            Storage::Open(storage) => storage,
+            other => {
+                self.storage = other;
+                return Ok(());
+            }
+        };
+        // Drops `file` before `open_store` on unwind.
+        let open_store = storage.open_store;
+        let mut file = storage.file;
+        let flush_res = async {
+            file.flush().await?;
+            file.sync_all().await?;
+            Ok::<_, std::io::Error>(())
         }
-
-        Ok(())
+        .await;
+        let (mut file, unlock_err) = loop {
+            match file.unlock(true) {
+                Ok(file) => break (file, None),
+                Err((locked, fd_lock_rs::Error::Interrupted)) => file = locked,
+                Err((locked, err)) => {
+                    let mut inner = None;
+                    std::mem::forget(locked.map(|f| {
+                        inner = Some(f);
+                        -1i32
+                    }));
+                    break (inner.expect("FdLock held file"), Some(err));
+                }
+            }
+        };
+        let close_res = loop {
+            match file.try_into_std() {
+                Ok(std_file) => {
+                    drop(std_file);
+                    break Ok(());
+                }
+                Err(still_busy) => {
+                    file = still_busy;
+                    if let Err(err) = tokio::task::spawn_blocking(|| {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    })
+                    .await
+                    {
+                        drop(file);
+                        break Err(Error::IO(std::io::Error::new(
+                            std::io::ErrorKind::Interrupted,
+                            err,
+                        )));
+                    }
+                }
+            }
+        };
+        drop(open_store);
+        flush_res?;
+        if let Some(err) = unlock_err {
+            return Err(Error::FDLock(err));
+        }
+        close_res
+    }
+    pub async fn close(mut self) -> Result<(), Error> {
+        self.close_storage().await
     }
     pub(crate) fn exists<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> bool {
         ptr.get(&self.persistent).unwrap_or(&Value::Null) != &Value::Null
@@ -216,10 +291,12 @@ impl Store {
     /// Sets `*committed` once the backup rename makes rollback unsafe.
     pub(crate) async fn compress(&mut self, committed: &mut bool) -> Result<(), Error> {
         use tokio::io::AsyncWriteExt;
-        let Some(storage) = &mut self.storage else {
-            return Ok(());
+        let storage = match &mut self.storage {
+            Storage::Open(storage) => storage,
+            Storage::InMemory => return Ok(()),
+            Storage::Closed => return Err(storage_closed_error()),
         };
-        let bak = storage.path.with_extension("bak");
+        let bak = storage.open_store.path.with_extension("bak");
         let bak_tmp = bak.with_extension("bak.tmp");
         let revision_cbor = serde_cbor::to_vec(&self.revision)?;
         let data_cbor = serde_cbor::to_vec(&self.persistent)?;
@@ -254,6 +331,9 @@ impl Store {
     pub(crate) async fn apply(&mut self, patch: DiffPatch) -> Result<Option<Arc<Revision>>, Error> {
         use tokio::io::AsyncWriteExt;
 
+        if matches!(self.storage, Storage::Closed) {
+            return Err(storage_closed_error());
+        }
         if (patch.0).0.is_empty() {
             return Ok(None);
         }
@@ -286,7 +366,7 @@ impl Store {
 
         let mut updated = TentativeUpdated::new(self, &patch)?;
 
-        if let Some(storage) = &mut updated.store.storage {
+        if let Storage::Open(storage) = &mut updated.store.storage {
             let patch_bin = serde_cbor::to_vec(&*patch)?;
             if updated.store.revision % 4096 == 0 {
                 let mut committed = false;
@@ -323,12 +403,6 @@ impl Store {
 // Iterative drop prevents stack overflow on deeply nested values.
 impl Drop for Store {
     fn drop(&mut self) {
-        if let Some(storage) = &self.storage {
-            if let Ok(mut lock) = OPEN_STORES.lock() {
-                lock.remove(&storage.path);
-            }
-        }
-
         match &self.persistent {
             Value::Array(vec) if !vec.is_empty() => {}
             Value::Object(map) if !map.is_empty() => {}
@@ -407,6 +481,14 @@ impl<T, E> From<Result<(T, Option<Arc<Revision>>), E>> for MutateResult<T, E> {
 }
 
 #[derive(Clone)]
+pub struct WeakPatchDb(Weak<RwLock<Store>>);
+impl WeakPatchDb {
+    pub fn upgrade(&self) -> Option<PatchDb> {
+        self.0.upgrade().map(|store| PatchDb { store })
+    }
+}
+
+#[derive(Clone)]
 pub struct PatchDb {
     pub(crate) store: Arc<RwLock<Store>>,
 }
@@ -418,7 +500,7 @@ impl PatchDb {
     pub fn in_memory() -> Self {
         Self {
             store: Arc::new(RwLock::new(Store {
-                storage: None,
+                storage: Storage::InMemory,
                 persistent: Value::Null,
                 revision: 0,
                 broadcast: Broadcast::new(),
@@ -431,10 +513,34 @@ impl PatchDb {
             store: Arc::new(RwLock::new(Store::open(path).await?)),
         })
     }
+    /// Waits until no store holds the path's process lock.
+    pub async fn wait_until_closed<P: AsRef<Path>>(path: P) {
+        let Ok(path) = tokio::fs::canonicalize(path).await else {
+            return;
+        };
+        let lock = OPEN_STORES.lock().unwrap().get(&path).cloned();
+        if let Some(lock) = lock {
+            let _ = lock.lock_owned().await;
+        }
+    }
     pub async fn close(self) {
         if let Ok(store) = Arc::try_unwrap(self.store) {
             let _ = store.into_inner().close().await;
         }
+    }
+    /// Closes a file-backed store's backing file while other handles exist, making later writes fail.
+    pub async fn close_storage(&self) -> Result<(), Error> {
+        let store = self.store.clone();
+        tokio::spawn(async move { store.write().await.close_storage().await })
+            .await
+            .map_err(|err| Error::IO(std::io::Error::new(std::io::ErrorKind::Interrupted, err)))?
+    }
+    #[cfg(test)]
+    pub(crate) fn store_lock(&self) -> &RwLock<Store> {
+        &self.store
+    }
+    pub fn downgrade(&self) -> WeakPatchDb {
+        WeakPatchDb(Arc::downgrade(&self.store))
     }
     pub async fn dump<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> Dump {
         self.store.read().await.dump(ptr)

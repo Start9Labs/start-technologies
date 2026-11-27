@@ -113,7 +113,12 @@ async fn setup_or_init(
         server.serve_ui_for(ctx.clone());
 
         let mut shutdown = ctx.shutdown.subscribe();
-        if let Some(shutdown) = shutdown.recv().await.expect("context dropped") {
+        if let Some(mut shutdown) = shutdown.recv().await.expect("context dropped") {
+            if !ctx.shutdown().await && shutdown.disk_guid.take().is_some() {
+                tracing::error!(
+                    "Skipping in-process data volume export because setup database storage did not close in time"
+                );
+            }
             return Ok(Err(shutdown));
         }
 
@@ -135,8 +140,12 @@ async fn setup_or_init(
 
         Ok(Ok(match ctx.result.get() {
             Some(Ok((_, rpc_ctx))) => (rpc_ctx.clone(), ctx.progress.clone()),
-            Some(Err(e)) => return Err(e.clone_output()),
+            Some(Err(e)) => {
+                ctx.shutdown().await;
+                return Err(e.clone_output());
+            }
             None => {
+                ctx.shutdown().await;
                 return Err(Error::new(
                     eyre!("{}", t!("bins.start-init.setup-mode-exited")),
                     ErrorKind::Unknown,

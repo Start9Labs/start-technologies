@@ -32,7 +32,7 @@ use crate::disk::mount::filesystem::cifs::Cifs;
 use crate::disk::mount::guard::{GenericMountGuard, TmpMountGuard};
 use crate::disk::util::{DiskInfo, StartOsRecoveryInfo, pvscan, recovery_info};
 use crate::hostname::{ServerHostname, repair_hostname};
-use crate::init::{InitPhases, InitResult, init};
+use crate::init::{InitPhases, InitResult, init_for_setup};
 use crate::net::ssl::root_ca_start_time;
 use crate::prelude::*;
 use crate::progress::{FullProgress, PhaseProgressTrackerHandle, ProgressUnits};
@@ -180,13 +180,7 @@ async fn setup_init(
     hostname: Option<ServerHostname>,
     init_phases: InitPhases,
 ) -> Result<(AccountInfo, InitResult), Error> {
-    let init_result = init(
-        &ctx.webserver,
-        ctx.dns.clone(),
-        &ctx.config.peek(|c| c.clone()),
-        init_phases,
-    )
-    .await?;
+    let init_result = init_for_setup(ctx, &ctx.config.peek(|c| c.clone()), init_phases).await?;
     let language = ctx.language.peek(|a| a.clone());
     let keyboard = ctx.keyboard.peek(|a| a.clone());
 
@@ -1089,7 +1083,7 @@ async fn fresh_setup(
 
     let config = ctx.config.peek(|c| c.clone());
 
-    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, init_phases).await?;
+    let init_result = init_for_setup(ctx, &config, init_phases).await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,

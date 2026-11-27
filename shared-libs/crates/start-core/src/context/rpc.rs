@@ -99,6 +99,16 @@ impl Drop for RpcContextSeed {
     }
 }
 
+async fn stop_crons(crons: &SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>) {
+    futures::future::join_all(
+        crons
+            .mutate(std::mem::take)
+            .into_values()
+            .map(NonDetachingJoinHandle::wait_for_abort),
+    )
+    .await;
+}
+
 async fn close_after_teardown(
     teardown: impl Future<Output = Result<(), Error>>,
     is_closed: &AtomicBool,
@@ -609,7 +619,7 @@ impl RpcContext {
 
     #[instrument(skip_all)]
     pub async fn shutdown(self) {
-        self.crons.mutate(|c| std::mem::take(c));
+        stop_crons(&self.crons).await;
         close_after_teardown(
             self.services.shutdown_all(),
             &self.0.is_closed,
@@ -834,6 +844,32 @@ mod tests {
                 .build()
                 .unwrap(),
         }
+    }
+
+    #[tokio::test]
+    async fn stop_crons_waits_for_aborted_tasks_to_drop_resources() {
+        let resource = Arc::new(());
+        let weak = Arc::downgrade(&resource);
+        let (started_tx, started_rx) = oneshot::channel();
+        let crons = SyncMutex::new(BTreeMap::new());
+        crons.mutate(|c| {
+            c.insert(
+                Guid::new(),
+                tokio::spawn(async move {
+                    let _held = resource;
+                    let _ = started_tx.send(());
+                    std::future::pending::<()>().await;
+                })
+                .into(),
+            );
+        });
+        started_rx.await.unwrap();
+        assert_eq!(weak.strong_count(), 1);
+
+        stop_crons(&crons).await;
+
+        assert_eq!(weak.strong_count(), 0);
+        assert!(crons.peek(|c| c.is_empty()));
     }
 
     #[tokio::test]

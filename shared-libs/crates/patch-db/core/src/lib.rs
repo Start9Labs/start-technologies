@@ -56,3 +56,5 @@ pub enum Error {
     #[error("Would Block")]
     WouldBlock(#[from] TryLockError),
 }
+
+pub use store::WeakPatchDb;
