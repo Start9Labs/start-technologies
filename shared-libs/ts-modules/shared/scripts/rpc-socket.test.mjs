@@ -17,6 +17,8 @@ const { RPC_CONSOLE_LOG_GLOBAL, RpcConsoleLog } =
   await import('../src/services/rpc-console-log.ts')
 const { ServerIdentityService } =
   await import('../src/services/server-identity.service.ts')
+const { DeviceClockError } =
+  await import('../src/services/session-websocket.ts')
 
 for (const name of ['CloseEvent', 'ErrorEvent'])
   globalThis[name] ??= class extends Event {
@@ -159,8 +161,8 @@ class LogicalSocket {
     this.readyState = 3
     this.onclose?.({ wasClean: true })
   }
-  fail() {
-    this.onerror?.(new ErrorEvent('error', { error: Error('transport') }))
+  fail(error = Error('transport')) {
+    this.onerror?.(new ErrorEvent('error', { error }))
   }
 }
 
@@ -580,6 +582,18 @@ test('transport loss cancels two established streams, pending initialization and
   assert.equal(LogicalSocket.instances.length, 2)
   abort.abort()
   assert.equal((await fresh).name, 'AbortError')
+})
+
+test('a rejected device clock names the clock instead of the transport', async context => {
+  const { service, lease } = await streamFixture(context)
+  const call = service.message(body, {}, lease).catch(error => error)
+  const other = service.message(body, {}, lease).catch(error => error)
+  await tick()
+  LogicalSocket.instances[0].fail(new DeviceClockError())
+  const clock = await call
+  network(clock)
+  assert.equal(clock.message, new DeviceClockError().message)
+  network(await other)
 })
 
 test('an unread burst survives while its sibling completes', async context => {

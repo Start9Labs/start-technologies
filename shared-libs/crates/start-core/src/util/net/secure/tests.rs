@@ -820,3 +820,129 @@ async fn expected_peer_restriction_rejects_different_authenticated_identity() {
     );
     assert_eq!(context.calls.load(Ordering::SeqCst), 0);
 }
+
+type NonceCheck = Arc<dyn Fn(&RequestCommitment) -> Result<(), Error> + Send + Sync>;
+
+async fn admission_server(
+    check: NonceCheck,
+) -> (
+    String,
+    tokio::sync::oneshot::Receiver<Result<(), Error>>,
+    ServerGuard,
+) {
+    let (done, completion) = tokio::sync::oneshot::channel();
+    let done = Arc::new(std::sync::Mutex::new(Some(done)));
+    let route = get(move |upgrade: axum::extract::ws::WebSocketUpgrade| {
+        let done = done.clone();
+        let check = check.clone();
+        async move {
+            upgrade.on_upgrade(move |socket| async move {
+                let result = EncryptedSocket::accept(
+                    Box::new(socket),
+                    &signer(42).into(),
+                    &[CONTEXT.into()],
+                    NonZeroUsize::new(1024).unwrap(),
+                    &Target::Rpc,
+                    None,
+                    |commitment| futures::future::ready(check(&commitment)),
+                )
+                .await
+                .map(|_| ());
+                done.lock().unwrap().take().unwrap().send(result).unwrap();
+            })
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/admit", listener.local_addr().unwrap());
+    let guard = ServerGuard(tokio::spawn(async move {
+        axum::serve(listener, Router::new().route("/admit", route))
+            .await
+            .unwrap();
+    }));
+    (url, completion, guard)
+}
+
+fn server_clock(skew: i64, seen: Arc<std::sync::Mutex<Vec<i64>>>) -> NonceCheck {
+    Arc::new(move |commitment| {
+        seen.lock().unwrap().push(commitment.timestamp);
+        let now = crate::sign::commitment::request::unix_timestamp() + skew;
+        if now.abs_diff(commitment.timestamp) > 30 {
+            return Err(Error::new(ClockSkew { now }, ErrorKind::InvalidSignature));
+        }
+        Ok(())
+    })
+}
+
+async fn initiate(url: &str) -> Result<(PeerIdentity, EncryptedSocket), Error> {
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        EncryptedSocket::initiate(
+            raw_socket(url).await,
+            PreparedClient::new(&signer(41), CONTEXT, Target::Rpc)
+                .await
+                .unwrap(),
+            NonZeroUsize::new(1024).unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_hello_rejected_for_its_timestamp_is_signed_again_with_the_server_clock() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (url, completion, _server) = admission_server(server_clock(120, seen.clone())).await;
+    let (peer, _socket) = initiate(&url).await.unwrap();
+    assert_eq!(peer.key, signer(42).verifying_key().await.unwrap());
+    completion.await.unwrap().unwrap();
+    let seen = seen.lock().unwrap();
+    let now = crate::sign::commitment::request::unix_timestamp();
+    assert_eq!(seen.len(), 2);
+    assert!(seen[0].abs_diff(now) <= 2);
+    assert!(seen[1].abs_diff(now + 120) <= 2);
+}
+
+#[tokio::test]
+async fn a_second_timestamp_rejection_reports_the_device_clock_without_another_retry() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (url, completion, _server) = admission_server(Arc::new({
+        let seen = seen.clone();
+        move |commitment: &RequestCommitment| {
+            seen.lock().unwrap().push(commitment.timestamp);
+            Err(Error::new(
+                ClockSkew {
+                    now: commitment.timestamp + 120,
+                },
+                ErrorKind::InvalidSignature,
+            ))
+        }
+    }))
+    .await;
+    let error = initiate(&url).await.err().unwrap();
+    assert_eq!(
+        error.source.to_string(),
+        t!("util.net.secure.clock-rejected")
+    );
+    assert!(ClockSkew::of(&completion.await.unwrap().err().unwrap()).is_some());
+    assert_eq!(seen.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn other_admission_rejections_get_no_retry_answer() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (url, completion, _server) = admission_server(Arc::new({
+        let calls = calls.clone();
+        move |_: &RequestCommitment| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err(Error::new(eyre!("replayed"), ErrorKind::InvalidSignature))
+        }
+    }))
+    .await;
+    let error = initiate(&url).await.err().unwrap();
+    assert_ne!(
+        error.source.to_string(),
+        t!("util.net.secure.clock-rejected")
+    );
+    assert!(ClockSkew::of(&completion.await.unwrap().err().unwrap()).is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

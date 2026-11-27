@@ -62,6 +62,20 @@ test('request proof verification rejects a normalized typed-byte tag', async () 
   ).rejects.toThrow()
 })
 
+test('request proofs commit the requested signing time and still verify', async () => {
+  const signer = await generateEphemeralRequestSigner()
+  const body = new TextEncoder().encode('captured body')
+  const time = Date.UTC(2030, 0, 1, 0, 0, 30, 999)
+  const proof = await signer.sign('server.test', body, time)
+  const parsed = (await decodeFirst(proof)).value as BinaryRequestProof
+  expect(BigInt(parsed.commitment.timestamp)).toBe(
+    BigInt(Math.floor(time / 1000)),
+  )
+  await expect(
+    verifyRequestProof(proof, 'server.test', body),
+  ).resolves.toBeTruthy()
+})
+
 test('DER64 normalization preserves standard Base64 and padding', () => {
   expect(normalizeDer64(pem)).toBe(der64)
   expect(normalizeDer64(pem.replace(/\n/g, '\r\n'))).toBe(der64)

@@ -13,7 +13,11 @@ registerHooks({
       format: 'module',
       shortCircuit: true,
       source: `
-      export async function prepareSession() {
+      export async function retryTime(response) {
+        return response[0] === 3 ? globalThis.serverTime : undefined
+      }
+      export async function prepareSession(...args) {
+        globalThis.preparedSessions?.push(args)
         return { message: new Uint8Array([1]), async finish(response) {
           return { temporary: response[0] === 2, peer: ${JSON.stringify(auth.ed25519PublicKeyDer64(new Uint8Array(32).fill(7)))}, cipher: {
             async write(bytes) { return bytes.slice() }, async read(bytes) { await globalThis.sessionRecordGate?.(); return bytes.slice() }
@@ -26,7 +30,7 @@ registerHooks({
 })
 const { SessionWebSocketStream } =
   await import('../src/services/session-stream.ts')
-const { sessionWebSocketConstructor } =
+const { DeviceClockError, sessionWebSocketConstructor } =
   await import('../src/services/session-websocket.ts')
 const profile = SESSION_PROFILE.transport
 for (const name of ['CloseEvent', 'ErrorEvent'])
@@ -353,4 +357,91 @@ test('raw writes wait for bufferedAmount and abort without a retained drain task
   abort.abort()
   await assert.rejects(write)
   raw.abort(Error('test complete'))
+})
+
+function retryingServer(answers) {
+  return class extends Socket {
+    constructor(url) {
+      super(url)
+      queueMicrotask(() => this.dispatchEvent(new Event('open')))
+    }
+    send(data) {
+      super.send(data)
+      const answer = answers[this.writes.length - 1]
+      if (this.writes.length > answers.length) return
+      queueMicrotask(() =>
+        answer === undefined ? this.close() : this.receive(record(answer)),
+      )
+    }
+  }
+}
+async function admitted(target, url, Server) {
+  globalThis.preparedSessions = []
+  globalThis.serverTime = Date.UTC(2031, 0, 1)
+  Socket.instances = []
+  try {
+    const Constructor = sessionWebSocketConstructor(
+      async () => identity(),
+      'server.test',
+      target,
+      Server,
+    )
+    const socket = new Constructor(url)
+    let error
+    socket.addEventListener('error', event => (error = event.error))
+    const opened = await new Promise(resolve => {
+      socket.addEventListener('open', () => resolve(true), { once: true })
+      socket.addEventListener('close', () => resolve(false), { once: true })
+    })
+    socket.close()
+    return {
+      opened,
+      error,
+      signedAt: globalThis.preparedSessions.map(args => args[3]),
+      sockets: Socket.instances.length,
+      writes: Socket.instances[0]?.writes.length,
+    }
+  } finally {
+    delete globalThis.preparedSessions
+    delete globalThis.serverTime
+  }
+}
+
+for (const [name, target, url] of [
+  ['RPC', 'rpc', 'wss://server.test/rpc/v2'],
+  [
+    'a GUID continuation',
+    { continuation: 'A'.repeat(32) },
+    `wss://server.test/rpc/v2/${'A'.repeat(32)}`,
+  ],
+])
+  test(`a retry answer re-signs ${name} once at the server clock on the same socket`, async () => {
+    const result = await admitted(target, url, retryingServer([[3], [1]]))
+    assert.equal(result.opened, true)
+    assert.deepEqual(result.signedAt, [undefined, Date.UTC(2031, 0, 1)])
+    assert.equal(result.sockets, 1)
+    assert.equal(result.writes, 2)
+  })
+
+test('a rejected retried hello reports the device clock without a third hello', async () => {
+  const result = await admitted(
+    'rpc',
+    'wss://server.test/rpc/v2',
+    retryingServer([[3], undefined]),
+  )
+  assert.equal(result.opened, false)
+  assert.ok(result.error instanceof DeviceClockError)
+  assert.equal(result.signedAt.length, 2)
+  assert.equal(result.writes, 2)
+})
+
+test('a dropped first hello is not re-signed', async () => {
+  const result = await admitted(
+    'rpc',
+    'wss://server.test/rpc/v2',
+    retryingServer([undefined]),
+  )
+  assert.equal(result.opened, false)
+  assert.ok(!(result.error instanceof DeviceClockError))
+  assert.equal(result.signedAt.length, 1)
 })

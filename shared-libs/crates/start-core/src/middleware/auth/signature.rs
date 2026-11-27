@@ -2,7 +2,6 @@ use std::collections::{BTreeSet, HashSet};
 use std::future::Future;
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::Request;
@@ -588,20 +587,37 @@ impl RequestReplayCheck {
 #[path = "signature/replay_tests.rs"]
 mod replay_tests;
 
+/// The source of an `accept_nonce` rejection for a timestamp outside the synchronized window.
+/// The rejected nonce stays unrecorded.
+#[derive(Debug)]
+pub struct ClockSkew {
+    /// This server's clock in Unix seconds when it rejected the timestamp.
+    pub now: i64,
+}
+
+impl std::fmt::Display for ClockSkew {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&t!("middleware.auth.timestamp-not-within-30s"))
+    }
+}
+
+impl std::error::Error for ClockSkew {}
+
+impl ClockSkew {
+    /// The skew behind an admission rejection, distinct from replay or a bad proof.
+    pub fn of(error: &Error) -> Option<&Self> {
+        error.source.downcast_ref()
+    }
+}
+
 async fn accept_nonce<C: SignatureAuthContext>(
     context: &C,
     commitment: &RequestCommitment,
 ) -> Result<(), Error> {
     let now = if context.clock_synced().await {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1);
+        let now = crate::sign::commitment::request::unix_timestamp();
         if now.abs_diff(commitment.timestamp) > SIG_TIME_GRACE_PERIOD_SECS / 2 {
-            return Err(Error::new(
-                eyre!("{}", t!("middleware.auth.timestamp-not-within-30s")),
-                ErrorKind::InvalidSignature,
-            ));
+            return Err(Error::new(ClockSkew { now }, ErrorKind::InvalidSignature));
         }
         Some(now)
     } else {

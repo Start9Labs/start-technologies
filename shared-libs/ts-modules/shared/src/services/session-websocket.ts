@@ -10,6 +10,16 @@ const profile = SESSION_PROFILE.transport
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
+/** A server rejected a hello signed at its own clock. */
+export class DeviceClockError extends Error {
+  constructor(options?: ErrorOptions) {
+    super(
+      "The server rejected this device's clock; check this device's date, time and time zone",
+      options,
+    )
+  }
+}
+
 export interface SessionSocketIdentity {
   readonly signer: auth.RequestSigner
   readonly signal: AbortSignal
@@ -134,8 +144,8 @@ export function sessionWebSocketConstructor(
         () => this.fail(identity.signal.reason),
         { once: true, signal: this.lifetime.signal },
       )
-      const { prepareSession } = await import('./session-identity')
-      const prepared = await prepareSession(identity.signer, context, target)
+      const { prepareSession, retryTime } = await import('./session-identity')
+      let prepared = await prepareSession(identity.signer, context, target)
       if (this.readyState !== this.CONNECTING) return
       identity.signal.throwIfAborted()
       const signal = AbortSignal.any([
@@ -154,10 +164,27 @@ export function sessionWebSocketConstructor(
           rejectionEvents: ['error', 'close'],
         })
         await raw.writeRecord(prepared.message, signal)
-        const response = await raw.readRecord(
+        let response = await raw.readRecord(
           profile.maxHandshakeRecordBytes,
           signal,
         )
+        const time = await retryTime(response)
+        if (time !== undefined) {
+          prepared = await prepareSession(
+            identity.signer,
+            context,
+            target,
+            time,
+          )
+          signal.throwIfAborted()
+          await raw.writeRecord(prepared.message, signal)
+          response = await raw
+            .readRecord(profile.maxHandshakeRecordBytes, signal)
+            .catch((cause: unknown) => {
+              signal.throwIfAborted()
+              throw new DeviceClockError({ cause })
+            })
+        }
         const secured = await prepared.finish(response)
         signal.throwIfAborted()
         assertServerIdentity(secured, allowTemporaryIdentity)

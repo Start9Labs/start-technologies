@@ -600,6 +600,8 @@ struct WebCryptoRecord {
 
 fn fixture_client(fixture: &WebCryptoFixture) -> PreparedClient {
     PreparedClient {
+        signer: signer(1),
+        target: Target::Rpc,
         secret: StaticSecret::from(
             <[u8; 32]>::try_from(hex::decode(&fixture.client_private).unwrap()).unwrap(),
         ),
@@ -739,4 +741,45 @@ async fn malformed_and_oversized_envelopes_do_not_reach_replay_policy() {
         reject_before_nonce(&wire, "server.test", None).await;
     }
     assert_eq!(wire_profile()["version"], VERSION);
+}
+
+#[tokio::test]
+async fn a_retry_answer_carries_the_server_clock_and_nothing_else() {
+    let timestamp = i64::MAX - 7;
+    let answer = retry(timestamp).unwrap();
+    assert_eq!(retry_timestamp(&answer), Some(timestamp));
+    assert_eq!(retry_timestamp(&[answer.as_slice(), &[0]].concat()), None);
+    let prepared = client(&signer(1)).await;
+    assert_eq!(retry_timestamp(prepared.message()), None);
+    let (_, response, _) = accept_rpc(&signer(2), prepared.message()).await;
+    assert_eq!(retry_timestamp(&response), None);
+    assert!(client(&signer(1)).await.finish(&answer).await.is_err());
+}
+
+#[tokio::test]
+async fn a_retried_initiation_is_fresh_and_signed_at_the_given_time() {
+    let prepared = client(&signer(1)).await;
+    let timestamp = unix_timestamp() + 3600;
+    let retried = prepared.retry(timestamp).await.unwrap();
+    let (_, proof) = split_proof(retried.message());
+    assert_eq!(proof.commitment.timestamp, timestamp);
+    let (first, _) = split_proof(prepared.message());
+    let (second, _) = split_proof(retried.message());
+    assert_ne!(first, second);
+    let (peer, response, _) = accept_rpc(&signer(2), retried.message()).await;
+    assert_eq!(peer, signer(1).verifying_key().await.unwrap());
+    retried.finish(&response).await.unwrap();
+}
+
+#[test]
+fn a_retry_answer_matches_the_browser_golden() {
+    assert_eq!(
+        retry(1_900_000_000).unwrap(),
+        hex::decode(concat!(
+            "a36870726f746f636f6c7153746172742d5250432d53657373696f6e",
+            "6776657273696f6e016568656c6c6fa264726f6c6565726574727969",
+            "74696d657374616d701a713fb300",
+        ))
+        .unwrap()
+    );
 }

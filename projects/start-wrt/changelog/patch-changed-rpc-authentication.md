@@ -19,3 +19,4 @@ release-notes: false
 - Cancel timed-out or disposed WebSocket requests without interrupting sibling calls, and release pending handlers when the socket closes.
 - Log decrypted browser RPC requests and replies to the developer console for 30 minutes after `rpcLog.enable()`, or a chosen number of minutes, until it expires or `rpcLog.disable()`.
 - Stream update progress and live logs over the encrypted RPC session instead of separate continuation sockets, ending log follow and update observation when the requesting key is revoked; the CLI and older clients keep the GUID WebSocket.
+- Sign the browser's encrypted RPC connection with the router's clock when this device's clock is wrong, so the web interface and first-time setup still work.

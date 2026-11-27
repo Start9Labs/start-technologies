@@ -20,3 +20,4 @@ release-notes: false
 - Keep encrypted browser RPC available over HTTP/2 connections.
 - Cancel timed-out or disposed WebSocket requests without interrupting sibling calls, and release pending handlers when the socket closes.
 - Log decrypted browser RPC requests and replies to the developer console for 30 minutes after `rpcLog.enable()`, or a chosen number of minutes, until it expires or `rpcLog.disable()`.
+- Sign the browser's encrypted RPC connection with the server's clock when this device's clock is wrong, so signing in, setup and RPC still work.

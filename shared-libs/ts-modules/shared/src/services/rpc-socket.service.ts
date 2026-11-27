@@ -24,6 +24,7 @@ import { AUTH_SIGNING_HOST, AuthKeyService } from './auth-key.service'
 import type { SessionSocketIdentity } from './session-websocket'
 import { withTimeout } from './http.service'
 import {
+  DeviceClockError,
   SessionOpenEvent,
   assertServerIdentity,
   sessionWebSocketConstructor,
@@ -236,8 +237,24 @@ export class RpcSocketService {
   }
 }
 
+function deviceClockError(cause: unknown): DeviceClockError | undefined {
+  let value = cause
+  while (value !== undefined) {
+    if (value instanceof DeviceClockError) return value
+    value =
+      value instanceof Event
+        ? (value as ErrorEvent).error
+        : value instanceof Error
+          ? value.cause
+          : undefined
+  }
+  return undefined
+}
+
 function transportError(cause: unknown) {
-  return Object.assign(new Error('Encrypted RPC transport failed', { cause }), {
-    code: 0,
-  })
+  const clock = deviceClockError(cause)
+  return Object.assign(
+    new Error(clock?.message ?? 'Encrypted RPC transport failed', { cause }),
+    { code: 0 },
+  )
 }
