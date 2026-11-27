@@ -10,7 +10,7 @@ use http::header::AUTHORIZATION;
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use include_dir::Dir;
-use ipnet::{IpNet, Ipv6Net};
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use patch_db::PatchDb;
 use patch_db::json_ptr::ROOT;
 use rpc_toolkit::yajrc::RpcError;
@@ -42,7 +42,7 @@ use crate::tunnel::db::{DnsRecordEntry, DnsRecords, PortForward, PortForwards, T
 use crate::tunnel::dns::DnsProxyController;
 use crate::tunnel::forward::address::ForwardAddress;
 use crate::tunnel::migrations::run_migrations;
-use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
+use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, WgSubnetMap, current_ifindex};
 use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
 use crate::util::sync::{SyncMutex, Watch};
@@ -203,8 +203,7 @@ pub struct TunnelContextSeed {
     pub lease_wake: tokio::sync::Notify,
     /// Current WireGuard ifindex; listeners rebind after interface recreation.
     pub forward_ifindex: tokio::sync::watch::Sender<u32>,
-    /// Serializes `resync_egress`; its read-DB → install → prune isn't atomic,
-    /// so a concurrent reconcile could prune a rule another call just installed.
+    /// Serializes read/install/prune reconciliations against stale-snapshot rule deletion.
     pub egress_lock: tokio::sync::Mutex<()>,
     /// Proxy-NDP entries we've installed (client GUA -> WAN interface), so a
     /// resync can withdraw the ones that no longer apply. Only populated when a
@@ -216,6 +215,62 @@ pub struct TunnelContextSeed {
     /// kernel's neighbor table.
     pub v6_lock: tokio::sync::Mutex<()>,
     pub shutdown: Sender<Option<bool>>,
+}
+
+const INTRA_SUBNET_TAG: &str = "tunnel-intra-";
+
+fn intra_subnet_v6_hosts(subnets: &WgSubnetMap) -> BTreeMap<Ipv4Net, BTreeSet<Ipv6Addr>> {
+    let mut hosts = BTreeMap::new();
+    let mut owners = BTreeMap::<Ipv6Addr, usize>::new();
+    for (subnet, cfg) in &subnets.0 {
+        let Some(prefix) = cfg.ipv6 else {
+            continue;
+        };
+        let addresses: BTreeSet<_> = std::iter::once(subnet.addr())
+            .chain(cfg.clients.0.keys().copied())
+            .map(|ip| crate::tunnel::wg6::host_v6(prefix, ip))
+            .collect();
+        for addr in &addresses {
+            *owners.entry(*addr).or_default() += 1;
+        }
+        hosts.insert(*subnet, addresses);
+    }
+    for addresses in hosts.values_mut() {
+        addresses.retain(|addr| owners[addr] == 1);
+    }
+    hosts
+}
+
+/// Overlapping IPv6 prefixes must not grant private cross-subnet access.
+fn intra_subnet_rules(
+    subnets: &WgSubnetMap,
+) -> (BTreeMap<String, String>, BTreeMap<String, String>) {
+    let wg =
+        format!("iifname \"{WIREGUARD_INTERFACE_NAME}\" oifname \"{WIREGUARD_INTERFACE_NAME}\"");
+    let mut v4 = BTreeMap::new();
+    let mut v6 = BTreeMap::new();
+    let v6_hosts = intra_subnet_v6_hosts(subnets);
+    for subnet in subnets.0.keys() {
+        let net = subnet.trunc();
+        let comment = format!("{INTRA_SUBNET_TAG}{net}");
+        if let Some(addresses) = v6_hosts.get(subnet).filter(|a| !a.is_empty()) {
+            let addresses: Vec<_> = addresses.iter().map(ToString::to_string).collect();
+            let hosts = if addresses.len() == 1 {
+                addresses[0].clone()
+            } else {
+                format!("{{ {} }}", addresses.join(", "))
+            };
+            v6.insert(
+                comment.clone(),
+                format!("{wg} ip6 saddr {hosts} ip6 daddr {hosts} ct state new accept"),
+            );
+        }
+        v4.insert(
+            comment,
+            format!("{wg} ip saddr {net} ip daddr {net} ct state new accept"),
+        );
+    }
+    (v4, v6)
 }
 
 /// Also tightens the files an earlier release left world-readable.
@@ -349,7 +404,9 @@ impl TunnelContext {
             "wg-forward",
             false,
             false,
-            &format!("iifname \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"),
+            &format!(
+                "iifname \"{WIREGUARD_INTERFACE_NAME}\" oifname != \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"
+            ),
         )
         .await?;
         // The ct rule loads conntrack before its sysctls are accessed.
@@ -360,7 +417,9 @@ impl TunnelContext {
             "wg-forward",
             false,
             false,
-            &format!("iifname \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"),
+            &format!(
+                "iifname \"{WIREGUARD_INTERFACE_NAME}\" oifname != \"{WIREGUARD_INTERFACE_NAME}\" ct state new accept"
+            ),
         )
         .await?;
         // Large TLS ClientHellos must fit the WireGuard path MTU.
@@ -509,6 +568,7 @@ impl TunnelContext {
         );
 
         ctx.resync_egress().await?;
+        ctx.resync_subnet_forward().await?;
         ctx.resync_v6().await?;
         crate::tunnel::forward::pinhole::seed_pinholes(&ctx).await?;
         // Grant every restored auto entry a fresh lease so a client that never
@@ -576,6 +636,7 @@ impl TunnelContext {
             .sync(server, self.dns_injector.clone())
             .await?;
         self.resync_egress().await?;
+        self.resync_subnet_forward().await?;
         self.resync_v6().await
     }
 
@@ -703,9 +764,32 @@ impl TunnelContext {
             }
         }
         // Prune device-override rules whose device was removed or cleared its `wan_ip`.
-        for comment in nft_comments_with_prefix("postrouting", "tunnel-snat-dev-").await {
+        for comment in nft_comments_with_prefix("ip", "postrouting", "tunnel-snat-dev-").await {
             if !want_dev.contains(&comment) {
                 nft_rule("postrouting", &comment, true, false, "").await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Reconciles private intra-subnet access; published ports retain their separate accepts.
+    pub async fn resync_subnet_forward(&self) -> Result<(), Error> {
+        let _guard = self.egress_lock.lock().await;
+        let (v4, v6) = intra_subnet_rules(&self.db.peek().await.as_wg().as_subnets().de()?);
+        for (comment, rule) in &v4 {
+            nft_rule("forward", comment, false, false, rule).await?;
+        }
+        for (comment, rule) in &v6 {
+            nft_rule_v6("forward", comment, false, false, rule).await?;
+        }
+        for comment in nft_comments_with_prefix("ip", "forward", INTRA_SUBNET_TAG).await {
+            if !v4.contains_key(&comment) {
+                nft_rule("forward", &comment, true, false, "").await?;
+            }
+        }
+        for comment in nft_comments_with_prefix("ip6", "forward", INTRA_SUBNET_TAG).await {
+            if !v6.contains_key(&comment) {
+                nft_rule_v6("forward", &comment, true, false, "").await?;
             }
         }
         Ok(())
@@ -1055,7 +1139,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::tunnel::wg::{WgClientKind, WgConfig, WgSubnetClients, WgSubnetConfig, WgSubnetMap};
+    use crate::tunnel::wg::{WgClientKind, WgConfig, WgSubnetClients, WgSubnetConfig};
 
     fn server_with_client(ipv6: Option<Ipv6Net>) -> WgServer {
         let mut server = WgServer::default();
@@ -1094,6 +1178,135 @@ mod tests {
         let keys = injector_keys(&server);
         assert!(keys.contains_key(&v4));
         assert_eq!(keys.get(&v4), keys.get(&v6), "same device, same TSIG key");
+    }
+
+    #[test]
+    fn subnet_forward_rules_admit_only_flows_within_a_subnet() {
+        let prefix: Ipv6Net = "2001:db8:abcd::/64".parse().unwrap();
+        let mut subnets = WgSubnetMap::default();
+        for (net, ipv6) in [
+            ("10.59.0.1/24", Some(prefix)),
+            ("10.59.1.1/24", Some(prefix)),
+            ("10.60.0.1/24", None),
+        ] {
+            subnets.0.insert(
+                net.parse().unwrap(),
+                WgSubnetConfig {
+                    ipv6,
+                    clients: WgSubnetClients(BTreeMap::from([(
+                        net.parse::<Ipv4Net>().unwrap().hosts().nth(1).unwrap(),
+                        WgConfig::generate("client".into(), WgClientKind::Client),
+                    )])),
+                    ..Default::default()
+                },
+            );
+        }
+        let (v4, v6) = intra_subnet_rules(&subnets);
+        let wg = "iifname \"wg-start-tunnel\" oifname \"wg-start-tunnel\"";
+        assert_eq!(
+            v4.into_iter().collect::<Vec<_>>(),
+            [
+                (
+                    "tunnel-intra-10.59.0.0/24".to_owned(),
+                    format!("{wg} ip saddr 10.59.0.0/24 ip daddr 10.59.0.0/24 ct state new accept")
+                ),
+                (
+                    "tunnel-intra-10.59.1.0/24".to_owned(),
+                    format!("{wg} ip saddr 10.59.1.0/24 ip daddr 10.59.1.0/24 ct state new accept")
+                ),
+                (
+                    "tunnel-intra-10.60.0.0/24".to_owned(),
+                    format!("{wg} ip saddr 10.60.0.0/24 ip daddr 10.60.0.0/24 ct state new accept")
+                ),
+            ]
+        );
+        assert_eq!(
+            v6.into_iter().collect::<Vec<_>>(),
+            [
+                (
+                    "tunnel-intra-10.59.0.0/24".to_owned(),
+                    format!(
+                        "{wg} ip6 saddr {{ 2001:db8:abcd::a3b:1, 2001:db8:abcd::a3b:2 }} ip6 daddr {{ 2001:db8:abcd::a3b:1, 2001:db8:abcd::a3b:2 }} ct state new accept"
+                    )
+                ),
+                (
+                    "tunnel-intra-10.59.1.0/24".to_owned(),
+                    format!(
+                        "{wg} ip6 saddr {{ 2001:db8:abcd::a3b:101, 2001:db8:abcd::a3b:102 }} ip6 daddr {{ 2001:db8:abcd::a3b:101, 2001:db8:abcd::a3b:102 }} ct state new accept"
+                    )
+                ),
+            ]
+        );
+    }
+
+    fn isolation_subnets(prefix_b: &str, client_b: &str) -> WgSubnetMap {
+        let mut subnets = WgSubnetMap::default();
+        for (net, prefix, client) in [
+            ("10.59.0.1/24", "2001:db8:abcd::/64", "10.59.0.2"),
+            ("10.59.1.1/24", prefix_b, client_b),
+        ] {
+            subnets.0.insert(
+                net.parse().unwrap(),
+                WgSubnetConfig {
+                    ipv6: Some(prefix.parse().unwrap()),
+                    clients: WgSubnetClients(BTreeMap::from([(
+                        client.parse().unwrap(),
+                        WgConfig::generate("client".into(), WgClientKind::Client),
+                    )])),
+                    ..Default::default()
+                },
+            );
+        }
+        subnets
+    }
+
+    #[test]
+    fn overlapping_v6_prefixes_do_not_share_private_access() {
+        let mut subnets = isolation_subnets("2001:db8:abcd::a3b:f0/124", "10.59.1.3");
+        let subnet_a = "10.59.0.1/24".parse().unwrap();
+        let subnet_b = "10.59.1.1/24".parse().unwrap();
+        let hosts = intra_subnet_v6_hosts(&subnets);
+        assert_eq!(
+            hosts[&subnet_a],
+            BTreeSet::from([
+                "2001:db8:abcd::a3b:1".parse().unwrap(),
+                "2001:db8:abcd::a3b:2".parse().unwrap(),
+            ])
+        );
+        assert_eq!(
+            hosts[&subnet_b],
+            BTreeSet::from([
+                "2001:db8:abcd::a3b:f1".parse().unwrap(),
+                "2001:db8:abcd::a3b:f3".parse().unwrap(),
+            ])
+        );
+        let (_, rules) = intra_subnet_rules(&subnets);
+        assert!(!rules["tunnel-intra-10.59.0.0/24"].contains("a3b:f3"));
+        assert!(!rules["tunnel-intra-10.59.1.0/24"].contains("a3b:2"));
+
+        subnets.0.remove(&subnet_b);
+        assert_eq!(intra_subnet_rules(&subnets).1.len(), 1);
+        subnets.0.get_mut(&subnet_a).unwrap().ipv6 = None;
+        assert!(intra_subnet_rules(&subnets).1.is_empty());
+    }
+
+    #[test]
+    fn v6_addresses_shared_between_subnets_get_no_private_accept() {
+        let subnets = isolation_subnets("2001:db8:abcd::a3b:0/120", "10.59.1.3");
+        let hosts = intra_subnet_v6_hosts(&subnets);
+        let shared = "2001:db8:abcd::a3b:1".parse().unwrap();
+        assert!(hosts.values().all(|addresses| !addresses.contains(&shared)));
+        assert!(
+            hosts[&"10.59.0.1/24".parse().unwrap()]
+                .contains(&"2001:db8:abcd::a3b:2".parse().unwrap())
+        );
+        assert!(
+            hosts[&"10.59.1.1/24".parse().unwrap()]
+                .contains(&"2001:db8:abcd::a3b:3".parse().unwrap())
+        );
+
+        let colliding = isolation_subnets("2001:db8:abcd::a3b:0/120", "10.59.1.2");
+        assert!(intra_subnet_rules(&colliding).1.is_empty());
     }
 
     #[test]

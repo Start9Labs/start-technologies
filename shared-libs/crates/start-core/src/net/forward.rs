@@ -416,10 +416,14 @@ async fn nft_rules_with_comment(family: &str, chain: &str, comment: &str) -> Vec
         .collect()
 }
 
-/// Comment tags in `chain` of `table ip startos` beginning with `prefix`. Used
-/// to prune orphaned per-device/per-subnet rules whose owner no longer exists.
-pub(crate) async fn nft_comments_with_prefix(chain: &str, prefix: &str) -> Vec<String> {
-    nft_list_chain("ip", chain)
+/// Comment tags in `chain` of `table <family> startos` beginning with `prefix`.
+/// Used to prune orphaned per-device/per-subnet rules whose owner no longer exists.
+pub(crate) async fn nft_comments_with_prefix(
+    family: &str,
+    chain: &str,
+    prefix: &str,
+) -> Vec<String> {
+    nft_list_chain(family, chain)
         .await
         .lines()
         .filter_map(|line| {
