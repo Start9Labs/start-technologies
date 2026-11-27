@@ -16,6 +16,7 @@ import {
   INACTIVE_STATUSES,
 } from 'src/app/services/pkg-status-rendering.service'
 import { getManifest } from 'src/app/utils/get-package-data'
+import { dependencyProvider } from 'src/app/utils/dependency-provider'
 
 @Component({
   selector: 'tr[task]',
@@ -57,7 +58,6 @@ import { getManifest } from 'src/app/utils/get-package-data'
           tuiIconButton
           iconStart="@tui.trash"
           appearance="primary-destructive"
-          [disabled]="!pkg()"
           (click)="dismiss()"
         >
           {{ 'Dismiss' | i18n }}
@@ -148,7 +148,13 @@ export class ServiceTaskComponent {
   readonly task = input.required<T.Task & { replayId: string }>()
   readonly services = input.required<Record<string, PackageDataEntry>>()
 
-  readonly pkg = computed(() => this.services()[this.task().packageId])
+  readonly providerId = computed(() =>
+    dependencyProvider(this.component.pkg(), this.task().packageId),
+  )
+  readonly pkg = computed(() => {
+    const id = this.providerId()
+    return id ? this.services()[id] : undefined
+  })
   readonly title = computed((pkg = this.pkg()) => pkg && getManifest(pkg).title)
 
   readonly icon = computed((pkg = this.pkg()) =>
@@ -163,7 +169,15 @@ export class ServiceTaskComponent {
 
   readonly disabled = computed(() => {
     const pkg = this.pkg()
-    if (!pkg) return this.i18n.transform('Not installed')!
+    if (!pkg)
+      return this.i18n.transform(
+        Object.keys(
+          this.component.pkg().dependencyBindings?.[this.task().packageId]
+            ?.candidates || {},
+        ).length > 1
+          ? 'Select a dependency provider'
+          : 'Not installed',
+      )!
 
     const action = pkg.actions[this.task().actionId]
     if (!action) return this.i18n.transform('Action not found')!
@@ -184,7 +198,8 @@ export class ServiceTaskComponent {
   })
 
   async dismiss() {
-    const { packageId, replayId } = this.task()
+    const { replayId } = this.task()
+    const packageId = getManifest(this.component.pkg()).id
 
     this.dialog
       .openConfirm(DISMISS)
@@ -210,7 +225,7 @@ export class ServiceTaskComponent {
     if (title && pkg && metadata) {
       this.actionService.present({
         pkgInfo: {
-          id: task.packageId,
+          id: this.providerId()!,
           title,
           status: getInstalledBaseStatus(pkg.statusInfo),
         },

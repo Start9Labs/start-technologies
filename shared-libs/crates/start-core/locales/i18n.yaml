@@ -1942,6 +1942,27 @@ db.subscription-not-found:
   pl_PL: "Subskrypcja bazy danych %{subscription} zakończyła się lub nie istnieje"
 
 # disk/main.rs
+dependencies.providers.incompatible:
+  en_US: "The selected package cannot fulfill this dependency."
+  de_DE: "Das ausgewählte Paket kann diese Abhängigkeit nicht erfüllen."
+  es_ES: "El paquete seleccionado no puede satisfacer esta dependencia."
+  fr_FR: "Le paquet sélectionné ne peut pas satisfaire cette dépendance."
+  pl_PL: "Wybrany pakiet nie może spełnić tej zależności."
+
+dependencies.providers.lock-requires-provider:
+  en_US: "Choose a provider to lock."
+  de_DE: "Wählen Sie einen Anbieter zum Fixieren aus."
+  es_ES: "Elija un proveedor para fijar."
+  fr_FR: "Choisissez un fournisseur à verrouiller."
+  pl_PL: "Wybierz dostawcę do przypięcia."
+
+dependencies.providers.unresolved:
+  en_US: "Choose a compatible provider for dependency %{dependency}."
+  de_DE: "Wählen Sie einen kompatiblen Anbieter für die Abhängigkeit %{dependency}."
+  es_ES: "Elija un proveedor compatible para la dependencia %{dependency}."
+  fr_FR: "Choisissez un fournisseur compatible pour la dépendance %{dependency}."
+  pl_PL: "Wybierz zgodnego dostawcę zależności %{dependency}."
+
 disk.main.defrag-failed:
   en_US: "Filesystem optimization failed; continuing with the converted filesystem."
   de_DE: "Die Dateisystemoptimierung ist fehlgeschlagen; die Konvertierung wird fortgesetzt."
@@ -7220,6 +7241,20 @@ help.arg.package-display-name:
   fr_FR: "Nom de paquet lisible (par ex. « Hello World »)"
   pl_PL: "Czytelna nazwa pakietu (np. „Hello World”)"
 
+help.arg.dependency-id:
+  en_US: "Logical dependency package identifier"
+  de_DE: "Paket-Kennung der logischen Abhängigkeit"
+  es_ES: "Identificador del paquete de dependencia lógica"
+  fr_FR: "Identifiant du paquet de dépendance logique"
+  pl_PL: "Identyfikator pakietu zależności logicznej"
+
+help.arg.lock-provider:
+  en_US: "Lock the selected provider without automatic fallback"
+  de_DE: "Den ausgewählten Anbieter ohne automatischen Wechsel fixieren"
+  es_ES: "Fijar el proveedor seleccionado sin cambio automático"
+  fr_FR: "Verrouiller le fournisseur sélectionné sans remplacement automatique"
+  pl_PL: "Przypnij wybranego dostawcę bez automatycznego przełączania"
+
 help.arg.package-id:
   en_US: "Package identifier"
   de_DE: "Paket-Kennung"
@@ -7345,6 +7380,20 @@ help.arg.signer-id:
   es_ES: "Identificador de firmante"
   fr_FR: "Identifiant du signataire"
   pl_PL: "Identyfikator sygnatariusza"
+
+help.arg.provider-id:
+  en_US: "Physical provider package identifier; omit to clear the preference"
+  de_DE: "Physische Paket-Kennung des Anbieters; weglassen, um die Präferenz zu löschen"
+  es_ES: "Identificador físico del paquete proveedor; omitir para borrar la preferencia"
+  fr_FR: "Identifiant physique du paquet fournisseur ; omettre pour effacer la préférence"
+  pl_PL: "Fizyczny identyfikator pakietu dostawcy; pomiń, aby usunąć preferencję"
+
+help.arg.provides:
+  en_US: "Dependency package identifier whose contract releases must satisfy"
+  de_DE: "Kennung des Abhängigkeitspakets, dessen Vertrag die Versionen erfüllen müssen"
+  es_ES: "Identificador del paquete de dependencia cuyo contrato deben cumplir las versiones"
+  fr_FR: "Identifiant du paquet de dépendance dont les versions doivent satisfaire le contrat"
+  pl_PL: "Identyfikator pakietu zależności, którego kontrakt muszą spełniać wersje"
 
 help.arg.source-version-range:
   en_US: "Source version range for migration"
@@ -9029,6 +9078,13 @@ about.remove-trusted-key:
   fr_FR: "Supprimer une clé de confiance"
   pl_PL: "Usuń zaufany klucz"
 
+about.select-dependency-provider:
+  en_US: "Select or clear a dependency provider"
+  de_DE: "Einen Abhängigkeitsanbieter auswählen oder zurücksetzen"
+  es_ES: "Seleccionar o borrar un proveedor de dependencias"
+  fr_FR: "Sélectionner ou effacer un fournisseur de dépendance"
+  pl_PL: "Wybierz lub usuń dostawcę zależności"
+
 about.select-s9pk-for-device:
   en_US: "Select the best compatible s9pk for a target device"
   de_DE: "Das beste kompatible s9pk für ein Zielgerät auswählen"
@@ -9042,6 +9098,13 @@ about.reassign-binding-port:
   es_ES: "Cambiar el puerto externo asignado de una vinculación"
   fr_FR: "Modifier le port externe attribué à une liaison"
   pl_PL: "Zmień przypisany port zewnętrzny powiązania"
+
+about.preview-provider-change:
+  en_US: "Read proposed provider metadata from stdin and list affected dependent packages"
+  de_DE: "Vorgeschlagene Anbietermetadaten von stdin lesen und betroffene abhängige Pakete auflisten"
+  es_ES: "Leer los metadatos propuestos del proveedor desde stdin y listar los paquetes dependientes afectados"
+  fr_FR: "Lire les métadonnées proposées du fournisseur depuis stdin et lister les paquets dépendants affectés"
+  pl_PL: "Odczytaj proponowane metadane dostawcy ze stdin i wyświetl dotknięte pakiety zależne"
 
 about.rebuild-service-container:
   en_US: "Rebuild service container"

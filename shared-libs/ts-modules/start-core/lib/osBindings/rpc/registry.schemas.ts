@@ -968,6 +968,10 @@ export const GetPackageParams: z.ZodIntersection<
   z.ZodObject<{
     id: z.ZodDefault<z.ZodNullable<typeof PackageId>>
     targetVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
+    /**
+     * Filters releases by a dependency contract rather than their own package version.
+     */
+    provides: z.ZodDefault<z.ZodNullable<typeof PackageId>>
     sourceVersion: z.ZodDefault<z.ZodNullable<typeof Version>>
     otherVersions: z.ZodDefault<z.ZodNullable<typeof PackageDetailLevel>>
     allRevisions: z.ZodDefault<z.ZodBoolean>
@@ -981,6 +985,15 @@ export const GetPackageParams: z.ZodIntersection<
         .string()
         .nullable()
         .default(() => null),
+      /**
+       * Filters releases by a dependency contract rather than their own package version.
+       */
+      provides: PackageId.nullable()
+        .default(() => null)
+        .meta({
+          description:
+            'Filters releases by a dependency contract rather than their own package version.',
+        }),
       sourceVersion: Version.nullable().default(() => null),
       otherVersions: PackageDetailLevel.nullable().default(() => null),
       allRevisions: z.boolean().default(() => false),
@@ -1593,6 +1606,12 @@ export const PackageMetadata: z.ZodObject<{
   hardwareVirtualization: z.ZodDefault<z.ZodBoolean>
   plugins: z.ZodDefault<z.ZodArray<typeof PluginId>>
   satisfies: z.ZodDefault<z.ZodArray<typeof Version>>
+  /**
+   * Promises the named package's dependency contract, including resource IDs and action schemas.
+   */
+  satisfiesPackages: z.ZodDefault<
+    z.ZodRecord<z.ZodString, z.ZodArray<typeof Version>>
+  >
 }> = /* @__PURE__ */ object({
   title: z.string(),
   /**
@@ -1653,6 +1672,16 @@ export const PackageMetadata: z.ZodObject<{
     }),
   plugins: z.array(PluginId).default(() => []),
   satisfies: z.array(Version).default(() => []),
+  /**
+   * Promises the named package's dependency contract, including resource IDs and action schemas.
+   */
+  satisfiesPackages: z
+    .record(z.string(), z.array(Version))
+    .default(() => ({}))
+    .meta({
+      description:
+        "Promises the named package's dependency contract, including resource IDs and action schemas.",
+    }),
 }).meta({
   id: 'PackageMetadata',
 })

@@ -1113,4 +1113,8 @@ export default {
   1319: 'Chipset',
   1320: 'Sensor',
   1321: 'No se encontraron sensores de temperatura',
+  1322: 'Proporcionado por',
+  1323: 'Selecciona un proveedor de dependencias',
+  1324: 'Fijar proveedor',
+  1325: 'Desfijar proveedor',
 } satisfies i18n

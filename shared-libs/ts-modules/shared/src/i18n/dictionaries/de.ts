@@ -1113,4 +1113,8 @@ export default {
   1319: 'Chipsatz',
   1320: 'Sensor',
   1321: 'Keine Temperatursensoren gefunden',
+  1322: 'Bereitgestellt von',
+  1323: 'Abhängigkeitsanbieter auswählen',
+  1324: 'Anbieter fixieren',
+  1325: 'Fixierung aufheben',
 } satisfies i18n

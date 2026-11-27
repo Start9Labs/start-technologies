@@ -1113,4 +1113,8 @@ export default {
   1319: 'Chipset',
   1320: 'Capteur',
   1321: 'Aucun capteur de température trouvé',
+  1322: 'Fourni par',
+  1323: 'Sélectionner un fournisseur de dépendance',
+  1324: 'Verrouiller le fournisseur',
+  1325: 'Déverrouiller le fournisseur',
 } satisfies i18n

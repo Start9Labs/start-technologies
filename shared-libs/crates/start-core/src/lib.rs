@@ -729,6 +729,28 @@ pub fn package<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "preview-provider-change",
+            from_fn_async(dependencies::providers::preview_provider_change)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "preview-provider-change",
+            from_fn_async(dependencies::providers::preview_provider_change_cli)
+                .with_display_serializable()
+                .with_about("about.preview-provider-change")
+                .no_ts(),
+        )
+        .subcommand(
+            "select-dependency-provider",
+            from_fn_async(dependencies::providers::select_provider)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.select-dependency-provider")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "stats",
             from_fn_async(lxc::stats)
                 .with_metadata(EFFECT, Effect::Read.into())

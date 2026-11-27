@@ -2252,6 +2252,12 @@ export const PackageMetadata: z.ZodObject<{
   hardwareVirtualization: z.ZodDefault<z.ZodBoolean>
   plugins: z.ZodDefault<z.ZodArray<typeof PluginId>>
   satisfies: z.ZodDefault<z.ZodArray<typeof Version>>
+  /**
+   * Promises the named package's dependency contract, including resource IDs and action schemas.
+   */
+  satisfiesPackages: z.ZodDefault<
+    z.ZodRecord<z.ZodString, z.ZodArray<typeof Version>>
+  >
 }> = /* @__PURE__ */ object({
   title: z.string(),
   /**
@@ -2312,6 +2318,16 @@ export const PackageMetadata: z.ZodObject<{
     }),
   plugins: z.array(PluginId).default(() => []),
   satisfies: z.array(Version).default(() => []),
+  /**
+   * Promises the named package's dependency contract, including resource IDs and action schemas.
+   */
+  satisfiesPackages: z
+    .record(z.string(), z.array(Version))
+    .default(() => ({}))
+    .meta({
+      description:
+        "Promises the named package's dependency contract, including resource IDs and action schemas.",
+    }),
 }).meta({
   id: 'PackageMetadata',
 })
@@ -2801,6 +2817,7 @@ export const TaskEntry: z.ZodObject<{
 })
 export const CheckDependenciesResult: z.ZodObject<{
   packageId: typeof PackageId
+  providerId: z.ZodDefault<z.ZodNullable<typeof PackageId>>
   title: z.ZodDefault<z.ZodNullable<z.ZodString>>
   installedVersion: z.ZodDefault<z.ZodNullable<typeof Version>>
   satisfies: z.ZodArray<typeof Version>
@@ -2809,6 +2826,7 @@ export const CheckDependenciesResult: z.ZodObject<{
   healthChecks: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
 }> = /* @__PURE__ */ object({
   packageId: PackageId,
+  providerId: PackageId.nullable().default(() => null),
   title: z
     .string()
     .nullable()

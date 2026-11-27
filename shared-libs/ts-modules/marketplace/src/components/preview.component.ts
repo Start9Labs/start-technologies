@@ -25,6 +25,7 @@ import {
 } from '@taiga-ui/layout'
 import {
   combineLatest,
+  distinctUntilChanged,
   filter,
   firstValueFrom,
   map,
@@ -154,7 +155,7 @@ export class MarketplacePreviewComponent {
 
   readonly pkgId = input.required<string>()
 
-  /** The newest release's listing, shown while the full release loads. */
+  /** The selected release's listing, shown while its full details load. */
   readonly listing = input<MarketplaceListing>()
 
   /** Action buttons for the resolved package (install/update), rendered with
@@ -170,10 +171,14 @@ export class MarketplacePreviewComponent {
   private readonly flavor$ = this.params$.pipe(map(p => p.get('flavor')))
 
   readonly targetRange = computed(() =>
-    this.params()?.get('requirePkg') === this.pkgId()
+    this.params()?.get('requirePkg') &&
+    (this.params()?.get('requirePkg') === this.pkgId() ||
+      this.params()?.get('provides') === this.params()?.get('requirePkg'))
       ? this.params()?.get('requireRange')
       : null,
   )
+
+  private readonly provides = computed(() => this.params()?.get('requirePkg'))
 
   readonly selectedVersion = signal<string | null>(null)
 
@@ -184,42 +189,63 @@ export class MarketplacePreviewComponent {
 
   readonly pkg$ = combineLatest([
     toObservable(this.selectedVersion),
+    toObservable(this.listing).pipe(
+      map(listing => listing?.version ?? null),
+      distinctUntilChanged(),
+    ),
     this.flavor$,
   ]).pipe(
-    switchMap(([version, flavor]) =>
-      this.marketplaceService.getPackage$(this.pkgId(), version, flavor).pipe(
-        tap(pkg => {
-          if (!pkg || version) return
-          const range = this.targetRange()
-          if (!range || satisfiesWithAliases(this.exver, pkg, range)) return
-          const candidate = compatibleVersions(this.exver, pkg, range)[0]
-          if (candidate) {
-            this.selectedVersion.set(candidate)
-          } else {
-            this.selectSatisfyingFlavor(pkg.flavor, range)
-          }
-        }),
-        filter(pkg => {
-          const range = this.targetRange()
-
-          return (
-            !!pkg &&
-            (!!version ||
+    switchMap(([version, listedVersion, flavor]) =>
+      this.marketplaceService
+        .getPackage$(this.pkgId(), version ?? listedVersion, flavor)
+        .pipe(
+          tap(pkg => {
+            if (!pkg || version) return
+            const range = this.targetRange()
+            if (
               !range ||
-              satisfiesWithAliases(this.exver, pkg, range))
-          )
-        }),
-        startWith<MarketplacePkg | null>(null),
-      ),
+              satisfiesWithAliases(this.exver, pkg, range, this.provides())
+            )
+              return
+            const candidate = compatibleVersions(
+              this.exver,
+              pkg,
+              range,
+              this.provides(),
+            )[0]
+            if (candidate) {
+              this.selectedVersion.set(candidate)
+            } else {
+              this.selectSatisfyingFlavor(pkg.flavor, range)
+            }
+          }),
+          filter(pkg => {
+            const range = this.targetRange()
+
+            return (
+              !!pkg &&
+              (!range ||
+                satisfiesWithAliases(this.exver, pkg, range, this.provides()))
+            )
+          }),
+          startWith<MarketplacePkg | null>(null),
+        ),
     ),
-    shareReplay({ bufferSize: 1, refCount: false }),
+    shareReplay({ bufferSize: 1, refCount: true }),
   )
 
   protected readonly pkg = toSignal(this.pkg$, { initialValue: null })
 
-  protected readonly placeholder = computed(() =>
-    this.selectedVersion() || this.targetRange() ? null : this.listing(),
-  )
+  protected readonly placeholder = computed(() => {
+    const listing = this.listing()
+    const range = this.targetRange()
+    return !this.selectedVersion() &&
+      listing &&
+      (!range ||
+        satisfiesWithAliases(this.exver, listing, range, this.provides()))
+      ? listing
+      : null
+  })
 
   private async selectSatisfyingFlavor(current: string | null, range: string) {
     const { packages } = await firstValueFrom(
@@ -231,12 +257,14 @@ export class MarketplacePreviewComponent {
     const resolved = await Promise.all(
       flavors.map(p =>
         firstValueFrom(
-          this.marketplaceService.getPackage$(p.id, null, p.flavor),
+          this.marketplaceService.getPackage$(p.id, p.version, p.flavor),
         ),
       ),
     )
     const match = resolved.find(
-      p => !!p && !!compatibleVersions(this.exver, p, range).length,
+      p =>
+        !!p &&
+        !!compatibleVersions(this.exver, p, range, this.provides()).length,
     )
 
     if (match) {
@@ -264,12 +292,10 @@ export class MarketplacePreviewComponent {
     ),
   )
 
-  readonly versions$ = this.flavor$.pipe(
-    switchMap(flavor =>
-      this.marketplaceService.getPackage$(this.pkgId(), null, flavor).pipe(
-        filter(Boolean),
-        map(pkg => compatibleVersions(this.exver, pkg, this.targetRange())),
-      ),
+  readonly versions$ = this.pkg$.pipe(
+    filter(Boolean),
+    map(pkg =>
+      compatibleVersions(this.exver, pkg, this.targetRange(), this.provides()),
     ),
   )
 

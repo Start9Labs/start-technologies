@@ -11,6 +11,22 @@ Dependencies are other services that a service requires or can optionally integr
 
 StartOS lists required dependencies from the package as soon as it initializes the service. Optional integrations appear when the service activates them. Their published version and health requirements still apply when active. When you install a service, StartOS checks its dependencies. If a required dependency is not installed, you will be prompted to install it. StartOS also monitors version compatibility — if a dependency is installed but running an incompatible version, you will be notified.
 
+## Choosing a Provider
+
+A different package can fulfill a dependency when its developer declares the required compatibility. StartOS uses the sole compatible installed provider automatically. Use the blue **Switch** button under **Dependencies** on the dependent service's page to open the provider and lock settings. Each service has its own choice.
+
+Choices are unlocked by default. The selected provider stays in use while compatible. If it becomes unavailable or incompatible, StartOS falls back to the sole compatible alternative; if several alternatives remain, choose one. An unlocked explicit choice remains preferred and returns when compatible again. Switching providers rebuilds the dependent service before its connections, mounts, and tasks use the replacement.
+
+The lock button inside the selection dialog pins the exact provider. **Select** applies both the provider and its lock setting; **Cancel** leaves them unchanged. A missing or incompatible locked provider leaves the dependency unsatisfied instead of falling back. Its cached title and icon remain visible after uninstall, and its Marketplace link shows only that package. With only one provider choice, a locked provider shows **Unlock** instead of **Switch**, including a missing pin without alternatives. An unlocked provider still shows **Switch** to open its lock settings. A missing pin with a compatible alternative also shows **Switch**. Unlocking restores automatic fallback. Choosing another provider explicitly overrides any existing lock and starts unlocked.
+
+The CLI offers the same per-service choice:
+
+```sh
+start-cli package select-dependency-provider <service-id> <dependency-id> --provider-id <provider-id> --locked
+```
+
+Omit `--locked` to select an unlocked provider. Omit both options to clear the saved choice; `--locked` requires `--provider-id`. To preview an update or removal, pipe provider metadata to `start-cli package preview-provider-change`: the input contains `id`, `version`, `satisfies`, and `satisfiesPackages`; `version: null` previews removal. It lists affected dependent package IDs without applying the change. `start-cli registry package get --provides <dependency-id> --target-version <range>` finds releases that claim the requested dependency contract.
+
 ## Configuring Dependencies
 
 Some dependencies need to be configured to work with the services that depend on them. When this is the case, a [task](tasks.md) will appear on the dashboard guiding you through the necessary steps. These tasks often link directly to an [action](actions.md) on the dependency, with form fields pre-filled to simplify configuration. While a service is not using an optional dependency, its tasks for that dependency are hidden and do not prevent it from starting.

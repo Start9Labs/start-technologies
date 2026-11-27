@@ -77,42 +77,61 @@ export type VersionOptions<Version extends string> = {
  * Represents a single version of the service, including its release notes,
  * migration scripts, and backwards-compatibility declarations.
  *
- * By convention, each version gets its own file (e.g. `versions/v1_0_0.ts`).
- *
  * @typeParam Version - The string literal exver version number
  */
 export interface VersionInfo<Version extends string> {
   /** Brand to preserve type parameter distinction across structural checks */
   readonly _version: Version
-  readonly options: VersionOptions<Version> & { satisfies: string[] }
-  /** Specify a version that this version is 100% backwards compatible to */
+  readonly options: VersionOptions<Version> & {
+    satisfies: string[]
+    satisfiesPackages: Record<string, string[]>
+  }
+  /** Declares full compatibility with a version of this package. */
   satisfies<V extends string>(
+    version: V & ValidateExVer<V>,
+  ): VersionInfo<Version>
+  /**
+   * Promises the named package version's host, interface, volume, action, and
+   * health-check IDs and behavior. Claims are direct, not transitive; this
+   * package's own version does not count toward another package ID.
+   */
+  satisfies<V extends string>(
+    packageId: string,
     version: V & ValidateExVer<V>,
   ): VersionInfo<Version>
 }
 
 class VersionInfoImpl<Version extends string> implements VersionInfo<Version> {
   readonly _version: Version = null as any as Version
-  constructor(
-    readonly options: VersionOptions<Version> & { satisfies: string[] },
-  ) {}
-  satisfies<V extends string>(
-    version: V & ValidateExVer<V>,
+  constructor(readonly options: VersionInfo<Version>['options']) {}
+  satisfies(
+    packageIdOrVersion: string,
+    version?: string,
   ): VersionInfo<Version> {
+    if (version === undefined) {
+      return new VersionInfoImpl({
+        ...this.options,
+        satisfies: [...this.options.satisfies, packageIdOrVersion],
+      })
+    }
+    const packages = this.options.satisfiesPackages
+    const claimed = Object.prototype.hasOwnProperty.call(
+      packages,
+      packageIdOrVersion,
+    )
+      ? packages[packageIdOrVersion]
+      : []
     return new VersionInfoImpl({
       ...this.options,
-      satisfies: [...this.options.satisfies, version],
+      satisfiesPackages: {
+        ...packages,
+        [packageIdOrVersion]: [...claimed, version],
+      },
     })
   }
 }
 
-/**
- * @description Use this function to define a new version of the service. By convention, each version should receive its own file.
- * @property {string} version
- * @property {string} releaseNotes
- * @property {object} migrations
- * @returns A VersionInfo instance that is exported, then imported into versions/index.ts.
- */
+/** Defines service versions for a VersionGraph. */
 export const VersionInfo = {
   of<
     Version extends string,
@@ -122,7 +141,11 @@ export const VersionInfo = {
       migrations: { other?: Other & ValidateOtherKeys<Other> }
     },
   ): VersionInfo<Version> {
-    return new VersionInfoImpl<Version>({ ...options, satisfies: [] })
+    return new VersionInfoImpl<Version>({
+      ...options,
+      satisfies: [],
+      satisfiesPackages: {},
+    })
   },
 }
 
@@ -134,8 +157,16 @@ function __type_tests() {
   })
     .satisfies('#other:1.0.0:0')
     .satisfies('#other:2.0.0:0')
-    // @ts-expect-error
+    .satisfies('another-package', '3.0.0:0')
+    .satisfies('another-package', '#other:4.0.0:1')
+    // @ts-expect-error - invalid own-package ExVer
     .satisfies('#other:2.f.0:0')
+    // @ts-expect-error - invalid cross-package ExVer
+    .satisfies('another-package', '#other:2.f.0:0')
+    // @ts-expect-error - ranges are not concrete compatibility versions
+    .satisfies('another-package', '>=1.0.0:0')
+    // @ts-expect-error - widened strings cannot be validated
+    .satisfies('another-package', '1.0.0:0' as string)
 
   let a: VersionInfo<'1.0.0:0'> = version
   // @ts-expect-error

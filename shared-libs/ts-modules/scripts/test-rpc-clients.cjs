@@ -45,6 +45,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       'AuthKeyService',
       'AuthService',
       'ConfigService',
+      'Exver',
       'RpcSocketService',
       'ServerIdentityService',
       'i18nPipe',
@@ -90,6 +91,14 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       required: () => angular.signal(undefined),
     }),
     inject: token => {
+      if (token === tokens.Exver && !dependencies.has(token)) {
+        dependencies.set(
+          token,
+          new (load(
+            'shared-libs/ts-modules/shared/src/services/exver.service.ts',
+          ).Exver)(),
+        )
+      }
       assert.ok(dependencies.has(token), `Missing injection: ${String(token)}`)
       return dependencies.get(token)
     },
@@ -135,7 +144,13 @@ function harness(moduleOverrides = new Map(), globals = {}) {
         }
       if (request === '@start9labs/shared') return shared()
       if (request === '@start9labs/marketplace')
-        return load('shared-libs/ts-modules/marketplace/src/types.ts')
+        return {
+          FALLBACK_ICON: 'data:image/png;base64,AQID',
+          ...load('shared-libs/ts-modules/marketplace/src/types.ts'),
+          ...load(
+            'shared-libs/ts-modules/marketplace/src/util/compatible-versions.ts',
+          ),
+        }
       if (request.endsWith('config.service'))
         return { ConfigService: tokens.ConfigService }
       if (request.endsWith('auth.service'))
@@ -1447,7 +1462,13 @@ test('StartOS mock routes keep build identity and UPS discovery and expose no re
   const pkg = { categories: [], best: {}, otherVersions: {} }
   const version = { ...pkg, best: { '1.0.0': {} } }
   const fixtures = {
-    RegistryPackages: { example: pkg },
+    RegistryPackages: {
+      example: pkg,
+      provider: {
+        ...pkg,
+        best: { '1.0.0:0': { satisfiesPackages: { example: ['2.0.0:0'] } } },
+      },
+    },
     OtherPackageVersions: { example: { '=1.0.0': version } },
   }
   const { dependencies, tokens, load } = harness(
@@ -1482,6 +1503,112 @@ test('StartOS mock routes keep build identity and UPS discovery and expose no re
     client.rpc.registry.package.get({ registry: 'https://registry.test/' }),
     /No handler for registry\.package\.get/,
   )
+})
+
+test('StartOS provider selection survives subscription bootstrap and rejects stale choices', async () => {
+  const owner = {
+    dependencySelections: {},
+    dependencyBindings: {
+      logical: {
+        providerId: 'first',
+        versions: ['1.0.0:0'],
+        candidates: { first: ['1.0.0:0'], second: ['1.0.0:0'] },
+      },
+    },
+  }
+  const data = {
+    ui: {},
+    serverInfo: { registries: {}, trustedKeys: {}, registryKeys: {} },
+    packageData: {
+      consumer: owner,
+      first: {
+        stateInfo: {
+          state: 'installed',
+          manifest: { id: 'first', title: 'First' },
+        },
+      },
+      second: {
+        stateInfo: {
+          state: 'installed',
+          manifest: { id: 'second', title: 'Second' },
+        },
+      },
+    },
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      ['./mock-patch', { mockPatchData: data, mockOsUpdateCache: () => null }],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
+  dependencies.set(tokens.WA_CRYPTO, webcrypto)
+  dependencies.set(tokens.AuthService, { isVerified$: of(true) })
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: data }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  await client.rpc.package.selectDependencyProvider({
+    id: 'consumer',
+    dependencyId: 'logical',
+    providerId: 'second',
+  })
+  const { dump } = await client.rpc.db.subscribe({})
+  assert.equal(
+    dump.value.packageData.consumer.dependencySelections.logical.providerId,
+    'second',
+  )
+  assert.equal(
+    dump.value.packageData.consumer.dependencyBindings.logical.providerId,
+    'second',
+  )
+  await assert.rejects(
+    client.rpc.package.selectDependencyProvider({
+      id: 'consumer',
+      dependencyId: 'logical',
+      providerId: 'removed',
+    }),
+  )
+  assert.equal(owner.dependencySelections.logical.providerId, 'second')
+  assert.equal(owner.dependencySelections.logical.pin, null)
+  await client.rpc.package.selectDependencyProvider({
+    id: 'consumer',
+    dependencyId: 'logical',
+    providerId: null,
+  })
+  assert.equal(Object.keys(owner.dependencySelections).length, 0)
+  assert.equal(owner.dependencyBindings.logical.providerId, 'second')
+  await client.rpc.package.selectDependencyProvider({
+    id: 'consumer',
+    dependencyId: 'logical',
+    providerId: 'second',
+    locked: true,
+  })
+  assert.equal(owner.dependencySelections.logical.pin.title, 'Second')
+  assert.equal(
+    owner.dependencySelections.logical.pin.icon,
+    'data:image/png;base64,AQID',
+  )
+  delete data.packageData.second
+  delete owner.dependencyBindings.logical.candidates.second
+  owner.dependencyBindings.logical.providerId = null
+  owner.dependencyBindings.logical.versions = []
+  const afterRemoval = await client.rpc.db.subscribe({})
+  assert.equal(
+    afterRemoval.dump.value.packageData.consumer.dependencySelections.logical
+      .pin.title,
+    'Second',
+  )
+  await client.rpc.package.selectDependencyProvider({
+    id: 'consumer',
+    dependencyId: 'logical',
+    providerId: 'second',
+    locked: false,
+  })
+  assert.equal(owner.dependencySelections.logical.pin, null)
+  assert.equal(owner.dependencyBindings.logical.providerId, 'first')
 })
 
 test('StartOS generated UPS contracts preserve the selected USB location', () => {
@@ -2323,7 +2450,11 @@ test('Brochure reports malformed registry URLs and can load the next selection',
       .ApiService,
     api,
   )
-  dependencies.set(storage, { getItem: () => null, setItem: () => {} })
+  const stored = new Map()
+  dependencies.set(storage, {
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => stored.set(key, value),
+  })
   dependencies.set(shared.Exver, {})
   dependencies.set(shared.i18nPipe, { transform: value => value })
   dependencies.set(shared.i18nService, { localize: value => value })
@@ -2352,6 +2483,10 @@ test('Brochure reports malformed registry URLs and can load the next selection',
     assert.equal(registries[0].url, 'https://registry.test/')
     assert.equal(registries[0].info.name, info.name)
     assert.equal(registries[0].packages.length, 0)
+    assert.deepEqual(JSON.parse(stored.get('_startos/customRegistry')), {
+      url: 'https://registry.test/',
+      name: info.name,
+    })
   } finally {
     subscription.unsubscribe()
     errorSubscription.unsubscribe()

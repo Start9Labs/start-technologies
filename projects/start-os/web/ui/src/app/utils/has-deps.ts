@@ -1,8 +1,13 @@
-import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
+import type { PackageDataEntry } from '../services/patch-db/data-model'
+import { dependencyProvider } from './dependency-provider'
 
 export function hasCurrentDeps(
   id: string,
-  pkgs: Record<string, PackageDataEntry>,
+  packages: Record<string, PackageDataEntry>,
 ): boolean {
-  return !!Object.values(pkgs).some(pkg => !!pkg.currentDependencies[id])
+  return Object.values(packages).some(owner =>
+    Object.keys(owner.currentDependencies).some(
+      logical => dependencyProvider(owner, logical) === id,
+    ),
+  )
 }

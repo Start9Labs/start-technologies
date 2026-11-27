@@ -1114,4 +1114,8 @@ export const ENGLISH: Record<string, number> = {
   'Chipset': 1319,
   'Sensor': 1320, // as in, a temperature sensor
   'No temperature sensors found': 1321,
+  'Provided by': 1322,
+  'Select a dependency provider': 1323,
+  'Lock provider': 1324,
+  'Unlock provider': 1325,
 }

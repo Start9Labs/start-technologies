@@ -81,13 +81,10 @@ export class MainComponent {
   protected readonly registry = toSignal(this.service.currentRegistry$)
 
   constructor() {
-    // Registry, service drawer (id/flavor) and search all live in query params,
-    // so any link is shareable: ?registry=<url>&id=<pkg>&flavor=<f>&search=<q>
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(params => {
       const registry = params.get('registry')
 
-      // Only override the search box when `search` is explicitly present, so
-      // opening a drawer (which only adds id/flavor) doesn't wipe the query.
+      // Drawer navigation preserves the search query.
       if (params.has('search')) {
         this.query.set(params.get('search') || '')
       }
@@ -99,14 +96,13 @@ export class MainComponent {
               this.service.lastSelectedRegistry || defaultRegistries.start9,
           },
           queryParamsHandling: 'merge',
+          replaceUrl: true,
         })
       } else {
         this.service.currentRegistryUrl$.next(registry)
       }
     })
 
-    // Surface unreachable registries and fall back to the default when the
-    // failed registry is the one requested in the URL.
     this.service.registryError$.pipe(takeUntilDestroyed()).subscribe(url => {
       this.dialog
         .openAlert(
@@ -128,6 +124,7 @@ export class MainComponent {
             flavor: null,
           },
           queryParamsHandling: 'merge',
+          replaceUrl: true,
         })
       }
     })

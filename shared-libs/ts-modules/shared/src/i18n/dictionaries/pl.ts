@@ -1113,4 +1113,8 @@ export default {
   1319: 'Chipset',
   1320: 'Czujnik',
   1321: 'Nie znaleziono czujników temperatury',
+  1322: 'Dostarczane przez',
+  1323: 'Wybierz dostawcę zależności',
+  1324: 'Przypnij dostawcę',
+  1325: 'Odepnij dostawcę',
 } satisfies i18n

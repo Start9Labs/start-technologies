@@ -4,13 +4,16 @@
 .SH NAME
 start\-cli\-registry\-package\-get \- List installation candidates
 .SH SYNOPSIS
-\fBstart\-cli registry package get\fR [\fB\-v\fR|\fB\-\-target\-version\fR] [\fB\-\-source\-version\fR] [\fB\-\-all\-revisions\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIID\fR] [\fIOTHER_VERSIONS\fR]
+\fBstart\-cli registry package get\fR [\fB\-v\fR|\fB\-\-target\-version\fR] [\fB\-\-provides\fR] [\fB\-\-source\-version\fR] [\fB\-\-all\-revisions\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIID\fR] [\fIOTHER_VERSIONS\fR]
 .SH DESCRIPTION
 List installation candidates
 .SH OPTIONS
 .TP
 \fB\-v\fR, \fB\-\-target\-version\fR \fI<TARGET_VERSION>\fR
 Target version range constraint
+.TP
+\fB\-\-provides\fR \fI<PROVIDES>\fR
+Dependency package identifier whose contract releases must satisfy
 .TP
 \fB\-\-source\-version\fR \fI<SOURCE_VERSION>\fR
 Source version to upgrade from

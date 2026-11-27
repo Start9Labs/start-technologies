@@ -5854,6 +5854,66 @@
     }
   },
   {
+    "name": "package.preview-provider-change",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "PreviewProviderChangeParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "version": {
+              "default": null,
+              "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
+            },
+            "satisfies": {
+              "default": [],
+              "type": "array",
+              "items": { "$ref": "#/$defs/Version" }
+            },
+            "satisfiesPackages": {
+              "default": {},
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/Version" }
+              }
+            }
+          },
+          "required": ["id"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" },
+        "Version": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/PackageId" },
+        "version": {
+          "default": null,
+          "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
+        },
+        "satisfies": {
+          "default": [],
+          "type": "array",
+          "items": { "$ref": "#/$defs/Version" }
+        },
+        "satisfiesPackages": {
+          "default": {},
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/Version" }
+          }
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "package.rebuild",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5888,6 +5948,49 @@
       "type": "object",
       "properties": { "id": { "$ref": "#/$defs/PackageId" } },
       "required": ["id"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "package.select-dependency-provider",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "SelectProviderParams": {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/$defs/PackageId" },
+            "dependencyId": { "$ref": "#/$defs/PackageId" },
+            "providerId": {
+              "default": null,
+              "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+            },
+            "locked": {
+              "default": false,
+              "description": "Locks against automatic fallback. Requires an explicit provider.",
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "dependencyId"],
+          "additionalProperties": true
+        },
+        "PackageId": { "type": "string" }
+      },
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/PackageId" },
+        "dependencyId": { "$ref": "#/$defs/PackageId" },
+        "providerId": {
+          "default": null,
+          "anyOf": [{ "$ref": "#/$defs/PackageId" }, { "type": "null" }]
+        },
+        "locked": {
+          "default": false,
+          "description": "Locks against automatic fallback. Requires an explicit provider.",
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "dependencyId"],
       "additionalProperties": true
     }
   },

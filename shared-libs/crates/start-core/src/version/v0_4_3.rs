@@ -23,7 +23,6 @@ use crate::util::Invoke;
 lazy_static::lazy_static! {
     static ref V0_4_3: exver::Version = exver::Version::new([0, 4, 3], []);
 }
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
 

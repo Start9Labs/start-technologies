@@ -79,6 +79,9 @@ pub struct GetPackageParams {
     pub id: Option<PackageId>,
     #[arg(long, short = 'v', help = "help.arg.target-version-range")]
     pub target_version: Option<VersionRange>,
+    /// Filters releases by a dependency contract rather than their own package version.
+    #[arg(long, help = "help.arg.provides")]
+    pub provides: Option<PackageId>,
     #[arg(long, help = "help.arg.source-version")]
     pub source_version: Option<VersionString>,
     #[visit(ts(skip))]
@@ -201,6 +204,7 @@ fn get_matching_models(
         source_version,
         device_info,
         target_version,
+        provides,
         ..
     }: &GetPackageParams,
 ) -> Result<Vec<(PackageId, VersionString, Model<PackageVersionInfo>)>, Error> {
@@ -219,10 +223,18 @@ fn get_matching_models(
             .as_entries()?
             .into_iter()
             .map(|(version, info)| {
+                let metadata = info.as_metadata().de()?;
+                let versions = crate::dependencies::providers::provided_versions(
+                    &metadata,
+                    k,
+                    &version,
+                    provides.as_ref().unwrap_or(k),
+                );
                 Ok::<_, Error>(
-                    if target_version
-                        .as_ref()
-                        .map_or(true, |tv| version.satisfies(tv))
+                    if !versions.is_empty()
+                        && target_version.as_ref().map_or(true, |range| {
+                            crate::dependencies::providers::compatible(&versions, range)
+                        })
                         && source_version.as_ref().map_or(Ok(true), |source_version| {
                             Ok::<_, Error>(
                                 source_version.satisfies(
@@ -440,6 +452,7 @@ pub(crate) fn selection(
             &GetPackageParams {
                 id: Some(id.clone()),
                 target_version: None,
+                provides: None,
                 source_version: None,
                 device_info: Some(device),
                 other_versions: None,
@@ -527,6 +540,7 @@ pub(crate) fn update_target(
     let params = GetPackageParams {
         id: Some(id.clone()),
         target_version: None,
+        provides: None,
         source_version: Some(installed.clone()),
         device_info: Some(device.clone()),
         other_versions: None,
@@ -1076,6 +1090,36 @@ mod tests {
     }
 
     #[test]
+    fn dependency_discovery_filters_all_releases_by_package_specific_claims() {
+        let info = |claims: Value, aliases: Value| {
+            json!({
+                "title": "Provider", "description": { "short": "", "long": "" },
+                "releaseNotes": "", "license": "MIT", "upstreamRepo": "https://example.com",
+                "satisfies": aliases, "satisfiesPackages": claims, "sourceVersion": null,
+            })
+        };
+        let db: Model<PackageIndex> = json!({ "packages": {
+            "provider": { "versions": {
+                "1:0": info(json!({"target":["2.1:0"]}), json!(["#alias:9:0"])),
+                "2:0": info(json!({}), json!([])),
+            } },
+            "unrelated": { "versions": { "2.1:0": info(json!({}), json!([])) } }
+        } })
+        .into();
+        let params: GetPackageParams =
+            from_value(json!({"provides":"target", "targetVersion":">=2:0 && <3:0"})).unwrap();
+        let found = get_matching_models(&db, &params).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "provider".parse().unwrap());
+        assert_eq!(found[0].1, "1:0".parse().unwrap());
+        let params: GetPackageParams =
+            from_value(json!({"id":"provider", "targetVersion":"=#alias:9:0"})).unwrap();
+        let found = get_matching_models(&db, &params).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].1, "1:0".parse().unwrap());
+    }
+
+    #[test]
     fn all_revisions_json_defaults_to_false_and_accepts_true() {
         for input in [json!({}), json!({ "allRevisions": false })] {
             let params: GetPackageParams = from_value(input).unwrap();
@@ -1306,6 +1350,7 @@ fn check_matching_info_short() {
             hardware_virtualization: false,
             plugins: BTreeSet::new(),
             satisfies: BTreeSet::new(),
+            satisfies_packages: BTreeMap::new(),
         },
         icon: Some(crate::registry::package::icon::PackageIcon::Stored(
             "blake3/icon.png".into(),

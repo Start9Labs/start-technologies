@@ -240,6 +240,12 @@ mod test {
         let server = server(http).unwrap();
         for (name, read_only, destructive) in [
             ("package.list", Some(true), None),
+            ("package.preview-provider-change", Some(true), None),
+            (
+                "package.select-dependency-provider",
+                Some(false),
+                Some(true),
+            ),
             ("volumes.inspect", Some(false), Some(false)),
             ("package.stop", Some(false), Some(false)),
             ("server.restart", Some(false), Some(false)),
@@ -254,7 +260,13 @@ mod test {
             assert_eq!(annotations.read_only_hint, read_only, "{name}");
             assert_eq!(annotations.destructive_hint, destructive, "{name}");
         }
-        for name in ["package.list", "package.start", "server.shutdown"] {
+        for name in [
+            "package.list",
+            "package.start",
+            "server.shutdown",
+            "package.preview-provider-change",
+            "package.select-dependency-provider",
+        ] {
             assert!(
                 server.get_tool(name).unwrap().description.is_some(),
                 "{name}"

@@ -532,6 +532,9 @@ export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
  * JSON Patch single patch operation
  */
 export type PatchOperation = z.output<typeof schemas.PatchOperation>
+export type PreviewProviderChangeParamsInput = z.input<
+  typeof schemas.PreviewProviderChangeParams
+>
 
 /**
  * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
@@ -578,6 +581,9 @@ export type RestoreVolumeParamsInput = z.input<
 >
 export type RestoreVolumeResult = z.output<typeof schemas.RestoreVolumeResult>
 export type RunActionParamsInput = z.input<typeof schemas.RunActionParams>
+export type SelectProviderParamsInput = z.input<
+  typeof schemas.SelectProviderParams
+>
 export type ServiceStats = z.output<typeof schemas.ServiceStats>
 export type SetDefaultOutboundParamsInput = z.input<
   typeof schemas.SetDefaultOutboundParams

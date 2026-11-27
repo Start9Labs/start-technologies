@@ -2,10 +2,12 @@ import { inject, Injectable } from '@angular/core'
 import {
   AbstractMarketplaceService,
   Marketplace,
+  MarketplaceListing,
   MarketplacePkg,
   StoreDataWithUrl,
   StoreIdentity,
   packageSignerPolicy,
+  satisfiesWithAliases,
   registryStatus,
   isRegistryLoading,
 } from '@start9labs/marketplace'
@@ -314,34 +316,128 @@ export class MarketplaceService extends AbstractMarketplaceService {
     )
   }
 
+  /**
+   * Includes superseded releases whose replacements may withdraw compatibility claims.
+   * Each flavor prefers its newest installable claimant, falling back to its newest claimant.
+   */
+  fetchProviders$(
+    url: string,
+    provides: string,
+    range: string,
+    providerId: string | null = null,
+  ): Observable<MarketplaceListing[]> {
+    return this.watchRegistry$(url).pipe(
+      filter((found): found is Saved => !!found && registryReady(found[1])),
+      switchMap(([key, entry]) =>
+        this.watchPackages$(key, {
+          include: ['satisfies', 'satisfiesPackages'].map(field =>
+            providerId
+              ? `${pathFromArray([providerId])}/versions/*/${field}`
+              : `/*/versions/*/${field}`,
+          ),
+        }).pipe(
+          filter(Boolean),
+          map((packages: Record<string, Partial<T.PackageInfo>>) =>
+            Object.entries(entry.selections).flatMap(([id, selection]) => {
+              if (providerId && id !== providerId) return []
+              const versions = Object.keys(selection.versions).filter(version =>
+                satisfiesWithAliases(
+                  this.exver,
+                  {
+                    id,
+                    version,
+                    satisfies:
+                      packages[id]?.versions?.[version]?.satisfies ?? [],
+                    satisfiesPackages:
+                      packages[id]?.versions?.[version]?.satisfiesPackages,
+                  },
+                  range,
+                  provides,
+                ),
+              )
+              const installable = versions.filter(
+                version => selection.versions[version]?.compatible,
+              )
+              const best = {
+                ...newestReleases(this.exver, versions),
+                ...newestReleases(this.exver, installable),
+              }
+              const target = selection.updateTarget
+              if (target && versions.includes(target))
+                best[this.exver.getFlavor(target) ?? ''] = target
+              return Object.values(best).map(version => ({
+                id,
+                version,
+                selection,
+              }))
+            }),
+          ),
+          distinctUntilChanged(
+            (a, b) => JSON.stringify(a) === JSON.stringify(b),
+          ),
+          switchMap(matches =>
+            matches.length
+              ? this.watchPackages$(key, {
+                  include: matches.flatMap(({ id, version }) => [
+                    pathFromArray([id, 'versions', version]),
+                    pathFromArray([id, 'categories']),
+                  ]),
+                  exclude: ['/*/versions/*/description/long'],
+                }).pipe(
+                  map(
+                    (packages: Record<string, Partial<T.PackageInfo>> | null) =>
+                      matches.flatMap(
+                        ({ id, version, selection }) =>
+                          this.listedRelease(
+                            id,
+                            version,
+                            selection,
+                            packages?.[id],
+                          ) ?? [],
+                      ),
+                  ),
+                )
+              : of([]),
+          ),
+        ),
+      ),
+    )
+  }
+
+  private listedRelease(
+    id: string,
+    version: string,
+    selection: Selection | undefined,
+    info: Partial<T.PackageInfo> | undefined,
+  ): MarketplacePkg | null {
+    const found = info?.versions?.[version]
+    if (!selection || !info || !found) return null
+    let listed = this.listed.get(info)
+    if (listed?.selection !== selection)
+      this.listed.set(info, (listed = { selection, releases: new Map() }))
+    let pkg = listed.releases.get(version)
+    if (!pkg) {
+      pkg = toPkg(
+        this.exver,
+        id,
+        version,
+        selection,
+        info.categories ?? [],
+        found,
+        info.versions ?? {},
+      )
+      listed.releases.set(version, pkg)
+    }
+    return pkg
+  }
+
   private toStore(
     url: string,
     entry: T.RegistryCache,
     packages: Record<string, Partial<T.PackageInfo>>,
   ): StoreDataWithUrl {
-    const release = (id: string, version: string) => {
-      const selection = entry.selections[id]
-      const info = packages[id]
-      const found = info?.versions?.[version]
-      if (!selection || !found) return []
-      let listed = this.listed.get(info)
-      if (listed?.selection !== selection)
-        this.listed.set(info, (listed = { selection, releases: new Map() }))
-      let pkg = listed.releases.get(version)
-      if (!pkg) {
-        pkg = toPkg(
-          this.exver,
-          id,
-          version,
-          selection,
-          info.categories ?? [],
-          found,
-          info.versions ?? {},
-        )
-        listed.releases.set(version, pkg)
-      }
-      return [pkg]
-    }
+    const release = (id: string, version: string) =>
+      this.listedRelease(id, version, entry.selections[id], packages[id]) ?? []
     const selections = Object.entries(entry.selections)
     return {
       url,
@@ -418,7 +514,6 @@ export class MarketplaceService extends AbstractMarketplaceService {
 type Selection = T.RegistryCache['selections'][string]
 type Saved = [string, T.RegistryCache]
 
-/** The index paths of the releases a listing shows. */
 function listedPaths(entry: T.RegistryCache): string[] {
   return Object.entries(entry.selections).flatMap(([id, selection]) =>
     listedVersions(selection).map(version =>

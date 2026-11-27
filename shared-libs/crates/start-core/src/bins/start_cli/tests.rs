@@ -82,6 +82,105 @@ fn push_cli_exposes_subscription_management_without_browser_registration() {
     }
 }
 
+#[test]
+fn provider_cli_selection_preserves_ids_locking_and_clear_defaults() {
+    for (flags, provider, locked) in [
+        (vec![], None, false),
+        (
+            vec!["--provider-id", "alternative"],
+            Some("alternative"),
+            false,
+        ),
+        (
+            vec!["--provider-id", "alternative", "--locked"],
+            Some("alternative"),
+            true,
+        ),
+    ] {
+        let matches = super::app()
+            .into_command()
+            .try_get_matches_from(
+                [
+                    "start-cli",
+                    "package",
+                    "select-dependency-provider",
+                    "consumer",
+                    "logical",
+                ]
+                .into_iter()
+                .chain(flags),
+            )
+            .unwrap();
+        let matches = matches
+            .subcommand_matches("package")
+            .unwrap()
+            .subcommand_matches("select-dependency-provider")
+            .unwrap();
+        let params = <crate::dependencies::providers::SelectProviderParams as clap::FromArgMatches>::from_arg_matches(matches).unwrap();
+        let wire = serde_json::to_value(params).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "id":"consumer", "dependencyId":"logical", "providerId":provider, "locked":locked,
+            })
+        );
+    }
+}
+
+#[test]
+fn provider_preview_and_registry_discovery_have_cli_bindings() {
+    let app = super::app().into_command();
+    let preview = app
+        .clone()
+        .try_get_matches_from([
+            "start-cli",
+            "package",
+            "preview-provider-change",
+            "--format",
+            "json",
+        ])
+        .unwrap();
+    assert_eq!(
+        preview
+            .subcommand_matches("package")
+            .unwrap()
+            .subcommand_name(),
+        Some("preview-provider-change")
+    );
+    let preview: crate::dependencies::providers::PreviewProviderChangeCliParams = serde_json::from_value(serde_json::json!({
+        "id":"alternative", "version":"1.0.0:0", "satisfies":[], "satisfiesPackages":{"logical":["26.0.0:0"]},
+    })).unwrap();
+    assert_eq!(
+        serde_json::to_value(preview).unwrap()["satisfiesPackages"]["logical"][0],
+        "26.0.0:0"
+    );
+    let matches = app
+        .try_get_matches_from([
+            "start-cli",
+            "registry",
+            "package",
+            "get",
+            "--provides",
+            "logical",
+            "--target-version",
+            ">=26.0.0:0",
+        ])
+        .unwrap();
+    let get = matches
+        .subcommand_matches("registry")
+        .unwrap()
+        .subcommand_matches("package")
+        .unwrap()
+        .subcommand_matches("get")
+        .unwrap();
+    assert_eq!(
+        get.get_one::<crate::PackageId>("provides")
+            .unwrap()
+            .to_string(),
+        "logical"
+    );
+}
+
 fn child(directory: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command

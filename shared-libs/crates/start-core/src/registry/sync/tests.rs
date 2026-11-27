@@ -472,6 +472,82 @@ fn synced_package_queries_keep_target_and_source_selection_while_offline() {
 }
 
 #[test]
+fn cached_provider_queries_select_claimed_versions_even_when_a_newer_release_drops_the_claim() {
+    let mut db = database();
+    let mut catalog = index();
+    catalog
+        .package
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .get_mut(&"1.0.0:0".parse().unwrap())
+        .unwrap()
+        .metadata
+        .satisfies_packages
+        .insert(
+            "logical".parse().unwrap(),
+            BTreeSet::from(["26.0.0:0".parse().unwrap()]),
+        );
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&catalog).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    set_status(
+        &mut db,
+        &Subscription::Index(url()),
+        RegistryStatus::Error,
+        None,
+    )
+    .unwrap();
+    let cached = db
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(cached.selections["test"].versions.len(), 2);
+    let saved = db
+        .as_public()
+        .as_registry_indexes()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    let releases = &saved.package.packages["test"].versions;
+    assert_eq!(
+        releases[&"1.0.0:0".parse().unwrap()]
+            .metadata
+            .satisfies_packages["logical"],
+        BTreeSet::from(["26.0.0:0".parse().unwrap()])
+    );
+    assert!(
+        releases[&"2.0.0:0".parse().unwrap()]
+            .metadata
+            .satisfies_packages
+            .is_empty()
+    );
+    let result = select(
+        &db,
+        &url(),
+        json!({"provides":"logical", "targetVersion":">=26.0.0:0", "otherVersions":"short"}),
+    )
+    .unwrap();
+    assert!(result["test"]["best"]["1.0.0:0"].is_object());
+    assert!(
+        result["test"]["best"]
+            .as_object()
+            .unwrap()
+            .get("2.0.0:0")
+            .is_none()
+    );
+}
+
+#[test]
 fn connecting_registries_select_nothing_and_first_failures_are_unreachable() {
     let mut db = database();
     for subscription in [Subscription::Index(url()), Subscription::Os(url())] {
@@ -804,6 +880,63 @@ fn index_patches_name_the_packages_they_change() {
 }
 
 #[test]
+fn provider_claims_follow_live_revisions_resumed_replays_and_replacement_snapshots() {
+    use connection::{SubscriptionEvent, SubscriptionStart};
+    let mut db = database();
+    let view = RegistryView::new(&device());
+    let ingest = |db: &mut DatabaseModel, event| ingest_event(db, &url(), &view, &event, &device());
+    let start = |id, value, revisions| {
+        SubscriptionEvent::Start(SubscriptionStart {
+            epoch: Some("claims".into()),
+            id,
+            value,
+            revisions,
+        })
+    };
+    let claims = |id, value| {
+        revision(
+            id,
+            json!([{
+                "op": "add", "path": "/package/packages/test/versions/1.0.0:0/satisfiesPackages",
+                "value": value,
+            }]),
+        )
+    };
+    let found = |db: &DatabaseModel, range: &str| {
+        select(
+            db,
+            &url(),
+            json!({"provides":"logical", "targetVersion":range}),
+        )
+        .unwrap()
+    };
+    ingest(&mut db, start(1, to_value(&index()).unwrap(), None)).unwrap();
+    assert!(found(&db, ">=26.0.0").as_object().unwrap().is_empty());
+    ingest(
+        &mut db,
+        SubscriptionEvent::Revision(claims(2, json!({"logical":["26.0.0:0"]}))),
+    )
+    .unwrap();
+    assert!(found(&db, ">=26.0.0")["test"]["best"]["1.0.0:0"].is_object());
+    ingest(
+        &mut db,
+        start(
+            4,
+            Value::Null,
+            Some(vec![
+                claims(3, json!({})),
+                claims(4, json!({"logical":["27.0.0:0"]})),
+            ]),
+        ),
+    )
+    .unwrap();
+    assert!(found(&db, "=26.0.0:0").as_object().unwrap().is_empty());
+    assert!(found(&db, "=27.0.0:0")["test"]["best"]["1.0.0:0"].is_object());
+    ingest(&mut db, start(5, to_value(&index()).unwrap(), None)).unwrap();
+    assert!(found(&db, ">=26.0.0").as_object().unwrap().is_empty());
+}
+
+#[test]
 fn index_revisions_patch_the_saved_index_and_resume_only_from_the_same_view() {
     use connection::{SubscriptionEvent, SubscriptionStart};
     let mut db = database();
@@ -1090,6 +1223,56 @@ fn update_target(db: &DatabaseModel) -> Option<String> {
         .get(&"test".parse::<crate::PackageId>().unwrap())
         .and_then(|package| package.update_target.as_ref())
         .map(ToString::to_string)
+}
+
+#[test]
+fn provider_update_targets_use_physical_versions_not_advertised_dependency_versions() {
+    let mut db = database();
+    let mut catalog = index();
+    for release in catalog
+        .package
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .values_mut()
+    {
+        release.metadata.satisfies_packages.insert(
+            "logical".parse().unwrap(),
+            BTreeSet::from(["26.0.0:0".parse().unwrap()]),
+        );
+    }
+    publish_snapshot(
+        &mut db,
+        &Subscription::Index(url()),
+        &to_value(&catalog).unwrap(),
+        &device(),
+    )
+    .unwrap();
+    install(&mut db, "1.6.0:0");
+    refresh_update_targets(&mut db, &device()).unwrap();
+    assert_eq!(update_target(&db).as_deref(), Some("2.0.0:0"));
+    let cached = db
+        .as_public()
+        .as_registry_cache()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    assert!(!cached.selections.contains_key("logical"));
+    let saved = db
+        .as_public()
+        .as_registry_indexes()
+        .as_idx(&url())
+        .unwrap()
+        .de()
+        .unwrap();
+    assert_eq!(
+        saved.package.packages["test"].versions[&"2.0.0:0".parse().unwrap()]
+            .metadata
+            .satisfies_packages["logical"],
+        BTreeSet::from(["26.0.0:0".parse().unwrap()])
+    );
 }
 
 #[test]

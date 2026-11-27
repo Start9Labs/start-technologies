@@ -28,7 +28,6 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { TrustedKeysService } from 'src/app/services/trusted-keys.service'
 import { dryUpdate } from 'src/app/utils/dry-update'
 import { getAllPackages, getManifest } from 'src/app/utils/get-package-data'
-import { hasCurrentDeps } from 'src/app/utils/has-deps'
 import { MarketplaceAlertsService } from '../services/alerts.service'
 
 type KEYS =
@@ -36,6 +35,7 @@ type KEYS =
   | 'version'
   | 'flavor'
   | 'satisfies'
+  | 'satisfiesPackages'
   | 'preDownloadAlert'
   | 's9pks'
   | 'signers'
@@ -210,7 +210,7 @@ export class MarketplaceControlsComponent {
       : await firstValueFrom(this.marketplace.currentRegistryUrl$)
     const originalUrl = localPkg?.registry || null
     if (!localPkg) {
-      await this.installOrUpload(currentUrl, trustOverride)
+      await this.dryInstall(currentUrl, trustOverride)
       return
     }
     if (
@@ -221,15 +221,7 @@ export class MarketplaceControlsComponent {
     )
       return
 
-    const { id, version } = getManifest(localPkg)
-    if (
-      hasCurrentDeps(id, await getAllPackages(this.patch)) &&
-      this.exver.compareExver(version, this.pkg().version) !== 0
-    ) {
-      await this.dryInstall(currentUrl, trustOverride)
-    } else {
-      await this.installOrUpload(currentUrl, trustOverride)
-    }
+    await this.dryInstall(currentUrl, trustOverride)
   }
 
   async showService() {
@@ -237,13 +229,22 @@ export class MarketplaceControlsComponent {
   }
 
   private async dryInstall(url: string | null, trustOverride: boolean) {
-    const { id, version, satisfies } = this.pkg()
+    const { id, version, satisfies, satisfiesPackages } = this.pkg()
     const packages = await getAllPackages(this.patch)
-    const breakages = dryUpdate(
-      { id, version, satisfies: satisfies || [] },
-      packages,
-      this.exver,
-    )
+    let breakages: string[] = []
+    const previewed = await this.tasks.runInline(async () => {
+      breakages = await dryUpdate(
+        {
+          id,
+          version,
+          satisfies: satisfies || [],
+          satisfiesPackages: satisfiesPackages || {},
+        },
+        packages,
+        this.api,
+      )
+    })
+    if (!previewed) return
     if (!breakages.length || (await this.alerts.alertBreakages(breakages))) {
       await this.installOrUpload(url, trustOverride)
     }

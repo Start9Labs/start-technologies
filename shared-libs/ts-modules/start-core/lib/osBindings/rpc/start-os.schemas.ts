@@ -2917,6 +2917,21 @@ export const PatchOperation: z.ZodUnion<
     id: 'PatchOperation',
     description: 'JSON Patch single patch operation',
   })
+export const PreviewProviderChangeParams: z.ZodObject<{
+  id: typeof PackageId
+  version: z.ZodDefault<z.ZodNullable<typeof Version>>
+  satisfies: z.ZodDefault<z.ZodArray<typeof Version>>
+  satisfiesPackages: z.ZodDefault<
+    z.ZodRecord<z.ZodString, z.ZodArray<typeof Version>>
+  >
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  version: Version.nullable().default(() => null),
+  satisfies: z.array(Version).default(() => []),
+  satisfiesPackages: z.record(z.string(), z.array(Version)).default(() => ({})),
+}).meta({
+  id: 'PreviewProviderChangeParams',
+})
 
 /**
  * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
@@ -3174,6 +3189,31 @@ export const RunActionParams: z.ZodObject<{
     .default(() => null),
 }).meta({
   id: 'RunActionParams',
+})
+export const SelectProviderParams: z.ZodObject<{
+  id: typeof PackageId
+  dependencyId: typeof PackageId
+  providerId: z.ZodDefault<z.ZodNullable<typeof PackageId>>
+  /**
+   * Locks against automatic fallback. Requires an explicit provider.
+   */
+  locked: z.ZodDefault<z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  dependencyId: PackageId,
+  providerId: PackageId.nullable().default(() => null),
+  /**
+   * Locks against automatic fallback. Requires an explicit provider.
+   */
+  locked: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Locks against automatic fallback. Requires an explicit provider.',
+    }),
+}).meta({
+  id: 'SelectProviderParams',
 })
 export const ServiceStats: z.ZodObject<{
   container_id: typeof ContainerId
@@ -6184,6 +6224,12 @@ export const Api = {
             },
           },
         },
+        'preview-provider-change': {
+          _PARAMS: /* @__PURE__ */ PreviewProviderChangeParams,
+          _RETURN: /* @__PURE__ */ z.array(PackageId),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         rebuild: {
           _PARAMS: /* @__PURE__ */ RebuildParams,
           _RETURN: /* @__PURE__ */ z.null(),
@@ -6192,6 +6238,12 @@ export const Api = {
         },
         restart: {
           _PARAMS: /* @__PURE__ */ ControlParams,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        'select-dependency-provider': {
+          _PARAMS: /* @__PURE__ */ SelectProviderParams,
           _RETURN: /* @__PURE__ */ z.null(),
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),

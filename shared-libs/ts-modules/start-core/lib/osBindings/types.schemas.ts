@@ -2817,6 +2817,23 @@ export const DeleteLegacyParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ targetId: BackupTargetId }).meta({
   id: 'DeleteLegacyParams',
 })
+
+/**
+ * Observed providers use active manifests; staged updates do not change the dependency contract.
+ */
+export const DependencyBinding: z.ZodObject<{
+  providerId: z.ZodDefault<z.ZodNullable<typeof PackageId>>
+  versions: z.ZodArray<typeof Version>
+  candidates: z.ZodRecord<z.ZodString, z.ZodArray<typeof Version>>
+}> = /* @__PURE__ */ object({
+  providerId: PackageId.nullable().default(() => null),
+  versions: z.array(Version),
+  candidates: z.record(z.string(), z.array(Version)),
+}).meta({
+  id: 'DependencyBinding',
+  description:
+    'Observed providers use active manifests; staged updates do not change the dependency contract.',
+})
 export const DependencyRequirement: z.ZodUnion<
   readonly [
     z.ZodIntersection<
@@ -3158,6 +3175,10 @@ export const GetPackageParams: z.ZodIntersection<
   z.ZodObject<{
     id: z.ZodDefault<z.ZodNullable<typeof PackageId>>
     targetVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
+    /**
+     * Filters releases by a dependency contract rather than their own package version.
+     */
+    provides: z.ZodDefault<z.ZodNullable<typeof PackageId>>
     sourceVersion: z.ZodDefault<z.ZodNullable<typeof Version>>
     otherVersions: z.ZodDefault<z.ZodNullable<typeof PackageDetailLevel>>
     allRevisions: z.ZodDefault<z.ZodBoolean>
@@ -3171,6 +3192,15 @@ export const GetPackageParams: z.ZodIntersection<
         .string()
         .nullable()
         .default(() => null),
+      /**
+       * Filters releases by a dependency contract rather than their own package version.
+       */
+      provides: PackageId.nullable()
+        .default(() => null)
+        .meta({
+          description:
+            'Filters releases by a dependency contract rather than their own package version.',
+        }),
       sourceVersion: Version.nullable().default(() => null),
       otherVersions: PackageDetailLevel.nullable().default(() => null),
       allRevisions: z.boolean().default(() => false),
@@ -4140,6 +4170,17 @@ export const PreDownloadAlert: z.ZodObject<{
   when: PreDownloadAlertWhen,
 }).meta({
   id: 'PreDownloadAlert',
+})
+
+/**
+ * Presentation retained while the pinned provider is absent.
+ */
+export const ProviderPin: z.ZodObject<{
+  title: z.ZodString
+  icon: typeof DataUrl
+}> = /* @__PURE__ */ object({ title: z.string(), icon: DataUrl }).meta({
+  id: 'ProviderPin',
+  description: 'Presentation retained while the pinned provider is absent.',
 })
 
 /**
@@ -5274,6 +5315,21 @@ export const DependencyMetadata: z.ZodIntersection<
   .meta({
     id: 'DependencyMetadata',
   })
+
+/**
+ * A pin forbids fallback and retains presentation after the provider is removed.
+ */
+export const DependencySelection: z.ZodObject<{
+  providerId: typeof PackageId
+  pin: z.ZodDefault<z.ZodNullable<typeof ProviderPin>>
+}> = /* @__PURE__ */ object({
+  providerId: PackageId,
+  pin: ProviderPin.nullable().default(() => null),
+}).meta({
+  id: 'DependencySelection',
+  description:
+    'A pin forbids fallback and retains presentation after the provider is removed.',
+})
 export const ExportActionParams: z.ZodObject<{
   id: typeof ActionId
   metadata: typeof ActionMetadata
@@ -5673,6 +5729,12 @@ export const PackageMetadata: z.ZodObject<{
   hardwareVirtualization: z.ZodDefault<z.ZodBoolean>
   plugins: z.ZodDefault<z.ZodArray<typeof PluginId>>
   satisfies: z.ZodDefault<z.ZodArray<typeof Version>>
+  /**
+   * Promises the named package's dependency contract, including resource IDs and action schemas.
+   */
+  satisfiesPackages: z.ZodDefault<
+    z.ZodRecord<z.ZodString, z.ZodArray<typeof Version>>
+  >
 }> = /* @__PURE__ */ object({
   title: z.string(),
   /**
@@ -5733,6 +5795,16 @@ export const PackageMetadata: z.ZodObject<{
     }),
   plugins: z.array(PluginId).default(() => []),
   satisfies: z.array(Version).default(() => []),
+  /**
+   * Promises the named package's dependency contract, including resource IDs and action schemas.
+   */
+  satisfiesPackages: z
+    .record(z.string(), z.array(Version))
+    .default(() => ({}))
+    .meta({
+      description:
+        "Promises the named package's dependency contract, including resource IDs and action schemas.",
+    }),
 }).meta({
   id: 'PackageMetadata',
 })
@@ -6903,6 +6975,7 @@ export const TaskEntry: z.ZodObject<{
 })
 export const CheckDependenciesResult: z.ZodObject<{
   packageId: typeof PackageId
+  providerId: z.ZodDefault<z.ZodNullable<typeof PackageId>>
   title: z.ZodDefault<z.ZodNullable<z.ZodString>>
   installedVersion: z.ZodDefault<z.ZodNullable<typeof Version>>
   satisfies: z.ZodArray<typeof Version>
@@ -6911,6 +6984,7 @@ export const CheckDependenciesResult: z.ZodObject<{
   healthChecks: z.ZodRecord<z.ZodString, typeof NamedHealthCheckResult>
 }> = /* @__PURE__ */ object({
   packageId: PackageId,
+  providerId: PackageId.nullable().default(() => null),
   title: z
     .string()
     .nullable()
@@ -7496,6 +7570,12 @@ export const PackageDataEntry: z.ZodObject<{
   developerKey: typeof literal_0
   lastBackup: z.ZodDefault<z.ZodNullable<z.ZodString>>
   currentDependencies: typeof CurrentDependencies
+  dependencySelections: z.ZodDefault<
+    z.ZodRecord<z.ZodString, typeof DependencySelection>
+  >
+  dependencyBindings: z.ZodDefault<
+    z.ZodRecord<z.ZodString, typeof DependencyBinding>
+  >
   actions: z.ZodRecord<z.ZodString, typeof ActionMetadata>
   tasks: z.ZodRecord<z.ZodString, typeof TaskEntry>
   hosts: typeof Hosts
@@ -7520,6 +7600,12 @@ export const PackageDataEntry: z.ZodObject<{
     .nullable()
     .default(() => null),
   currentDependencies: CurrentDependencies,
+  dependencySelections: z
+    .record(z.string(), DependencySelection)
+    .default(() => ({})),
+  dependencyBindings: z
+    .record(z.string(), DependencyBinding)
+    .default(() => ({})),
   actions: z.record(z.string(), ActionMetadata),
   tasks: z.record(z.string(), TaskEntry),
   hosts: Hosts,
