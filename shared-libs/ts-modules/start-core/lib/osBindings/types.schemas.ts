@@ -1308,6 +1308,12 @@ export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
   .meta({
     id: 'PluginId',
   })
+export const PowerAction: z.ZodEnum<{
+  restart: 'restart'
+  shutdown: 'shutdown'
+}> = /* @__PURE__ */ z.enum(['restart', 'shutdown']).meta({
+  id: 'PowerAction',
+})
 export const PreDownloadAlertWhen: z.ZodObject<{ sourceVersion: z.ZodString }> =
   /* @__PURE__ */ object({ sourceVersion: z.string() }).meta({
     id: 'PreDownloadAlertWhen',
@@ -1757,21 +1763,37 @@ export const ShutdownParams: z.ZodObject<{
    * frontend omits this and gets an immediate reply). Cleared with
    * `--nowait`. The wait can't outlive the webserver teardown that follows
    * container shutdown, so the connection drops once services are stopped.
+   * A deferred action replies immediately, before teardown begins.
    */
   wait: z.ZodDefault<z.ZodBoolean>
+  /**
+   * Interrupt a running backup instead of waiting for it to finish.
+   */
+  force: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   /**
    * Block until graceful teardown completes (default over the CLI; the
    * frontend omits this and gets an immediate reply). Cleared with
    * `--nowait`. The wait can't outlive the webserver teardown that follows
    * container shutdown, so the connection drops once services are stopped.
+   * A deferred action replies immediately, before teardown begins.
    */
   wait: z
     .boolean()
     .default(() => false)
     .meta({
       description:
-        "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+        "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+    }),
+  /**
+   * Interrupt a running backup instead of waiting for it to finish.
+   */
+  force: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Interrupt a running backup instead of waiting for it to finish.',
     }),
 }).meta({
   id: 'ShutdownParams',
@@ -6780,6 +6802,10 @@ export const ServerStatus: z.ZodObject<{
   shuttingDown: z.ZodDefault<z.ZodBoolean>
   restarting: z.ZodDefault<z.ZodBoolean>
   restart: z.ZodDefault<z.ZodNullable<typeof RestartReason>>
+  /**
+   * A power action queued until the running backup finishes.
+   */
+  deferredPowerAction: z.ZodDefault<z.ZodNullable<typeof PowerAction>>
 }> = /* @__PURE__ */ object({
   backupProgress: FullProgress.nullable().default(() => null),
   backupConversions: z
@@ -6789,6 +6815,14 @@ export const ServerStatus: z.ZodObject<{
   shuttingDown: z.boolean().default(() => false),
   restarting: z.boolean().default(() => false),
   restart: RestartReason.nullable().default(() => null),
+  /**
+   * A power action queued until the running backup finishes.
+   */
+  deferredPowerAction: PowerAction.nullable()
+    .default(() => null)
+    .meta({
+      description: 'A power action queued until the running backup finishes.',
+    }),
 }).meta({
   id: 'ServerStatus',
 })

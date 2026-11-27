@@ -85,6 +85,8 @@ pub mod net;
 pub mod notifications;
 pub mod nut;
 pub mod os_install;
+#[cfg(target_os = "linux")]
+pub mod power_key;
 pub mod prelude;
 pub mod progress;
 pub mod registries;
@@ -460,6 +462,14 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.restart-server")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "cancel-deferred-power",
+            from_fn_async(shutdown::cancel_deferred_power)
+                .with_metadata(EFFECT, Effect::Write.into())
+                .no_display()
+                .with_about("about.cancel-deferred-power")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(

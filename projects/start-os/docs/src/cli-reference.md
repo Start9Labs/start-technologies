@@ -86,13 +86,25 @@ Revoke one or more bearer tokens by the ID `auth token list` shows.
 
 Restart, shut down, update, and configure the server.
 
+Backup-safe restart and shutdown require StartOS 0.4.3 or later. The `--force` flag and `cancel-deferred-power` command require start-cli 3.0.0 or later.
+
 ### `start-cli server restart`
 
-Restart the server.
+Restart the server, waiting for a running backup to finish first.
+
+- `--force` — Interrupt a running backup and restart now
+- `--nowait` — Return immediately instead of waiting for graceful shutdown
 
 ### `start-cli server shutdown`
 
-Shut down the server.
+Shut down the server, waiting for a running backup to finish first.
+
+- `--force` — Interrupt a running backup and shut down now
+- `--nowait` — Return immediately instead of waiting for graceful shutdown
+
+### `start-cli server cancel-deferred-power`
+
+Cancel a restart or shutdown that is waiting for a backup to finish.
 
 ### `start-cli server update`
 

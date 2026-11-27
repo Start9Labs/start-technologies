@@ -67,6 +67,17 @@ test('accepts both English dictionary quote styles, including an apostrophe', t 
   assert.match(result.stdout, /All i18n keys are valid/)
 })
 
+test('rejects English entries sharing a translation ID', t => {
+  const f = fixture(t)
+  writeFileSync(
+    join(f.dictionaries, 'en.ts'),
+    `export const ENGLISH = { 'Simple key': 1, 'Another key': 1 }\n`,
+  )
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /Duplicate i18n dictionary ID: 1/)
+})
+
 test('requires translations for double-quoted English entries even when unused', t => {
   const f = fixture(t)
   writeFileSync(

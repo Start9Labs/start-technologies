@@ -1255,21 +1255,37 @@ export const ShutdownParams: z.ZodObject<{
    * frontend omits this and gets an immediate reply). Cleared with
    * `--nowait`. The wait can't outlive the webserver teardown that follows
    * container shutdown, so the connection drops once services are stopped.
+   * A deferred action replies immediately, before teardown begins.
    */
   wait: z.ZodDefault<z.ZodBoolean>
+  /**
+   * Interrupt a running backup instead of waiting for it to finish.
+   */
+  force: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   /**
    * Block until graceful teardown completes (default over the CLI; the
    * frontend omits this and gets an immediate reply). Cleared with
    * `--nowait`. The wait can't outlive the webserver teardown that follows
    * container shutdown, so the connection drops once services are stopped.
+   * A deferred action replies immediately, before teardown begins.
    */
   wait: z
     .boolean()
     .default(() => false)
     .meta({
       description:
-        "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+        "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.\nA deferred action replies immediately, before teardown begins.",
+    }),
+  /**
+   * Interrupt a running backup instead of waiting for it to finish.
+   */
+  force: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Interrupt a running backup instead of waiting for it to finish.',
     }),
 }).meta({
   id: 'ShutdownParams',
@@ -6186,6 +6202,12 @@ export const Api = {
     server: {
       _PARAMS: /* @__PURE__ */ empty,
       _CHILDREN: {
+        'cancel-deferred-power': {
+          _PARAMS: /* @__PURE__ */ empty,
+          _RETURN: /* @__PURE__ */ z.null(),
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
         'clear-nut': {
           _PARAMS: /* @__PURE__ */ empty,
           _RETURN: /* @__PURE__ */ z.null(),

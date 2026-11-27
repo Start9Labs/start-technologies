@@ -11,6 +11,7 @@ import {
   registryUrl,
   sameUrl,
   withAbortSignal,
+  waitForPatchSequence,
   RPCErrorDetails,
   SetLanguageParams,
 } from '@start9labs/shared'
@@ -65,6 +66,7 @@ import {
   UpdatingState,
 } from 'src/app/services/patch-db/data-model'
 import { ConfigService } from 'src/app/services/config.service'
+import { PATCH_CACHE } from 'src/app/services/patch-db/patch-db-source'
 import { toAuthorityUrl } from 'src/app/utils/acme'
 import { getCurrentManifest, getManifest } from 'src/app/utils/get-package-data'
 import { getDriveName } from 'src/app/utils/get-drive-name'
@@ -154,6 +156,7 @@ export class MockApiService extends ApiService implements StartupApiService {
   readonly mockWsSource$ = new Subject<Revision>()
   private readonly i18n = inject(i18nPipe)
   private readonly storage = inject(WA_SESSION_STORAGE)
+  private readonly cache = inject(PATCH_CACHE)
   private mockDocument?: Promise<Dump<DataModel>>
   private mockDoc?: Dump<DataModel>
 
@@ -164,6 +167,8 @@ export class MockApiService extends ApiService implements StartupApiService {
     })
   }
   private readonly gitHash = inject(ConfigService).gitHash
+  private backingUp = false
+  private deferredPowerAction: T.PowerAction | null = null
   private readonly revertTime = 1800
   private readonly crypto = inject(WA_CRYPTO)
   private drives?: Map<string, number>
@@ -516,8 +521,14 @@ export class MockApiService extends ApiService implements StartupApiService {
         progress: null,
       }
     },
+    'server.cancel-deferred-power': async () => {
+      await pauseFor(1000)
+      return this.deferPower(null)
+    },
     'server.restart': async params => {
       await pauseFor(2000)
+      if (!params.force && this.backingUp) return this.deferPower('restart')
+      await this.deferPower(null)
 
       const patch = [
         {
@@ -543,6 +554,8 @@ export class MockApiService extends ApiService implements StartupApiService {
     },
     'server.shutdown': async params => {
       await pauseFor(2000)
+      if (!params.force && this.backingUp) return this.deferPower('shutdown')
+      await this.deferPower(null)
 
       const patch = [
         {
@@ -1227,6 +1240,7 @@ export class MockApiService extends ApiService implements StartupApiService {
       if (!target) throw new Error('Backup target not found')
       const targetName = target.name
       const source = structuredClone(target.source)
+      this.backingUp = true
       const serverPath = '/serverInfo/statusInfo/backupProgress'
       const ids =
         params.packageIds ?? Object.keys(this.mockData('/packageData'))
@@ -1357,15 +1371,6 @@ export class MockApiService extends ApiService implements StartupApiService {
           report,
         })
 
-        const lastPatch: ReplaceOperation<T.ServerStatus['backupProgress']>[] =
-          [
-            {
-              op: PatchOp.REPLACE,
-              path: serverPath,
-              value: null,
-            },
-          ]
-        this.mockRevision(lastPatch)
         if (utils.deepEqual(this.backupTarget(params.targetId)?.source, source))
           await this.mockRevision<unknown>([
             {
@@ -1379,6 +1384,17 @@ export class MockApiService extends ApiService implements StartupApiService {
               },
             },
           ])
+
+        await this.mockRevision([
+          { op: PatchOp.REPLACE, path: serverPath, value: null },
+        ])
+        this.backingUp = false
+        if (this.deferredPowerAction) {
+          const action = this.deferredPowerAction
+          await this.handlers[
+            action === 'restart' ? 'server.restart' : 'server.shutdown'
+          ]!({})
+        }
       }, 500)
 
       const originalPatch: ReplaceOperation<
@@ -2961,6 +2977,19 @@ export class MockApiService extends ApiService implements StartupApiService {
     ]
     this.mockRevision(patch)
     this.refreshMockAddresses(basePath, current)
+  }
+
+  private async deferPower(action: T.PowerAction | null): Promise<null> {
+    this.deferredPowerAction = action
+    this.mockRevision([
+      {
+        op: PatchOp.REPLACE,
+        path: '/serverInfo/statusInfo/deferredPowerAction',
+        value: action,
+      },
+    ])
+    await waitForPatchSequence(this.cache, { patchSequence: this.sequence })
+    return null
   }
 
   private mockDnsServers(servers: string[] | null): string[] | null {

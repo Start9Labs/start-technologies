@@ -6,8 +6,8 @@ import {
   DocsLinkDirective,
   i18nPipe,
   SafeLinksDirective,
-  TaskService,
 } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
 import {
   TuiButton,
   TuiDataList,
@@ -19,6 +19,7 @@ import {
 import { filter } from 'rxjs'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { AuthService } from 'src/app/services/auth.service'
+import { PowerService } from 'src/app/services/power.service'
 import { LAST_SYNCED, STATUS } from 'src/app/services/status.service'
 import { TitleService } from 'src/app/services/title.service'
 import { ABOUT } from './about.component'
@@ -153,8 +154,8 @@ export class HeaderMenuComponent {
   protected readonly corner = inject(TitleService).corner
   private readonly api = inject(ApiService)
   private readonly auth = inject(AuthService)
-  private readonly tasks = inject(TaskService)
   private readonly dialog = inject(DialogService)
+  private readonly power = inject(PowerService)
 
   open = false
 
@@ -165,7 +166,10 @@ export class HeaderMenuComponent {
     this.dialog.openComponent(ABOUT, { label: 'About this server' }).subscribe()
   }
 
-  async promptPower(action: 'restart' | 'shutdown') {
+  async promptPower(action: T.PowerAction) {
+    // The backup prompt replaces this confirmation.
+    if (this.power.backingUp()) return this.power.power(action).subscribe()
+
     this.dialog
       .openConfirm(
         action === 'restart'
@@ -191,15 +195,7 @@ export class HeaderMenuComponent {
             },
       )
       .pipe(filter(Boolean))
-      .subscribe(() =>
-        this.tasks.run(
-          async () =>
-            action === 'restart'
-              ? await this.api.rpc.server.restart({})
-              : await this.api.rpc.server.shutdown({}),
-          `Beginning ${action}`,
-        ),
-      )
+      .subscribe(() => this.power.power(action).subscribe())
   }
 
   logout() {
