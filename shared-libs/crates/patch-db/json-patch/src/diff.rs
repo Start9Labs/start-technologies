@@ -1,3 +1,4 @@
+use imbl_value::imbl::Vector;
 use imbl_value::imbl::ordmap::DiffItem;
 use imbl_value::OrdValue;
 use json_ptr::JsonPointer;
@@ -19,6 +20,8 @@ impl PatchDiffer {
 }
 
 /// Diff two JSON documents and generate a JSON Patch (RFC 6902).
+///
+/// Array alignment lookahead is bounded by the combined input lengths.
 ///
 /// # Example
 /// Diff two JSONs:
@@ -105,17 +108,18 @@ fn diff_mut(differ: &mut PatchDiffer, from: &OrdValue, to: &OrdValue) {
         (OrdValue::Array(f), OrdValue::Array(t)) if !f.ptr_eq(t) => {
             let mut f_idx = 0;
             let mut t_idx = 0;
+            let mut lookahead = f.len().saturating_add(t.len());
             while f_idx < f.len() && t_idx < t.len() {
                 if f[f_idx].ptr_eq(&t[t_idx]) {
                     f_idx += 1;
                     t_idx += 1;
-                } else if t.iter().skip(t_idx + 1).any(|t| f[f_idx].ptr_eq(t)) {
+                } else if shared_ahead(&f[f_idx], t, t_idx + 1, &mut lookahead) {
                     differ.patch.0.push(PatchOperation::Add(AddOperation {
                         path: differ.path.clone().join_end_idx(t_idx),
                         value: t[t_idx].clone(),
                     }));
                     t_idx += 1;
-                } else if f.iter().skip(f_idx + 1).any(|f| t[t_idx].ptr_eq(f)) {
+                } else if shared_ahead(&t[t_idx], f, f_idx + 1, &mut lookahead) {
                     differ.patch.0.push(PatchOperation::Remove(RemoveOperation {
                         path: differ.path.clone().join_end_idx(t_idx),
                     }));
@@ -149,6 +153,18 @@ fn diff_mut(differ: &mut PatchDiffer, from: &OrdValue, to: &OrdValue) {
             })),
         _ => (),
     }
+}
+
+fn shared_ahead(value: &OrdValue, array: &Vector<OrdValue>, start: usize, budget: &mut usize) -> bool {
+    let mut index = start;
+    while *budget > 0 && index < array.len() {
+        *budget -= 1;
+        if value.ptr_eq(&array[index]) {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -246,6 +262,46 @@ mod tests {
         crate::patch(&mut applied, &patch).unwrap();
         assert_eq!(applied, to);
         patch
+    }
+
+    #[test]
+    fn array_alignment_shares_a_bounded_lookahead_budget() {
+        let from = ord_json!([{ "t": 1 }, { "t": 2 }]);
+        let from = from.as_array().unwrap();
+        let to: imbl_value::imbl::Vector<OrdValue> = vec![
+            OrdValue::Null,
+            OrdValue::Null,
+            from[0].clone(),
+            from[1].clone(),
+        ]
+        .into_iter()
+        .collect();
+        let mut budget = 3;
+        assert!(super::shared_ahead(&from[0], &to, 1, &mut budget));
+        assert_eq!(budget, 1);
+        assert!(!super::shared_ahead(&from[1], &to, 2, &mut budget));
+        assert_eq!(budget, 0);
+        assert!(!super::shared_ahead(&from[0], &to, 2, &mut budget));
+    }
+
+    #[test]
+    fn independently_allocated_strings_still_diff_in_place() {
+        let from = ord_json!(["a", "b", "c", "d"]);
+        assert!(
+            shift_patch(from.clone(), ord_json!(["a", "b", "c", "d"]))
+                .0
+                .is_empty()
+        );
+        assert_eq!(
+            shift_patch(from, ord_json!(["e", "f", "g", "h"])),
+            imbl_value::from_value(ord_json!([
+                { "op": "replace", "path": "/0", "value": "e" },
+                { "op": "replace", "path": "/1", "value": "f" },
+                { "op": "replace", "path": "/2", "value": "g" },
+                { "op": "replace", "path": "/3", "value": "h" },
+            ]))
+            .unwrap()
+        );
     }
 
     #[test]
