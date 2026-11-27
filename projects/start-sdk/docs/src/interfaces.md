@@ -585,9 +585,9 @@ For unproxied service TLS, StartOS preserves the client source IP when it routes
 
 **The SANs are the whole contract.** Nothing rewrites the handshake, so the certificate must be valid for every address a client actually dials — there is no proxy to paper over a mismatch:
 
-- `startos.internal` and `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
+- `startos.internal` and `sdk.getOsIp` — the bridge, where other services reach you
+- `sdk.getContainerIp` — the container itself, which StartOS dials when it rewraps your TLS
 - `127.0.0.1` — your own subcontainers, which share the service's network namespace
-- `sdk.getContainerIp` — the container itself
 - **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported
 
 Those internal names are half the set, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
@@ -608,7 +608,7 @@ export const setupCerts = sdk.setupOnInit(async effects => {
     )
     .const()
 
-  const hostnames = ['startos.internal', await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
+  const hostnames = ['startos.internal', await sdk.getContainerIp(effects).once(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
   const cert = (await sdk.getSslCertificate(effects, hostnames).const()).join('')
   const key = await sdk.getSslKey(effects, { hostnames })
   await writeFile('/media/startos/volumes/main/tls.cert', cert)
@@ -622,12 +622,12 @@ That distinction has teeth because reissuing the certificate restarts the servic
 
 `getSslCertificate` signs an IP the **box itself holds** — one in the container bridge subnet, or an address on one of the server's own gateways. A WAN IPv4 fails the whole call because that address belongs to the router, not to you; an IPv6 GUA is configured on the box and is signed. See [Narrowing the set](main.md#narrowing-the-set) for why that exclusion is a union rather than a two-field `exclude`.
 
-Read the container IP with `.const()` rather than `.once()`: a container that comes back on a new IP must reissue the certificate, or every client dialing the old one fails verification.
+The container IP is fixed for the installation, so `.once()` reads it.
 
 Most daemons read their TLS pair once at startup, so reissuing the file is only half the job — something has to restart the service, or it keeps serving the old certificate against the new address set. Whatever you key that restart on must not blink: a value that momentarily reads empty will restart the daemon for nothing, and if the restart can feed back into the value, it will not converge.
 
 > [!WARNING]
-> Do **not** add a `<package-id>.startos` DNS name to the SANs. That overlay DNS is deprecated and slated for removal, and it resolves to the container IP rather than the bridge — so it bypasses the platform entirely. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
+> Do **not** add a `<package-id>.startos` DNS name to the SANs. StartOS does not resolve those names. Dependents reach you through the bridge; see [Service-to-Service Networking](service-to-service.md).
 
 A passthrough port carries its external port in `net.assignedSslPort`, the same as an `addSsl` port — which of the two fields is populated says whether the port speaks TLS, not who terminates it. Dependents should read neither field directly; `sdk.host.getBridgeAddress` resolves the binding's derived address and is correct under every arrangement on this page.
 
@@ -656,9 +656,6 @@ An HTTP-proxied binding, with or without `addSsl`, reaches your container over I
 ## Authenticating at the Proxy
 
 Gate an HTTP-proxied binding with HTTP authentication by setting `proxy.auth`. The OS reverse proxy validates the `Authorization` header on every incoming request _before_ forwarding it to your container. Requests that fail get `401 Unauthorized` with a `WWW-Authenticate` challenge and are not forwarded. You do **not** need to build auth into the service or run a sidecar proxy to gate the addresses StartOS publishes.
-
-> [!WARNING]
-> The gate guards the proxy, not your container. Every service on the server shares one bridge, so another service can still dial your container's own IP and reach the port directly, ungated. Treat `proxy.auth` as protection from the network, not from other services: where the app holds something worth stealing (keys, funds, admin over another service), keep the app's own login on as well. Bind listeners used only by your own daemons to loopback; ports consumed by other services or off-server clients must listen on the container's bridge addresses, including raw TCP, UDP and TLS-passthrough ports without an HTTP proxy (see [Service-to-Service Networking](service-to-service.md)).
 
 `auth` takes a `ProxyAuth`, which is one of two shapes:
 

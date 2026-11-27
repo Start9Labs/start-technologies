@@ -120,6 +120,7 @@ pub async fn create_subcontainer_fs(
                 )
             })?;
         let container_guid = &lxc_container.guid;
+        let root = lxc_container.slot().host_root();
         let rootfs_dir = lxc_container.rootfs_dir();
         let mountpoint = rootfs_dir
             .join("media/startos/subcontainers")
@@ -163,7 +164,7 @@ pub async fn create_subcontainer_fs(
         };
 
         Command::new("chown")
-            .arg(format!("{0}:{0}", crate::lxc::BASE_IDMAP.to_id))
+            .arg(format!("{root}:{root}"))
             .arg(&mountpoint)
             .invoke(ErrorKind::Filesystem)
             .await?;
@@ -171,7 +172,7 @@ pub async fn create_subcontainer_fs(
         match tokio::fs::create_dir(&etc).await {
             Ok(()) => {
                 Command::new("chown")
-                    .arg(format!("{0}:{0}", crate::lxc::BASE_IDMAP.to_id))
+                    .arg(format!("{root}:{root}"))
                     .arg(&etc)
                     .invoke(ErrorKind::Filesystem)
                     .await?;
@@ -184,15 +185,15 @@ pub async fn create_subcontainer_fs(
         write_file_owned_atomic(
             mountpoint.join("etc/hostname"),
             format!("{container_guid}\n"),
-            crate::lxc::BASE_IDMAP.to_id,
-            crate::lxc::BASE_IDMAP.to_id,
+            root,
+            root,
         )
         .await?;
         write_file_owned_atomic(
             mountpoint.join("etc/hosts"),
             format!("127.0.0.1\tlocalhost\n127.0.1.1\t{container_guid}\n::1\tlocalhost ip6-localhost ip6-loopback\n"),
-            crate::lxc::BASE_IDMAP.to_id,
-            crate::lxc::BASE_IDMAP.to_id,
+            root,
+            root,
         )
         .await?;
         tracing::info!("Mounted overlay {guid} for {image_id}");

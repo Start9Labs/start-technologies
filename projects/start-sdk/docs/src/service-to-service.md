@@ -6,17 +6,17 @@ There is exactly one supported way to do this, and three once-common patterns th
 
 ## The host bridge
 
-Every StartOS service runs in its own container on a single internal bridge, `lxcbr0`. Containers reach the bridge gateway — the OS itself — by the name `startos.internal`, which StartOS resolves and certifies for every container. Where a setting accepts only an IP address — a trusted-proxy list, a DNS server, an allowlist — read the gateway's fixed address with:
+Every StartOS service runs in its own container, and containers cannot reach one another directly. They reach the OS by the name `startos.internal`, which StartOS resolves and certifies for every container. Where a setting accepts only an IP address — a trusted-proxy list, a DNS server, an allowlist — read the OS's fixed address with:
 
 ```typescript
-const osIp = await sdk.getOsIp(effects) // "10.0.3.1" — a plain Promise, not reactive
+const osIp = await sdk.getOsIp(effects) // e.g. "172.16.0.1" — a plain Promise, not reactive
 ```
 
-`getOsIp` is a one-shot read of a compile-time constant. It never changes and never needs watching.
+`getOsIp` is a one-shot read of a constant of the running OS. It never needs watching, but read it rather than writing the address into your package.
 
 Every port a service **binds** (via `sdk.MultiHost.of(...).bindPort(...)` in [interfaces.ts](interfaces.md)) is reachable from other containers at `startos.internal:<assigned external port>`. This holds even for a binding with **no exported interface** — binding a port is enough to make it reachable on the bridge (see [Exposing a bridge-only port](#exposing-a-bridge-only-port) below).
 
-The converse does not hold: not binding a port does not hide it. Every service's container sits on the same bridge, so a daemon listening on `0.0.0.0` or `::` is reachable from every other service at your container's IP, binding or no binding. **Bind every listener that only your own daemons use — a database, a cache, an internal API, a daemon init starts temporarily — to `127.0.0.1`.**
+A port your service does not bind is unreachable from other services, even when its daemon listens on `0.0.0.0` or `::`. Do not bind a port that only your own daemons use; listening on `127.0.0.1` suits a database, cache or internal API that only your container talks to.
 
 > [!IMPORTANT]
 > The bridge exposes a service at its **assigned external port**, which you must not assume. `preferredExternalPort` is a request, not a guarantee: the first service to claim a given external port gets it and later claimants fall back to a random port, and when `preferredExternalPort` is omitted it defaults to the protocol default (`http` → 80). So the external port is only knowable at runtime, by reading the dependency's live binding. What _is_ stable is the dependency's **internal** port and **host id** — import those as constants from the dependency's package.
@@ -198,8 +198,8 @@ This is a fallback for addresses you cannot resolve. When you _do_ know the targ
 
 Three patterns that older packages used are being removed. Do not introduce them:
 
-- **`<package-id>.startos` DNS names** (`http://bitcoind.startos:8332`). The overlay DNS that resolved these is deprecated and will be removed. Resolve the bridge address instead.
-- **Cross-package container IPs** (`sdk.getContainerIp(effects, { packageId })`). A dependency's container IP is not stable across its restarts/updates and reading it reactively restarts your service on every dependency churn. Use the bridge. (`getContainerIp` with **no** `packageId` — your _own_ container IP — remains fine.)
+- **`<package-id>.startos` DNS names** (`http://bitcoind.startos:8332`). StartOS does not resolve them. Resolve the bridge address instead.
+- **Cross-package container IPs.** Containers cannot reach each other directly; every connection to a dependency goes through the bridge.
 - **Reading `net.assignedPort` / `net.assignedSslPort` directly, or matching `metadata.gateway === 'lxcbr0'` by hand.** Which of the two is populated is a property of how the dependency bound the port — not something a caller may assume. Read the binding's bridge address, which is correct either way.
 
 ## Reference implementations

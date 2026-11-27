@@ -10,8 +10,11 @@ async fn live_legacy_registries_discover_and_populate_both_catalogs() {
     use crate::sign::{AnySigningKey, Signer};
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client =
-        ReloadableHttpClient::new(format!("socks5h://{}", listener.local_addr().unwrap())).unwrap();
+    let client = ReloadableHttpClient::through_proxy(&format!(
+        "socks5h://{}",
+        listener.local_addr().unwrap()
+    ))
+    .unwrap();
     let _proxy: NonDetachingJoinHandle<()> = tokio::spawn(async move {
         let mut connections = tokio::task::JoinSet::new();
         loop {

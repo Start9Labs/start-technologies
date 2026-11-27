@@ -1,7 +1,6 @@
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::str::FromStr;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -300,21 +299,6 @@ pub async fn dump_table(
             map.private_domains
                 .iter()
                 .map(|(d, _)| (d.clone(), None))
-                .chain(map.services.iter().filter_map(|(svc, ip)| {
-                    ip.iter()
-                        .find(|(_, registration)| registration.lifetime.strong_count() > 0)
-                        .map(|(ip, _)| {
-                            (
-                                svc.as_ref().map_or(
-                                    InternedString::from_static("startos"),
-                                    |svc| {
-                                        InternedString::from_display(&lazy_format!("{svc}.startos"))
-                                    },
-                                ),
-                                Some(IpAddr::V4(*ip)),
-                            )
-                        })
-                }))
                 .collect()
         }))
 }
@@ -389,8 +373,6 @@ pub struct DnsController {
 
 lazy_static::lazy_static! {
     static ref LOCALHOST: Name = Name::from_ascii("localhost").unwrap();
-    static ref STARTOS: Name = Name::from_ascii("startos").unwrap();
-    static ref EMBASSY: Name = Name::from_ascii("embassy").unwrap();
 }
 
 /// Per-connection outgoing-response buffer size for TCP DNS listeners.
@@ -563,8 +545,6 @@ impl tower_service::Service<hyper_util::client::legacy::connect::dns::Name> for 
 enum Resolution {
     /// Answers locally; an absent address family returns NODATA.
     Answer(Vec<IpAddr>),
-    /// Rejects unknown StartOS names without forwarding them.
-    NxDomain,
     Forward,
 }
 
@@ -775,34 +755,7 @@ impl Resolver {
                     }
                 }
             }
-            if STARTOS.zone_of(name) || EMBASSY.zone_of(name) {
-                let Ok(pkg) = name
-                    .iter()
-                    .rev()
-                    .skip(1)
-                    .next()
-                    .map(std::str::from_utf8)
-                    .transpose()
-                    .map_err(|_| ())
-                    .and_then(|s| s.map(PackageId::from_str).transpose().map_err(|_| ()))
-                else {
-                    return Resolution::NxDomain;
-                };
-                // start-os.startos aliases the server's startos record.
-                let pkg = pkg.filter(|p| !p.is_start_os());
-                if let Some(ip) = r.services.get(&pkg) {
-                    Resolution::Answer(
-                        ip.iter()
-                            .filter(|(_, registration)| registration.lifetime.strong_count() > 0)
-                            .map(|(ip, _)| (*ip).into())
-                            .collect(),
-                    )
-                } else {
-                    Resolution::NxDomain
-                }
-            } else {
-                Resolution::Forward
-            }
+            Resolution::Forward
         })
     }
 }
@@ -857,7 +810,7 @@ impl RequestHandler for Resolver {
                 .map_err(|e| NetError::from(e.to_string()))?;
             let query = req.query;
             let name = query.name();
-            let mut header = response_header(request);
+            let header = response_header(request);
 
             match self.resolve(name, req.src.ip()) {
                 Resolution::Forward => {
@@ -872,21 +825,6 @@ impl RequestHandler for Resolver {
                     Ok(catalog
                         .handle_request::<R, T>(request, response_handle.clone())
                         .await)
-                }
-                Resolution::NxDomain => {
-                    header.authoritative = true;
-                    header.response_code = ResponseCode::NXDomain;
-                    response_handle
-                        .send_response(
-                            MessageResponseBuilder::from_message_request(&*request).build(
-                                header,
-                                [],
-                                [],
-                                [],
-                                [],
-                            ),
-                        )
-                        .await
                 }
                 Resolution::Answer(addresses) => {
                     let records = address_records(name, query.query_type(), addresses);
@@ -1260,7 +1198,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn private_dns_responses_preserve_addresses_nodata_and_nxdomain() {
+    async fn private_dns_responses_preserve_addresses_and_nodata() {
         let (_temp, resolver) = resolver_fixture().await;
         let name = Name::from_ascii("localhost.").unwrap();
         for (record_type, expected) in [
@@ -1289,15 +1227,6 @@ mod tests {
             assert!(reply.metadata.recursion_available);
             assert_eq!(reply.answers, expected);
         }
-        let mut message = Message::query();
-        message.add_query(Query::query(
-            Name::from_ascii("missing.startos.").unwrap(),
-            RecordType::A,
-        ));
-        let reply = exchange(&resolver, message, "127.0.0.1:12345".parse().unwrap()).await;
-        assert_eq!(reply.metadata.response_code, ResponseCode::NXDomain);
-        assert!(reply.metadata.authoritative);
-        assert!(reply.answers.is_empty());
     }
 
     #[tokio::test]
@@ -2042,13 +1971,28 @@ mod tests {
                 .await
                 .is_ok()
         );
-        assert!(matches!(
-            resolver.resolve(
-                &Name::from_ascii("missing.startos.").unwrap(),
-                "10.0.3.2".parse().unwrap()
-            ),
-            Resolution::NxDomain
-        ));
+    }
+
+    #[tokio::test]
+    async fn registered_packages_get_no_local_names() {
+        let (_temp, resolver) = resolver_fixture().await;
+        let _service = resolver
+            .controller()
+            .add_service(
+                Some("pinned".parse().unwrap()),
+                "10.0.3.2".parse().unwrap(),
+                None,
+            )
+            .unwrap();
+        for name in ["pinned.startos.", "pinned.embassy.", "startos."] {
+            assert!(matches!(
+                resolver.resolve(
+                    &Name::from_ascii(name).unwrap(),
+                    "10.0.3.3".parse().unwrap()
+                ),
+                Resolution::Forward
+            ));
+        }
     }
 
     #[tokio::test]

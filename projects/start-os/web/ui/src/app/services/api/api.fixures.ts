@@ -2853,6 +2853,7 @@ PersistentKeepalive = 25`
     outboundGateway: null,
     outboundDns: null,
     registry: 'https://registry.start9.com/',
+    containerSlot: 4,
     developerKey: 'developer-key',
     plugin: { url: null },
     tasks: {
@@ -2909,6 +2910,7 @@ PersistentKeepalive = 25`
     outboundGateway: null,
     outboundDns: null,
     registry: 'https://registry.start9.com/',
+    containerSlot: 5,
     developerKey: 'developer-key',
     plugin: { url: null },
     tasks: {},
@@ -2967,6 +2969,7 @@ PersistentKeepalive = 25`
     outboundGateway: null,
     outboundDns: null,
     registry: 'https://registry.start9.com/',
+    containerSlot: 6,
     developerKey: 'developer-key',
     plugin: { url: null },
     tasks: {

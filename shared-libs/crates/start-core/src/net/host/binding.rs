@@ -1159,7 +1159,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
 }
 
 /// The row `sdk.host.getBridgeAddress` resolves: IPv4 on the `lxcbr0` gateway.
-fn bridge_address(addresses: &DerivedAddressInfo, ssl: bool) -> Option<SocketAddr> {
+pub(crate) fn bridge_address(addresses: &DerivedAddressInfo, ssl: bool) -> Option<SocketAddr> {
     addresses
         .available
         .iter()
@@ -1644,7 +1644,12 @@ pub async fn set_address_enabled<Kind: HostApiKind>(
                 .as_gateways()
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
+            Kind::host_for(&inheritance, db)?.update_addresses(
+                Kind::owner(&inheritance),
+                &hostname,
+                &gateways,
+                &ports,
+            )
         })
         .await
         .result?;
@@ -1692,7 +1697,12 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
                 .as_gateways()
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
+            Kind::host_for(&inheritance, db)?.update_addresses(
+                Kind::owner(&inheritance),
+                &hostname,
+                &gateways,
+                &ports,
+            )
         })
         .await
         .result?;
@@ -1802,7 +1812,12 @@ pub async fn set_gua_wan<Kind: HostApiKind>(
                 .as_gateways()
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
+            Kind::host_for(&inheritance, db)?.update_addresses(
+                Kind::owner(&inheritance),
+                &hostname,
+                &gateways,
+                &ports,
+            )
         })
         .await
         .result?;

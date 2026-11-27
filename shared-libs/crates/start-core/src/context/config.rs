@@ -309,8 +309,6 @@ pub fn resolve_profile<'a>(
 pub struct ServerConfig {
     #[arg(short, long, help = "help.arg.config-file-path")]
     pub config: Option<PathBuf>,
-    #[arg(long, help = "help.arg.socks-listen-address")]
-    pub socks_listen: Option<SocketAddr>,
     #[arg(long, help = "help.arg.revision-cache-size")]
     pub revision_cache_size: Option<usize>,
     #[arg(long, help = "help.arg.disable-encryption")]
@@ -328,7 +326,6 @@ impl ContextConfig for ServerConfig {
         self.config.take()
     }
     fn merge_with(&mut self, other: Self) {
-        self.socks_listen = self.socks_listen.take().or(other.socks_listen);
         self.revision_cache_size = self
             .revision_cache_size
             .take()

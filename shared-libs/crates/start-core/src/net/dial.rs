@@ -1,33 +1,75 @@
 use std::collections::VecDeque;
 use std::future::Future;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
-use fast_socks5::client::{Config as ClientConfig, Socks5Stream};
-use fast_socks5::server::Socks5ServerProtocol;
-use fast_socks5::util::target_addr::TargetAddr;
-use fast_socks5::{ReplyError, Socks5Command};
 use futures::stream::FuturesUnordered;
 use futures::{Stream, StreamExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::time::Instant;
 
-use crate::HOST_IP;
+use crate::db::model::Database;
+use crate::net::host::binding::{DerivedAddressInfo, bridge_address};
 use crate::net::mdns::resolve_mdns;
 use crate::prelude::*;
-use crate::util::actor::background::BackgroundJobQueue;
-use crate::util::future::NonDetachingJoinHandle;
+use crate::util::sync::SyncRwLock;
 
-pub const DEFAULT_SOCKS_LISTEN: SocketAddr = SocketAddr::V4(SocketAddrV4::new(
-    Ipv4Addr::new(HOST_IP[0], HOST_IP[1], HOST_IP[2], HOST_IP[3]),
-    1080,
-));
-
-/// Requires the user-installable `tor` service to be running.
-const TOR_PROXY: (&str, u16) = ("tor.startos", 9050);
+/// The addresses of the Tor package's SOCKS binding: host `socks`, internal port 9050.
+/// tor-startos publishes both as a contract.
+const TOR_SOCKS_ADDRESSES: &str = "/public/packageData/tor/hosts/socks/bindings/9050/addresses";
 
 const CONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 const RESOLUTION_DELAY: Duration = Duration::from_millis(50);
+
+/// Ignores ASCII case and a final DNS root dot.
+pub fn is_onion(host: &str) -> bool {
+    host.trim_end_matches('.')
+        .rsplit_once('.')
+        .is_some_and(|(_, suffix)| suffix.eq_ignore_ascii_case("onion"))
+}
+
+fn tor_unavailable(host: &str) -> Error {
+    Error::new(
+        eyre!("{}", t!("net.dial.tor-unavailable", host = host)),
+        ErrorKind::Network,
+    )
+}
+
+/// The bridge address of Tor's SOCKS binding. `None` while Tor has not bound it.
+#[derive(Clone, Debug, Default)]
+pub struct TorSocks(Arc<SyncRwLock<Option<SocketAddr>>>);
+
+impl TorSocks {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self) -> Option<SocketAddr> {
+        self.0.read()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set(&self, socks: SocketAddr) {
+        self.0.replace(Some(socks));
+    }
+
+    /// Tracks the binding until the database closes.
+    pub async fn follow(self, db: TypedPatchDb<Database>) {
+        let mut watch = db.watch(TOR_SOCKS_ADDRESSES.parse().unwrap()).await;
+        while let Ok(addresses) = watch.peek_and_mark_seen() {
+            self.0.replace(
+                from_value::<Option<DerivedAddressInfo>>(addresses)
+                    .ok()
+                    .flatten()
+                    .and_then(|addresses| bridge_address(&addresses, false)),
+            );
+            if watch.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
 
 /// Uses libc resolution; musl reads `/etc/hosts` and `/etc/resolv.conf`.
 async fn lookup_family(
@@ -144,133 +186,137 @@ where
         .unwrap_or_else(|| Error::new(eyre!("no address to connect to"), ErrorKind::Network)))
 }
 
-/// Routes `.onion` through Tor and `.local` through Avahi; other names use libc resolution.
-async fn connect_target(addr: TargetAddr) -> Result<TcpStream, Error> {
-    match addr {
-        TargetAddr::Domain(domain, port) if domain.ends_with(".onion") => Ok(
-            Socks5Stream::connect(TOR_PROXY, domain, port, ClientConfig::default())
-                .await
-                .with_kind(ErrorKind::Network)?
-                .get_socket(),
-        ),
-        TargetAddr::Domain(domain, port) if domain.ends_with(".local") => {
-            let ip = resolve_mdns(&domain).await?;
-            TcpStream::connect((ip, port))
-                .await
-                .with_kind(ErrorKind::Network)
-        }
-        TargetAddr::Domain(domain, port) => connect_domain(domain, port).await,
-        TargetAddr::Ip(addr) => TcpStream::connect(addr).await.with_kind(ErrorKind::Network),
+/// Connects through Avahi for `.local`; other names use libc resolution. Refuses an onion.
+pub async fn dial(host: &str, port: u16) -> Result<TcpStream, Error> {
+    if is_onion(host) {
+        Err(tor_unavailable(host))
+    } else if let Ok(ip) = host.trim_matches(['[', ']']).parse::<IpAddr>() {
+        TcpStream::connect((ip, port))
+            .await
+            .with_kind(ErrorKind::Network)
+    } else if host.ends_with(".local") {
+        TcpStream::connect((resolve_mdns(host).await?, port))
+            .await
+            .with_kind(ErrorKind::Network)
+    } else {
+        connect_domain(host.to_owned(), port).await
     }
 }
 
-pub struct SocksController {
-    _thread: NonDetachingJoinHandle<()>,
-}
-impl SocksController {
-    pub fn new(listen: SocketAddr) -> Result<Self, Error> {
-        Ok(Self {
-            _thread: tokio::spawn(async move {
-                let listener;
-                loop {
-                    if let Some(l) = TcpListener::bind(listen)
-                        .await
-                        .with_kind(ErrorKind::Network)
-                        .log_err()
-                    {
-                        listener = l;
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+/// Resolves `.local` through Avahi and other names through libc, both families.
+/// Refuses an onion, which never reaches DNS.
+pub struct OsResolver;
+
+impl reqwest::dns::Resolve for OsResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let name = name.as_str().to_owned();
+        Box::pin(async move {
+            if is_onion(&name) {
+                return Err(tor_unavailable(&name).source.into());
+            }
+            let addrs: Vec<SocketAddr> = if name.ends_with(".local") {
+                vec![SocketAddr::new(
+                    resolve_mdns(&name).await.map_err(|e| e.source)?.into(),
+                    0,
+                )]
+            } else {
+                let (v6, v4) = futures::join!(
+                    lookup_family(name.clone(), 0, libc::AF_INET6),
+                    lookup_family(name, 0, libc::AF_INET)
+                );
+                match (v6, v4) {
+                    (Err(e), Err(_)) => return Err(e.source.into()),
+                    (v6, v4) => v6
+                        .unwrap_or_default()
+                        .into_iter()
+                        .chain(v4.unwrap_or_default())
+                        .collect(),
                 }
-                let (bg, mut runner) = BackgroundJobQueue::new();
-                runner
-                    .run_while(async {
-                        loop {
-                            match listener.accept().await {
-                                Ok((stream, _)) => {
-                                    bg.add_job(async move {
-                                        if let Err(e) = async {
-                                            let (proto, cmd, target) =
-                                                Socks5ServerProtocol::accept_no_auth(stream)
-                                                    .await
-                                                    .with_kind(ErrorKind::Network)?
-                                                    .read_command()
-                                                    .await
-                                                    .with_kind(ErrorKind::Network)?;
-
-                                            if cmd != Socks5Command::TCPConnect {
-                                                proto
-                                                    .reply_error(&ReplyError::CommandNotSupported)
-                                                    .await
-                                                    .with_kind(ErrorKind::Network)?;
-                                                return Ok(());
-                                            }
-
-                                            match connect_target(target).await {
-                                                Ok(mut target) => {
-                                                    if let Err(e) = socket2::SockRef::from(&target)
-                                                        .set_keepalive(true)
-                                                    {
-                                                        tracing::error!(
-                                                            "Failed to set tcp keepalive: {e}"
-                                                        );
-                                                        tracing::debug!("{e:?}");
-                                                    }
-                                                    let mut sock = proto
-                                                        .reply_success(SocketAddr::new(
-                                                            Ipv4Addr::UNSPECIFIED.into(),
-                                                            0,
-                                                        ))
-                                                        .await
-                                                        .with_kind(ErrorKind::Network)?;
-                                                    tokio::io::copy_bidirectional(
-                                                        &mut sock,
-                                                        &mut target,
-                                                    )
-                                                    .await
-                                                    .with_kind(ErrorKind::Network)?;
-                                                }
-                                                Err(e) => {
-                                                    tracing::debug!(
-                                                        "SOCKS5 target connection failed: {e:?}"
-                                                    );
-                                                    proto
-                                                        .reply_error(&ReplyError::HostUnreachable)
-                                                        .await
-                                                        .with_kind(ErrorKind::Network)?;
-                                                }
-                                            }
-
-                                            Ok::<_, Error>(())
-                                        }
-                                        .await
-                                        {
-                                            tracing::trace!("SOCKS5 Stream Error: {e}");
-                                            tracing::trace!("{e:?}");
-                                        }
-                                    });
-                                }
-                                Err(e) => {
-                                    tracing::error!("SOCKS5 TCP Accept Error: {e}");
-                                    tracing::debug!("{e:?}");
-                                }
-                            }
-                        }
-                    })
-                    .await;
-            })
-            .into(),
+            };
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
         })
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::net::Ipv6Addr;
+    use imbl_value::InternedString;
+
+    use super::{Database, TorSocks};
+    use crate::net::forward::START9_BRIDGE_IFACE;
+    use crate::net::host::binding::DerivedAddressInfo;
+    use crate::net::service_interface::{HostnameInfo, HostnameMetadata};
+
+    #[tokio::test]
+    async fn tor_socks_follows_the_tor_bridge_binding() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::prelude::TypedPatchDb::<Database>::load_unchecked(
+            patch_db::PatchDb::open(temp.path().join("db"))
+                .await
+                .unwrap(),
+        );
+        db.put(
+            &patch_db::json_ptr::ROOT,
+            &imbl_value::json!({ "public": { "packageData": {} } }),
+        )
+        .await
+        .unwrap();
+        let tor = TorSocks::new();
+        let follower = tokio::spawn(tor.clone().follow(db.clone()));
+        let settled = |want: Option<std::net::SocketAddr>| {
+            let tor = tor.clone();
+            async move {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while tor.get() != want {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .is_ok()
+            }
+        };
+        let row = |hostname: &str, port, gateway: &str| HostnameInfo {
+            ssl: false,
+            public: false,
+            hostname: InternedString::intern(hostname),
+            port: Some(port),
+            metadata: HostnameMetadata::Ipv4 {
+                gateway: gateway.parse().unwrap(),
+            },
+        };
+        let addresses = DerivedAddressInfo {
+            available: [
+                row("192.168.1.5", 9050, "eth0"),
+                row("172.16.0.1", 9051, START9_BRIDGE_IFACE),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        db.put(
+            &"/public/packageData/tor".parse().unwrap(),
+            &imbl_value::json!({ "hosts": { "socks": { "bindings": { "9050": {
+                "addresses": imbl_value::to_value(&addresses).unwrap()
+            } } } } }),
+        )
+        .await
+        .unwrap();
+        assert!(settled(Some("172.16.0.1:9051".parse().unwrap())).await);
+        db.put(
+            &"/public/packageData".parse().unwrap(),
+            &imbl_value::json!({}),
+        )
+        .await
+        .unwrap();
+        assert!(settled(None).await);
+        follower.abort();
+    }
+
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
 
     use futures::FutureExt;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     use super::*;
 
@@ -278,6 +324,42 @@ mod test {
     const STALLED_TOO: SocketAddr =
         SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 2), 9));
     const REFUSED: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 3), 9));
+    const ONION_HOSTS: [&str; 4] = [
+        "hidden.onion",
+        "hidden.onion.",
+        "Hidden.OnIoN",
+        "Hidden.OnIoN.",
+    ];
+
+    #[test]
+    fn onion_hosts_include_absolute_names_and_ignore_ascii_case() {
+        for host in ONION_HOSTS {
+            assert!(is_onion(host), "{host}");
+        }
+        for host in ["onion", "hidden.onion.example", "example.org.", "127.0.0.1"] {
+            assert!(!is_onion(host), "{host}");
+        }
+    }
+
+    #[tokio::test]
+    async fn onion_dialing_fails_closed() {
+        for host in ONION_HOSTS {
+            let error = dial(host, 80).await.unwrap_err();
+            assert_eq!(error.to_string(), tor_unavailable(host).to_string());
+        }
+    }
+
+    #[tokio::test]
+    async fn onion_resolution_fails_closed() {
+        use reqwest::dns::Resolve;
+
+        for host in ONION_HOSTS {
+            let Err(error) = OsResolver.resolve(host.parse().unwrap()).await else {
+                panic!("onion host resolved: {host}");
+            };
+            assert_eq!(error.to_string(), tor_unavailable(host).source.to_string());
+        }
+    }
 
     async fn echo_round_trip(
         sock: &mut (impl AsyncRead + AsyncWrite + Unpin),
@@ -642,99 +724,5 @@ mod test {
             }
         });
         Ok(addr)
-    }
-
-    async fn start_proxy() -> Result<(SocketAddr, SocksController), Error> {
-        let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-            .await
-            .with_kind(ErrorKind::Network)?;
-        let listen = probe.local_addr().with_kind(ErrorKind::Network)?;
-        drop(probe);
-        let ctrl = SocksController::new(listen)?;
-        for _ in 0..50 {
-            if TcpStream::connect(listen).await.is_ok() {
-                return Ok((listen, ctrl));
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        Err(Error::new(
-            color_eyre::eyre::eyre!("socks proxy did not come up"),
-            ErrorKind::Network,
-        ))
-    }
-
-    #[tokio::test]
-    async fn connect_proxies_traffic_to_the_target() -> Result<(), Error> {
-        let target = echo_server().await?;
-        let (listen, _ctrl) = start_proxy().await?;
-
-        let mut sock = Socks5Stream::connect(
-            listen,
-            target.ip().to_string(),
-            target.port(),
-            ClientConfig::default(),
-        )
-        .await
-        .with_kind(ErrorKind::Network)?;
-        echo_round_trip(&mut sock).await
-    }
-
-    #[tokio::test]
-    async fn hostname_connect_proxies_traffic_to_the_target() -> Result<(), Error> {
-        let target = echo_server().await?;
-        let (listen, _ctrl) = start_proxy().await?;
-        let mut sock = Socks5Stream::connect(
-            listen,
-            "localhost".to_owned(),
-            target.port(),
-            ClientConfig::default(),
-        )
-        .await
-        .with_kind(ErrorKind::Network)?;
-        echo_round_trip(&mut sock).await
-    }
-
-    #[tokio::test]
-    async fn unreachable_target_is_refused_not_hung() -> Result<(), Error> {
-        let dead = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-            .await
-            .with_kind(ErrorKind::Network)?;
-        let addr = dead.local_addr().with_kind(ErrorKind::Network)?;
-        drop(dead);
-        let (listen, _ctrl) = start_proxy().await?;
-
-        assert!(
-            Socks5Stream::connect(
-                listen,
-                addr.ip().to_string(),
-                addr.port(),
-                ClientConfig::default(),
-            )
-            .await
-            .is_err()
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn bind_and_udp_associate_are_rejected() -> Result<(), Error> {
-        let (listen, _ctrl) = start_proxy().await?;
-        for cmd in [Socks5Command::TCPBind, Socks5Command::UDPAssociate] {
-            let label = format!("{cmd:?}");
-            assert!(
-                Socks5Stream::connect_raw(
-                    cmd,
-                    listen,
-                    Ipv4Addr::LOCALHOST.to_string(),
-                    9,
-                    None,
-                    ClientConfig::default(),
-                )
-                .await
-                .is_err(),
-                "{label} should be refused"
-            );
-        }
-        Ok(())
     }
 }

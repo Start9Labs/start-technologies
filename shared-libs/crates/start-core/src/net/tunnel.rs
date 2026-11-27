@@ -247,7 +247,7 @@ pub async fn remove_tunnel(
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
             for host in all_hosts(db) {
-                let host = host?;
+                let (owner, host) = host?;
                 host.as_public_domains_mut()
                     .mutate(|p| Ok(p.retain(|_, v| v.gateway != id)))?;
                 host.as_bindings_mut().mutate(|b| {
@@ -262,7 +262,7 @@ pub async fn remove_tunnel(
                     }
                     Ok(())
                 })?;
-                host.update_addresses(&hostname, &gateways, &ports)?;
+                host.update_addresses(owner, &hostname, &gateways, &ports)?;
             }
 
             Ok(())
@@ -283,7 +283,7 @@ pub async fn remove_tunnel(
                 .de()?;
             let ports = db.as_private().as_available_ports().de()?;
             for host in all_hosts(db) {
-                let host = host?;
+                let (owner, host) = host?;
                 host.as_private_domains_mut().mutate(|d| {
                     for gateways in d.values_mut() {
                         gateways.remove(&id);
@@ -291,7 +291,7 @@ pub async fn remove_tunnel(
                     d.retain(|_, gateways| !gateways.is_empty());
                     Ok(())
                 })?;
-                host.update_addresses(&hostname, &gateways, &ports)?;
+                host.update_addresses(owner, &hostname, &gateways, &ports)?;
             }
 
             Ok(())

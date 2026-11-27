@@ -24,6 +24,7 @@ pub async fn create_local_directory(path: &Path) -> Result<(), Error> {
     finish_directory_publication(path, set_local_permissions(path).await).await
 }
 
+/// Stores ids as each container sees them; consumers attach through their own idmap.
 pub(crate) async fn set_local_permissions(path: &Path) -> Result<(), Error> {
     std::os::unix::fs::chown(path, Some(0), Some(0))?;
     tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o777)).await?;

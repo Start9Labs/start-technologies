@@ -4,6 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use crate::disk::mount::filesystem::idmapped::IdMap;
 use crate::disk::mount::filesystem::syscall::{
     DetachedMount, MountNamespace, open_beneath, open_tree_attr_idmap_fd, open_tree_clone_fd,
     same_mount, unmount_fd, userns_fd_from_idmap,
@@ -125,9 +126,10 @@ impl PreparedSource {
         self.container_ids
     }
 
-    async fn clone_for_attachment(&self) -> Result<DetachedMount, Error> {
+    /// Maps container ids through the consumer container's idmap.
+    async fn clone_for_attachment(&self, idmap: IdMap) -> Result<DetachedMount, Error> {
         let mount = if self.container_ids {
-            let userns = userns_fd_from_idmap(&[crate::lxc::BASE_IDMAP]).await?;
+            let userns = userns_fd_from_idmap(&[idmap], None).await?;
             open_tree_attr_idmap_fd(self.directory.as_fd(), userns.as_fd())?
         } else {
             open_tree_clone_fd(self.directory.as_fd(), false)?
@@ -230,13 +232,15 @@ impl From<Error> for MountSourceError {
 #[derive(Default)]
 pub struct SharedVolumeMounts {
     blocked: bool,
+    /// The container's map, applied to sources that hold container ids.
+    idmap: Option<IdMap>,
     slots: BTreeMap<(Guid, PathBuf), MountSlot>,
     root: Option<StagingRoot>,
 }
 
 impl SharedVolumeMounts {
     /// The caller must establish this root before executing package JavaScript.
-    pub(crate) async fn new(rootfs: &Path) -> Result<Self, Error> {
+    pub(crate) async fn new(rootfs: &Path, idmap: IdMap) -> Result<Self, Error> {
         let backing = TmpDir::new().await?;
         tokio::fs::set_permissions(&*backing, std::fs::Permissions::from_mode(0o755)).await?;
         std::os::unix::fs::chown(&*backing, Some(0), Some(0))?;
@@ -254,6 +258,7 @@ impl SharedVolumeMounts {
         let unavailable = AttachedMount::bind(&empty, &empty, true, namespace)?;
         Ok(Self {
             blocked: false,
+            idmap: Some(idmap),
             root: Some(StagingRoot {
                 _unavailable: unavailable,
                 directory,
@@ -341,8 +346,9 @@ impl SharedVolumeMounts {
             .or_not_found("shared-volume staging root")?;
         let key = (guid.clone(), confined_relative(location)?);
         let slot = self.slots.get_mut(&key).or_not_found("volume mountpoint")?;
+        let idmap = self.idmap.or_not_found("container idmap")?;
         let detached = source
-            .clone_for_attachment()
+            .clone_for_attachment(idmap)
             .await
             .map_err(MountSourceError::Source)?;
         let relative = Path::new(id.as_ref()).join(Guid::new().to_string());

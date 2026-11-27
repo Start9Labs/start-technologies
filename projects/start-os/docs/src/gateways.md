@@ -52,7 +52,7 @@ Which gateway carries the OS's and each service's outbound connections is set un
 
 For an interface whose SSL StartOS terminates, the gateway's secure setting decides whether its plain-HTTP private addresses are enabled by default. Loopback and the container bridge are secure, because they never leave your server. Other gateways — your router, WiFi, a WireGuard tunnel — are insecure by default.
 
-On an insecure gateway, each plain-HTTP address requires an explicit [command-line opt-in](interfaces.md#plain-http-private-addresses). The UI hides those addresses until they are enabled and lets you disable them again. Marking a gateway secure instead enables the default plaintext addresses server-wide: your server's LAN IP addresses, its [`.local` name](mdns.md), and [private domains](private-domains.md) on that gateway.
+On an insecure gateway, each plain-HTTP address of a service requires an explicit [command-line opt-in](interfaces.md#plain-http-private-addresses); the StartOS UI's are enabled by default. The UI hides those addresses until they are enabled and lets you disable them again. Marking a gateway secure instead enables the default plaintext addresses server-wide: your server's LAN IP addresses, its [`.local` name](mdns.md), and [private domains](private-domains.md) on that gateway.
 
 This setting lives on the command line. [SSH](ssh.md) into your server, then:
 

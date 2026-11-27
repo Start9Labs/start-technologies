@@ -5,7 +5,7 @@ use std::future::Future;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, Weak};
 use std::task::{Poll, ready};
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use imbl::{OrdMap, OrdSet};
 use imbl_value::{InOMap, InternedString};
-use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use ipnet::IpNet;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn, from_fn_async};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -33,12 +33,12 @@ use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::{AcmeSettings, NetworkInterfaceInfo};
 use crate::db::{DbAccessByKey, DbAccessMut};
+use crate::lxc::slot::{CONTAINER_NET, CONTAINER_NET_V6};
 use crate::mcp::{EFFECT, Effect};
 use crate::net::acme::{
     ACME_TLS_ALPN_NAME, AcmeCertStore, AcmeIssuance, AcmeProvider, AcmeTlsAlpnCache,
     AcmeTlsHandler, GetAcmeIssuance, ReportOrderFailure,
 };
-use crate::net::forward::START9_BRIDGE_V6_SUBNET;
 use crate::net::gateway::{
     GatewayInfo, NetworkInterfaceController, NetworkInterfaceListenerAcceptMetadata,
 };
@@ -59,7 +59,7 @@ use crate::util::future::NonDetachingJoinHandle;
 use crate::util::io::ReadWriter;
 use crate::util::serde::{HandlerExtSerde, MaybeUtf8String, display_serializable};
 use crate::util::sync::{SyncMutex, SyncRwLock, Watch};
-use crate::{GatewayId, HOST_IP, HostId, PackageId, ResultExt};
+use crate::{GatewayId, HostId, PackageId, ResultExt};
 
 /// Identifies which service+host contributed a set of SNI hostname mappings, so
 /// each can be reconciled independently — a service only ever adds or removes
@@ -822,7 +822,7 @@ impl VHostBindListener {
 }
 
 /// The listeners `reqs` calls for: every IP of a required public gateway, plus
-/// each explicitly required private IP, bound on `port`.
+/// each explicitly required private IP, bound on `port`. Never IPv6 link-local.
 fn desired_listeners(
     port: u16,
     ip_info: &OrdMap<GatewayId, NetworkInterfaceInfo>,
@@ -834,14 +834,11 @@ fn desired_listeners(
         .flat_map(|(id, iface, ip_info)| {
             ip_info.subnets.iter().filter_map(move |subnet| {
                 let ip = subnet.addr();
-                let wanted = reqs.public_gateways.contains(id) || reqs.private_ips.contains(&ip);
+                let link_local = matches!(ip, IpAddr::V6(v6) if ipv6_is_link_local(v6));
+                let wanted = !link_local
+                    && (reqs.public_gateways.contains(id) || reqs.private_ips.contains(&ip));
                 wanted.then(|| {
-                    let addr = match ip {
-                        IpAddr::V6(v6) if ipv6_is_link_local(v6) => {
-                            SocketAddrV6::new(v6, port, 0, ip_info.scope_id).into()
-                        }
-                        ip => SocketAddr::new(ip, port),
-                    };
+                    let addr = SocketAddr::new(ip, port);
                     let gateway = GatewayInfo {
                         id: id.clone(),
                         info: iface.clone(),
@@ -923,12 +920,7 @@ impl Accept for VHostBindListener {
         for (&addr, (listener, gw_info)) in &self.listeners {
             match listener.poll_accept(cx) {
                 Poll::Ready(Ok((stream, peer_addr))) => {
-                    if let Err(e) = socket2::SockRef::from(&stream)
-                        .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-                    {
-                        tracing::error!("Failed to set tcp keepalive: {e}");
-                        tracing::debug!("{e:?}");
-                    }
+                    crate::net::utils::set_default_keepalive(&stream);
                     return Poll::Ready(Ok((
                         NetworkInterfaceListenerAcceptMetadata {
                             inner: TcpMetadata {
@@ -1191,18 +1183,11 @@ impl fmt::Debug for ProxyTarget {
     }
 }
 
-/// Whether `ip` sits on lxcbr0, where the containers are.
+/// Whether the address is on the container network.
 fn on_container_bridge(ip: IpAddr) -> bool {
-    static V6: LazyLock<Ipv6Net> =
-        LazyLock::new(|| START9_BRIDGE_V6_SUBNET.parse().expect("const subnet"));
-    static V4: LazyLock<Ipv4Net> = LazyLock::new(|| {
-        Ipv4Net::new(HOST_IP.into(), 24)
-            .expect("const prefix")
-            .trunc()
-    });
     match ip {
-        IpAddr::V4(v4) => V4.contains(&v4),
-        IpAddr::V6(v6) => V6.contains(&v6),
+        IpAddr::V4(v4) => CONTAINER_NET.contains(&v4),
+        IpAddr::V6(v6) => CONTAINER_NET_V6.contains(&v6),
     }
 }
 
@@ -1487,12 +1472,7 @@ where
     ) -> Option<(ServerConfig, Self::PreprocessRes)> {
         let peer = extract::<TcpMetadata, _>(metadata).map(|m| m.peer_addr);
         let (tcp_stream, deadline) = self.connect_backend(peer).await?;
-        if let Err(e) = socket2::SockRef::from(&tcp_stream)
-            .set_tcp_keepalive(&crate::net::utils::default_keepalive())
-        {
-            tracing::error!("Failed to set tcp keepalive: {e}");
-            tracing::debug!("{e:?}");
-        }
+        crate::net::utils::set_default_keepalive(&tcp_stream);
         let origin_registration = self.register_origin::<A>(metadata, &tcp_stream).ok()?;
         let client_alpn: Vec<Vec<u8>> = hello
             .alpn()
@@ -2628,7 +2608,7 @@ mod port_map_tests {
                 provider: AcmeProvider::from_str("letsencrypt").unwrap(),
                 gateway: GatewayId::from(InternedString::intern(GATEWAY)),
             }),
-            addr: "10.0.3.2:443".parse().unwrap(),
+            addr: "172.16.0.3:443".parse().unwrap(),
             addr_v6: None,
             proxy: None,
             connect_ssl: None,
@@ -2876,8 +2856,8 @@ mod accept_filter_tests {
         assert!(!t.gateways_client(ip("192.168.1.5")));
         assert!(!t.gateways_client(ip("fd00:3::1")));
 
-        // on lxcbr0 with the backend, which answers it directly over that link
-        assert!(!t.gateways_client(ip("10.0.3.42")));
+        // on the container network with the backend
+        assert!(!t.gateways_client(ip("172.16.0.42")));
         assert!(!t.gateways_client(ip("fd00:3::c9f:81ff:fe37:c0a9")));
     }
 
@@ -3709,7 +3689,7 @@ mod upstream_alpn_tests {
     /// has to be part of a target's identity.
     #[test]
     fn a_target_is_not_equal_to_one_that_pins_a_different_protocol() {
-        let addr: SocketAddr = "10.0.3.2:443".parse().unwrap();
+        let addr: SocketAddr = "172.16.0.3:443".parse().unwrap();
         let pinned = |proto: &[u8]| Some(AlpnInfo(vec![MaybeUtf8String(proto.to_vec())]));
         assert_ne!(
             target(addr, None, pinned(b"h2")),

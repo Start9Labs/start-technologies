@@ -149,6 +149,7 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
     use crate::disk::mount::filesystem::ReadWrite;
     use crate::disk::mount::filesystem::bind::{Bind, FileType};
     use crate::disk::mount::guard::MountGuard;
+    use crate::lxc::slot::ContainerSlot;
     use crate::lxc::{LxcConfig, LxcManager};
 
     let fixture = crate::util::btrfs::tests::directory();
@@ -162,8 +163,24 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         .await
         .unwrap();
     let manager = Arc::new(LxcManager::new());
-    let first = manager.create(None, LxcConfig::default()).await.unwrap();
-    let second = manager.create(None, LxcConfig::default()).await.unwrap();
+    let first = manager
+        .create(
+            None,
+            ContainerSlot::new(0).unwrap(),
+            None,
+            LxcConfig::default(),
+        )
+        .await
+        .unwrap();
+    let second = manager
+        .create(
+            None,
+            ContainerSlot::new(1).unwrap(),
+            None,
+            LxcConfig::default(),
+        )
+        .await
+        .unwrap();
     let helper = std::env::var_os("STARTOS_TEST_CONTAINER_HELPER")
         .expect("STARTOS_TEST_CONTAINER_HELPER must name this build's start-container");
     let mut helper_mounts = Vec::new();
@@ -179,10 +196,14 @@ async fn real_lxc_best_effort_revocation_preserves_aliases_and_locks_readonly_st
         );
     }
     let first_mounts = Arc::new(tokio::sync::Mutex::new(
-        SharedVolumeMounts::new(first.rootfs_dir()).await.unwrap(),
+        SharedVolumeMounts::new(first.rootfs_dir(), first.slot().idmap())
+            .await
+            .unwrap(),
     ));
     let second_mounts = Arc::new(tokio::sync::Mutex::new(
-        SharedVolumeMounts::new(second.rootfs_dir()).await.unwrap(),
+        SharedVolumeMounts::new(second.rootfs_dir(), second.slot().idmap())
+            .await
+            .unwrap(),
     ));
     let registry = crate::shared_volumes::access::SharedVolumeAccess::default();
     let first_package = "first".parse().unwrap();

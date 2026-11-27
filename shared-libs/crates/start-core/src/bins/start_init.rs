@@ -246,7 +246,10 @@ pub async fn main(
             async move {
                 tracing::error!("{e}");
                 tracing::debug!("{e:?}");
-
+                server
+                    .acceptor_setter()
+                    .send_modify(WildcardListener::serve_wildcard)
+                    .log_err();
                 let ctx = DiagnosticContext::init(
                     config,
                     if tokio::fs::metadata("/media/startos/config/disk.guid")

@@ -1,17 +1,14 @@
 #!/bin/bash
 
 # IPv6 counterpart of forward-port: manage a single non-SSL IPv6 port-forward
-# (DNAT host-GUA:sport -> container:dport) as native nftables rules in
-# `table ip6 startos`. Used to route a non-SSL LAN+WAN GUA to its container —
-# unlike SSL, the host has no terminator, so inbound v6 is DNAT'd to the
-# container's (SLAAC ULA) v6. Invoked once per (sip, sport -> dip:dport,
-# src_subnet, transport) tuple by shared-libs/crates/start-core/src/net/forward.rs.
+# (DNAT host-address:sport -> target:dport) as native nftables rules in
+# `table ip6 startos`. Invoked once per (sip, sport -> dip:dport, src_subnet,
+# transport) tuple by shared-libs/crates/start-core/src/net/forward.rs.
 #
 # Each protocol owns a comment tag for independent teardown by handle.
-# Single-port only (GUA forwards are never
-# ranges — port ranges are IPv4-only in the model).
+# Single-port only (port ranges are IPv4-only in the model).
 #
-# src_subnet, when set, restricts inbound to that LAN v6 subnet: a LAN-only GUA
+# src_subnet, when set, restricts inbound to that LAN v6 subnet: a LAN address
 # rejects off-subnet (WAN) sources. Unset means WAN (LAN+WAN) — no restriction.
 
 if [ -z "$sip" ] || [ -z "$dip" ] || [ -z "$dprefix" ] || [ -z "$sport" ] || [ -z "$dport" ]; then
@@ -66,11 +63,12 @@ for protocol in "${protocols[@]}"; do
             fi
             # DNAT for locally-originated (hairpin from the host itself).
             echo "add rule ip6 startos output ip6 daddr $sip $PROTO $dnat comment \"$TAG\""
-            # Allow new forwarded connections to the container.
-            echo "add rule ip6 startos forward ip6 daddr $dip $PROTO th dport $dport ct state new accept comment \"$TAG\""
-            # Masquerade hairpin replies so they reverse through this host.
-            echo "add rule ip6 startos postrouting fib saddr type local ct original ip6 daddr $sip ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
-            echo "add rule ip6 startos postrouting ip6 saddr $dip/$dprefix ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
+            # Container ports accept DNAT traffic, never direct container-address connections.
+            echo "add rule ip6 startos forward ip6 daddr $dip $PROTO th dport $dport ct state new ct status dnat accept comment \"$TAG\""
+            # Masquerade hairpin replies so they reverse through this host. A target
+            # the host holds answers locally and sees the client's own source.
+            echo "add rule ip6 startos postrouting fib saddr type local fib daddr type != local ct original ip6 daddr $sip ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
+            echo "add rule ip6 startos postrouting fib daddr type != local ip6 saddr $dip/$dprefix ip6 daddr $dip $PROTO th dport $dport masquerade comment \"$TAG\""
         fi
     } | nft -f - || exit $?
 done

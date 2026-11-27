@@ -390,8 +390,11 @@ impl DetachedMount {
 /// the helper's stdin to let it exit. The captured fd keeps the namespace
 /// alive. Done as a subprocess rather than an in-process fork because forking
 /// a multi-threaded tokio runtime is unsound.
+///
+/// An owner makes that host uid and gid the namespace's owner rather than root.
 pub async fn userns_fd_from_idmap(
     idmap: &[crate::disk::mount::filesystem::idmapped::IdMap],
+    owner: Option<u32>,
 ) -> Result<OwnedFd, Error> {
     // /proc/<pid>/uid_map columns are "id-in-userns id-in-parent range".
     // For an idmapped mount the kernel runs the on-disk id through
@@ -422,6 +425,7 @@ pub async fn userns_fd_from_idmap(
     let mut child = Command::new(&helper)
         .arg0("startos-unshare-userns-helper")
         .arg("unshare-userns")
+        .args(owner.map(|owner| owner.to_string()))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -524,9 +528,17 @@ fn which_self_exe() -> Result<OsString, Error> {
 
 /// Body of the `unshare-userns` subcommand: `unshare(CLONE_NEWUSER)`, print
 /// `ready\n`, then block until stdin closes.
-pub fn unshare_userns_main() -> std::io::Result<()> {
+///
+/// An owner becomes the effective uid and gid before unsharing.
+pub fn unshare_userns_main(owner: Option<u32>) -> std::io::Result<()> {
     use std::io::{Read, Write};
 
+    if let Some(owner) = owner {
+        let errno = |e: nix::Error| std::io::Error::from_raw_os_error(e as i32);
+        let root = (nix::unistd::Uid::from_raw(0), nix::unistd::Gid::from_raw(0));
+        nix::unistd::setresgid(root.1, nix::unistd::Gid::from_raw(owner), root.1).map_err(errno)?;
+        nix::unistd::setresuid(root.0, nix::unistd::Uid::from_raw(owner), root.0).map_err(errno)?;
+    }
     nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWUSER)
         .map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
 

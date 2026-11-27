@@ -1352,7 +1352,7 @@ pub async fn test_smtp(
         .body("This is a test email sent from your StartOS Server".to_owned())?;
 
     let tls_parameters = TlsParameters::new(host.clone())?;
-    let ip = reachable_ip(crate::net::socks::connect_domain(host.clone(), port)).await?;
+    let ip = reachable_ip(crate::net::dial::connect_domain(host.clone(), port)).await?;
     let transport = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(ip)
         .port(port)
         .tls(match security {

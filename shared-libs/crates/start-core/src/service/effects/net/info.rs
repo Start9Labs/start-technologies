@@ -17,51 +17,41 @@ use crate::{GatewayId, PackageId};
 #[serde(rename_all = "camelCase")]
 #[command(rename_all = "kebab-case")]
 pub struct GetContainerIpParams {
-    #[arg(long, help = "help.arg.package-id")]
-    package_id: Option<PackageId>,
-
+    /// Ignored: the address is fixed for the installation.
     #[arg(skip)]
     callback: Option<CallbackId>,
+    /// Rejected when present: the effect answers only for the calling service.
+    #[serde(default, skip_serializing)]
+    #[visit(ts(skip))]
+    #[arg(skip)]
+    package_id: Option<imbl_value::Value>,
 }
 
 rpc_toolkit::reflect_ts!(GetContainerIpParams);
 rpc_toolkit::ts_export!(GetContainerIpParams, namespaces = [""]);
 
+/// The calling service's own container address.
 pub async fn get_container_ip(
     context: EffectContext,
-    GetContainerIpParams {
-        package_id,
-        callback,
-    }: GetContainerIpParams,
-) -> Result<Option<Ipv4Addr>, Error> {
-    let context = context.deref()?;
-
-    if let Some(package_id) = package_id.filter(|id| id != &context.seed.id) {
-        if let Some(callback) = callback {
-            // ip is static for the lifetime of the container, so callback unnecessary for self
-            let callback = callback.register(&context.seed.persistent_container);
-            context
-                .seed
-                .ctx
-                .callbacks
-                .add_get_container_ip(package_id.clone(), CallbackHandler::new(&context, callback));
-        }
-        let Some(svc) = &*context.seed.ctx.services.get(&package_id).await else {
-            return Ok(None);
-        };
-
-        let Some(lxc) = svc.seed.persistent_container.lxc_container.get() else {
-            return Ok(None);
-        };
-        let res = lxc.ip().await?;
-
-        Ok(Some(res))
-    } else {
-        let Some(lxc) = context.seed.persistent_container.lxc_container.get() else {
-            return Ok(None);
-        };
-        lxc.ip().await.map(Some)
+    GetContainerIpParams { package_id, .. }: GetContainerIpParams,
+) -> Result<Ipv4Addr, Error> {
+    if package_id.is_some() {
+        return Err(Error::new(
+            eyre!(
+                "{}",
+                t!("service.effects.net.info.container-ip-is-self-only")
+            ),
+            ErrorKind::InvalidRequest,
+        ));
     }
+    let context = context.deref()?;
+    Ok(context
+        .seed
+        .persistent_container
+        .lxc_container
+        .get()
+        .or_not_found("lxc container")?
+        .ip())
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields, Parser)]

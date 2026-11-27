@@ -113,11 +113,12 @@ for protocol in "${protocols[@]}"; do
             fi
             # DNAT for locally-originated (hairpin from the host itself).
             echo "add rule ip startos output ip daddr $sip $PROTO $dnat comment \"$TAG\""
-            # Allow new forwarded connections to the target.
-            echo "add rule ip startos forward ip daddr $dip $PROTO th dport $dport_match ct state new accept comment \"$TAG\""
-            # Masquerade hairpin replies so they reverse through this host.
-            echo "add rule ip startos postrouting fib saddr type local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
-            echo "add rule ip startos postrouting ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
+            # Container ports accept DNAT traffic, never direct container-address connections.
+            echo "add rule ip startos forward ip daddr $dip $PROTO th dport $dport_match ct state new ct status dnat accept comment \"$TAG\""
+            # Masquerade hairpin replies so they reverse through this host. A target
+            # the host holds answers locally and sees the client's own source.
+            echo "add rule ip startos postrouting fib saddr type local fib daddr type != local ct original ip daddr $sip ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
+            echo "add rule ip startos postrouting fib daddr type != local ip saddr $dip/$dprefix ip daddr $dip $PROTO th dport $dport_match masquerade comment \"$TAG\""
             if [ "$protocol" = udp ] && [ -n "$sip_iface" ]; then
                 echo "add rule ip startos forward_snat ip saddr $dip oifname \"$sip_iface\" meta l4proto udp $snat comment \"$TAG\""
             fi
