@@ -82,7 +82,7 @@ Ensure these all identify the same complete upstream release:
 
 ## File Structure
 
-The latest version **always** lives in `startos/versions/current.ts`. The filename never changes as you bump — only its contents do. Historical versions that a migration needs to upgrade _from_ are kept as version-named files alongside it.
+The latest version **always** lives in `startos/versions/current.ts`. The filename never changes as you bump — only its contents do. Historical versions needed to preserve migration steps and connections are kept as version-named files alongside it.
 
 ```
 startos/versions/
@@ -151,22 +151,22 @@ A historical file's export is renamed to match the version, with every `.`, `:`,
 
 That principle decides the file layout, so the deciding question is **does the version currently in `current.ts` carry a migration?** — not whether the bump you are making needs one. That only decides what you write into the new `current.ts`.
 
-**The outgoing version's migration is empty (the common case): bump `current.ts` in place.** Empty means the `up` body does nothing. The template's `up: async ({ effects }) => {}` with `down: IMPOSSIBLE` is empty — `down: IMPOSSIBLE` is not a migration, it only forbids downgrades — so it earns the version no file, and the block stays as it is on the bump. Edit `version` and `releaseNotes` in `startos/versions/current.ts`, adding the new version's own migration if it needs one. Don't rename the file, don't touch the export name, don't touch `index.ts`, leave `other` as it is. Git history of `current.ts` preserves the prior release notes automatically, so there is no separate "keep the old notes" step.
+**The outgoing version's migration is empty (the common case): bump `current.ts` in place.** Empty means neither `up` nor `down` performs a data conversion, and no `migrations.other` entry is pinned to this version (below). The template's empty `up` with `down: IMPOSSIBLE` meets that rule, and the block stays as it is on the bump. Edit `version` and `releaseNotes` in `startos/versions/current.ts`, adding the new version's own migration if it needs one. Don't rename the file, don't touch the export name, don't touch `index.ts`, leave `other` as it is. Git history of `current.ts` preserves the prior release notes automatically, so there is no separate "keep the old notes" step.
 
-**The outgoing version carries a migration: spin it off, then write a fresh `current.ts`.**
+**The outgoing version carries a migration or a pinned connection: spin it off, then write a fresh `current.ts`.** A `migrations.other` entry is **pinned** when it is valid only for this version's data format, like a bridge to another flavor at the version where their formats match. Moving it onto a newer version would claim the newer format crosses unchanged, so it earns its version a historical file even when its functions do no work. An entry that **follows `current`** stays in `current.ts` and moves with every bump: one that brings another flavor's or line's data into whatever version is newest, such as a flavor's arrival edge from each of another flavor's series.
 
 1. **Rename `current.ts` to the version it currently holds** — e.g. `v2.3.2_1.ts` (see [Historical Version File Naming](#historical-version-file-naming)), and rename its export from `current` to the matching `v_2_3_2_1`.
-2. **Add that historical version to the `other` array** in `index.ts` so its migration still runs for users upgrading through it.
+2. **Add that historical version to the `other` array** in `index.ts` so paths can still traverse its migrations and pinned connections.
 3. **Create a new `startos/versions/current.ts`** exporting `current` with the new version string, release notes, and its own migration if it needs one — never the one you just spun off.
 
 > [!WARNING]
-> Bumping in place over a version that carries a migration **deletes that migration from the graph**, and nothing will tell you. Every user still below that version upgrades to the new `current` in one hop — the range vertex below covers them — so the update succeeds normally, having silently skipped the data migration. Whether the migration happens to be safe to re-run is beside the point: don't fold it into the successor, spin it off.
+> Bumping in place over a version that carries a migration **deletes that migration from the graph**. Users upgrading through it can silently skip the conversion. Dropping a pinned connection can break a flavor-switch path; moving it to `current` changes where the path crosses flavors. Preserve the version that owns it, even when the migration body is safe to re-run.
 
-This keeps `versions/` lean: only versions that introduced a migration survive as their own files; everything else is just the latest state of `current.ts`.
+This keeps `versions/` focused on the steps and connections needed by migration paths, rather than on release history.
 
 ### Why Released Versions Don't Need to Be Declared
 
-A released version is **not** a reason to add it to `other`. Only a migration is. This trips people up, so here is the mechanism.
+A released version is **not** a reason to add it to `other`. Keep definitions needed by migration paths. This trips people up, so here is the mechanism.
 
 `VersionGraph` does not only add a vertex per version you declare. For every version whose `up` is not `IMPOSSIBLE`, it also synthesizes a **range vertex** — an edge _into_ that version, covering the whole gap beneath it (`<X` if it is the lowest declared version, otherwise `>=prev && <X`). A package with `other: []` and `current` at `1.0.0:3` therefore has a graph of exactly two vertices:
 
@@ -174,16 +174,16 @@ A released version is **not** a reason to add it to `other`. Only a migration is
 <1.0.0:3  --[up]-->  1.0.0:3
 ```
 
-Any installed version below `current` falls inside that range and migrates to `current` **in a single hop**, running `current`'s `up` migration once. This holds whether or not that version was ever declared, and whether or not it was ever released — including versions you shipped as sideloadable `.s9pk`s outside a registry.
+Any installed version of the same flavor below `current` falls inside that range and migrates to `current` **in a single hop**, running `current`'s `up` migration once. This holds whether or not that version was ever declared, and whether or not it was ever released — including versions you shipped as sideloadable `.s9pk`s outside a registry.
 
-A version earns a declared node **only** when it introduced a migration. Declaring migration-less versions adds files that must be read, kept compiling, and reasoned about forever, and buys no behavior. Don't do it to record release history — git history of `current.ts` already is that record.
+Keep a declared historical node when a migration path needs its data conversion, pinned connection, or range boundary. A historical flavor bridge is one such node ([example below](#composing-down-across-flavor-and-up)). Release history alone belongs in git history of `current.ts`.
 
 > [!NOTE]
-> A corollary: to make an update reachable for users on a version you shipped elsewhere, you only need `current`'s version string to sort _above_ theirs. You do not need to declare the intervening revisions.
+> With an allowed `up`, a higher `current` accepts earlier versions of the same flavor through its range vertex. Those releases need no nodes of their own unless a migration path needs their steps or connections.
 
 ### canMigrateFrom Is Derived, Not Curated
 
-The manifest's `canMigrateFrom` / `canMigrateTo` fields are **computed from the graph** — a reverse/forward search from `current`, which `setupManifest` serializes into the manifest at pack time. They are not something you author, and not something the `other` array exists to feed. Adding versions to `other` to "widen" them is a misconception: `other: []` already yields the widest possible range (`<=current`), via the range vertex above.
+The manifest's `canMigrateFrom` / `canMigrateTo` fields are **computed from the graph** — a reverse/forward search from `current`, which `setupManifest` serializes into the manifest at pack time. They include versions reachable through multiple edges, including explicit cross-flavor connections. With `other: []`, an allowed `up` already accepts every lower version of the same flavor through the range vertex above. Add historical nodes to preserve the steps and connections a path needs, rather than to enumerate releases.
 
 ### Upstream Update
 
@@ -191,7 +191,7 @@ When the upstream project releases a new version:
 
 1. Update git submodule to new tag
 2. Update `dockerTag` in [manifest/index.ts](./manifest.md)
-3. Update `current.ts` to the new upstream version (spin off a historical file first if the version it currently holds carries a migration — see above)
+3. Update `current.ts` to the new upstream version (spin off a historical file first if the version it currently holds carries a data conversion or pinned connection — see above)
 4. Reset downstream to 0
 
 ### Wrapper-Only Changes
@@ -200,7 +200,7 @@ When making changes to the StartOS wrapper without upstream changes:
 
 1. Keep upstream version the same
 2. Increment downstream revision
-3. Apply the [migration rule](#when-to-create-a-new-version-file) — edit `current.ts` in place unless the version it currently holds carries a migration
+3. Apply the [migration rule](#when-to-create-a-new-version-file) — preserve any data conversions or pinned connections on the version being replaced
 
 ### A version is released once the reference registry serves it
 
@@ -259,7 +259,7 @@ Use a template literal (backticks) only when the note actually spans multiple li
 
 ## Migrations
 
-Migrations run when users update between versions:
+A version's `migrations` are the edges StartOS walks to carry a package's data from one version to another:
 
 ```typescript
 migrations: {
@@ -280,7 +280,7 @@ Use `IMPOSSIBLE` for the `down` migration when:
 - It is the initial version (nothing to roll back to)
 - The migration involves breaking changes that cannot be reversed
 
-`IMPOSSIBLE` keeps the version out of `canMigrateTo`, and StartOS refuses a downgrade it cannot reach — telling the user to uninstall and restore a backup instead.
+`down: IMPOSSIBLE` removes that version's ordinary downward edges. Explicit `migrations.other` edges remain independent. StartOS refuses a downgrade when the outgoing and incoming graphs cannot compose a path to it ([below](#how-startos-runs-a-migration-path)).
 
 ```typescript
 migrations: {
@@ -293,6 +293,111 @@ migrations: {
 
 > [!WARNING]
 > Migrations are only for migrating data that is _not_ migrated by the upstream service itself.
+
+### How Edges Compose Within a Graph
+
+`VersionGraph.of({ current, other })` supplies the version definitions used to construct one package's graph. The SDK sorts the declared versions separately for each flavor. A version's ordinary `up` points from the preceding declared version to it; its ordinary `down` points back. The SDK also creates range vertices covering the gaps between declared versions ([above](#why-released-versions-dont-need-to-be-declared)). These ordinary edges connect versions of the same flavor.
+
+`migrations.other` adds explicit directed connections to that graph. Each key supplies a range vertex, with edges in the directions declared, and connects matching declared version vertices too. A path can compose ordinary and explicit edges through historical nodes: down within one flavor, across an explicit connection, then up within another flavor. The explicit connection need not touch either package's `current`.
+
+For ordinary `up` and `down`, an omitted function leaves a traversable edge with no data conversion; `IMPOSSIBLE` removes that direction. Within a `migrations.other` entry, each direction exists when its function is supplied. An empty function there still declares a connection.
+
+Traversal follows directed edges along a shortest path by edge count. It can skip an intermediate version when an explicit shortcut provides a shorter path. Each successful edge stores its destination as the data version; a range destination can be the handoff between packages. A migration aimed at an exact version settles the stored data version to that exact version when it reaches a matching range.
+
+### How StartOS Runs a Migration Path
+
+StartOS records a **data version** for every installed package: the version the data on disk was last migrated to. Each migration step advances it. An update, a downgrade, and a switch to another flavor of the same package id are all one path from that data version to the incoming package's `current`, and **the path can run through two version graphs: the outgoing package's, then the incoming package's.**
+
+StartOS splits the path by choosing a `target` data version for the outgoing package's uninit, from the outgoing manifest's `canMigrateTo` and the incoming manifest's `canMigrateFrom`:
+
+| When                                                           | `target`                      | Outgoing package's graph runs | Incoming package's graph runs    |
+| -------------------------------------------------------------- | ----------------------------- | ----------------------------- | -------------------------------- |
+| The incoming package accepts the current data version          | the current data version      | nothing                       | the whole path                   |
+| Otherwise, the outgoing package can reach the incoming version | the incoming version          | the whole path                | nothing                          |
+| Otherwise                                                      | the overlap of the two ranges | the path into the overlap     | the path from there to `current` |
+
+When the two ranges don't overlap, StartOS refuses the update. The outgoing package's `versionGraph` uninit walks its shortest path from the data version to `target`. The incoming package's `versionGraph` init then walks its own shortest path from wherever the data version is left to its `current`. StartOS chooses the handoff in the table's order; each package searches its own graph for its half of the path.
+
+So which package runs a migration depends on the path, not on the version that declares it:
+
+- **An update runs entirely in the incoming package when it accepts the current data version**, the first row. Same-flavor updates with an unbroken chain of allowed `up` edges normally take this route.
+- **A version's `down` runs in that version's own code** whenever the outgoing half steps down from it: a rollback, or a switch to a flavor that accepts only older data.
+- **An edge to another flavor or release line can be declared by either package** ([below](#edges-to-other-flavors-and-release-lines)), and runs in whichever half of the path it falls in.
+- **Work that must happen when the data leaves a version belongs in that version's migrations**, not in uninit. Uninit's `target` is a data version, not the incoming version: on a compatible update it is the version already installed, the same value a shutdown passes. Only an uninstall is identifiable, by `target: null` ([Uninit](./init.md#uninit)).
+
+### Edges to Other Flavors and Release Lines
+
+`migrations.other` declares explicit edges between a version and a version range, such as another flavor with the same package id or another release line. Its `up` migrates data from a version in that range to the declaring version; its `down` migrates from the declaring version to that range. **The names describe direction relative to the declaring version, not numerical ordering across flavors.** Supply each direction the package supports.
+
+```typescript
+migrations: {
+  up: async ({ effects }) => {},
+  down: IMPOSSIBLE,
+  other: {
+    // Bitcoin Core 29.x data, arriving at or leaving this Knots version
+    '^29': {
+      up: async ({ effects }) => { /* Core → this version */ },
+      down: async ({ effects }) => { /* this version → Core */ },
+    },
+  },
+},
+```
+
+These edges compose with the rest of the graph. A declaration in either package is enough for a direction when the surrounding edges complete the path. `VersionGraph.of({ other })` supplies historical version definitions; `migrations.other` supplies explicit connections on one of those definitions.
+
+### Composing Down, Across Flavor, and Up
+
+Suppose two flavors of the same package id have the following version definitions. The function names stand for the actual data conversions:
+
+| Definition | Version      | Ordinary `up`   | Ordinary `down` |
+| ---------- | ------------ | --------------- | --------------- |
+| `a2`       | `#a:2.0.0:0` | `IMPOSSIBLE`    | `IMPOSSIBLE`    |
+| `a3`       | `#a:3.0.0:0` | `migrateA2ToA3` | `migrateA3ToA2` |
+| `b2`       | `#b:2.0.0:0` | `IMPOSSIBLE`    | `IMPOSSIBLE`    |
+| `b3`       | `#b:3.0.0:0` | `migrateB2ToB3` | `migrateB3ToB2` |
+
+The data formats can cross flavors at version 2. Declare that bridge on `a2` by adding this field to its `migrations`:
+
+```typescript
+other: {
+  '#b:2.0.0:0': {
+    up: migrateB2ToA2,
+    down: migrateA2ToB2,
+  },
+},
+```
+
+Each package includes its own historical bridge endpoint:
+
+```typescript
+const graphA = VersionGraph.of({ current: a3, other: [a2] })
+const graphB = VersionGraph.of({ current: b3, other: [b2] })
+```
+
+**Switching A3 → B3** composes three edges, even though there is no direct edge between the current versions:
+
+```text
+#a:3.0.0:0 --[a3.down]--> #a:2.0.0:0
+           --[a2.other['#b:2.0.0:0'].down]--> #b:2.0.0:0
+           --[b3.up]--> #b:3.0.0:0
+```
+
+The incoming B graph accepts B2 data but not A3 data. The outgoing A graph reaches B2 but not B3. Their ranges overlap at B2, so StartOS chooses B2 as the handoff:
+
+1. **Outgoing A uninit** runs `a3.down`, then `a2`'s explicit `down` to B2.
+2. **Incoming B init** runs `b3.up` from B2 to B3.
+
+**Switching B3 → A3** uses the reverse directions of the same declarations:
+
+```text
+#b:3.0.0:0 --[b3.down]--> #b:2.0.0:0
+           --[a2.other['#b:2.0.0:0'].up]--> #a:2.0.0:0
+           --[a3.up]--> #a:3.0.0:0
+```
+
+The handoff is again B2. Outgoing B uninit runs `b3.down`; incoming A init runs `a2`'s explicit `up`, then `a3.up`. The same bridge belongs to outgoing code in the first switch and incoming code in the reverse switch. The two graphs retain their own definitions and execute in sequence.
+
+This example permits both switches because all six directed conversions exist. Supplying just the bridge's `up` supports B2 → A2; the A2 → B2 direction requires its `down`. Likewise, a blocked ordinary downward edge can prevent reaching the bridge in the first place. Retain `a2` when A advances beyond version 3: its bridge is pinned to version 2 and remains part of the composed path ([version-file rule](#when-to-create-a-new-version-file)).
 
 ## setupOnInit
 
