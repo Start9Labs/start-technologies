@@ -238,7 +238,8 @@ export class RpcSocketService {
 }
 
 function deviceClockError(cause: unknown): DeviceClockError | undefined {
-  for (let value = cause; value !== undefined;) {
+  let value = cause
+  while (value !== undefined) {
     if (value instanceof DeviceClockError) return value
     value =
       value instanceof Event
