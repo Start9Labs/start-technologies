@@ -1113,4 +1113,7 @@ export default {
   1319: 'Chipset',
   1320: 'Czujnik',
   1321: 'Nie znaleziono czujników temperatury',
+  1322: 'Wymuś zatrzymanie',
+  1323: 'Wymuszanie zatrzymania',
+  1324: 'Wymuszenie zatrzymania może spowodować utratę danych lub pozostawić serwis w nieprawidłowym stanie. Czy na pewno chcesz wymusić zatrzymanie?',
 } satisfies i18n

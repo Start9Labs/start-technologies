@@ -2782,6 +2782,7 @@ export const StatusInfo: z.ZodObject<{
   error: z.ZodDefault<z.ZodNullable<typeof ErrorData>>
   started: z.ZodDefault<z.ZodNullable<z.ZodString>>
   desired: typeof DesiredStatus
+  forceStopAt: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   health: z.record(z.string(), NamedHealthCheckResult),
   error: ErrorData.nullable().default(() => null),
@@ -2790,6 +2791,10 @@ export const StatusInfo: z.ZodObject<{
     .nullable()
     .default(() => null),
   desired: DesiredStatus,
+  forceStopAt: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'StatusInfo',
 })

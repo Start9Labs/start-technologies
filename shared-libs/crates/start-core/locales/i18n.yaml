@@ -4955,6 +4955,18 @@ update.failed-title:
   pl_PL: "Aktualizacja StartOS nie powiodła się"
 
 # control.rs
+control.force-stop-in-progress:
+  en_US: "The service is being force stopped"
+  de_DE: "Der Dienst wird zwangsweise gestoppt"
+  es_ES: "El servicio se está deteniendo de forma forzada"
+  fr_FR: "Le service est en cours d’arrêt forcé"
+  pl_PL: "Trwa wymuszone zatrzymywanie usługi"
+control.force-stop-unavailable:
+  en_US: "Force stop is not available for this stop request"
+  de_DE: "Erzwungenes Stoppen ist für diese Stoppanforderung nicht verfügbar"
+  es_ES: "La detención forzada no está disponible para esta solicitud"
+  fr_FR: "L’arrêt forcé n’est pas disponible pour cette demande d’arrêt"
+  pl_PL: "Wymuszone zatrzymanie nie jest dostępne dla tego żądania"
 control.start-critical-task:
   en_US: "Warning: startup requested for service %{id}; unresolved critical tasks block runtime startup until they are resolved"
   de_DE: "Warnung: Start für Dienst %{id} angefordert; ungelöste kritische Aufgaben blockieren den Start bis zu ihrer Erledigung"
@@ -5810,6 +5822,13 @@ help.arg.force-stderr-tty:
   es_ES: "Forzar que stderr sea tratado como TTY"
   fr_FR: "Forcer stderr à être traité comme un TTY"
   pl_PL: "Wymuś traktowanie stderr jako TTY"
+
+help.arg.force-stop-at:
+  en_US: "Server-issued forceStopAt from service status, in RFC3339 format; stale deadlines are rejected"
+  de_DE: "Vom Server gesetztes forceStopAt aus dem Dienststatus im RFC3339-Format; veraltete Fristen werden abgelehnt"
+  es_ES: "forceStopAt emitido por el servidor en el estado del servicio, en formato RFC3339; se rechazan los plazos obsoletos"
+  fr_FR: "forceStopAt fourni par le serveur dans l’état du service, au format RFC3339 ; les échéances périmées sont rejetées"
+  pl_PL: "forceStopAt nadany przez serwer w stanie usługi, w formacie RFC3339; nieaktualne terminy są odrzucane"
 
 help.arg.force-tty:
   en_US: "Force TTY mode for I/O"
@@ -8509,6 +8528,13 @@ about.flash-startos:
   es_ES: "Flashear StartOS a una unidad"
   fr_FR: "Flasher StartOS sur un lecteur"
   pl_PL: "Flashuj StartOS na dysk"
+
+about.force-stop-service:
+  en_US: "Force stop a stalled service; may cause data loss"
+  de_DE: "Einen festhängenden Dienst zwangsweise stoppen; kann Datenverlust verursachen"
+  es_ES: "Forzar la detención de un servicio bloqueado; puede causar pérdida de datos"
+  fr_FR: "Forcer l’arrêt d’un service bloqué ; peut entraîner une perte de données"
+  pl_PL: "Wymuś zatrzymanie zablokowanej usługi; może spowodować utratę danych"
 
 about.forget-disconnected-gateway:
   en_US: "Forget a disconnected gateway"

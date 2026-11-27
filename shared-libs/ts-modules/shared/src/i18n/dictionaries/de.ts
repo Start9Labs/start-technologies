@@ -1113,4 +1113,7 @@ export default {
   1319: 'Chipsatz',
   1320: 'Sensor',
   1321: 'Keine Temperatursensoren gefunden',
+  1322: 'Stopp erzwingen',
+  1323: 'Stopp wird erzwungen',
+  1324: 'Ein erzwungener Stopp kann zu Datenverlust führen oder den Dienst in einem fehlerhaften Zustand hinterlassen. Möchten Sie den Stopp wirklich erzwingen?',
 } satisfies i18n

@@ -1113,4 +1113,7 @@ export default {
   1319: 'Chipset',
   1320: 'Sensor',
   1321: 'No se encontraron sensores de temperatura',
+  1322: 'Forzar detención',
+  1323: 'Forzando detención',
+  1324: 'Forzar la detención puede provocar pérdida de datos o dejar el servicio en mal estado. ¿Seguro que deseas forzar la detención?',
 } satisfies i18n

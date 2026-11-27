@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-package-force-stop 1  "force-stop "
+.SH NAME
+start\-cli\-package\-force\-stop \- Force stop a stalled service; may cause data loss
+.SH SYNOPSIS
+\fBstart\-cli package force\-stop\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIID\fR> <\fIFORCE_STOP_AT\fR>
+.SH DESCRIPTION
+Force stop a stalled service; may cause data loss
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIID\fR>
+Package identifier
+.TP
+<\fIFORCE_STOP_AT\fR>
+Server\-issued forceStopAt from service status, in RFC3339 format; stale deadlines are rejected

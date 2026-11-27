@@ -1113,4 +1113,7 @@ export default {
   1319: 'Chipset',
   1320: 'Capteur',
   1321: 'Aucun capteur de température trouvé',
+  1322: 'Forcer l’arrêt',
+  1323: 'Arrêt forcé en cours',
+  1324: 'Forcer l’arrêt peut entraîner une perte de données ou laisser le service dans un état défectueux. Voulez-vous vraiment forcer l’arrêt ?',
 } satisfies i18n

@@ -519,6 +519,10 @@ test('StartOS derives the method path and forwards results untouched', async () 
   assert.equal(requests[2].method, 'package.action.get-input')
   await rpc.server.logs({ limit: 1 }, { timeout: 10000 })
   assert.equal(requests[3].timeout, 10000)
+  const forceStop = { id: 'demo', forceStopAt: '2026-10-10T12:00:30Z' }
+  assert.equal(await rpc.package.forceStop(forceStop), null)
+  assert.equal(requests[4].method, 'package.force-stop')
+  assert.equal(requests[4].params, forceStop)
 })
 
 function normalStreamFixture() {
@@ -1461,13 +1465,11 @@ test('StartOS mock routes keep build identity and UPS discovery and expose no re
   dependencies.set(tokens.WA_SESSION_STORAGE, null)
   dependencies.set(tokens.AuthService, { isVerified$: of(true) })
   dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
+  dependencies.set(tokens.ConfigService, { gitHash: 'configured-os-build' })
   const client = new (load(
     'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
   ).MockApiService)()
-  assert.equal(
-    await client.rpc['git-info']({}),
-    dependencies.get(tokens.ConfigService).gitHash,
-  )
+  assert.equal(await client.rpc.gitInfo({}), 'configured-os-build')
   assert.equal(
     (await client.rpc.server['nut-scan']({}))[0].driver,
     'usbhid-ups',
@@ -1482,6 +1484,103 @@ test('StartOS mock routes keep build identity and UPS discovery and expose no re
     client.rpc.registry.package.get({ registry: 'https://registry.test/' }),
     /No handler for registry\.package\.get/,
   )
+})
+
+test('StartOS force-stop mock checks its live episode independently of seed and client cache', async () => {
+  const oldDeadline = new Date(Date.now() - 120000).toISOString()
+  const deadline = new Date(Date.now() - 60000).toISOString()
+  const status = {
+    desired: { main: 'stopped' },
+    started: new Date(Date.now() - 3600000).toISOString(),
+    forceStopAt: deadline,
+    error: null,
+    health: {},
+  }
+  const { dependencies, tokens, load } = harness(
+    new Map([
+      ['src/app/utils/acme', {}],
+      ['./api.fixures', { Mock: {} }],
+      [
+        './mock-patch',
+        {
+          mockPatchData: {
+            packageData: {
+              service: { statusInfo: { ...status, forceStopAt: oldDeadline } },
+            },
+          },
+        },
+      ],
+      ['./md-sample.md', ''],
+    ]),
+  )
+  dependencies.set(tokens.WA_SESSION_STORAGE, null)
+  dependencies.set(tokens.PATCH_CACHE, new BehaviorSubject({ value: {} }))
+  const client = new (load(
+    'projects/start-os/web/ui/src/app/services/api/embassy-mock-api.service.ts',
+  ).MockApiService)()
+  await client.mockRevision([
+    {
+      op: 'replace',
+      path: '/packageData/service/statusInfo',
+      value: status,
+    },
+  ])
+  await assert.rejects(
+    client.rpc.package.forceStop({ id: 'service', forceStopAt: oldDeadline }),
+    /not eligible/,
+  )
+  const revisions = []
+  const subscription = client.mockWsSource$.subscribe(revision =>
+    revisions.push(revision),
+  )
+  await client.rpc.package.forceStop({ id: 'service', forceStopAt: deadline })
+  assert.deepEqual(JSON.parse(JSON.stringify(revisions[0].patch)), [
+    {
+      op: 'replace',
+      path: '/packageData/service/statusInfo',
+      value: {
+        desired: { main: 'stopped' },
+        forceStopAt: null,
+        started: null,
+        error: null,
+        health: {},
+      },
+    },
+  ])
+  await assert.rejects(
+    client.rpc.package.forceStop({ id: 'service', forceStopAt: deadline }),
+    /not eligible/,
+  )
+  await assert.rejects(
+    client.rpc.package.forceStop({ id: 'missing', forceStopAt: deadline }),
+    /not eligible/,
+  )
+  subscription.unsubscribe()
+})
+
+test('Force stop decoders default legacy deadlines and preserve the issued episode', () => {
+  const { load } = harness()
+  const status = {
+    desired: { main: 'stopped' },
+    started: null,
+    error: null,
+    health: {},
+  }
+  const deadline = '2026-10-10T12:00:30.123456Z'
+  for (const file of ['types.schemas.ts', 'rpc/effects.schemas.ts']) {
+    const { StatusInfo } = load(
+      `shared-libs/ts-modules/start-core/lib/osBindings/${file}`,
+    )
+    assert.equal(StatusInfo.parse(status).forceStopAt, null)
+    assert.equal(
+      StatusInfo.parse({ ...status, forceStopAt: null }).forceStopAt,
+      null,
+    )
+    assert.equal(
+      StatusInfo.parse({ ...status, forceStopAt: deadline }).forceStopAt,
+      deadline,
+    )
+  }
 })
 
 test('StartOS generated UPS contracts preserve the selected USB location', () => {

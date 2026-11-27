@@ -711,6 +711,15 @@ pub fn package<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
+            "force-stop",
+            from_fn_async(control::force_stop)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .with_metadata("sync_db", Value::Bool(true))
+                .no_display()
+                .with_about("about.force-stop-service")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
             "restart",
             from_fn_async(control::restart)
                 .with_metadata(EFFECT, Effect::Write.into())

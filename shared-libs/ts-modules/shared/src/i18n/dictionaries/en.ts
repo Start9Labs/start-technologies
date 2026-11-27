@@ -1114,4 +1114,7 @@ export const ENGLISH: Record<string, number> = {
   'Chipset': 1319,
   'Sensor': 1320, // as in, a temperature sensor
   'No temperature sensors found': 1321,
+  'Force stop': 1322,
+  'Force stopping': 1323,
+  'Force stopping may cause data loss or leave the service in a bad state. Are you sure you want to force stop?': 1324,
 }

@@ -78,6 +78,7 @@ pub struct RpcContextSeed {
     pub net_controller: Arc<NetController>,
     pub s9pk_arch: Option<&'static str>,
     pub services: ServiceMap,
+    pub force_stop_delay: std::time::Duration,
     pub(crate) shared_volume_access: crate::shared_volumes::access::SharedVolumeAccess,
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
     pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
@@ -524,6 +525,7 @@ impl RpcContext {
             callbacks: net_controller.callbacks.clone(),
             net_controller,
             os_net_service,
+            force_stop_delay: config.force_stop_delay(),
             s9pk_arch: if config.multi_arch_s9pks.unwrap_or(false) {
                 None
             } else {
