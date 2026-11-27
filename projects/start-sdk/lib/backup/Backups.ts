@@ -1,5 +1,6 @@
 import * as T from '@start9labs/start-core/types'
 import * as child_process from 'child_process'
+import { randomBytes } from 'node:crypto'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { Affine, asError } from '../util'
@@ -15,6 +16,7 @@ const BACKUP_HOST_PATH = '/media/startos/backup'
 const BACKUP_VOLUMES_PATH = `${BACKUP_HOST_PATH}/volumes`
 const BACKUP_CONTAINER_MOUNT = '/backup-target'
 const MARIADB_SHUTDOWN_TIMEOUT = 120_000
+const MAX_STDERR_BYTES = 64 * 1024
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
@@ -149,6 +151,169 @@ const importSql = (client: string, database: string, file: string) => [
   file,
 ]
 
+async function syncDir(dir: string): Promise<void> {
+  const handle = await fs.open(dir, 'r')
+  let synced = false
+  try {
+    await handle.sync()
+    synced = true
+  } finally {
+    await handle.close().catch(e => {
+      if (synced) throw e
+    })
+  }
+}
+
+async function writeAll(handle: fs.FileHandle, chunk: Buffer): Promise<void> {
+  let offset = 0
+  while (offset < chunk.length) {
+    const { bytesWritten } = await handle.write(
+      chunk,
+      offset,
+      chunk.length - offset,
+    )
+    if (bytesWritten === 0) {
+      throw new Error('Short write while staging database dump')
+    }
+    offset += bytesWritten
+  }
+}
+
+function validateDumpFileName(fileName: string): void {
+  if (
+    !fileName ||
+    fileName === '.' ||
+    fileName === '..' ||
+    fileName.includes('/') ||
+    fileName.includes('\0')
+  ) {
+    throw new Error(`Invalid backup dump filename: ${fileName}`)
+  }
+}
+
+/** Pre-rename failures preserve the previous dump; incomplete copies never become live. */
+async function copyFileAtomically<M extends T.SDKManifest>(
+  sub: SubContainer<M>,
+  src: string,
+  dstDir: string,
+  fileName: string,
+): Promise<void> {
+  validateDumpFileName(fileName)
+  const { stdout: sizeOut } = await sub.execFail(
+    ['sh', '-c', 'stat -Lc %s -- "$1" 2>/dev/null || wc -c < "$1"', 'sh', src],
+    { user: 'root', timeout: null },
+  )
+  const sizeText = sizeOut.toString('utf8').trim()
+  if (!/^\d+$/.test(sizeText)) {
+    throw new Error(`Invalid dump size for ${src}: ${sizeText}`)
+  }
+  const expectedSize = Number(sizeText)
+  if (!Number.isSafeInteger(expectedSize)) {
+    throw new Error(`Invalid dump size for ${src}: ${sizeText}`)
+  }
+  const dst = path.join(dstDir, fileName)
+  // StartOS serializes backups; this helper owns matching staging files.
+  const stagedPrefix = `.${fileName}.`
+  for (const name of await fs.readdir(dstDir)) {
+    if (
+      name.startsWith(stagedPrefix) &&
+      /^[0-9a-f]{24}\.tmp$/.test(name.slice(stagedPrefix.length))
+    ) {
+      await fs.rm(path.join(dstDir, name), { force: true })
+    }
+  }
+  const staged = path.join(
+    dstDir,
+    `${stagedPrefix}${randomBytes(12).toString('hex')}.tmp`,
+  )
+  let created = false
+  let renamed = false
+  try {
+    const dstHandle = await fs.open(staged, 'wx', 0o600)
+    created = true
+    let synced = false
+    try {
+      const child = await sub.spawn(['cat', '--', src], {
+        user: 'root',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      if (!child.stdout || !child.stderr) {
+        child.kill('SIGKILL')
+        throw new Error(`Failed to open stream for ${src}`)
+      }
+      let stderrError: Error | null = null
+      let stderrBytes = 0
+      const stderrChunks: Buffer[] = []
+      child.stderr.on('data', (chunk: Buffer | string) => {
+        if (stderrBytes >= MAX_STDERR_BYTES) return
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        const slice = buf.subarray(0, MAX_STDERR_BYTES - stderrBytes)
+        stderrChunks.push(slice)
+        stderrBytes += slice.length
+      })
+      child.stderr.on('error', err => {
+        stderrError = asError(err)
+        child.stdout?.destroy(stderrError)
+      })
+      const closePromise = new Promise<{
+        code: number | null
+        signal: NodeJS.Signals | null
+      }>((resolve, reject) => {
+        child.once('error', err => {
+          child.stdout?.destroy(err)
+          reject(err)
+        })
+        child.once('close', (code, signal) => resolve({ code, signal }))
+      })
+      closePromise.catch(() => {})
+
+      let bytesCopied = 0
+      try {
+        for await (const chunk of child.stdout) {
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+          await writeAll(dstHandle, buf)
+          bytesCopied += buf.length
+        }
+        const { code, signal } = await closePromise
+        if (stderrError) throw stderrError
+        if (code !== 0 || signal !== null) {
+          const stderr = Buffer.concat(stderrChunks).toString('utf8').trim()
+          const detail = signal ? `signal ${signal}` : `code ${code}`
+          throw new Error(
+            `cat ${src} failed (${detail})${stderr ? `: ${stderr}` : ''}`,
+          )
+        }
+        if (bytesCopied !== expectedSize) {
+          throw new Error(
+            `Dump stream size mismatch for ${src}: copied ${bytesCopied} of ${expectedSize} bytes`,
+          )
+        }
+      } catch (e) {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill('SIGKILL')
+        }
+        child.stdout.destroy()
+        child.stderr.destroy()
+        await closePromise.catch(() => {})
+        throw e
+      }
+      await dstHandle.sync()
+      synced = true
+    } finally {
+      await dstHandle.close().catch(e => {
+        if (synced) throw e
+      })
+    }
+    await fs.rename(staged, dst)
+    renamed = true
+    await syncDir(dstDir)
+  } finally {
+    if (created && !renamed) {
+      await fs.rm(staged, { force: true }).catch(() => {})
+    }
+  }
+}
+
 /**
  * Bind-mount the host backup directory (`/media/startos/backup`) into a
  * SubContainer's rootfs.
@@ -273,8 +438,8 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
    * this uses `pg_dump` to create a logical dump before backup and `pg_restore` to rebuild
    * the database after restore.
    *
-   * The dump is staged in the subcontainer's `/tmp` and copied to the backup
-   * target, so it needs transient room for one copy of the dump.
+   * The subcontainer needs transient room for one dump. The backup target
+   * holds the previous and replacement dumps until replacement completes.
    *
    * @returns A configured Backups instance with pre/post hooks. Chain `.addVolume()` or
    * `.addSync()` to include additional volumes/paths in the backup.
@@ -296,12 +461,14 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
     } = config
     const pgdata = `${mountpoint}${pgdataPath}`
     const pgCtlTimeout = String(Math.ceil(readyTimeout / 1000))
-    const dumpFile = `${BACKUP_CONTAINER_MOUNT}/${database}-db.dump`
+    const dumpFileName = `${database}-db.dump`
+    validateDumpFileName(dumpFileName)
+    const dumpFile = `${BACKUP_CONTAINER_MOUNT}/${dumpFileName}`
     // pg_dump's writes are silently dropped on the backup-fs FUSE mount —
-    // pg_dump exits 0 but the file stays 0 bytes. `cp` writes through the
-    // FUSE correctly, so we dump to a non-FUSE path inside the subcontainer
-    // rootfs and `cp` the result through. Likewise on restore, `cp` the dump
-    // off the FUSE before pg_restore reads it.
+    // pg_dump exits 0 but the file stays 0 bytes. Dump to a non-FUSE path
+    // inside the subcontainer rootfs, then stage, fsync, and rename into
+    // `/backup-target`. On restore, `cp` the dump off the FUSE before
+    // pg_restore reads it.
     const tmpDumpFile = `/tmp/${database}-db.dump`
 
     function dbMounts() {
@@ -376,10 +543,12 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
               { user: 'postgres', timeout: null },
             )
             console.log('[pg-dump] copying dump to backup target')
-            await sub.execFail(['cp', tmpDumpFile, dumpFile], {
-              user: 'root',
-              timeout: null,
-            })
+            await copyFileAtomically(
+              sub,
+              tmpDumpFile,
+              `${sub.rootfs}${BACKUP_CONTAINER_MOUNT}`,
+              dumpFileName,
+            )
             console.log('[pg-dump] stopping postgres')
             await sub.execFail(
               ['pg_ctl', 'stop', '-D', pgdata, '-w', '-t', pgCtlTimeout],
@@ -474,10 +643,12 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       mysqldOptions = [],
       readyTimeout = 30_000,
     } = config
-    const dumpFile = `${BACKUP_CONTAINER_MOUNT}/${database}-db.dump`
+    const dumpFileName = `${database}-db.dump`
+    validateDumpFileName(dumpFileName)
+    const dumpFile = `${BACKUP_CONTAINER_MOUNT}/${dumpFileName}`
     // See the comment on `tmpDumpFile` in withPgDump — backup-fs FUSE
-    // silently drops mysqldump's writes, so stage the dump in the
-    // subcontainer rootfs and `cp` through.
+    // silently drops mysqldump's writes, so dump to the subcontainer rootfs
+    // and stage, fsync, and rename into `/backup-target`.
     const tmpDumpFile = '/tmp/db.sql'
 
     function dbMounts() {
@@ -586,10 +757,12 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 ],
                 { user: 'root', env: passwordEnv(pw), timeout: null },
               )
-              await sub.execFail(['cp', tmpDumpFile, dumpFile], {
-                user: 'root',
-                timeout: null,
-              })
+              await copyFileAtomically(
+                sub,
+                tmpDumpFile,
+                `${sub.rootfs}${BACKUP_CONTAINER_MOUNT}`,
+                dumpFileName,
+              )
             } finally {
               await stopMysql(sub)
             }
@@ -674,7 +847,9 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
       mariadbdOptions = [],
       readyTimeout = 30_000,
     } = config
-    const dumpFile = `${BACKUP_CONTAINER_MOUNT}/${database}.sql.gz`
+    const dumpFileName = `${database}.sql.gz`
+    validateDumpFileName(dumpFileName)
+    const dumpFile = `${BACKUP_CONTAINER_MOUNT}/${dumpFileName}`
     const tmpSqlFile = '/tmp/db.sql'
     const tmpDumpFile = `${tmpSqlFile}.gz`
 
@@ -779,10 +954,12 @@ export class Backups<M extends T.SDKManifest> implements InitScript {
                 user: 'root',
                 timeout: null,
               })
-              await sub.execFail(['cp', tmpDumpFile, dumpFile], {
-                user: 'root',
-                timeout: null,
-              })
+              await copyFileAtomically(
+                sub,
+                tmpDumpFile,
+                `${sub.rootfs}${BACKUP_CONTAINER_MOUNT}`,
+                dumpFileName,
+              )
             })
           },
         )
