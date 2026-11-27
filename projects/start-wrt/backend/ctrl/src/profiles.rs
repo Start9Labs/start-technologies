@@ -1274,9 +1274,7 @@ async fn reload_system_inner(restart_network: bool) -> Result<(), Error> {
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"))
             .await;
-    let _ =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/smartdns").arg("restart"))
-            .await;
+    dns::restart_smartdns().await;
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart"))
             .await;
@@ -1324,9 +1322,7 @@ async fn reload_system_and_wifi_inner(restart_network: bool) -> Result<(), Error
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/odhcpd").arg("restart"))
             .await;
-    let _ =
-        crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/smartdns").arg("restart"))
-            .await;
+    dns::restart_smartdns().await;
     let _ =
         crate::run_quiet_async(tokio::process::Command::new("/etc/init.d/firewall").arg("restart"))
             .await;
