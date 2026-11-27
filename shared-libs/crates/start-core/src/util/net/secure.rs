@@ -13,6 +13,7 @@ use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 use super::{MAX_CLOSE_PAYLOAD_BYTES, MAX_CLOSE_REASON_BYTES};
 use crate::prelude::*;
+use crate::middleware::auth::signature::ClockSkew;
 use crate::sign::AnyVerifyingKey;
 use crate::sign::commitment::request::RequestCommitment;
 use crate::sign::session::{PeerIdentity, PreparedClient, ServerIdentity, SessionCipher, Target};
@@ -118,6 +119,13 @@ fn retaining_decoder(header: usize, maximum: usize) -> LengthDelimitedCodec {
         .length_adjustment(header as isize)
         .num_skip(0)
         .new_codec()
+}
+
+fn clock_rejected() -> Error {
+    Error::new(
+        eyre!("{}", t!("util.net.secure.clock-rejected")),
+        ErrorKind::InvalidSignature,
+    )
 }
 
 fn invalid_message() -> Error {
@@ -348,7 +356,8 @@ impl EncryptedSocket {
     }
 
     /// Completes the initiator exchange before returning the verified remote identity.
-    /// Preparing the identity separately keeps interactive signing outside the handshake deadline.
+    /// Preparing the identity separately keeps interactive signing outside the handshake deadline,
+    /// except for the one re-signing a server's retry answer asks for.
     pub async fn initiate(
         mut socket: BoxWebSocket,
         prepared: PreparedClient,
@@ -357,7 +366,19 @@ impl EncryptedSocket {
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
             let mut records = HandshakeRecords::new();
             send_handshake(&mut socket, prepared.message()).await?;
-            let response = records.receive(&mut socket).await?;
+            let mut response = records.receive(&mut socket).await?;
+            let prepared = match crate::sign::session::retry_timestamp(&response) {
+                Some(timestamp) => {
+                    let retried = prepared.retry(timestamp).await?;
+                    send_handshake(&mut socket, retried.message()).await?;
+                    response = records
+                        .receive(&mut socket)
+                        .await
+                        .map_err(|_| clock_rejected())?;
+                    retried
+                }
+                None => prepared,
+            };
             let (peer, state) = prepared.finish(&response).await?;
             Ok((peer, Self::new(socket, state, records, incoming)))
         })
@@ -366,6 +387,7 @@ impl EncryptedSocket {
     }
 
     /// Completes the responder exchange, optionally restricting the admitted peer identity.
+    /// A hello rejected only as [`ClockSkew`] gets an unsigned retry answer and one more hello.
     pub async fn accept<F, Fut>(
         mut socket: BoxWebSocket,
         identity: &ServerIdentity,
@@ -376,21 +398,36 @@ impl EncryptedSocket {
         accept_nonce: F,
     ) -> Result<(AnyVerifyingKey, InternedString, Self), Error>
     where
-        F: FnOnce(RequestCommitment) -> Fut,
+        F: Fn(RequestCommitment) -> Fut,
         Fut: Future<Output = Result<(), Error>>,
     {
         tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
             let mut records = HandshakeRecords::new();
-            let request = records.receive(&mut socket).await?;
-            let (peer, context, response, state) = crate::sign::session::accept(
-                identity,
-                contexts,
-                &request,
-                target,
-                expected,
-                accept_nonce,
-            )
-            .await?;
+            let mut retried = false;
+            let (peer, context, response, state) = loop {
+                let request = records.receive(&mut socket).await?;
+                let error = match crate::sign::session::accept(
+                    identity,
+                    contexts,
+                    &request,
+                    target,
+                    expected,
+                    &accept_nonce,
+                )
+                .await
+                {
+                    Ok(accepted) => break accepted,
+                    Err(error) => error,
+                };
+                match ClockSkew::of(&error) {
+                    Some(skew) if !retried => {
+                        retried = true;
+                        send_handshake(&mut socket, &crate::sign::session::retry(skew.now)?)
+                            .await?;
+                    }
+                    _ => return Err(error),
+                }
+            };
             send_handshake(&mut socket, &response).await?;
             Ok((peer, context, Self::new(socket, state, records, incoming)))
         })

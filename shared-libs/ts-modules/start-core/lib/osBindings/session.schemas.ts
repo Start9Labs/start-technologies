@@ -101,6 +101,20 @@ export const Hello: z.ZodUnion<
         temporary: z.ZodOptional<z.ZodBoolean>
       }>
     >,
+    z.ZodIntersection<
+      z.ZodObject<{
+        /**
+         * Unsigned server answer to a client hello rejected only for its timestamp.
+         */
+        role: z.ZodLiteral<'retry'>
+      }>,
+      z.ZodObject<{
+        /**
+         * The server's clock in Unix seconds.
+         */
+        timestamp: typeof literal_0
+      }>
+    >,
   ]
 > = /* @__PURE__ */ z
   .union([
@@ -126,6 +140,30 @@ export const Hello: z.ZodUnion<
             'A binary byte string, without a text encoding or an integer-array fallback.',
         }),
         temporary: z.boolean().optional(),
+      }),
+    ),
+    z.intersection(
+      object({
+        /**
+         * Unsigned server answer to a client hello rejected only for its timestamp.
+         */
+        role: z.literal('retry').meta({
+          description:
+            'Unsigned server answer to a client hello rejected only for its timestamp.',
+        }),
+      }),
+      object({
+        /**
+         * The server's clock in Unix seconds.
+         */
+        timestamp: literal_0
+          .meta({
+            description:
+              'A CBOR integer whose JavaScript decoder may return a bigint.',
+          })
+          .meta({
+            description: "The server's clock in Unix seconds.",
+          }),
       }),
     ),
   ])

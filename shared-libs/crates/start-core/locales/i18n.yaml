@@ -5334,6 +5334,13 @@ util.rpc.unknown-scheme:
   pl_PL: "nieznany schemat: %{scheme}"
 
 # util/net.rs
+util.net.secure.clock-rejected:
+  en_US: "The server rejected this device's clock; check this device's date, time and time zone"
+  de_DE: "Der Server hat die Uhr dieses Geräts abgelehnt; prüfen Sie Datum, Uhrzeit und Zeitzone dieses Geräts"
+  es_ES: "El servidor rechazó el reloj de este dispositivo; compruebe la fecha, la hora y la zona horaria de este dispositivo"
+  fr_FR: "Le serveur a rejeté l'horloge de cet appareil ; vérifiez la date, l'heure et le fuseau horaire de cet appareil"
+  pl_PL: "Serwer odrzucił zegar tego urządzenia; sprawdź datę, godzinę i strefę czasową tego urządzenia"
+
 util.net.secure.invalid-message:
   en_US: "Invalid encrypted WebSocket message"
   de_DE: "Ungültige verschlüsselte WebSocket-Nachricht"

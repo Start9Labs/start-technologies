@@ -32,14 +32,24 @@ pub struct RequestCommitment {
 
 rpc_toolkit::reflect_ts!(RequestCommitment);
 rpc_toolkit::ts_export!(RequestCommitment, namespaces = [""]);
+/// Seconds since the Unix epoch on this host's clock, negative before it.
+pub fn unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1)
+}
+
 impl RequestCommitment {
     /// Commits the complete byte slice with a fresh timestamp and nonce.
     pub fn for_bytes(body: &[u8]) -> Self {
+        Self::for_bytes_at(body, unix_timestamp())
+    }
+
+    /// Commits the complete byte slice with a fresh nonce, stamped with the given Unix seconds.
+    pub fn for_bytes_at(body: &[u8], timestamp: i64) -> Self {
         Self {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or_else(|e| e.duration().as_secs() as i64 * -1),
+            timestamp,
             nonce: rand::random(),
             size: body.len() as u64,
             blake3: Base64(*blake3::hash(body).as_bytes()),
@@ -119,7 +129,17 @@ impl RequestProof {
         body: &[u8],
         context: &str,
     ) -> Result<Self, Error> {
-        let commitment = RequestCommitment::for_bytes(body);
+        Self::sign_commitment_at(signer, body, context, unix_timestamp()).await
+    }
+
+    /// Signs as [`Self::sign_commitment`], stamped with the given Unix seconds.
+    pub async fn sign_commitment_at(
+        signer: &Signer,
+        body: &[u8],
+        context: &str,
+        timestamp: i64,
+    ) -> Result<Self, Error> {
+        let commitment = RequestCommitment::for_bytes_at(body, timestamp);
         let signature = signer
             .sign_message(&crate::sign::signing_message(
                 crate::sign::COMMITMENT_SIG_TAG,

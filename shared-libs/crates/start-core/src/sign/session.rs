@@ -10,11 +10,11 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 
 use super::commitment::request::binary::BinaryRequestProof;
-use super::commitment::request::{RequestCommitment, RequestProof};
+use super::commitment::request::{RequestCommitment, RequestProof, unix_timestamp};
 use super::{AnyVerifyingKey, Signer};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
-use crate::util::serde::binary::ByteString;
+use crate::util::serde::binary::{ByteString, Integer};
 
 mod cbor;
 
@@ -65,6 +65,11 @@ enum Hello {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         temporary: bool,
     },
+    /// Unsigned server answer to a client hello rejected only for its timestamp.
+    Retry {
+        /// The server's clock in Unix seconds.
+        timestamp: Integer<i64>,
+    },
 }
 
 rpc_toolkit::reflect_ts!(Hello);
@@ -80,7 +85,7 @@ fn ephemeral() -> StaticSecret {
     StaticSecret::from(rand::random::<[u8; 32]>())
 }
 
-async fn encode(signer: &Signer, context: &str, hello: Hello) -> Result<Vec<u8>, Error> {
+fn encode_body(hello: Hello) -> Result<Vec<u8>, Error> {
     let mut wire = Vec::new();
     serde_cbor::ser::into_writer(
         &Message {
@@ -91,7 +96,17 @@ async fn encode(signer: &Signer, context: &str, hello: Hello) -> Result<Vec<u8>,
         &mut wire,
     )
     .with_kind(ErrorKind::Serialization)?;
-    let proof = RequestProof::sign_commitment(signer, &wire, context).await?;
+    Ok(wire)
+}
+
+async fn encode(
+    signer: &Signer,
+    context: &str,
+    hello: Hello,
+    timestamp: i64,
+) -> Result<Vec<u8>, Error> {
+    let mut wire = encode_body(hello)?;
+    let proof = RequestProof::sign_commitment_at(signer, &wire, context, timestamp).await?;
     serde_cbor::ser::into_writer(&BinaryRequestProof::from(&proof), &mut wire)
         .with_kind(ErrorKind::Serialization)?;
     if wire.len() > MAX_HANDSHAKE_BYTES {
@@ -163,8 +178,36 @@ pub struct PeerIdentity {
     pub temporary: bool,
 }
 
+/// The server's clock from an unsigned retry answer, else `None`.
+pub fn retry_timestamp(response: &[u8]) -> Option<i64> {
+    if response.len() > MAX_HANDSHAKE_BYTES {
+        return None;
+    }
+    let mut reader = std::io::Cursor::new(response);
+    let message: Message = cbor::read(&mut reader).ok()?;
+    match message {
+        Message {
+            protocol,
+            version: VERSION,
+            hello: Hello::Retry { timestamp },
+        } if protocol == PROTOCOL && reader.position() as usize == response.len() => {
+            Some(timestamp.0)
+        }
+        _ => None,
+    }
+}
+
+/// The unsigned answer inviting one hello signed at the server's clock.
+pub(crate) fn retry(timestamp: i64) -> Result<Vec<u8>, Error> {
+    encode_body(Hello::Retry {
+        timestamp: Integer(timestamp),
+    })
+}
+
 /// A single connection's signed initiation, prepared before network deadlines.
 pub struct PreparedClient {
+    signer: Signer,
+    target: Target,
     secret: StaticSecret,
     context: InternedString,
     message: Vec<u8>,
@@ -173,21 +216,38 @@ pub struct PreparedClient {
 impl PreparedClient {
     /// Uses a fresh DH key and request commitment for every connection.
     pub async fn new(signer: &Signer, context: &str, target: Target) -> Result<Self, Error> {
+        Self::at(signer, context, target, unix_timestamp()).await
+    }
+
+    async fn at(
+        signer: &Signer,
+        context: &str,
+        target: Target,
+        timestamp: i64,
+    ) -> Result<Self, Error> {
         let secret = ephemeral();
         let message = encode(
             signer,
             context,
             Hello::Client {
                 ephemeral: ByteString(PublicKey::from(&secret).to_bytes()),
-                target,
+                target: target.clone(),
             },
+            timestamp,
         )
         .await?;
         Ok(Self {
+            signer: signer.clone(),
+            target,
             secret,
             context: context.into(),
             message,
         })
+    }
+
+    /// A fresh initiation for the same signer and target, stamped with the server's clock.
+    pub async fn retry(&self, timestamp: i64) -> Result<Self, Error> {
+        Self::at(&self.signer, &self.context, self.target.clone(), timestamp).await
     }
 
     /// The signed client envelope, without the transport's length prefix.
@@ -274,6 +334,7 @@ where
             client_hello: ByteString(Sha256::digest(request).into()),
             temporary: identity.temporary,
         },
+        unix_timestamp(),
     )
     .await?;
     let cipher = SessionCipher::derive(
