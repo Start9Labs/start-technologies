@@ -137,6 +137,7 @@ async fn inner_main() -> Result<(), Error> {
     let server_identity = auth.server_identity().await?;
     let ctx = ServerContext {
         setup_flash: Arc::new(tokio::sync::Mutex::new(())),
+        system_update: Arc::new(tokio::sync::Mutex::new(())),
         secure_session: None,
         continuations: continuations.clone(),
         auth,

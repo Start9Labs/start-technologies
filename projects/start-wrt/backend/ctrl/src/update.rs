@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::continuations::{Guid, RpcContinuation, WebSocketPolicy};
-use crate::error::Error;
+use crate::prelude::*;
 use crate::progress::{FullProgress, FullProgressTracker, ProgressUnits};
 use crate::registry::device_info::DeviceInfo;
 use crate::registry::os::{asset_for_platform, OsVersionInfo, SIG_CONTEXT};
@@ -77,6 +77,7 @@ pub async fn fetch_versions(registry_url: &str) -> Result<BTreeMap<String, OsVer
 
 /// Revoking the requesting key ends observation on both transports.
 /// Canceling observation does not cancel an accepted update.
+/// Refuses while another update request is in progress.
 pub async fn update_system(
     HandlerArgs {
         context: ctx,
@@ -90,6 +91,7 @@ pub async fn update_system(
         ..
     }: HandlerArgs<ServerContext, UpdateSystemParams, Empty, FullProgress>,
 ) -> Result<UpdateSystemRes, Error> {
+    let in_flight = crate::begin_exclusive(&ctx.system_update, "update")?;
     let none = |rpc_stream: Option<RpcStream<FullProgress>>| {
         if let Some(stream) = rpc_stream {
             let _ = stream.close(Ok::<_, Error>(()));
@@ -145,10 +147,11 @@ pub async fn update_system(
     let mut apply_phase = tracker.add_phase("Applying update".into(), Some(1));
 
     let subscription = startos::auth::continuation_subscription(&ctx, signer).await?;
-    let client = reqwest::Client::new();
+    let client = firmware_client(DOWNLOAD_IDLE_TIMEOUT)?;
     let target_ver_for_task = target_ver.clone();
     let tracker_for_task = tracker.clone();
     let done = tokio::spawn(async move {
+        let _in_flight = in_flight;
         let tracker = tracker_for_task;
         let target_ver = target_ver_for_task;
         let result = do_update(
@@ -205,6 +208,19 @@ pub async fn update_system(
 }
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(300);
+
+/// The longest a mirror may go without sending.
+const DOWNLOAD_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Divided across a mirror's addresses.
+const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn firmware_client(idle: Duration) -> Result<reqwest::Client, Error> {
+    reqwest::Client::builder()
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+        .read_timeout(idle)
+        .build()
+        .map_err(|e| Error::other(format!("building the firmware client: {e}")))
+}
 
 fn legacy_progress_continuation(
     subscription: RevocationSubscription,
@@ -350,7 +366,8 @@ async fn do_update(
     verify_phase: &mut crate::progress::PhaseProgressTrackerHandle,
     apply_phase: &mut crate::progress::PhaseProgressTrackerHandle,
 ) -> Result<(), Error> {
-    let firmware_path = Path::new("/tmp/firmware.bin");
+    // Written only while holding `system_update`; sysupgrade flashes it in place.
+    let firmware_path = Path::new("/tmp/startwrt-update.bin");
 
     download_firmware(client, &asset, firmware_path, |bytes_written| {
         download_phase.set_done(bytes_written);

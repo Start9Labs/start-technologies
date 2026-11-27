@@ -423,9 +423,24 @@ impl CallRemote<ServerContext> for CliContext {
     }
 }
 
+/// Refuses an operation while another run of it holds its lock.
+pub(crate) fn begin_exclusive(
+    lock: &Arc<tokio::sync::Mutex<()>>,
+    operation: &str,
+) -> Result<tokio::sync::OwnedMutexGuard<()>, Error> {
+    lock.clone().try_lock_owned().map_err(|_| {
+        Error::new(
+            eyre!("{operation} already in progress"),
+            ErrorKind::InvalidRequest,
+        )
+    })
+}
+
 #[derive(Clone)]
 pub struct ServerContext {
     pub(crate) setup_flash: Arc<tokio::sync::Mutex<()>>,
+    /// Held by an update request and its task; procd stops the daemon before a flash.
+    pub(crate) system_update: Arc<tokio::sync::Mutex<()>>,
     pub continuations: Arc<continuations::RpcContinuations>,
     pub auth: Arc<auth::AuthState>,
     pub server_identity: startos::sign::Signer,
@@ -441,12 +456,14 @@ impl ServerContext {
         let continuations = Arc::downgrade(&self.continuations);
         let server_identity = self.server_identity.clone();
         let setup_flash = self.setup_flash.clone();
+        let system_update = self.system_update.clone();
         startos::middleware::auth::signature::RequestReplayCheck::new(&self.auth, move |auth| {
             Some(Self {
                 continuations: continuations.upgrade()?,
                 auth,
                 server_identity: server_identity.clone(),
                 setup_flash: setup_flash.clone(),
+                system_update: system_update.clone(),
                 secure_session: None,
             })
         })
@@ -466,6 +483,7 @@ impl Default for ServerContext {
     fn default() -> Self {
         Self {
             setup_flash: Arc::new(tokio::sync::Mutex::new(())),
+            system_update: Arc::new(tokio::sync::Mutex::new(())),
             continuations: Arc::new(continuations::RpcContinuations::new()),
             auth: Arc::new(auth::AuthState::in_memory()),
             server_identity: startos::sign::AnySigningKey::generate().into(),

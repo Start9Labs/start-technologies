@@ -257,7 +257,11 @@ verifies BLAKE3 hash + Ed25519 signatures, then runs `sysupgrade`.
 A typed response stream (the web UI) receives `FullProgress` items and a null final
 result, or the update's error; `progress` is then null. Other callers receive a GUID
 for WebSocket progress streaming. Canceling observation does not cancel an accepted
-update, and revoking the requesting key ends observation.
+update, and revoking the requesting key ends observation. While a `system.update` request is
+checking for, downloading, verifying or applying an update, another `system.update` is
+refused (`InvalidRequest`) until the first returns without an update or its update fails.
+A mirror that cannot be reached within 30 seconds, or does not answer within 60, is
+skipped for the asset's next URL; a download that stops sending for 60 seconds fails.
 
 ```rust
 // Request:

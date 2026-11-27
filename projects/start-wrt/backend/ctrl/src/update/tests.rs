@@ -342,3 +342,169 @@ async fn streamed_progress_ends_with_the_update_result() {
         Progress::Complete(false)
     );
 }
+
+async fn stalled_registry() -> (
+    String,
+    tokio::sync::watch::Sender<bool>,
+    NonDetachingJoinHandle<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let firmware: reqwest::Url = format!("{base}/firmware").parse().unwrap();
+    let info = serde_json::to_value(OsVersionInfo {
+        source_version: "*".parse().unwrap(),
+        squashfs: BTreeMap::from([(
+            DeviceInfo::load().unwrap().os.platform.into(),
+            asset(vec![firmware]).await,
+        )]),
+        ..Default::default()
+    })
+    .unwrap();
+    let (release, released) = tokio::sync::watch::channel(false);
+    let router = Router::new()
+        .route(
+            "/firmware",
+            get(move || {
+                let mut released = released.clone();
+                async move {
+                    let _ = released.wait_for(|released| *released).await;
+                    StatusCode::NOT_FOUND
+                }
+            }),
+        )
+        .route(
+            "/rpc/v0",
+            post(move |axum::Json(request): axum::Json<serde_json::Value>| {
+                let info = info.clone();
+                async move {
+                    assert_eq!(request["method"], "os.version.get");
+                    axum::Json(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request["id"],
+                        "result": { "99.0.0": info },
+                    }))
+                }
+            }),
+        );
+    let task = NonDetachingJoinHandle::from(tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    }));
+    (base, release, task)
+}
+
+fn update_args(
+    context: &ServerContext,
+    registry: &str,
+) -> HandlerArgs<ServerContext, UpdateSystemParams, Empty, FullProgress> {
+    HandlerArgs {
+        context: context.clone(),
+        parent_method: Default::default(),
+        method: Default::default(),
+        params: UpdateSystemParams {
+            registry: Some(registry.to_string()),
+            target_version: None,
+            signer: None,
+        },
+        inherited_params: Empty {},
+        raw_params: imbl_value::Value::Null,
+        rpc_stream: None,
+    }
+}
+
+#[tokio::test]
+async fn an_update_in_flight_refuses_another_until_it_fails() {
+    let (registry, release, _server) = stalled_registry().await;
+    let context = ServerContext::default();
+
+    let first = update_system(update_args(&context, &registry))
+        .await
+        .unwrap();
+    assert_eq!(first.target.as_deref(), Some("99.0.0"));
+    let refused = update_system(update_args(&context, &registry))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::InvalidRequest);
+
+    release.send(true).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while context.system_update.clone().try_lock_owned().is_err() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("a failed update must release the next one");
+    let retried = update_system(update_args(&context, &registry))
+        .await
+        .unwrap();
+    assert_eq!(retried.target.as_deref(), Some("99.0.0"));
+}
+
+#[tokio::test]
+async fn a_request_that_fails_before_starting_leaves_updates_available() {
+    let context = ServerContext::default();
+    let error = update_system(update_args(&context, "http://127.0.0.1:1"))
+        .await
+        .unwrap_err();
+    assert_ne!(error.kind, ErrorKind::InvalidRequest);
+    assert!(context.system_update.clone().try_lock_owned().is_ok());
+}
+
+#[tokio::test]
+async fn a_mirror_that_stops_sending_fails_the_download() {
+    let router = Router::new().route(
+        "/firmware",
+        get(|| async {
+            let partial = futures_util::stream::once(async {
+                Ok::<_, std::io::Error>(axum::body::Bytes::from_static(&FIRMWARE[..4]))
+            });
+            axum::body::Body::from_stream(partial.chain(futures_util::stream::pending()))
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/firmware", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let _server = NonDetachingJoinHandle::from(tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    }));
+    let asset = asset(vec![url]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("firmware.bin");
+    let client = firmware_client(Duration::from_millis(200)).unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        download_firmware(&client, &asset, &path, |_| {}),
+    )
+    .await
+    .expect("an idle mirror must fail the download");
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn a_slow_mirror_that_keeps_sending_completes_the_download() {
+    let router = Router::new().route(
+        "/firmware",
+        get(|| async {
+            let trickle = futures_util::stream::iter(FIRMWARE.chunks(1)).then(|byte| async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                Ok::<_, std::io::Error>(axum::body::Bytes::from_static(byte))
+            });
+            axum::body::Body::from_stream(trickle)
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/firmware", listener.local_addr().unwrap())
+        .parse()
+        .unwrap();
+    let _server = NonDetachingJoinHandle::from(tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    }));
+    let asset = asset(vec![url]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("firmware.bin");
+    let client = firmware_client(Duration::from_millis(500)).unwrap();
+    download_firmware(&client, &asset, &path, |_| {})
+        .await
+        .unwrap();
+    asset.commitment.verify_file(&path).await.unwrap();
+}
