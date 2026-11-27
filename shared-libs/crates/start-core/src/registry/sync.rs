@@ -32,6 +32,8 @@ use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::trusted_keys::connection::{
     connected_registry_urls, is_connected, refresh_registry, registry_url, same_registry,
 };
+use crate::registry::vulnerability::{OS_SUBJECT, Vulnerabilities};
+use crate::trusted_keys::{TrustContext, enabled_keys};
 use crate::util::VersionString;
 use crate::util::future::NonDetachingJoinHandle;
 
@@ -85,6 +87,12 @@ pub struct OsUpdateCache {
     /// Failure of the latest synchronization attempt; absent while connecting or connected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// StartOS vulnerabilities the source publishes, signed or not by a trusted key.
+    #[serde(default)]
+    pub vulnerabilities: Vulnerabilities,
+    /// Entries of `vulnerabilities` that a key trusted for StartOS updates signed.
+    #[serde(default)]
+    pub trusted_vulnerabilities: BTreeSet<InternedString>,
 }
 
 rpc_toolkit::reflect_ts!(OsUpdateCache);
@@ -264,6 +272,8 @@ pub async fn watch_registries(
     let context: ContextProvider = Arc::new(context);
     let _update_targets: NonDetachingJoinHandle<()> =
         tokio::spawn(watch_installed_versions(db.clone(), context.clone())).into();
+    let _vulnerability_trust: NonDetachingJoinHandle<()> =
+        tokio::spawn(watch_trusted_keys(db.clone(), context.clone())).into();
     let mut watch = RegistrySettingsWatch::new(&db).await;
     let mut tasks = RegistryTasks::new();
     let mut language = None;
@@ -509,6 +519,8 @@ fn set_status(
                             default_locale: None,
                             status,
                             error: error.map(str::to_owned),
+                            vulnerabilities: BTreeMap::new(),
+                            trusted_vulnerabilities: BTreeSet::new(),
                         });
                     } else if let Some(cache) = cache {
                         cache.status = status;
@@ -599,14 +611,148 @@ fn refresh_selections(
             Ok((selection(&index, &id, &device, target.as_ref())?, id))
         })
         .collect::<Result<Vec<_>, Error>>()?;
+    let keys = enabled_keys(
+        &db.as_public().as_server_info().as_trusted_keys().de()?,
+        TrustContext::Marketplace,
+    );
+    let mut found = Vec::new();
     let packages = cache_entry_mut(db, url)?.as_selections_mut();
-    for (selected, id) in selections {
-        match selected {
-            Some(selected) => packages.insert(&id, &selected)?,
-            None => packages.remove(&id)?,
+    for (mut selected, id) in selections {
+        let Some(selected) = &mut selected else {
+            packages.remove(&id)?;
+            continue;
         };
+        let published = index
+            .as_packages()
+            .as_idx(&id)
+            .map(|package| package.as_vulnerabilities().de())
+            .transpose()?
+            .unwrap_or_default();
+        let trusted = crate::registry::vulnerability::trusted(&id, &published, &keys);
+        selected.vulnerabilities = trusted.keys().cloned().collect();
+        let previous: BTreeSet<InternedString> = packages
+            .as_idx(&id)
+            .map(|previous| previous.as_vulnerabilities().de())
+            .transpose()?
+            .unwrap_or_default();
+        if let Some(version) = installed.get(&id) {
+            found.extend(
+                trusted
+                    .into_iter()
+                    .filter(|(vid, v)| !previous.contains(vid) && v.affects(version))
+                    .map(|(vid, v)| (id.clone(), version.clone(), vid, v)),
+            );
+        }
+        packages.insert(&id, selected)?;
+    }
+    for (id, version, vid, vulnerability) in found {
+        let title = db
+            .as_public()
+            .as_package_data()
+            .as_idx(&id)
+            .map(|entry| {
+                entry
+                    .as_state_info()
+                    .as_manifest(ManifestPreference::Old)
+                    .as_metadata()
+                    .as_title()
+                    .de()
+            })
+            .transpose()?
+            .map_or_else(|| id.to_string(), |title| title.to_string());
+        crate::registry::vulnerability::notify_found(
+            db,
+            url,
+            Some((&id, &title)),
+            &version,
+            &vid,
+            &vulnerability,
+        )?;
     }
     Ok(())
+}
+
+/// Recomputes trusted StartOS vulnerabilities and notifies about new ones affecting this StartOS.
+fn refresh_os_vulnerabilities(
+    db: &mut DatabaseModel,
+    previous: &BTreeSet<InternedString>,
+    os_version: &exver::Version,
+) -> Result<(), Error> {
+    let Some(mut cache) = db.as_public().as_os_update_cache().de()? else {
+        return Ok(());
+    };
+    let keys = enabled_keys(
+        &db.as_public().as_server_info().as_trusted_keys().de()?,
+        TrustContext::Os,
+    );
+    let trusted = crate::registry::vulnerability::trusted(OS_SUBJECT, &cache.vulnerabilities, &keys);
+    let version = VersionString::from(exver::ExtendedVersion::new(
+        os_version.clone(),
+        exver::Version::default(),
+    ));
+    cache.trusted_vulnerabilities = trusted.keys().cloned().collect();
+    let registry = cache.registry.clone();
+    db.as_public_mut().as_os_update_cache_mut().ser(&Some(cache))?;
+    for (vid, vulnerability) in trusted {
+        if !previous.contains(&vid) && vulnerability.affects(&version) {
+            crate::registry::vulnerability::notify_found(
+                db,
+                &registry,
+                None,
+                &version,
+                &vid,
+                &vulnerability,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Reapplies vulnerability trust after the server's trusted keys change.
+fn refresh_trusted_vulnerabilities(db: &mut DatabaseModel, device: &DeviceInfo) -> Result<(), Error> {
+    for url in db.as_public().as_registry_indexes().keys()? {
+        let ids = db
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url)
+            .map(|cache| cache.as_selections().keys())
+            .transpose()?
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        refresh_selections(db, &url, ids, device)?;
+    }
+    let previous = db
+        .as_public()
+        .as_os_update_cache()
+        .de()?
+        .map(|cache| cache.trusted_vulnerabilities)
+        .unwrap_or_default();
+    refresh_os_vulnerabilities(db, &previous, &device.os.version)
+}
+
+async fn watch_trusted_keys(db: TypedPatchDb<Database>, context: ContextProvider) {
+    let mut watch = db
+        .watch("/public/serverInfo/trustedKeys".parse().unwrap())
+        .await;
+    loop {
+        if watch.peek_and_mark_seen().is_err() || watch.changed().await.is_err() {
+            return;
+        }
+        let result = async {
+            let Some(ctx) = context() else {
+                return Ok(());
+            };
+            let device = DeviceInfo::load(&ctx).await?;
+            db.mutate(|db| refresh_trusted_vulnerabilities(db, &device))
+                .await
+                .result
+        }
+        .await;
+        if let Err(error) = result {
+            tracing::warn!(?error, "Could not reapply vulnerability trust");
+        }
+    }
 }
 
 fn refresh_update_targets(db: &mut DatabaseModel, device: &DeviceInfo) -> Result<(), Error> {
@@ -923,6 +1069,14 @@ fn publish_snapshot(
                 .map(|cache| cache.as_info().de().map(|info| info.name))
                 .transpose()?
                 .flatten();
+            let previous = db
+                .as_public()
+                .as_os_update_cache()
+                .de()?
+                .filter(|cache| same_registry(cache.registry.as_str(), url.as_str()))
+                .map(|cache| cache.trusted_vulnerabilities)
+                .unwrap_or_default();
+            let vulnerabilities = index.as_vulnerabilities().de()?;
             crate::update::security::notify_updates(db, url, name, index.de()?)?;
             db.as_public_mut()
                 .as_os_update_cache_mut()
@@ -932,7 +1086,10 @@ fn publish_snapshot(
                     default_locale: None,
                     status: RegistryStatus::Connected,
                     error: None,
+                    vulnerabilities,
+                    trusted_vulnerabilities: BTreeSet::new(),
                 }))?;
+            refresh_os_vulnerabilities(db, &previous, &device.os.version)?;
         }
     }
     sync_os_default_locale(db)

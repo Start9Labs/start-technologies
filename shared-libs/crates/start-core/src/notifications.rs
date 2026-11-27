@@ -424,6 +424,22 @@ pub struct OsUpdateAvailable {}
 rpc_toolkit::reflect_ts!(OsUpdateAvailable);
 rpc_toolkit::ts_export!(OsUpdateAvailable, namespaces = [""]);
 
+/// A newly trusted vulnerability affecting an installed package or this StartOS.
+#[derive(Debug, Serialize, Deserialize, VisitFields)]
+#[serde(tag = "kind", rename = "vulnerability-found", rename_all = "camelCase")]
+#[visit(ts(rename = "VulnerabilityFound"))]
+pub struct VulnerabilityFound {
+    pub registry: url::Url,
+    /// The affected package; absent for StartOS.
+    pub package_id: Option<PackageId>,
+    pub version: crate::util::VersionString,
+    pub vulnerability_id: InternedString,
+    pub stop_recommended: bool,
+}
+
+rpc_toolkit::reflect_ts!(VulnerabilityFound);
+rpc_toolkit::ts_export!(VulnerabilityFound, namespaces = [""]);
+
 /// A key a connected registry newly offers, imported untrusted.
 #[derive(Debug, Serialize, Deserialize, VisitFields)]
 #[serde(tag = "kind", rename = "registry-key-added", rename_all = "camelCase")]
@@ -475,6 +491,9 @@ impl NotificationType for RegistryKeyAdded {
 }
 impl NotificationType for RegistryKeyDropped {
     const CODE: u32 = 5;
+}
+impl NotificationType for VulnerabilityFound {
+    const CODE: u32 = 6;
 }
 
 #[instrument(skip(subtype, db))]

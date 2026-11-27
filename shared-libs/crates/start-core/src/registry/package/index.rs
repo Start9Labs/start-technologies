@@ -61,6 +61,8 @@ pub struct PackageInfo {
     pub authorized: BTreeMap<Guid, VersionRange>,
     pub versions: BTreeMap<VersionString, PackageVersionInfo>,
     pub categories: BTreeSet<InternedString>,
+    #[serde(default)]
+    pub vulnerabilities: crate::registry::vulnerability::Vulnerabilities,
 }
 
 rpc_toolkit::reflect_ts!(PackageInfo);

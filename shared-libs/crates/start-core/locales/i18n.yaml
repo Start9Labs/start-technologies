@@ -7543,6 +7543,83 @@ about.add-package-category:
   fr_FR: "Ajouter un paquet à une catégorie"
   pl_PL: "Dodaj pakiet do kategorii"
 
+about.add-package-vulnerability:
+  en_US: "Sign and publish a package vulnerability"
+  de_DE: "Paket-Schwachstelle signieren und veröffentlichen"
+  es_ES: "Firmar y publicar una vulnerabilidad del paquete"
+  fr_FR: "Signer et publier une vulnérabilité du paquet"
+  pl_PL: "Podpisz i opublikuj podatność pakietu"
+
+about.remove-package-vulnerability:
+  en_US: "Remove a package vulnerability"
+  de_DE: "Paket-Schwachstelle entfernen"
+  es_ES: "Eliminar una vulnerabilidad del paquete"
+  fr_FR: "Supprimer une vulnérabilité du paquet"
+  pl_PL: "Usuń podatność pakietu"
+
+about.commands-package-vulnerabilities:
+  en_US: "Commands to publish and remove package vulnerabilities"
+  de_DE: "Befehle zum Veröffentlichen und Entfernen von Paket-Schwachstellen"
+  es_ES: "Comandos para publicar y eliminar vulnerabilidades de paquetes"
+  fr_FR: "Commandes pour publier et supprimer des vulnérabilités de paquets"
+  pl_PL: "Polecenia do publikowania i usuwania podatności pakietów"
+
+about.add-os-vulnerability:
+  en_US: "Sign and publish a StartOS vulnerability"
+  de_DE: "StartOS-Schwachstelle signieren und veröffentlichen"
+  es_ES: "Firmar y publicar una vulnerabilidad de StartOS"
+  fr_FR: "Signer et publier une vulnérabilité de StartOS"
+  pl_PL: "Podpisz i opublikuj podatność StartOS"
+
+about.remove-os-vulnerability:
+  en_US: "Remove a StartOS vulnerability"
+  de_DE: "StartOS-Schwachstelle entfernen"
+  es_ES: "Eliminar una vulnerabilidad de StartOS"
+  fr_FR: "Supprimer une vulnérabilité de StartOS"
+  pl_PL: "Usuń podatność StartOS"
+
+about.commands-os-vulnerabilities:
+  en_US: "Commands to publish and remove StartOS vulnerabilities"
+  de_DE: "Befehle zum Veröffentlichen und Entfernen von StartOS-Schwachstellen"
+  es_ES: "Comandos para publicar y eliminar vulnerabilidades de StartOS"
+  fr_FR: "Commandes pour publier et supprimer des vulnérabilités de StartOS"
+  pl_PL: "Polecenia do publikowania i usuwania podatności StartOS"
+
+help.arg.vulnerability-id:
+  en_US: "Vulnerability identifier, such as a CVE number"
+  de_DE: "Schwachstellen-Kennung, etwa eine CVE-Nummer"
+  es_ES: "Identificador de la vulnerabilidad, como un número CVE"
+  fr_FR: "Identifiant de la vulnérabilité, par exemple un numéro CVE"
+  pl_PL: "Identyfikator podatności, np. numer CVE"
+
+help.arg.vulnerability-affected:
+  en_US: "Version range the vulnerability affects"
+  de_DE: "Versionsbereich, den die Schwachstelle betrifft"
+  es_ES: "Rango de versiones afectado por la vulnerabilidad"
+  fr_FR: "Plage de versions affectée par la vulnérabilité"
+  pl_PL: "Zakres wersji, których dotyczy podatność"
+
+help.arg.vulnerability-circumstances:
+  en_US: "When the affected versions are exploitable"
+  de_DE: "Wann die betroffenen Versionen ausnutzbar sind"
+  es_ES: "Cuándo se pueden explotar las versiones afectadas"
+  fr_FR: "Quand les versions affectées sont exploitables"
+  pl_PL: "Kiedy można wykorzystać podatne wersje"
+
+help.arg.vulnerability-impact:
+  en_US: "Damage a successful exploit can do"
+  de_DE: "Schaden, den ein erfolgreicher Angriff anrichten kann"
+  es_ES: "Daño que puede causar un ataque exitoso"
+  fr_FR: "Dommages qu'une exploitation réussie peut causer"
+  pl_PL: "Szkody, jakie może wyrządzić udany atak"
+
+help.arg.vulnerability-stop-recommended:
+  en_US: "Recommend stopping the service until it is patched"
+  de_DE: "Empfehlen, den Dienst bis zur Behebung anzuhalten"
+  es_ES: "Recomendar detener el servicio hasta que se corrija"
+  fr_FR: "Recommander d'arrêter le service jusqu'à sa correction"
+  pl_PL: "Zalecaj zatrzymanie usługi do czasu poprawki"
+
 about.add-package-registry:
   en_US: "Add package to registry index"
   de_DE: "Paket zum Registry-Index hinzufügen"
@@ -9996,3 +10073,24 @@ volume.restore-conflict:
   es_ES: "No se puede revertir %{id}: tanto la copia de seguridad como los datos activos contienen archivos, por lo que no está claro cuál es el actual. Resuélvalo manualmente antes de volver a intentarlo."
   fr_FR: "Impossible de restaurer %{id} : la sauvegarde et les données actives contiennent toutes deux des fichiers, on ne sait donc pas laquelle est à jour. Résolvez ce point manuellement avant de réessayer."
   pl_PL: "Nie można wycofać %{id}: zarówno kopia zapasowa, jak i dane bieżące zawierają pliki, więc nie jest jasne, które są aktualne. Rozwiąż to ręcznie przed ponowną próbą."
+
+vulnerability.title:
+  en_US: "Vulnerability found"
+  de_DE: "Schwachstelle gefunden"
+  es_ES: "Vulnerabilidad encontrada"
+  fr_FR: "Vulnérabilité détectée"
+  pl_PL: "Wykryto podatność"
+
+vulnerability.package-message:
+  en_US: "%{title} %{version} has a known vulnerability: %{impact}"
+  de_DE: "%{title} %{version} hat eine bekannte Schwachstelle: %{impact}"
+  es_ES: "%{title} %{version} tiene una vulnerabilidad conocida: %{impact}"
+  fr_FR: "%{title} %{version} présente une vulnérabilité connue : %{impact}"
+  pl_PL: "%{title} %{version} ma znaną podatność: %{impact}"
+
+vulnerability.os-message:
+  en_US: "StartOS %{version} has a known vulnerability: %{impact}"
+  de_DE: "StartOS %{version} hat eine bekannte Schwachstelle: %{impact}"
+  es_ES: "StartOS %{version} tiene una vulnerabilidad conocida: %{impact}"
+  fr_FR: "StartOS %{version} présente une vulnérabilité connue : %{impact}"
+  pl_PL: "StartOS %{version} ma znaną podatność: %{impact}"

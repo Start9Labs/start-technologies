@@ -45,6 +45,7 @@ pub mod reader;
 pub mod signer;
 pub mod sync;
 pub mod upstream;
+pub mod vulnerability;
 
 #[cfg(test)]
 pub(crate) mod tests;

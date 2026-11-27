@@ -408,6 +408,9 @@ pub struct PackageSelection {
     /// server can install.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_target: Option<VersionString>,
+    /// Published vulnerabilities, in the saved index, that a key trusted for packages signed.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub vulnerabilities: BTreeSet<InternedString>,
 }
 
 rpc_toolkit::reflect_ts!(PackageSelection);
@@ -496,6 +499,7 @@ pub(crate) fn selection(
         versions,
         first_published_at: first_published_at(index, id)?,
         update_target: update_target.cloned(),
+        vulnerabilities: BTreeSet::new(),
     }))
 }
 
