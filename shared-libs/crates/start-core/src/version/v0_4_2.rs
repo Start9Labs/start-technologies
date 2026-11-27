@@ -39,7 +39,8 @@ mod tests {
 
     use super::*;
     use crate::db::model::Database;
-    use crate::trusted_keys::{initial_trusted_keys, legacy};
+    use crate::trusted_keys::initial_trusted_keys;
+    use crate::version::v0_4_1_2::{decode_keys, grouped_keys};
     use crate::version::{Current, rollback_to_unchecked, v0_4_1_1};
 
     #[tokio::test]
@@ -65,7 +66,7 @@ mod tests {
                     json!({ "enabled": enabled, "settings": settings.clone() });
                 fixture["public"]["serverInfo"]["trustedKeys"] =
                     if matches!(from, "0.4.1" | "0.4.1.1") {
-                        to_value(&legacy::grouped_keys(trust.clone())).unwrap()
+                        to_value(&grouped_keys(trust.clone())).unwrap()
                     } else {
                         to_value(&trust).unwrap()
                     };
@@ -95,7 +96,7 @@ mod tests {
                 );
                 assert_eq!(migrated["public"]["serverInfo"]["nut"], saved_nut);
                 assert_eq!(
-                    legacy::decode_keys(
+                    decode_keys(
                         migrated["public"]["serverInfo"]["trustedKeys"].clone(),
                         chrono::Utc::now(),
                     )
