@@ -137,7 +137,7 @@ mod tests {
     #[tokio::test]
     async fn signer_files_replace_removed_keys_and_preserve_an_empty_selection() {
         let temp = TmpDir::new().await.unwrap();
-        let keys = crate::update::signers::initial_signers()
+        let keys = crate::trusted_keys::initial_signer_labels()
             .into_keys()
             .map(|key| key.parse().unwrap())
             .collect::<BTreeSet<_>>();
@@ -158,7 +158,7 @@ mod tests {
         let seeded = read_signers(&defaults).await.unwrap();
         assert_eq!(
             seeded,
-            crate::update::signers::initial_signers()
+            crate::trusted_keys::initial_signer_labels()
                 .into_keys()
                 .map(|key| key.parse().unwrap())
                 .collect()

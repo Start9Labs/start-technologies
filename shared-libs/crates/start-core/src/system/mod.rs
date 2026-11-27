@@ -35,7 +35,10 @@ use crate::{MAIN_DATA, PACKAGE_DATA};
 
 mod disk_health;
 pub(crate) mod log_level;
+mod temperature;
 pub(crate) mod trust_ca;
+
+pub use temperature::{SensorKind, TemperatureSensor};
 
 #[cfg(test)]
 mod metrics_tests;
@@ -582,7 +585,8 @@ impl<'de> Deserialize<'de> for GigaBytes {
 #[derive(Deserialize, Serialize, Clone, Debug, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricsGeneral {
-    pub temperature: Option<Celsius>,
+    #[serde(default)]
+    pub temperatures: Vec<TemperatureSensor>,
 }
 
 rpc_toolkit::reflect_ts!(MetricsGeneral);
@@ -726,7 +730,7 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
     db: &TypedPatchDb<Database>,
     mut mk_shutdown: F,
 ) {
-    let init_temp = match get_temp().await {
+    let init_temp = match temperature::read().await {
         Ok(a) => Some(a),
         Err(e) => {
             tracing::error!(
@@ -819,7 +823,7 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
 
     cache.send(Some(Metrics {
         general: MetricsGeneral {
-            temperature: init_temp,
+            temperatures: init_temp.unwrap_or_default(),
         },
         memory: init_mem,
         cpu: init_cpu,
@@ -828,7 +832,7 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
 
     let mut task_vec = Vec::new();
     if should_launch_temp_task {
-        task_vec.push(launch_temp_task(cache, mk_shutdown()).boxed());
+        task_vec.push(launch_temp_task(cache, db, mk_shutdown()).boxed());
     }
     task_vec.push(launch_cpu_task(cache, proc_stat, mk_shutdown()).boxed());
     task_vec.push(launch_mem_task(cache, mk_shutdown()).boxed());
@@ -839,15 +843,13 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
 
 async fn launch_temp_task(
     cache: &Watch<Option<Metrics>>,
+    db: &TypedPatchDb<Database>,
     mut shutdown: Receiver<Option<Shutdown>>,
 ) {
+    let mut thermal_watch = temperature::ThermalWatch::default();
     loop {
-        match get_temp().await {
-            Ok(a) => {
-                cache.send_if_modified(|c| {
-                    c.as_mut().unwrap().general.temperature.replace(a) != Some(a)
-                });
-            }
+        let temperatures = match temperature::read().await {
+            Ok(a) => a,
             Err(e) => {
                 tracing::error!(
                     "{}",
@@ -857,8 +859,19 @@ async fn launch_temp_task(
                     )
                 );
                 tracing::debug!("{:?}", e);
+                Vec::new()
             }
-        }
+        };
+        thermal_watch.check(db, &temperatures).await;
+        cache.send_if_modified(|c| {
+            let general = &mut c.as_mut().unwrap().general;
+            if general.temperatures != temperatures {
+                general.temperatures = temperatures;
+                true
+            } else {
+                false
+            }
+        });
         tokio::select! {
             _ = shutdown.recv() => return,
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(4)) => (),
@@ -958,40 +971,6 @@ async fn launch_disk_task(
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => (),
         }
     }
-}
-
-#[instrument(skip_all)]
-async fn get_temp() -> Result<Celsius, Error> {
-    let temp = serde_json::from_slice::<serde_json::Value>(
-        &Command::new("sensors")
-            .arg("-j")
-            .invoke(ErrorKind::Filesystem)
-            .await?,
-    )
-    .with_kind(ErrorKind::Deserialization)?
-    .as_object()
-    .into_iter()
-    .flatten()
-    .flat_map(|(_, v)| v.as_object())
-    .flatten()
-    .flat_map(|(_, v)| v.as_object())
-    .flatten()
-    .filter_map(|(k, v)| {
-        // we have seen so far that `temp1` is always a composite reading of some sort, so we should just use that for each chip
-        if k.trim() == "temp1_input" {
-            v.as_f64()
-        } else {
-            None
-        }
-    })
-    .reduce(f64::max)
-    .ok_or_else(|| {
-        Error::new(
-            eyre!("{}", t!("system.no-temperatures-available")),
-            ErrorKind::Filesystem,
-        )
-    })?;
-    Ok(Celsius(temp))
 }
 
 #[derive(Debug, Clone)]
@@ -1521,7 +1500,7 @@ pub async fn set_language(
 #[tokio::test]
 #[ignore]
 pub async fn test_get_temp() {
-    println!("{}", get_temp().await.unwrap())
+    println!("{:?}", temperature::read().await.unwrap())
 }
 
 #[tokio::test]

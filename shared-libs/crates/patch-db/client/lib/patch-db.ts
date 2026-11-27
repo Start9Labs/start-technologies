@@ -13,6 +13,7 @@ import {
   getValueByPointer,
   pathFromArray,
 } from './json-patch-lib'
+import { reconcile } from './projection'
 
 /**
  * Observable database client backed by RFC 6902 JSON Patches.
@@ -90,9 +91,8 @@ export class PatchDB<T extends { [key: string]: any }> {
   /**
    * Returns an observable of the value at the given path within the document.
    *
-   * Overloaded for 0–6 path segments with full type safety. The returned
-   * observable emits whenever a patch touches the watched path (or any
-   * ancestor/descendant of it).
+   * Overloaded for 0–6 path segments with full type safety.
+   * After the initial value, emits only when `value !== previousValue`.
    *
    * The observable waits for the first non-zero revision (i.e. a real dump)
    * before emitting, so subscribers won't see the empty initial state.
@@ -241,16 +241,19 @@ export class PatchDB<T extends { [key: string]: any }> {
     })
   }
 
+  /** Keeps the identity of every subtree the dump leaves unchanged. */
   protected handleDump(dump: Dump<T>, cache: Dump<T>): void {
-    cache.value = { ...dump.value }
+    cache.value = reconcile(cache.value, dump.value ?? {}) as T
     Object.keys(this.watchedNodes).forEach(watchedPath => {
       this.updateWatchedNode(watchedPath, cache.value)
     })
   }
 
+  /** Notifies the watch only when its value is a different object. */
   protected updateWatchedNode(path: string, data: T): void {
+    const node = this.watchedNodes[path]
     const value = getValueByPointer(data, path)
-    this.watchedNodes[path]?.subject.next(value)
+    if (node && node.subject.value !== value) node.subject.next(value)
   }
 
   private isRevision(update: Update<T>): update is Revision {

@@ -34,7 +34,7 @@ with `<header tuiHeader><h3 tuiTitle>` and `<ul tuiList="s">`. A `role="table"` 
       <small tuiSubtitle>Your vendor's security team</small>
     </span>
     <aside tuiAccessories>
-      <span tuiBadge appearance="positive" iconStart="@tui.lock">StartTunnel</span>
+      <span tuiBadge appearance="positive" iconStart="@tui.lock">Encrypted</span>
     </aside>
   </header>
   <p tuiDescription>…</p>
@@ -43,8 +43,8 @@ with `<header tuiHeader><h3 tuiTitle>` and `<ul tuiList="s">`. A `role="table"` 
 <code tuiChip size="xs">start-cli</code>
 ```
 
-**3. Per-component loader + try/catch + error toast → `TaskService.run(task, 'Saving')`**
-(state.md). A flow that needs raw promise semantics keeps a manual loader; the wrapper is not
+**3. Per-component loader + try/catch + error toast → the app's action wrapper,
+`run(task, 'Saving')`** (state.md). A flow that needs raw promise semantics keeps a manual loader; the wrapper is not
 forced where it doesn't fit.
 
 **4. Duplicated desktop/mobile DOM → one DOM restyled per breakpoint** (styling.md, Responsive).
@@ -71,7 +71,7 @@ on the element that needs more (styling.md). Physical properties → logical (`i
 layout pokes die with the primitive that replaces them; custom appearance CSS
 (`[tuiCardLarge] { background: … }`) → `appearance="floating"`. When a global override _is_
 warranted, double the selector (`.g-negative.g-negative { … }`,
-`tui-dropdown[data-appearance='start-os'][data-appearance='start-os']`).
+`tui-dropdown[data-appearance='app'][data-appearance='app']`).
 
 **9. Form ceremony → `NonNullableFormBuilder` shorthand** (forms.md), with single-use private
 fields inlined into the group literal.
@@ -94,10 +94,10 @@ a `switchMap(async …)` that builds an object → `map(c => c ?? defaultConfig)
 needless signal ceremony gets deleted (a `TitleStrategy` injection where
 `toSignal(router.events)` as a change trigger sufficed).
 
-**13. DI style.** `private readonly patch: PatchDB<DataModel> = inject(PatchDB)` →
-`inject<PatchDB<DataModel>>(PatchDB)`; inject the **narrow** dependency (`PATCH_CACHE`
-observable, not the whole `PatchDB`) to break cycles; type against the abstract class; a child
-may inject its parent component instance (`inject(MarketplacePreviewComponent)`) instead of
+**13. DI style.** `private readonly store: Store<DataModel> = inject(Store)` →
+`inject<Store<DataModel>>(Store)`; inject the **narrow** dependency (a `CACHE` observable
+token, not the whole store) to break cycles; type against the abstract class; a child may
+inject its parent component instance (`inject(PreviewComponent)`) instead of
 prop-drilling; hand-rolled unions → library types (`PolymorpheusContent`).
 
 **14. Dead code dies immediately.** Unused components, `.html`/`.scss` orphans,
@@ -147,4 +147,4 @@ for proper nouns and page titles.
    `provideTaiga({ mode })`.
 5. **Adopt new primitives as they ship**: `linkedSignal`, `@let`, `TUI_BREAKPOINT`,
    `@Service()`, `text-wrap: balance`.
-6. Version pinning and the fleet table's update are in SKILL.md, The fleet.
+6. Version pinning is in SKILL.md, Stack; each repo records its own versions.

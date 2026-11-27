@@ -1,90 +1,94 @@
-import { Component, input } from '@angular/core'
+import { Component, input, Pipe, PipeTransform } from '@angular/core'
+import { i18nKey, i18nPipe } from '@start9labs/shared'
+import { T } from '@start9labs/start-core'
+import { TuiCell, TuiTitle } from '@taiga-ui/core'
+import { TuiProgress } from '@taiga-ui/kit'
+import { ValuePipe } from './value.pipe'
+
+const NAMES: Record<T.SensorKind, i18nKey> = {
+  cpu: 'Processor',
+  gpu: 'Graphics',
+  memory: 'Memory',
+  storage: 'Storage drive',
+  network: 'Network adapter',
+  chipset: 'Chipset',
+  system: 'System',
+  other: 'Sensor',
+}
+
+/** Gauges start where no part is warm yet and fill at the sensor's critical limit. */
+const FLOOR = 40
+
+@Pipe({ name: 'gauge' })
+export class GaugePipe implements PipeTransform {
+  transform({ temperature, high, critical }: T.TemperatureSensor) {
+    const floor = Math.min(FLOOR, Number.parseFloat(high.value) - 10)
+    const t = Number.parseFloat(temperature.value) - floor
+    const h = Number.parseFloat(high.value) - floor
+    const c = Number.parseFloat(critical.value) - floor
+    const warm = `${(100 * h) / c}%`
+
+    return {
+      max: c,
+      value: Math.min(Math.max(t, 0), c),
+      color: `linear-gradient(to right, var(--tui-status-positive) ${warm}, var(--tui-status-warning) ${warm}, var(--tui-status-negative))`,
+      hot: t >= h && t < c,
+      critical: t >= c,
+    }
+  }
+}
 
 @Component({
   selector: 'metrics-temperature',
   template: `
-    <svg viewBox="0 0 43 95" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path
-        d="M31.7543 56.2935C31.5285 56.1505 31.3425 55.9529 31.2135 55.7188C31.0846 55.4848 31.0168 55.2219 31.0165 54.9547V12.2071C31.0165 9.68211 30.0134 7.26051 28.228 5.47505C26.4425 3.68959 24.0209 2.68652 21.4959 2.68652C18.9708 2.68652 16.5492 3.68959 14.7638 5.47505C12.9783 7.26051 11.9753 9.68211 11.9753 12.2071V54.9547C11.9748 55.2214 11.9072 55.4837 11.7786 55.7174C11.65 55.951 11.4645 56.1485 11.2394 56.2915C8.41934 58.1285 6.12747 60.6696 4.59028 63.6636C3.05309 66.6576 2.32379 70.001 2.47448 73.3632C2.70143 78.3319 4.86361 83.0146 8.49859 86.4098C12.1336 89.8049 16.9527 91.6429 21.9254 91.5307C26.8981 91.4185 31.6294 89.365 35.1076 85.8094C38.5857 82.2537 40.5345 77.4783 40.5371 72.5043C40.5385 69.2847 39.7359 66.1157 38.2022 63.2848C36.6684 60.4539 34.4521 58.0508 31.7543 56.2935Z"
-        stroke="var(--tui-background-neutral-1)"
-        stroke-width="4"
-        stroke-miterlimit="10"
-        stroke-linecap="round"
-      />
-      <rect
-        x="18"
-        y="10"
-        width="7"
-        height="60"
-        rx="3"
-        fill="var(--tui-background-neutral-1)"
-      />
-      <rect
-        x="18"
-        y="10"
-        width="7"
-        height="60"
-        rx="3"
-        class="bar"
-        fill="url(#temperature)"
-      />
-      <path
-        d="M21.5011 82.0256C26.7592 82.0256 31.0217 77.7631 31.0217 72.505C31.0217 67.2469 26.7592 62.9844 21.5011 62.9844C16.243 62.9844 11.9805 67.2469 11.9805 72.505C11.9805 77.7631 16.243 82.0256 21.5011 82.0256Z"
-        fill="#3853E3"
-      />
-      <defs>
-        <linearGradient
-          id="temperature"
-          x1="21"
-          y1="13"
-          x2="21"
-          y2="66"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop offset="0" stop-color="#EC2E34" />
-          <stop offset="0.35" stop-color="#C48510" />
-          <stop offset="0.65" stop-color="#00A030" />
-          <stop offset="1" stop-color="#325CE3" />
-        </linearGradient>
-      </defs>
-    </svg>
-    <b>{{ value() ? value() + ' C°' : 'N/A' }}</b>
+    @if (value(); as sensors) {
+      @for (sensor of sensors; track sensor.id) {
+        @let gauge = sensor | gauge;
+        <div>
+          <div tuiCell="s">
+            <span tuiTitle>
+              {{ names[sensor.kind] | i18n }}
+              <span tuiSubtitle>{{ sensor.id }}</span>
+            </span>
+            <b
+              [class.g-warning]="gauge.hot"
+              [class.g-negative]="gauge.critical"
+            >
+              {{ sensor.temperature.value | value }}
+              {{ sensor.temperature.unit }}
+            </b>
+          </div>
+          <progress
+            tuiProgressBar
+            tuiProgressFixedGradient
+            size="s"
+            [max]="gauge.max"
+            [value]="gauge.value"
+            [color]="gauge.color"
+          ></progress>
+        </div>
+      } @empty {
+        <p class="g-secondary">
+          {{ 'No temperature sensors found' | i18n }}
+        </p>
+      }
+    }
   `,
   styles: `
-    @use '@taiga-ui/styles/utils' as taiga;
-
     :host {
-      height: 100%;
-      min-height: 9rem;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      margin: auto;
+      gap: 0.75rem;
+      padding-block-end: 0.625rem;
     }
 
-    svg {
-      width: auto;
-      height: 75%;
-      max-width: 100%;
-    }
-
-    span {
-      width: 4rem;
-      flex-shrink: 0;
-      white-space: nowrap;
-      text-align: center;
-    }
-
-    .bar {
-      @include taiga.transition(clip-path);
-      clip-path: inset(var(--fill) 0 0 0);
+    [tuiSubtitle] {
+      color: var(--tui-text-tertiary);
     }
   `,
-  host: {
-    '[style.--fill.%]': '100 - value()',
-  },
+  imports: [TuiCell, TuiTitle, TuiProgress, GaugePipe, ValuePipe, i18nPipe],
 })
 export class TemperatureComponent {
-  readonly value = input.required<number>()
+  readonly value = input<readonly T.TemperatureSensor[]>()
+  readonly names = NAMES
 }

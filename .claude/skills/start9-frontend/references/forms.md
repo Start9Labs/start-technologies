@@ -3,7 +3,7 @@
 - **`inject(NonNullableFormBuilder).group({...})` with array shorthand** as a field initializer;
   types are inferred, never annotated. Inline literal narrowing where needed
   (`protocol: ['tcp' as Protocol]`). `FormBuilder`/untyped `FormControl`: banned (the one
-  exception: StartOS's spec-driven dynamic form engine legitimately uses `UntypedFormBuilder`).
+  exception: a spec-driven dynamic form engine, whose shape is data, uses `UntypedFormBuilder`).
 
 ```ts
 protected readonly form = inject(NonNullableFormBuilder).group({
@@ -50,8 +50,8 @@ that `strictTemplates` cannot see. Selects:
 
 - **Error messages are declarative and central**: bare `<tui-error formControlName="x" />` +
   `tuiValidationErrorsProvider({...})` — at root for a monolingual app, in **component
-  `providers`** per dialog/page, or via a wrapper that routes messages through i18n
-  (`provideTranslatedValidationErrors` in start-wrt, messages as reactive `computed` signals).
+  `providers`** per dialog/page, or via a wrapper provider that routes messages through i18n
+  (messages as reactive `computed` signals).
   Never per-field message markup; never the legacy `[error]="[] | tuiFieldError | async"` chain.
 - **Cross-field validation is declarative**: `[tuiValidator]="form.value.password || '' |
 tuiMapper: match"` with a `match(pw): ValidatorFn` factory — or plain validator functions on
@@ -60,10 +60,11 @@ tuiMapper: match"` with a `match(pw): ValidatorFn` factory — or plain validato
   `tuiMarkControlAsTouchedAndValidate(this.form)` and bails if invalid — from review: _"a good
   UX pattern is to not disable it… so that I can see all the fields I forgot to type in."_
   `[disabled]="form.invalid"` is acceptable on tiny one/two-field forms. Async flow is the
-  signal + try/catch/finally with a toast on failure, or `TaskService.run`. Zoneless-safe
+  signal + try/catch/finally with a toast on failure, or the app's action wrapper (state.md).
+  Zoneless-safe
   validity: `formStatus = toSignal(this.form.statusChanges, { initialValue: this.form.status })`;
   a full-page form's Cancel is `type="reset"` disabled on `form.pristine`.
 - **Single ad-hoc fields skip reactive forms**: `[(ngModel)]="signal"`
   (+ `[ngModelOptions]="{standalone: true}"` inside a formGroup context), `linkedSignal`
   clearing the error on edit.
-- **Masking**: Maskito (`@maskito/*`) where real masking is needed (start-wrt IP masks).
+- **Masking**: Maskito (`@maskito/*`) where real masking is needed, such as IP addresses.

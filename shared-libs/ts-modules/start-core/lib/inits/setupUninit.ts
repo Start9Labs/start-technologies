@@ -2,16 +2,17 @@ import { ExtendedVersion, VersionRange } from '../exver'
 import * as T from '../types'
 
 /**
- * Function signature for an uninit handler that runs during service shutdown/uninstall.
+ * Function signature for an uninit handler, run on every shutdown, update and uninstall.
  */
 export type UninitFn = (
   effects: T.Effects,
   /**
-   * @description the target version to prepare for
-   *
-   * on update: the canMigrateFrom of the new package
-   * on uninstall: null
-   * on shutdown: the current version
+   * @description The data version to leave the data at. Shutdown passes
+   * the running version. An update, downgrade or flavor switch passes the
+   * current data version, the incoming version, or the overlap of their
+   * ranges, as the migration path requires, so a compatible update passes
+   * the same value as a shutdown. Uninstall passes `null`, the only value
+   * that identifies its exit.
    */
   target: VersionRange | ExtendedVersion | null,
 ) => Promise<void | null | undefined>
@@ -21,11 +22,12 @@ export interface UninitScript {
   uninit(
     effects: T.Effects,
     /**
-     * @description the target version to prepare for
-     *
-     * on update: the canMigrateFrom of the new package
-     * on uninstall: null
-     * on shutdown: the current version
+     * @description The data version to leave the data at. Shutdown passes
+     * the running version. An update, downgrade or flavor switch passes the
+     * current data version, the incoming version, or the overlap of their
+     * ranges, as the migration path requires, so a compatible update passes
+     * the same value as a shutdown. Uninstall passes `null`, the only value
+     * that identifies its exit.
      */
     target: VersionRange | ExtendedVersion | null,
   ): Promise<void>

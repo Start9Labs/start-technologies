@@ -129,6 +129,11 @@ impl Current {
     }
 }
 
+/// Whether this build can migrate a database last written by StartOS `version`.
+pub fn can_migrate_from(version: exver::Version) -> bool {
+    Version::from_exver_version(version).as_version_t().is_ok()
+}
+
 pub async fn post_init(
     ctx: &RpcContext,
     mut progress: PhaseProgressTrackerHandle,
@@ -861,6 +866,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn migrates_only_from_versions_this_build_knows() {
+        assert!(can_migrate_from(Current::default().semver()));
+        assert!(can_migrate_from(v0_4_1_2::Version.semver()));
+        assert!(can_migrate_from(v0_3_5_1::Version.semver()));
+        assert!(!can_migrate_from("99.0.0".parse().unwrap()));
+        assert!(!can_migrate_from("0.3.4".parse().unwrap()));
+    }
+
+    #[test]
     fn current_matches_manifest() {
         assert_eq!(
             Current::default().semver().to_string(),
@@ -1048,8 +1062,9 @@ mod tests {
 
     #[tokio::test]
     async fn maintenance_revisions_upgrade_to_keyrings_and_roll_back() {
-        use crate::trusted_keys::legacy::{TrustedKeyrings as TrustedKeys, os_signers};
-        use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
+        use super::v0_4_0_3::{TrustedOsUpdateSigners, initial_signers};
+        use super::v0_4_1::os_signers;
+        use crate::trusted_keys::legacy::TrustedKeyrings as TrustedKeys;
 
         let current = Version::from_exver_version(v0_4_1::Version.semver())
             .as_version_t()

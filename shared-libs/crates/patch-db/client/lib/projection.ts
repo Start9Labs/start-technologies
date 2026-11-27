@@ -39,7 +39,11 @@ export type Reach = 'out' | 'route' | 'in'
 const RANK: Record<Reach, number> = { out: 0, route: 1, in: 2 }
 
 /** A selector as the server's parameters take it. */
-export type WireSelector = { include: string; exclude?: string[]; depth?: number }
+export type WireSelector = {
+  include: string
+  exclude?: string[]
+  depth?: number
+}
 
 /** Patterns sorted and deduplicated. */
 export function normalizeSelector(selector: Selector): WireSelector {
@@ -202,39 +206,164 @@ function cutsBelow(selection: Selection, path: readonly string[]): boolean {
   )
 }
 
+/**
+ * A projection of an earlier value, reused where the value is unchanged. Holds only for
+ * the selection that produced it.
+ */
+export type Projected = { source: unknown; value: unknown }
+
 /** The projected value at a path the selection reaches. */
 export function projectValue(
   selection: Selection,
   path: readonly string[],
   value: unknown,
 ): unknown {
-  if (wholeBelow(selection, path)) return value
-  if (Array.isArray(value)) {
-    if (cutsBelow(selection, path)) return []
-    return value.map((child, i) => {
-      const at = [...path, String(i)]
-      return reach(selection, at) === 'out'
-        ? null
-        : projectValue(selection, at, child)
-    })
-  }
-  if (isObject(value))
-    return Object.fromEntries(
-      Object.entries(value).flatMap(([key, child]) => {
-        const at = [...path, key]
-        return reach(selection, at) === 'out'
-          ? []
-          : [[key, projectValue(selection, at, child)]]
-      }),
-    )
-  return value
+  return project(selection, path, value, undefined, always)
 }
 
 /** The projected subtree value; null when the selection excludes the subtree itself. */
 export function projectRoot(selection: Selection, value: unknown): unknown {
+  return reprojectRoot(selection, value)
+}
+
+/**
+ * {@link projectRoot}, keeping the previous projection's subtrees wherever their source is
+ * unchanged and the previous projection still holds. Returns the previous projection
+ * itself when nothing differs.
+ */
+export function reprojectRoot(
+  selection: Selection,
+  value: unknown,
+  previous?: Projected,
+  holds: (path: readonly string[]) => boolean = always,
+): unknown {
   return reach(selection, []) === 'out'
     ? null
-    : projectValue(selection, [], value)
+    : project(selection, [], value, previous, holds)
+}
+
+/**
+ * A replica's projection to a selection it narrows to, from the projection it holds of a
+ * wider one. Subtrees no dropped selector reaches keep their identity.
+ */
+export function projectNarrowed(
+  selection: Selection,
+  dropped: Selection,
+  value: unknown,
+): unknown {
+  if (!dropped.length) return value
+  return reprojectRoot(
+    selection,
+    value,
+    { source: value, value },
+    path => reach(dropped, path) === 'out',
+  )
+}
+
+/**
+ * The next document, keeping each subtree of the previous one it deeply equals. Returns
+ * the previous document when nothing differs.
+ */
+export function reconcile(previous: unknown, next: unknown): unknown {
+  if (previous === next) return previous
+  if (Array.isArray(previous) && Array.isArray(next))
+    return reuse(
+      previous,
+      next.map((child, i) =>
+        i < previous.length ? reconcile(previous[i], child) : child,
+      ),
+    )
+  if (isObject(previous) && isObject(next))
+    return reuse(
+      previous,
+      Object.fromEntries(
+        Object.entries(next).map(([key, child]) => [
+          key,
+          key in previous ? reconcile(previous[key], child) : child,
+        ]),
+      ),
+    )
+  return next
+}
+
+const always = () => true
+
+function project(
+  selection: Selection,
+  path: readonly string[],
+  value: unknown,
+  previous: Projected | undefined,
+  holds: (path: readonly string[]) => boolean,
+): unknown {
+  if (previous && previous.source === value && holds(path))
+    return previous.value
+  if (wholeBelow(selection, path)) return value
+  if (Array.isArray(value)) {
+    if (cutsBelow(selection, path)) return reuse(previous?.value, [])
+    return reuse(
+      previous?.value,
+      value.map((child, i) => {
+        const at = [...path, String(i)]
+        return reach(selection, at) === 'out'
+          ? null
+          : project(selection, at, child, below(previous, String(i)), holds)
+      }),
+    )
+  }
+  if (isObject(value))
+    return reuse(
+      previous?.value,
+      Object.fromEntries(
+        Object.entries(value).flatMap(([key, child]) => {
+          const at = [...path, key]
+          return reach(selection, at) === 'out'
+            ? []
+            : [
+                [
+                  key,
+                  project(selection, at, child, below(previous, key), holds),
+                ],
+              ]
+        }),
+      ),
+    )
+  return value
+}
+
+function below(
+  previous: Projected | undefined,
+  key: string,
+): Projected | undefined {
+  const source = previous?.source
+  const value = previous?.value
+  return isContainer(source) &&
+    isContainer(value) &&
+    key in source &&
+    key in value
+    ? { source: source[key], value: value[key] }
+    : undefined
+}
+
+/** The earlier container when it holds the same children. */
+function reuse(earlier: unknown, next: unknown): unknown {
+  return shallowEqual(earlier, next) ? earlier : next
+}
+
+function shallowEqual(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b))
+    return a.length === b.length && a.every((child, i) => child === b[i])
+  if (isObject(a) && isObject(b)) {
+    const keys = Object.keys(b)
+    return (
+      Object.keys(a).length === keys.length &&
+      keys.every(key => key in a && a[key] === b[key])
+    )
+  }
+  return false
+}
+
+function isContainer(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 function projectOperation(
@@ -292,7 +421,8 @@ export function shiftedArrays(
     const path = arrayFromPath(op.path)
     if (!path.length) return
     const parent = pathFromArray(path.slice(0, -1))
-    if (Array.isArray(getValueByPointer(after as any, parent))) arrays.add(parent)
+    if (Array.isArray(getValueByPointer(after as any, parent)))
+      arrays.add(parent)
   })
   return [...arrays]
 }
@@ -328,9 +458,7 @@ export function projectScoped(
     ]
   const resent = shifted
     .map(arrayFromPath)
-    .filter(
-      at => at.length >= root.length && root.every((s, i) => s === at[i]),
-    )
+    .filter(at => at.length >= root.length && root.every((s, i) => s === at[i]))
     .map(at => at.slice(root.length))
     .filter(
       rel => reach(selection, rel) !== 'out' && !wholeBelow(selection, rel),
@@ -338,9 +466,7 @@ export function projectScoped(
     .sort((a, b) => a.length - b.length)
     .filter(
       (rel, i, all) =>
-        !all
-          .slice(0, i)
-          .some(outer => outer.every((s, k) => s === rel[k])),
+        !all.slice(0, i).some(outer => outer.every((s, k) => s === rel[k])),
     )
   const ops = scopeOperations(patch, pointer)
   const under = (op: Operation<unknown>, rel: string[]) => {
@@ -453,9 +579,7 @@ export function selectionContains(
   selection: Selection,
   selector: Selector,
 ): boolean {
-  return (
-    !selection.length || selection.some(s => selectorContains(s, selector))
-  )
+  return !selection.length || selection.some(s => selectorContains(s, selector))
 }
 
 /** The selectors no other one contains, keyed for comparison. */
