@@ -43,6 +43,7 @@ import {
   toServerForm,
   toServerSettings,
 } from './form'
+import { sortedGateways } from 'src/app/services/gateway.service'
 import { NUT_MODE_PICKER } from './picker'
 import { NutStatusService } from './service'
 import { toUpsView } from './status'
@@ -480,7 +481,8 @@ export default class Nut {
     ): { key: i18nKey; value: string; secret?: boolean }[] | null =>
       settings?.mode === 'server' && settings.listenAll
         ? [
-            ...Object.values(gateways)
+            ...sortedGateways(gateways)
+              .map(([, gateway]) => gateway)
               .filter(({ ipInfo }) =>
                 ['ethernet', 'wireless', 'bridge'].includes(
                   ipInfo?.deviceType ?? '',

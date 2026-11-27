@@ -100,7 +100,8 @@ export class SignerStatusesPipe {
       })
       .sort(
         (a, b) =>
-          STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
+          STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
+          a.id.localeCompare(b.id),
       )
   }
 }

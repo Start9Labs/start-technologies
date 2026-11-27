@@ -2,8 +2,9 @@ import type { T } from '@start9labs/start-core'
 
 /**
  * The requested locale's exact or same-language translation, else the owner's
- * declared default, else an arbitrary stored one.
- * Matches the backend's `LocaleString::localize_for`.
+ * declared default, else the alphabetically first locale's.
+ * Ties resolve alphabetically, never by key order, matching the backend's
+ * `LocaleString::localize_for`.
  */
 export function localizeFor(
   string: T.LocaleString,
@@ -13,13 +14,13 @@ export function localizeFor(
   if (typeof string === 'string') return string
 
   const language = lang.split('_')[0] + '_'
+  const locales = Object.keys(string).sort()
+  const sameLanguage = locales.find(locale => locale.startsWith(language))
   return (
     string[lang] ??
-    Object.entries(string).find(([locale]) =>
-      locale.startsWith(language),
-    )?.[1] ??
+    (sameLanguage && string[sameLanguage]) ??
     (defaultLocale ? string[defaultLocale] : undefined) ??
-    Object.values(string)[0] ??
+    (locales[0] && string[locales[0]]) ??
     ''
   )
 }

@@ -275,6 +275,7 @@ impl NetController {
                     },
                     interface_type: ServiceInterfaceType::Ui,
                     preferred_launcher_address: None,
+                    index: None,
                 };
                 db.as_public_mut()
                     .as_server_info_mut()

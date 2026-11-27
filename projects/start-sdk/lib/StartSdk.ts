@@ -583,6 +583,8 @@ export class StartSdk<Manifest extends T.SDKManifest> {
            * @see {@link https://docs.start9.com/packaging/interfaces.html#nominating-an-address-to-open Nominating an Address to Open}
            */
           preferredLauncherAddress?: string | null
+          /** (optional) position in the StartOS interface list, lowest first. Defaults to the order interfaces are exported in `setupInterfaces`. */
+          index?: number
         },
       ) => new ServiceInterfaceBuilder({ ...options, effects }),
       /**
@@ -621,6 +623,8 @@ export class StartSdk<Manifest extends T.SDKManifest> {
           /** (optional) transport scheme prefix, e.g. `'tcp'` for bitcoin ZMQ
            * endpoints. Omit for raw UDP/TCP ranges (coturn, RTP, FTP). */
           scheme?: string | null
+          /** (optional) position in the StartOS interface list, lowest first. Defaults to the order interfaces are exported in `setupInterfaces`. */
+          index?: number
         },
       ) => new RangeInterfaceBuilder({ ...options, effects }),
       /**

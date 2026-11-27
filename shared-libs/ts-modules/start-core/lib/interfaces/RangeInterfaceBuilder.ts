@@ -18,6 +18,7 @@ export class RangeInterfaceBuilder {
       name: string
       description: string
       scheme?: string | null
+      index?: number
     },
   ) {}
 }

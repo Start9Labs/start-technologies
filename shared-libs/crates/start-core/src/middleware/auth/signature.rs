@@ -1038,6 +1038,7 @@ mod tests {
             },
             interface_type: ServiceInterfaceType::Ui,
             preferred_launcher_address: None,
+            index: None,
         };
         BindInfo {
             enabled: true,

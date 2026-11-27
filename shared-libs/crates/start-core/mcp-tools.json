@@ -5009,6 +5009,17 @@
               "default": null,
               "description": "The interface address Open UI should prefer.",
               "type": ["string", "null"]
+            },
+            "index": {
+              "description": "Position in the package's interface list, set by the package. Unset sorts last.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
             }
           },
           "required": [
@@ -7172,6 +7183,17 @@
               "default": null,
               "description": "The interface address Open UI should prefer.",
               "type": ["string", "null"]
+            },
+            "index": {
+              "description": "Position in the package's interface list, set by the package. Unset sorts last.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                { "type": "null" }
+              ]
             }
           },
           "required": [

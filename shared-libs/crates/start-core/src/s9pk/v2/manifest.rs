@@ -212,7 +212,10 @@ impl std::str::FromStr for LocaleString {
 }
 impl LocaleString {
     /// Resolves to the requested locale's exact or same-language translation, else the
-    /// owner's declared default, else an arbitrary stored one.
+    /// owner's declared default, else the alphabetically first locale's.
+    ///
+    /// Ties resolve alphabetically, never by stored key order; `localizeFor` in the shared
+    /// web library applies the same rule.
     pub fn localize_for(&mut self, locale: Option<&str>, default: Option<&str>) {
         if let Self::LanguageMap(map) = self {
             let requested = locale
@@ -221,7 +224,11 @@ impl LocaleString {
             let translated = requested
                 .and_then(|l| map.remove(&l))
                 .or_else(|| default.and_then(|default| map.remove(default)))
-                .or_else(|| map.values().next().cloned())
+                .or_else(|| {
+                    map.iter()
+                        .min_by(|a, b| a.0.cmp(&b.0))
+                        .map(|(_, v)| v.clone())
+                })
                 .unwrap_or_default();
             *self = Self::Translated(translated);
         }
@@ -473,10 +480,16 @@ fn locale_resolution_prefers_requested_then_declared_default() {
     }
     for locale in [Some("zz_ZZ"), Some(""), None] {
         for default in [None, Some("ja_JP")] {
-            let resolved = text().localized_for(locale, default);
-            assert!(["English", "Deutsch", "Polski"].contains(&&*resolved));
+            assert_eq!(text().localized_for(locale, default), "Deutsch");
         }
     }
+    let regional = || -> LocaleString {
+        serde_json::from_str(r#"{"fr_FR":"France","en_US":"US","fr_BE":"Belgique","en_GB":"UK"}"#)
+            .unwrap()
+    };
+    assert_eq!(regional().localized_for(Some("en_AU"), None), "UK");
+    assert_eq!(regional().localized_for(Some("fr_CA"), None), "Belgique");
+    assert_eq!(regional().localized_for(Some("ja_JP"), None), "UK");
     assert_eq!(
         LocaleString::LanguageMap(InOMap::default()).localized_for(Some(""), None),
         ""

@@ -18,6 +18,7 @@ import { DataModel } from 'src/app/services/patch-db/data-model'
 import { getCurrentManifest } from 'src/app/utils/get-package-data'
 import { VolumeGrant } from '../../../system/routes/volumes/grant'
 import { VOLUME_TYPES, volumePath } from '../../../system/routes/volumes/types'
+import { byEntryName } from 'src/app/utils/by-entry-name'
 
 @Component({
   template: `
@@ -35,7 +36,7 @@ import { VOLUME_TYPES, volumePath } from '../../../system/routes/volumes/types'
           {{ 'Documentation' | i18n }}
         </a>
       </header>
-      @let volumeList = volumes() | keyvalue: null;
+      @let volumeList = volumes() | keyvalue: byEntryName;
       @if (!enabled()) {
         <p tuiNotification appearance="info">
           {{ 'This service cannot use shared volumes' | i18n }}
@@ -107,6 +108,8 @@ import { VOLUME_TYPES, volumePath } from '../../../system/routes/volumes/types'
   ],
 })
 export default class ServiceVolumes {
+  protected readonly byEntryName = byEntryName
+
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
 
   protected readonly types = VOLUME_TYPES

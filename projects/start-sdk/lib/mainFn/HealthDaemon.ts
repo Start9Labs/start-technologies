@@ -224,7 +224,21 @@ export class HealthDaemon<Manifest extends SDKManifest> {
       ...displayedHealth,
       id: this.id,
       name: display,
+      ...(this.ready.index != null && { index: this.ready.index }),
     })
+  }
+
+  /** Updates display order without rerunning the check or resetting readiness. */
+  async setIndex(index: number | undefined) {
+    if (this.ready === EXIT_SUCCESS || this.ready.index === index) return
+    const previous = this.ready.index
+    this.ready.index = index
+    try {
+      await this.setHealth(this._health)
+    } catch (error) {
+      this.ready.index = previous
+      throw error
+    }
   }
 
   async updateStatus() {

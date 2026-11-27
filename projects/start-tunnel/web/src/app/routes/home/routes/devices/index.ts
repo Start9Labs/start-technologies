@@ -25,6 +25,7 @@ import { TunnelData } from 'src/app/services/patch-db/data-model'
 import { DEVICES_ADD } from './add'
 import { DEVICES_CONFIG } from './config'
 import { deviceIpv6, MappedDevice } from './utils'
+import { entriesByIp } from 'src/app/utils/order'
 
 type DeviceRow = { name: string; subnet: { name: string }; ip: string }
 
@@ -320,15 +321,13 @@ export default class Devices {
   protected readonly subnets = toSignal(
     this.patch.watch$('wg', 'subnets').pipe(
       map(subnets =>
-        Object.entries(subnets).map(
-          ([range, { name, clients, wanIp, ipv6 }]) => ({
-            range,
-            name,
-            clients,
-            wanIp,
-            ipv6,
-          }),
-        ),
+        entriesByIp(subnets).map(([range, { name, clients, wanIp, ipv6 }]) => ({
+          range,
+          name,
+          clients,
+          wanIp,
+          ipv6,
+        })),
       ),
     ),
     { initialValue: null },
@@ -340,7 +339,7 @@ export default class Devices {
     const defaultWan = this.defaultWan()
 
     return this.subnets()?.flatMap(subnet =>
-      Object.entries(subnet.clients).map(
+      entriesByIp(subnet.clients).map(
         ([
           ip,
           { name, kind, allowDnsInjection, allowAutoPortForward, wanIp },

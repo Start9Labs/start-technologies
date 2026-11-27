@@ -1,5 +1,5 @@
 import { Daemons, DaemonsReconciler, configHash } from '../mainFn/Daemons'
-import { cooldownTrigger } from '../trigger'
+import { cooldownTrigger, onceTrigger } from '../trigger'
 import { Daemon } from '../mainFn/Daemon'
 import { Mounts } from '../mainFn/Mounts'
 import { setupMain } from '../mainFn'
@@ -123,6 +123,119 @@ describe('Daemons recorder', () => {
         requires: ['migrate'],
       })
     expect(daemons.entries.map(x => x.kind)).toEqual(['oneshot', 'health'])
+  })
+
+  it.each([
+    ['declaration order by default', {}, ['first', 'second', 'third']],
+    [
+      'a later position moves a check down',
+      { first: 9 },
+      ['second', 'third', 'first'],
+    ],
+    [
+      'a requested index wins a tie with a default',
+      { third: 0 },
+      ['third', 'first', 'second'],
+    ],
+    [
+      'requested ties keep declaration order',
+      { second: 0, third: 0 },
+      ['second', 'third', 'first'],
+    ],
+  ] as const)(
+    'orders health checks: %s',
+    async (_case, requested, expected) => {
+      const effects = { ...fakeEffects(), setHealth: async () => null } as any
+      const ready = (id: 'first' | 'second' | 'third') => ({
+        ...baseReady,
+        trigger: onceTrigger,
+        ...(id in requested && {
+          index: (requested as Record<string, number>)[id],
+        }),
+      })
+      const daemons = await Daemons.of<Manifest>({ effects })
+        .addHealthCheck('first', { ready: ready('first'), requires: [] })
+        .addHealthCheck('second', { ready: ready('second'), requires: [] })
+        .addHealthCheck('third', { ready: ready('third'), requires: [] })
+        .build()
+      const indices = Object.fromEntries(
+        daemons.healthDaemons.map(hd => [
+          hd.id,
+          hd.ready === 'EXIT_SUCCESS' ? null : hd.ready.index,
+        ]),
+      )
+      expect(expected.map(id => indices[id])).toEqual([0, 1, 2])
+      await daemons.term()
+    },
+  )
+})
+
+describe('dynamic health ordering', () => {
+  it('updates retained checks on insertion, reordering, and requested-index changes', async () => {
+    const latest = new Map<string, { index?: number | null; result: string }>()
+    const setHealth = jest.fn(
+      async (health: { id: string; index?: number | null; result: string }) => {
+        latest.set(health.id, health)
+        return null
+      },
+    )
+    const effects = { ...fakeEffects(), setHealth } as T.Effects
+    const probe = jest.fn(baseReady.fn)
+    let order = ['b']
+    let requested: Record<string, number> = {}
+    const options = (id: 'a' | 'b') => ({
+      ready: {
+        display: id,
+        index: requested[id],
+        trigger: onceTrigger,
+        fn: probe,
+      },
+      requires: [] as [],
+    })
+    const reconciler = Daemons.dynamic<Manifest>(effects, ({ effects }) => {
+      const chain = Daemons.of<Manifest>({ effects })
+      if (order.length === 1) return chain.addHealthCheck('b', options('b'))
+      return order[0] === 'a'
+        ? chain
+            .addHealthCheck('a', options('a'))
+            .addHealthCheck('b', options('b'))
+        : chain
+            .addHealthCheck('b', options('b'))
+            .addHealthCheck('a', options('a'))
+    })
+    const built = await reconciler.build()
+    const settle = () => new Promise<void>(resolve => setImmediate(resolve))
+    const indices = () =>
+      Object.fromEntries([...latest].map(([id, health]) => [id, health.index]))
+    try {
+      await settle()
+      expect(indices()).toEqual({ b: 0 })
+      expect(probe).toHaveBeenCalledTimes(1)
+
+      order = ['a', 'b']
+      reconciler.scheduleRerun()
+      await settle()
+      expect(indices()).toEqual({ a: 0, b: 1 })
+      expect(latest.get('b')?.result).toBe('success')
+      expect(probe).toHaveBeenCalledTimes(2)
+
+      order = ['b', 'a']
+      reconciler.scheduleRerun()
+      await settle()
+      expect(indices()).toEqual({ b: 0, a: 1 })
+      expect(probe).toHaveBeenCalledTimes(2)
+
+      requested = { a: 0 }
+      reconciler.scheduleRerun()
+      await settle()
+      expect(indices()).toEqual({ a: 0, b: 1 })
+      expect(
+        [...latest.values()].every(health => health.result === 'success'),
+      ).toBe(true)
+      expect(probe).toHaveBeenCalledTimes(2)
+    } finally {
+      await built.term()
+    }
   })
 })
 

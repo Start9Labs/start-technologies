@@ -4236,6 +4236,10 @@ export const ServiceInterface: z.ZodObject<{
    * The interface address Open UI should prefer.
    */
   preferredLauncherAddress: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  /**
+   * Position in the package's interface list, set by the package. Unset sorts last.
+   */
+  index: z.ZodOptional<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   id: ServiceInterfaceId,
   name: z.string(),
@@ -4253,6 +4257,13 @@ export const ServiceInterface: z.ZodObject<{
     .meta({
       description: 'The interface address Open UI should prefer.',
     }),
+  /**
+   * Position in the package's interface list, set by the package. Unset sorts last.
+   */
+  index: z.int().nullable().optional().meta({
+    description:
+      "Position in the package's interface list, set by the package. Unset sorts last.",
+  }),
 }).meta({
   id: 'ServiceInterface',
 })

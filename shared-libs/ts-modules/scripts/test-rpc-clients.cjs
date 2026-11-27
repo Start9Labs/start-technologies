@@ -108,6 +108,7 @@ function harness(moduleOverrides = new Map(), globals = {}) {
       ...load('shared-libs/ts-modules/shared/src/util/misc.util.ts'),
       ...load('shared-libs/ts-modules/shared/src/util/format-progress.ts'),
       ...load('shared-libs/ts-modules/shared/src/util/with-abort.ts'),
+      ...load('shared-libs/ts-modules/shared/src/util/indexed-entries.ts'),
       pauseFor: async (_, signal) => signal?.throwIfAborted(),
       getErrorMessage: load(
         'shared-libs/ts-modules/shared/src/util/error-message.ts',
@@ -1867,6 +1868,10 @@ function gatewayDnsHarness() {
     ],
   ])
   const { dependencies, load } = harness(overrides)
+  Object.assign(
+    overrides.get('@start9labs/shared'),
+    load('shared-libs/ts-modules/shared/src/util/indexed-entries.ts'),
+  )
   const { PatchDB } = require('patch-db-client')
   const gateway = {
     name: 'LAN',

@@ -11,6 +11,7 @@ import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import { combineLatest, defaultIfEmpty, firstValueFrom, map } from 'rxjs'
 import { TRUSTED_KEY_DETAILS } from 'src/app/components/trusted-keys/details'
+import { sortedRegistries } from 'src/app/utils/registries'
 import { parsePemPublicKey } from 'src/app/utils/public-keys'
 import { ApiService } from './api/embassy-api.service'
 import { DataModel } from './patch-db/data-model'
@@ -39,7 +40,7 @@ export class TrustedKeysService extends MarketplaceTrust {
       map(([snapshots, registries]) => {
         const offers: Record<string, RegistryOffer[]> = {}
 
-        for (const [url, name] of Object.entries(registries)) {
+        for (const [url, name] of sortedRegistries(registries)) {
           for (const [listed, ids] of Object.entries(snapshots)) {
             if (!sameUrl(url, listed)) continue
             for (const id of ids)

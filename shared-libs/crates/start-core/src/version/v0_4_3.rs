@@ -38,13 +38,14 @@ impl VersionT for Version {
         V0_4_3.clone()
     }
     fn migration_revision(self) -> usize {
-        4
+        5
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
     }
     fn up(self, db: &mut Value, _: Self::PreUpRes) -> Result<Value, Error> {
         move_ssh_pubkeys(db, "private", "public")?;
+        index_existing_tasks(db)?;
         for_each_host(db, |host| {
             let Some(ranges) = host.get_mut("bindingRanges").and_then(Value::as_object_mut) else {
                 return;
@@ -67,6 +68,22 @@ impl VersionT for Version {
     fn down(self, db: &mut Value) -> Result<(), Error> {
         move_ssh_pubkeys(db, "public", "private")
     }
+}
+
+fn index_existing_tasks(db: &mut Value) -> Result<(), Error> {
+    let Some(packages) = db
+        .get_mut("public")
+        .and_then(|public| public.get_mut("packageData"))
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    for (_, package) in packages.iter_mut() {
+        if let Some(tasks) = package.get_mut("tasks").and_then(Value::as_object_mut) {
+            populate_indices(tasks.iter_mut().map(|(_, task)| task))?;
+        }
+    }
+    Ok(())
 }
 
 fn move_ssh_pubkeys(db: &mut Value, from: &str, to: &str) -> Result<(), Error> {
@@ -217,6 +234,40 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn existing_tasks_receive_positions_before_new_tasks() {
+        let mut db = json!({ "public": { "packageData": {
+            "service": { "tasks": {
+                "z": { "active": true, "task": { "name": "First" } },
+                "a": { "active": false, "task": { "name": "Second" } }
+            } },
+            "other": { "tasks": {} }
+        } } });
+        Version.up(&mut db, ()).unwrap();
+        let tasks = &db["public"]["packageData"]["service"]["tasks"];
+        assert_eq!(tasks["z"]["index"], json!(0));
+        assert_eq!(tasks["a"]["index"], json!(1));
+        assert_eq!(tasks["a"]["active"], json!(false));
+        let migrated = db.clone();
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(db, migrated);
+        let tasks = db["public"]["packageData"]["service"]["tasks"]
+            .as_object_mut()
+            .unwrap();
+        let next = next_index(
+            tasks
+                .values()
+                .map(|task| from_value::<Option<u32>>(task["index"].clone()).unwrap()),
+        );
+        tasks.insert("new".into(), json!({ "index": next }));
+        assert_eq!(tasks["new"]["index"], json!(2));
+        index_existing_tasks(&mut db).unwrap();
+        assert_eq!(
+            db["public"]["packageData"]["service"]["tasks"]["z"]["index"],
+            json!(0)
+        );
+    }
+
     fn profile(kind: &str, mtu: Option<u32>) -> HashMap<String, HashMap<String, OwnedValue>> {
         let mut settings = HashMap::from([(
             "connection".to_string(),
@@ -244,7 +295,7 @@ mod tests {
         let version = super::super::Version::from_exver_version(Version.semver())
             .as_version_t()
             .unwrap();
-        for applied in [0, 1, 2] {
+        for applied in [0, 1, 2, 3, 4] {
             let mut db = json!({ "public": { "serverInfo": {
                 "version": "0.4.3",
                 "packageVersionCompat": ">=0.3.0 <0.5.0",

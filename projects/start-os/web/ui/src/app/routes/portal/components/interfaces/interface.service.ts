@@ -1,7 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { T, utils } from '@start9labs/start-core'
 import { selectLaunchableAddress } from '@start9labs/start-core/util/selectLaunchableAddress'
-import { tuiDefaultSort } from '@taiga-ui/cdk'
 import { ConfigService } from 'src/app/services/config.service'
 import { GatewayPlus } from 'src/app/services/gateway.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
@@ -10,7 +9,11 @@ import {
   renderPkgStatus,
 } from 'src/app/services/pkg-status-rendering.service'
 import { toAuthorityName } from 'src/app/utils/acme'
-import { getManifest } from 'src/app/utils/get-package-data'
+import { byTitle, getManifest } from 'src/app/utils/get-package-data'
+import {
+  byInterfaceIndex,
+  packageInterfaces,
+} from 'src/app/utils/service-interfaces'
 
 // An IPv6 global-unicast address (GUA) — not loopback / ULA (fc00::/7) /
 // link-local (fe80::/10). Mirrors the backend's `ipv6_is_local` complement, so
@@ -102,9 +105,6 @@ function getAddressType(h: T.HostnameInfo): string {
 export class InterfaceService {
   private readonly config = inject(ConfigService)
 
-  // The package's service interfaces, mapped for display: single-port
-  // interfaces first (reached host -> binding -> interface), then port ranges
-  // (host -> bindingRange -> interface, carrying a `portRange` span).
   getServiceInterfaces(
     pkg: PackageDataEntry,
     gateways: GatewayPlus[],
@@ -112,93 +112,84 @@ export class InterfaceService {
   ): MappedServiceInterface[] {
     const { hosts } = pkg
 
-    const all = Object.values(hosts).flatMap(host =>
-      Object.values(host.bindings).flatMap(binding =>
-        Object.values(binding.interfaces),
-      ),
+    const all = packageInterfaces(hosts)
+
+    const single = all.map<MappedServiceInterface>(iFace => {
+      const hostId = iFace.addressInfo.hostId || ''
+      const host = hosts[hostId]
+      const sharedHostNames = all
+        .filter(si => si.addressInfo.hostId === hostId && si.id !== iFace.id)
+        .map(si => si.name)
+
+      return {
+        ...iFace,
+        gatewayGroups: host ? this.getGatewayGroups(iFace, host, gateways) : [],
+        pluginGroups: host
+          ? this.getPluginGroups(iFace, host, allPackageData)
+          : [],
+        // A public domain applies to the whole host, so the CA selector must
+        // appear whenever any binding on it is SSL — not only this interface's.
+        anyAddSsl: Object.values(host?.bindings ?? {}).some(
+          b => !!b.options.addSsl,
+        ),
+        // This interface's own binding: gates whether port/firewall tests are
+        // meaningful while the service is stopped (see MappedServiceInterface).
+        addSsl:
+          !!host?.bindings[iFace.addressInfo.internalPort]?.options.addSsl,
+        sharedHostNames,
+      }
+    })
+
+    const ranges = Object.entries(hosts).flatMap(([hostId, host]) =>
+      Object.entries(host.bindingRanges)
+        .filter(([, range]) => range.interface)
+        .map<MappedServiceInterface>(([key, range]) => {
+          const iface = range.interface!
+          const internalStartPort = Number(key)
+          const end = range.externalStartPort + range.numberOfPorts - 1
+          // Representative addressInfo: `internalPort` is the range's internal
+          // start port (its key in bindingRanges) so the per-address toggle
+          // and add-domain effects target the range; `scheme` prefixes URLs.
+          const addressInfo: T.AddressInfo = {
+            username: null,
+            hostId,
+            internalPort: internalStartPort,
+            scheme: iface.scheme,
+            sslScheme: null,
+            suffix: '',
+          }
+
+          return {
+            id: iface.id,
+            name: iface.name,
+            description: iface.description,
+            masked: false,
+            type: 'api',
+            preferredLauncherAddress: null,
+            index: iface.index,
+            addressInfo,
+            gatewayGroups: this.getRangeGatewayGroups(
+              addressInfo,
+              range,
+              host,
+              gateways,
+            ),
+            pluginGroups: [],
+            anyAddSsl: Object.values(host.bindings).some(
+              b => !!b.options.addSsl,
+            ),
+            // Port ranges are always non-SSL (bound directly by the service).
+            addSsl: false,
+            sharedHostNames: [],
+            portRange:
+              range.numberOfPorts > 1
+                ? `${range.externalStartPort}-${end}`
+                : `${range.externalStartPort}`,
+          }
+        }),
     )
 
-    const single = all
-      .sort(tuiDefaultSort)
-      .map<MappedServiceInterface>(iFace => {
-        const hostId = iFace.addressInfo.hostId || ''
-        const host = hosts[hostId]
-        const sharedHostNames = all
-          .filter(si => si.addressInfo.hostId === hostId && si.id !== iFace.id)
-          .map(si => si.name)
-
-        return {
-          ...iFace,
-          gatewayGroups: host
-            ? this.getGatewayGroups(iFace, host, gateways)
-            : [],
-          pluginGroups: host
-            ? this.getPluginGroups(iFace, host, allPackageData)
-            : [],
-          // A public domain applies to the whole host, so the CA selector must
-          // appear whenever any binding on it is SSL — not only this interface's.
-          anyAddSsl: Object.values(host?.bindings ?? {}).some(
-            b => !!b.options.addSsl,
-          ),
-          // This interface's own binding: gates whether port/firewall tests are
-          // meaningful while the service is stopped (see MappedServiceInterface).
-          addSsl:
-            !!host?.bindings[iFace.addressInfo.internalPort]?.options.addSsl,
-          sharedHostNames,
-        }
-      })
-
-    const ranges = Object.entries(hosts)
-      .flatMap(([hostId, host]) =>
-        Object.entries(host.bindingRanges)
-          .filter(([, range]) => range.interface)
-          .map<MappedServiceInterface>(([key, range]) => {
-            const iface = range.interface!
-            const internalStartPort = Number(key)
-            const end = range.externalStartPort + range.numberOfPorts - 1
-            // Representative addressInfo: `internalPort` is the range's internal
-            // start port (its key in bindingRanges) so the per-address toggle
-            // and add-domain effects target the range; `scheme` prefixes URLs.
-            const addressInfo: T.AddressInfo = {
-              username: null,
-              hostId,
-              internalPort: internalStartPort,
-              scheme: iface.scheme,
-              sslScheme: null,
-              suffix: '',
-            }
-
-            return {
-              id: iface.id,
-              name: iface.name,
-              description: iface.description,
-              masked: false,
-              type: 'api',
-              preferredLauncherAddress: null,
-              addressInfo,
-              gatewayGroups: this.getRangeGatewayGroups(
-                addressInfo,
-                range,
-                host,
-                gateways,
-              ),
-              pluginGroups: [],
-              anyAddSsl: Object.values(host.bindings).some(
-                b => !!b.options.addSsl,
-              ),
-              // Port ranges are always non-SSL (bound directly by the service).
-              addSsl: false,
-              sharedHostNames: [],
-              portRange:
-                range.numberOfPorts > 1
-                  ? `${range.externalStartPort}-${end}`
-                  : `${range.externalStartPort}`,
-            }
-          }),
-      )
-      .sort((a, b) => a.addressInfo.internalPort - b.addressInfo.internalPort)
-
-    return [...single, ...ranges]
+    return [...single, ...ranges].sort(byInterfaceIndex)
   }
 
   getGatewayGroups(
@@ -358,7 +349,10 @@ export class InterfaceService {
 
     // Also include URL plugins that have no addresses yet
     if (allPackageData) {
-      for (const [pkgId, pkg] of Object.entries(allPackageData)) {
+      const byPackageTitle = Object.entries(allPackageData).sort(
+        ([, a], [, b]) => byTitle(a, b),
+      )
+      for (const [pkgId, pkg] of byPackageTitle) {
         if (pkg.plugin?.url && !groupMap.has(pkgId)) {
           groupMap.set(pkgId, [])
         }

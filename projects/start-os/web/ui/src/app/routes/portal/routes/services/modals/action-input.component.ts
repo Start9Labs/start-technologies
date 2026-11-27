@@ -37,6 +37,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { PrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
 import {
+  byTitle,
   getAllPackages,
   getLiveTasks,
   getManifest,
@@ -299,7 +300,7 @@ export class ActionInputModal {
               task.input.accept.every(accept => conflicts(accept, input)),
           ),
       )
-      .map(id => id)
+      .sort((a, b) => byTitle(packages[a]!, packages[b]!))
 
     if (!breakages.length) return true
 

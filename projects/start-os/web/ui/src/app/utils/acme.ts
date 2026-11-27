@@ -13,13 +13,17 @@ export function toAuthorityUrl(name: string): string {
   return knownAuthorities.find(ca => ca.name === name)?.url || name
 }
 
-/** The first configured authority in `knownAuthorities` order, else any configured one. */
+/** Configured authorities: known ones in `knownAuthorities` order, then the rest by URL. */
+export function orderedAuthorities(configured: readonly string[]): string[] {
+  const rank = (url: string) => {
+    const known = knownAuthorities.findIndex(ca => ca.url === url)
+    return known === -1 ? Infinity : known
+  }
+  return [...configured].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+}
+
 export function defaultAuthority(configured: readonly string[]): string {
-  return (
-    knownAuthorities.find(ca => configured.includes(ca.url))?.url ||
-    configured[0] ||
-    'local'
-  )
+  return orderedAuthorities(configured)[0] ?? 'local'
 }
 
 export const knownAuthorities = [

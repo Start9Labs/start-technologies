@@ -30,7 +30,8 @@ export class RangeOrigin {
       )
     }
     this.exported = true
-    const { effects, id, name, description, scheme } = serviceInterface.options
+    const { effects, id, name, description, scheme, index } =
+      serviceInterface.options
     await effects.exportRangeServiceInterface({
       hostId: this.host.options.id,
       internalStartPort: this.internalStartPort,
@@ -38,6 +39,7 @@ export class RangeOrigin {
       name,
       description,
       scheme: scheme ?? null,
+      ...(index != null && { index }),
     })
   }
 }

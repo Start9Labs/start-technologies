@@ -25,6 +25,9 @@ pub struct ExportServiceInterfaceParams {
     r#type: ServiceInterfaceType,
     /// The interface address Open UI should prefer.
     preferred_launcher_address: Option<String>,
+    /// Position in the package's interface list. Unset sorts last.
+    #[serde(default)]
+    index: Option<u32>,
 }
 
 rpc_toolkit::reflect_ts!(ExportServiceInterfaceParams);
@@ -40,6 +43,7 @@ pub async fn export_service_interface(
         address_info,
         r#type,
         preferred_launcher_address,
+        index,
     }: ExportServiceInterfaceParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
@@ -55,6 +59,7 @@ pub async fn export_service_interface(
         address_info,
         interface_type: r#type,
         preferred_launcher_address,
+        index,
     };
 
     context
@@ -94,6 +99,9 @@ pub struct ExportRangeServiceInterfaceParams {
     name: String,
     description: String,
     scheme: Option<InternedString>,
+    /// Position in the package's interface list. Unset sorts last.
+    #[serde(default)]
+    index: Option<u32>,
 }
 
 rpc_toolkit::reflect_ts!(ExportRangeServiceInterfaceParams);
@@ -107,6 +115,7 @@ pub async fn export_range_service_interface(
         name,
         description,
         scheme,
+        index,
     }: ExportRangeServiceInterfaceParams,
 ) -> Result<(), Error> {
     let context = context.deref()?;
@@ -117,6 +126,7 @@ pub async fn export_range_service_interface(
         name,
         description,
         scheme,
+        index,
     };
 
     context

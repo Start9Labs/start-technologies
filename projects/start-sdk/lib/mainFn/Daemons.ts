@@ -67,6 +67,12 @@ export type Ready = {
    */
   display: string | null
   /**
+   * Requested position in the StartOS health-check list, lowest first.
+   * Unset keeps the entry's declaration position; on a tie a requested index
+   * goes first.
+   */
+  index?: number
+  /**
    * The function called on each polling interval to determine the daemon's health.
    *
    * Return a {@link HealthCheckResult} with a `result` field (`success`, `loading`,
@@ -594,6 +600,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
     })
     const byId = new Map<string, HealthDaemon<Manifest>>()
     try {
+      const indices = healthIndices(this.entries)
       for (const entry of this.entries) {
         const deps = entry.requires
           .map(r => byId.get(r))
@@ -604,7 +611,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
           daemon =
             entry.prebuiltDaemon ??
             Daemon.of<Manifest>()(this.effects, entry.subcontainer, entry.exec)
-          readyArg = entry.ready
+          readyArg = { ...entry.ready, index: indices.get(entry.id) }
         } else if (entry.kind === 'oneshot') {
           daemon = Oneshot.of<Manifest>()(
             this.effects,
@@ -613,7 +620,7 @@ export class Daemons<Manifest extends T.SDKManifest, Ids extends string>
           )
           readyArg = EXIT_SUCCESS
         } else {
-          readyArg = entry.ready
+          readyArg = { ...entry.ready, index: indices.get(entry.id) }
         }
         // Detach the daemon so its own onLeaveContext doesn't self-term —
         // Daemons.term() drives dependency-ordered shutdown for the whole
@@ -837,6 +844,32 @@ function validateEntries<M extends T.SDKManifest>(
       }
     }
   }
+}
+
+/**
+ * Each readiness-reporting entry's position in the health-check list: by
+ * requested `index`, else declaration position; on a tie an explicit `index`
+ * goes first, then declaration order. Positions are unique and start at 0.
+ */
+function healthIndices<M extends T.SDKManifest>(
+  entries: ReadonlyArray<DaemonEntry<M>>,
+): Map<string, number> {
+  return new Map(
+    entries
+      .flatMap((entry, position) =>
+        entry.kind === 'oneshot'
+          ? []
+          : [{ id: entry.id, position, requested: entry.ready.index }],
+      )
+      .sort(
+        (a, b) =>
+          (a.requested ?? a.position) - (b.requested ?? b.position) ||
+          Number(a.requested === undefined) -
+            Number(b.requested === undefined) ||
+          a.position - b.position,
+      )
+      .map(({ id }, index) => [id, index]),
+  )
 }
 
 /**
@@ -1146,14 +1179,20 @@ export class DaemonsReconciler<M extends T.SDKManifest>
 
     await this.stopEntries(toStop)
 
+    const indices = healthIndices(entries)
     for (const entry of entries) {
-      if (this.running.has(entry.id)) continue
       try {
-        await this.startEntry(
-          entry,
-          desiredHashes.get(entry.id)!,
-          sharedVolumesRevision,
-        )
+        const current = this.running.get(entry.id)
+        if (current) {
+          await current.healthDaemon.setIndex(indices.get(entry.id))
+        } else {
+          await this.startEntry(
+            entry,
+            indices.get(entry.id),
+            desiredHashes.get(entry.id)!,
+            sharedVolumesRevision,
+          )
+        }
       } catch (e) {
         logErrorOnce(asError(e))
       }
@@ -1196,6 +1235,7 @@ export class DaemonsReconciler<M extends T.SDKManifest>
 
   private async startEntry(
     entry: DaemonEntry<M>,
+    index: number | undefined,
     hash: string,
     sharedVolumesRevision: number,
   ): Promise<void> {
@@ -1209,13 +1249,13 @@ export class DaemonsReconciler<M extends T.SDKManifest>
       daemon =
         entry.prebuiltDaemon ??
         Daemon.of<M>()(this.rootEffects, subcontainer, entry.exec)
-      readyArg = entry.ready
+      readyArg = { ...entry.ready, index }
     } else if (entry.kind === 'oneshot') {
       subcontainer = entry.subcontainer
       daemon = Oneshot.of<M>()(this.rootEffects, subcontainer, entry.exec)
       readyArg = EXIT_SUCCESS
     } else {
-      readyArg = entry.ready
+      readyArg = { ...entry.ready, index }
     }
     // Detach the daemon so its own onLeaveContext doesn't self-term — the
     // reconciler drives shutdown via stopEntries / term(). (Each daemon

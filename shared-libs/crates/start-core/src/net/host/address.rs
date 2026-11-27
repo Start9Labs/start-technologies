@@ -768,6 +768,7 @@ mod test {
                 name: "Range".into(),
                 description: String::new(),
                 scheme: None,
+                index: None,
             }),
         }
     }

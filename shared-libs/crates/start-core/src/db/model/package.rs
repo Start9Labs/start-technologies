@@ -520,6 +520,9 @@ impl Model<PackageDataEntry> {
 pub struct TaskEntry {
     pub task: Task,
     pub active: bool,
+    /// Creation order among the package's tasks; a re-created task keeps its place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
 }
 
 rpc_toolkit::reflect_ts!(TaskEntry);

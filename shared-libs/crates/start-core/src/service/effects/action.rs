@@ -397,15 +397,30 @@ async fn create_task(
                 .as_package_data_mut()
                 .as_idx_mut(src_id)
                 .or_not_found(src_id)?;
-            let active = match active {
-                Some(active) => active,
-                None => match pde.as_tasks().as_idx(&replay_id) {
-                    Some(entry) => entry.as_active().de()?,
-                    None => true,
-                },
+            let existing = pde.as_tasks().as_idx(&replay_id);
+            let active = match (active, existing) {
+                (Some(active), _) => active,
+                (None, Some(entry)) => entry.as_active().de()?,
+                (None, None) => true,
             };
-            pde.as_tasks_mut()
-                .insert(&replay_id, &TaskEntry { active, task })
+            let index = match existing {
+                Some(entry) => entry.as_index().de()?,
+                None => Some(next_index(
+                    pde.as_tasks()
+                        .as_entries()?
+                        .into_iter()
+                        .map(|(_, entry)| entry.as_index().de())
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
+            };
+            pde.as_tasks_mut().insert(
+                &replay_id,
+                &TaskEntry {
+                    active,
+                    task,
+                    index,
+                },
+            )
         })
         .await
         .result?;

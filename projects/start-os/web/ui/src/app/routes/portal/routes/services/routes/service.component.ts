@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common'
 import { Component, computed, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { ActivatedRoute } from '@angular/router'
-import { isEmptyObject } from '@start9labs/shared'
+import { indexedEntries, isEmptyObject } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import { map, of } from 'rxjs'
@@ -146,5 +146,5 @@ function toHealthCheck(statusInfo: T.StatusInfo): T.NamedHealthCheckResult[] {
     !statusInfo.started ||
     isEmptyObject(statusInfo.health)
     ? []
-    : Object.values(statusInfo.health).filter(h => !!h)
+    : indexedEntries(statusInfo.health).map(([, health]) => health)
 }

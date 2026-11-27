@@ -11,7 +11,7 @@ import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { PkgIconDirective } from 'src/app/routes/portal/components/pkg-icon'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
-import { getCurrentManifest } from 'src/app/utils/get-package-data'
+import { byTitle, getCurrentManifest } from 'src/app/utils/get-package-data'
 import { GrantChoice, grantFor, GrantLabel, permission } from './grant'
 import { SourceFields, sourceEdit } from './source-fields'
 import { SOURCE_MANAGE_STYLES } from './manage.styles'
@@ -131,6 +131,7 @@ export class VolumeManage {
   protected readonly edit = sourceEdit(this.volume, { cifsNamedByHost: false })
   protected readonly packages = computed(() =>
     Object.values(this.allPackages() || {})
+      .sort(byTitle)
       .map(getCurrentManifest)
       .filter(manifest => manifest.sharedVolumes),
   )

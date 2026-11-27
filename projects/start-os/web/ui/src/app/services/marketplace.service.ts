@@ -9,12 +9,7 @@ import {
   registryStatus,
   isRegistryLoading,
 } from '@start9labs/marketplace'
-import {
-  defaultRegistries,
-  Exver,
-  registryUrl,
-  sameUrl,
-} from '@start9labs/shared'
+import { Exver, registryUrl, sameUrl } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import {
   PatchDB,
@@ -40,6 +35,7 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
+import { sortedRegistries } from 'src/app/utils/registries'
 
 @Injectable({
   providedIn: 'root',
@@ -60,7 +56,7 @@ export class MarketplaceService extends AbstractMarketplaceService {
     { selection: Selection; releases: Map<string, MarketplacePkg> }
   >()
 
-  /** Lists defaults in `defaultRegistries` order, then custom registries in saved order. */
+  /** Registries in {@link sortedRegistries} order. */
   readonly registries$: Observable<
     (StoreIdentity & { status: T.RegistryStatus })[]
   > = combineLatest([
@@ -68,22 +64,20 @@ export class MarketplaceService extends AbstractMarketplaceService {
     this.registryCache$,
   ]).pipe(
     map(([registries, cache]) =>
-      Object.entries(registries)
-        .sort(([a], [b]) => defaultRank(a) - defaultRank(b))
-        .flatMap(([url, name]) => {
-          try {
-            const entry = findRegistryCache(cache, url)?.[1]
-            return [
-              {
-                ...toStoreIdentity(url, name),
-                status: registryStatus(entry),
-                error: entry?.error,
-              },
-            ]
-          } catch {
-            return []
-          }
-        }),
+      sortedRegistries(registries).flatMap(([url, name]) => {
+        try {
+          const entry = findRegistryCache(cache, url)?.[1]
+          return [
+            {
+              ...toStoreIdentity(url, name),
+              status: registryStatus(entry),
+              error: entry?.error,
+            },
+          ]
+        } catch {
+          return []
+        }
+      }),
     ),
   )
 
@@ -351,9 +345,13 @@ export class MarketplaceService extends AbstractMarketplaceService {
       packages: selections.flatMap(([id, selection]) =>
         selection.best.flatMap(version => release(id, version)),
       ),
-      updates: selections.flatMap(([id, selection]) =>
-        selection.updateTarget ? release(id, selection.updateTarget) : [],
-      ),
+      updates: selections
+        .flatMap(([id, selection]) =>
+          selection.updateTarget ? release(id, selection.updateTarget) : [],
+        )
+        .sort(
+          (a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id),
+        ),
     }
   }
 
@@ -520,10 +518,4 @@ function findRegistryCache(
   if (!found) return undefined
   const [key, entry] = found
   return [key, entry.selections ? entry : { ...entry, selections: {} }]
-}
-
-function defaultRank(url: string): number {
-  const defaults = Object.values(defaultRegistries)
-  const rank = defaults.findIndex(known => sameUrl(known, url))
-  return rank < 0 ? defaults.length : rank
 }

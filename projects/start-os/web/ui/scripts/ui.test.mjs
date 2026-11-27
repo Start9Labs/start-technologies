@@ -55,7 +55,9 @@ boundary(
     `import { sameUrl as defaultUrl } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/misc.util.ts', import.meta.url).href)};` +
     `export { legacyDatabaseSubscription } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/services/database-subscription.ts', import.meta.url).href)};` +
     `export { withAbortSignal } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/with-abort.ts', import.meta.url).href)};` +
-    `export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)};`,
+    `export { escapeHtml } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/escape-html.ts', import.meta.url).href)};` +
+    `export { byIndex, indexedEntries } from ${JSON.stringify(new URL('../../../../../shared-libs/ts-modules/shared/src/util/indexed-entries.ts', import.meta.url).href)};` +
+    'export const knownRegistries = {};',
 )
 boundary(
   '@taiga-ui/core',
@@ -67,6 +69,9 @@ boundary(
     'TuiAppearance',
     'TuiCell',
     'TuiDataList',
+    'TuiDataListComponent',
+    'TuiOption',
+    'TuiOptionWithValue',
     'TuiDropdown',
     'TuiNotification',
     'TuiNotificationService',
@@ -102,6 +107,7 @@ boundary(
     'TuiPassword',
     'TuiSegmented',
     'TuiSwitch',
+    'TuiSkeleton',
     'TuiTextarea',
     'TuiTooltip',
     'TuiConfirmService',
@@ -1368,7 +1374,7 @@ test('release notes select the live UI language without refetching or changing r
   locale.language = 'german'
   assert.equal(pipe.transform(notes), 'Deutsche Hinweise')
   locale.language = 'french'
-  assert.equal(pipe.transform(notes), 'English notes')
+  assert.equal(pipe.transform(notes), 'Deutsche Hinweise')
   locale.language = 'english'
   assert.equal(pipe.transform(notes), 'English notes')
   assert.equal(f.requests.length, 0)
@@ -1696,6 +1702,120 @@ const { WA_IS_MOBILE } = await import('@ng-web-apis/platform')
 const { getManifest, getCurrentManifest } =
   await import('src/app/utils/get-package-data')
 const { getPartitionName } = await import('src/app/utils/get-partition-name')
+const { InterfaceService } =
+  await import('src/app/routes/portal/components/interfaces/interface.service')
+const { hostInterfaceNames } = await import('src/app/utils/service-interfaces')
+const { MarketplaceComponent: ProductionMarketplace } =
+  await import('../../../../../shared-libs/ts-modules/marketplace/src/components/marketplace.component.ts')
+const { AbstractMarketplaceService } = await import('@start9labs/marketplace')
+const { ɵSIGNAL: SIGNAL } = await import('@angular/core')
+
+test('single-port and range interfaces share one package index order', t => {
+  const single = {
+    id: 'single',
+    name: 'Single',
+    index: 1,
+    addressInfo: { hostId: 'main', internalPort: 80 },
+  }
+  const range = { id: 'range', name: 'Range', index: 0 }
+  const addresses = { available: [], enabled: [], disabled: [] }
+  const host = {
+    bindings: {
+      80: {
+        interfaces: { single },
+        addresses,
+        options: {
+          transport: ['tcp'],
+          proxy: null,
+          addSsl: null,
+          secure: null,
+        },
+      },
+    },
+    bindingRanges: {
+      4000: {
+        interface: range,
+        addresses,
+        externalStartPort: 4000,
+        numberOfPorts: 2,
+        transport: ['tcp'],
+      },
+    },
+  }
+  const injector = createEnvironmentInjector(
+    [{ provide: ConfigService, useValue: { accessType: 'localhost' } }],
+    null,
+  )
+  const service = runInInjectionContext(injector, () => new InterfaceService())
+  t.after(() => injector.destroy())
+  const pkg = { hosts: { main: host } }
+  assert.deepEqual(
+    service.getServiceInterfaces(pkg, []).map(iface => iface.id),
+    ['range', 'single'],
+  )
+  assert.deepEqual(hostInterfaceNames(host), ['Range', 'Single'])
+  single.index = 0
+  range.index = 1
+  assert.deepEqual(
+    service.getServiceInterfaces(pkg, []).map(iface => iface.id),
+    ['single', 'range'],
+  )
+  assert.deepEqual(hostInterfaceNames(host), ['Single', 'Range'])
+})
+
+test('numeric category IDs respect their index after pinned categories', t => {
+  const url = 'https://registry.test'
+  const injector = createEnvironmentInjector(
+    [
+      { provide: WA_IS_MOBILE, useValue: false },
+      { provide: i18nPipe, useValue: { transform: text => text } },
+      {
+        provide: AbstractMarketplaceService,
+        useValue: { currentRegistryUrl$: of(url) },
+      },
+    ],
+    null,
+  )
+  const component = runInInjectionContext(
+    injector,
+    () => new ProductionMarketplace(),
+  )
+  t.after(() => injector.destroy())
+  const registry = {
+    url,
+    status: 'connected',
+    info: {
+      categories: {
+        all: { name: 'All' },
+        2: { name: 'Two', index: 1 },
+        10: { name: 'Ten', index: 0 },
+      },
+    },
+    packages: [
+      { categories: ['2', '10'], firstPublishedAt: new Date().toISOString() },
+    ],
+  }
+  const input = component.registry[SIGNAL]
+  input.applyValueToInputSignal(input, registry)
+  assert.deepEqual(
+    [...component.categories().keys()],
+    ['all', 'new-arrivals', '10', '2'],
+  )
+  component.category.set('10')
+  assert.equal(component.effectiveCategory(), '10')
+  assert.equal(component.name(), 'Ten')
+  input.applyValueToInputSignal(input, {
+    ...registry,
+    info: {
+      categories: { all: { name: 'All' }, 2: { name: 'Two', index: 0 } },
+    },
+  })
+  assert.equal(component.effectiveCategory(), 'all')
+  assert.deepEqual(
+    [...component.categories().keys()],
+    ['all', 'new-arrivals', '2'],
+  )
+})
 
 for (const [label, result, expected] of [
   ['declined', of(false), 0],

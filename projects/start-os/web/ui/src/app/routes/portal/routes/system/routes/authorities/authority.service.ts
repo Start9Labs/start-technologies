@@ -8,7 +8,11 @@ import { FormComponent } from 'src/app/routes/portal/components/form.component'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
-import { knownAuthorities, toAuthorityName } from 'src/app/utils/acme'
+import {
+  knownAuthorities,
+  orderedAuthorities,
+  toAuthorityName,
+} from 'src/app/utils/acme'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 
 export type Authority = {
@@ -31,7 +35,7 @@ export class AuthorityService {
   readonly authorities = toSignal<Authority[]>(
     this.patch.watch$('serverInfo', 'network', 'acme').pipe(
       map(acme => [
-        ...Object.keys(acme).map(url => ({
+        ...orderedAuthorities(Object.keys(acme)).map(url => ({
           url,
           name: toAuthorityName(url),
           contact:

@@ -21,6 +21,7 @@ import {
 } from 'src/app/routes/portal/routes/system/routes/volumes/types'
 import { PlaceholderComponent } from 'src/app/routes/portal/components/placeholder.component'
 import { BackupService } from './backup.service'
+import { byEntryName } from 'src/app/utils/by-entry-name'
 
 export type PickerMode = 'create' | 'restore'
 
@@ -43,7 +44,10 @@ export interface Picked {
       </hgroup>
     </header>
     @if (context.data === 'create') {
-      @for (entry of service.targets() | keyvalue: null; track entry.key) {
+      @for (
+        entry of service.targets() | keyvalue: byEntryName;
+        track entry.key
+      ) {
         @let target = entry.value;
         <button
           tuiCell
@@ -213,6 +217,8 @@ export interface Picked {
   ],
 })
 class BackupPicker {
+  protected readonly byEntryName = byEntryName
+
   protected readonly context =
     injectContext<TuiDialogContext<Picked, PickerMode>>()
   protected readonly service = inject(BackupService)

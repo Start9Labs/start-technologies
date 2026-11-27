@@ -10,6 +10,7 @@ import { DepErrorService } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
 import { PrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
 import { getManifest } from 'src/app/utils/get-package-data'
+import { packageInterfaces } from 'src/app/utils/service-interfaces'
 import { InterfaceService } from '../../../components/interfaces/interface.service'
 
 @Component({
@@ -149,15 +150,12 @@ export class ServiceControlsComponent {
   )
 
   readonly interfaces = computed(() =>
-    Object.values(this.pkg().hosts)
-      .flatMap(host => Object.values(host.bindings))
-      .flatMap(binding => Object.values(binding.interfaces))
-      .filter(
-        i =>
-          i.type === 'ui' &&
-          (i.addressInfo.scheme === 'http' ||
-            i.addressInfo.sslScheme === 'https'),
-      ),
+    packageInterfaces(this.pkg().hosts).filter(
+      i =>
+        i.type === 'ui' &&
+        (i.addressInfo.scheme === 'http' ||
+          i.addressInfo.sslScheme === 'https'),
+    ),
   )
 
   readonly hasAnyHref = computed(() =>
