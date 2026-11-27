@@ -24,6 +24,7 @@ path = "src/lib.rs"
 
 [features]
 beta = []
+db-arena = ["imbl-value/arena"]
 console = ["console-subscriber", "tokio/tracing"]
 default = []
 dev = []

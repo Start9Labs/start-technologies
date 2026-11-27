@@ -26,6 +26,18 @@ use crate::prelude::*;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
 use crate::util::serde::{HandlerExtSerde, apply_expr};
 
+/// Backs database values with a deleted file in the data directory, once per process.
+///
+/// Without the `db-arena` feature, or when the file can't be created, values stay on the heap.
+pub fn init_value_arena(dir: &std::path::Path) {
+    #[cfg(feature = "db-arena")]
+    if let Err(e) = imbl_value::arena::init(dir) {
+        tracing::warn!("database values stay in memory: {e}");
+    }
+    #[cfg(not(feature = "db-arena"))]
+    let _ = dir;
+}
+
 lazy_static::lazy_static! {
     static ref PUBLIC: JsonPointer = "/public".parse().unwrap();
 }

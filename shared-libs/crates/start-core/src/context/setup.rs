@@ -141,6 +141,7 @@ impl SetupContext {
     #[instrument(skip_all)]
     pub async fn db(&self) -> Result<PatchDb, Error> {
         let db_path = Path::new(MAIN_DATA).join("embassy.db");
+        crate::db::init_value_arena(Path::new(MAIN_DATA));
         let db = PatchDb::open(&db_path)
             .await
             .with_ctx(|_| (crate::ErrorKind::Filesystem, db_path.display().to_string()))?;

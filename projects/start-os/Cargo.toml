@@ -17,6 +17,7 @@ path = "src/bin/start-container.rs"
 [features]
 beta = ["start-core/beta"]
 console = ["start-core/console"]
+db-arena = ["start-core/db-arena"]
 default = []
 dev = ["start-core/dev"]
 test = ["start-core/test"]
