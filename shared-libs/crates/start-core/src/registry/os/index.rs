@@ -17,7 +17,7 @@ use crate::sign::commitment::blake3::Blake3Commitment;
 #[model = "Model<Self>"]
 pub struct OsIndex {
     pub versions: OsVersionInfoMap,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub vulnerabilities: crate::registry::vulnerability::Vulnerabilities,
 }
 

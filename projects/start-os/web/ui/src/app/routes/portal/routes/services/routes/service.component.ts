@@ -21,6 +21,9 @@ import { ServiceHealthChecksComponent } from '../components/health-checks.compon
 import { ServiceInstallProgressComponent } from '../components/progress.component'
 import { ServiceStatusComponent } from '../components/status.component'
 import { ServiceUptimeComponent } from '../components/uptime.component'
+import { ServiceVulnerabilitiesComponent } from '../components/vulnerabilities.component'
+import { MarketplaceService } from 'src/app/services/marketplace.service'
+import { getManifest } from 'src/app/utils/get-package-data'
 
 @Component({
   template: `
@@ -35,6 +38,16 @@ import { ServiceUptimeComponent } from '../components/uptime.component'
             <service-controls [pkg]="pkg" [status]="status()" />
           }
         </service-status>
+
+        @if (vulnerabilities() | async; as found) {
+          @if (found.length) {
+            <service-vulnerabilities
+              [pkg]="pkg"
+              [status]="status()"
+              [vulnerabilities]="found"
+            />
+          }
+        }
 
         @if (status() !== 'backing-up') {
           <service-health-checks [checks]="health()" />
@@ -96,6 +109,7 @@ import { ServiceUptimeComponent } from '../components/uptime.component'
     ServiceErrorComponent,
     ServiceTasksComponent,
     ServiceUptimeComponent,
+    ServiceVulnerabilitiesComponent,
   ],
 })
 export class ServiceRoute {
@@ -116,6 +130,18 @@ export class ServiceRoute {
   )
 
   protected readonly pkg = computed(() => this.services()[this.id() || ''])
+
+  private readonly marketplace = inject(MarketplaceService)
+
+  protected readonly vulnerabilities = computed((pkg = this.pkg()) =>
+    pkg?.registry && pkg.stateInfo.state === 'installed'
+      ? this.marketplace.vulnerabilities$(
+          pkg.registry,
+          getManifest(pkg).id,
+          getManifest(pkg).version,
+        )
+      : of([]),
+  )
 
   protected readonly health = computed((pkg = this.pkg()) =>
     pkg ? toHealthCheck(pkg.statusInfo) : [],

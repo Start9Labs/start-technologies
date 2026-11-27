@@ -17,6 +17,7 @@ import {
   Language,
   LANGUAGE_TO_CODE,
   LANGUAGES,
+  LocalizePipe,
   TaskService,
 } from '@start9labs/shared'
 import { TuiAnimated } from '@taiga-ui/cdk'
@@ -28,6 +29,7 @@ import {
   TuiDropdown,
   TuiIcon,
   TuiInput,
+  TuiNotification,
   TuiTitle,
 } from '@taiga-ui/core'
 import {
@@ -95,6 +97,24 @@ import { UPDATE } from './update.component'
           {{ (update ? 'View' : 'Check for updates') | i18n }}
         </button>
       </div>
+      @for (
+        vulnerability of os.vulnerabilities$ | async;
+        track vulnerability.id
+      ) {
+        <div tuiNotification appearance="negative">
+          <span tuiTitle>
+            {{ 'This StartOS version has a known vulnerability' | i18n }}:
+            {{ vulnerability.id }}
+            <span tuiSubtitle>
+              {{ 'Vulnerable when' | i18n }}:
+              {{ vulnerability.circumstances | localize }}
+            </span>
+            <span tuiSubtitle>
+              {{ 'Impact' | i18n }}: {{ vulnerability.impact | localize }}
+            </span>
+          </span>
+        </div>
+      }
       <div tuiCell tuiAppearance="outline-grayscale">
         <tui-icon icon="@tui.server" />
         <span tuiTitle>
@@ -265,6 +285,8 @@ import { UPDATE } from './update.component'
     TuiBadge,
     TuiBadgeNotification,
     TuiAnimated,
+    TuiNotification,
+    LocalizePipe,
   ],
 })
 export default class SystemGeneralComponent {

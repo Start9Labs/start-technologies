@@ -66,9 +66,16 @@ export class NotificationService {
   }
 
   getLink(notification: ServerNotification<number>): string | null {
-    return schemas.OsUpdateAvailable.safeParse(notification.data).success
-      ? '/system/general'
-      : null
+    if (schemas.OsUpdateAvailable.safeParse(notification.data).success) {
+      return '/system/general'
+    }
+    const vulnerability = schemas.VulnerabilityFound.safeParse(
+      notification.data,
+    )
+    if (!vulnerability.success) return null
+    return vulnerability.data.packageId
+      ? `/services/${vulnerability.data.packageId}`
+      : '/system/general'
   }
 
   viewModal(notification: ServerNotification<number>) {

@@ -89,6 +89,34 @@ function mockReleases(id: string): Record<string, T.PackageVersionInfo> {
   ])
 }
 
+const MOCK_VULNERABILITIES: Record<
+  string,
+  Record<string, T.SignedVulnerability>
+> = {
+  lnd: {
+    'CVE-2024-38359': {
+      affected: '<0.18.0:0',
+      circumstances:
+        'The peer port is reachable by an attacker who can open channels.',
+      impact: 'A malicious peer can crash the node, forcing channels to close.',
+      stopRecommended: true,
+      publishedAt: '2026-11-20T00:00:00Z',
+      signatures: {},
+    },
+  },
+}
+
+const MOCK_OS_VULNERABILITIES: Record<string, T.SignedVulnerability> = {
+  'STARTOS-2026-01': {
+    affected: '>=0.4.0',
+    circumstances: 'Remote access is enabled over a public IP address.',
+    impact: 'An attacker can read service credentials.',
+    stopRecommended: false,
+    publishedAt: '2026-11-20T00:00:00Z',
+    signatures: {},
+  },
+}
+
 function mockSelections(): T.RegistryCache['selections'] {
   return Object.fromEntries(
     Object.entries(Mock.RegistryPackages).map(([id, pkg]) => {
@@ -112,6 +140,9 @@ function mockSelections(): T.RegistryCache['selections'] {
             ]),
           ),
           ...(updateTarget && releases[updateTarget] ? { updateTarget } : {}),
+          ...(MOCK_VULNERABILITIES[id]
+            ? { vulnerabilities: Object.keys(MOCK_VULNERABILITIES[id]!) }
+            : {}),
         },
       ]
     }),
@@ -136,6 +167,7 @@ export function mockRegistryIndex(
             authorized: {},
             categories: pkg.categories,
             versions: mockReleases(id),
+            vulnerabilities: MOCK_VULNERABILITIES[id] ?? {},
           },
         ]),
       ),
@@ -178,6 +210,8 @@ export function mockOsUpdateCache(
       : Mock.RegistryOSUpdate,
     defaultLocale: 'en_US',
     status: 'connected',
+    vulnerabilities: MOCK_OS_VULNERABILITIES,
+    trustedVulnerabilities: Object.keys(MOCK_OS_VULNERABILITIES),
   }
 }
 

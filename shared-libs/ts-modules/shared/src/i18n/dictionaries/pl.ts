@@ -1113,4 +1113,10 @@ export default {
   1319: 'Chipset',
   1320: 'Czujnik',
   1321: 'Nie znaleziono czujników temperatury',
+  1322: 'Podatności',
+  1323: 'Podatne, gdy',
+  1324: 'Skutki',
+  1325: 'Zaleca się zatrzymanie tej usługi do czasu aktualizacji do poprawionej wersji.',
+  1326: 'Ta wersja StartOS ma znaną podatność',
+  1327: 'Ta wersja ma znaną podatność',
 } satisfies i18n

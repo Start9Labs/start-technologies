@@ -27,12 +27,12 @@ use crate::registry::package::get::{
     GetPackageParams, PackageSelection, select_packages, selection, update_target,
 };
 use crate::registry::package::index::PackageIndex;
+use crate::registry::vulnerability::{OS_SUBJECT, Vulnerabilities};
 use crate::s9pk::merkle_archive::source::encrypted::KeyStreamInfo;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
 use crate::trusted_keys::connection::{
     connected_registry_urls, is_connected, refresh_registry, registry_url, same_registry,
 };
-use crate::registry::vulnerability::{OS_SUBJECT, Vulnerabilities};
 use crate::trusted_keys::{TrustContext, enabled_keys};
 use crate::util::VersionString;
 use crate::util::future::NonDetachingJoinHandle;
@@ -622,18 +622,21 @@ fn refresh_selections(
             packages.remove(&id)?;
             continue;
         };
-        let published = index
+        let published: Vulnerabilities = index
             .as_packages()
             .as_idx(&id)
-            .map(|package| package.as_vulnerabilities().de())
+            .map(|package| crate::registry::vulnerability::published(package.as_vulnerabilities()))
             .transpose()?
             .unwrap_or_default();
         let trusted = crate::registry::vulnerability::trusted(&id, &published, &keys);
         selected.vulnerabilities = trusted.keys().cloned().collect();
         let previous: BTreeSet<InternedString> = packages
             .as_idx(&id)
-            .map(|previous| previous.as_vulnerabilities().de())
+            .map(|previous| {
+                from_value::<Option<_>>(previous.as_vulnerabilities().as_value().clone())
+            })
             .transpose()?
+            .flatten()
             .unwrap_or_default();
         if let Some(version) = installed.get(&id) {
             found.extend(
@@ -685,14 +688,17 @@ fn refresh_os_vulnerabilities(
         &db.as_public().as_server_info().as_trusted_keys().de()?,
         TrustContext::Os,
     );
-    let trusted = crate::registry::vulnerability::trusted(OS_SUBJECT, &cache.vulnerabilities, &keys);
+    let trusted =
+        crate::registry::vulnerability::trusted(OS_SUBJECT, &cache.vulnerabilities, &keys);
     let version = VersionString::from(exver::ExtendedVersion::new(
         os_version.clone(),
         exver::Version::default(),
     ));
     cache.trusted_vulnerabilities = trusted.keys().cloned().collect();
     let registry = cache.registry.clone();
-    db.as_public_mut().as_os_update_cache_mut().ser(&Some(cache))?;
+    db.as_public_mut()
+        .as_os_update_cache_mut()
+        .ser(&Some(cache))?;
     for (vid, vulnerability) in trusted {
         if !previous.contains(&vid) && vulnerability.affects(&version) {
             crate::registry::vulnerability::notify_found(
@@ -709,7 +715,10 @@ fn refresh_os_vulnerabilities(
 }
 
 /// Reapplies vulnerability trust after the server's trusted keys change.
-fn refresh_trusted_vulnerabilities(db: &mut DatabaseModel, device: &DeviceInfo) -> Result<(), Error> {
+fn refresh_trusted_vulnerabilities(
+    db: &mut DatabaseModel,
+    device: &DeviceInfo,
+) -> Result<(), Error> {
     for url in db.as_public().as_registry_indexes().keys()? {
         let ids = db
             .as_public()
@@ -1076,7 +1085,8 @@ fn publish_snapshot(
                 .filter(|cache| same_registry(cache.registry.as_str(), url.as_str()))
                 .map(|cache| cache.trusted_vulnerabilities)
                 .unwrap_or_default();
-            let vulnerabilities = index.as_vulnerabilities().de()?;
+            let vulnerabilities =
+                crate::registry::vulnerability::published(index.as_vulnerabilities())?;
             crate::update::security::notify_updates(db, url, name, index.de()?)?;
             db.as_public_mut()
                 .as_os_update_cache_mut()

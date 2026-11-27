@@ -351,7 +351,7 @@ export type Patch = z.output<typeof schemas.Patch>
 export type RegistryInfo = z.output<typeof schemas.RegistryInfo>
 
 /**
- * A [`Vulnerability`] as a registry publishes it.
+ * A `Vulnerability` as a registry publishes it.
  */
 export type SignedVulnerability = z.output<typeof schemas.SignedVulnerability>
 

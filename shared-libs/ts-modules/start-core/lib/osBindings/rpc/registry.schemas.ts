@@ -1813,7 +1813,7 @@ export const RegistryInfo: z.ZodObject<{
 })
 
 /**
- * A [`Vulnerability`] as a registry publishes it.
+ * A `Vulnerability` as a registry publishes it.
  */
 export const SignedVulnerability: z.ZodIntersection<
   z.ZodObject<{
@@ -1831,7 +1831,7 @@ export const SignedVulnerability: z.ZodIntersection<
   )
   .meta({
     id: 'SignedVulnerability',
-    description: 'A [`Vulnerability`] as a registry publishes it.',
+    description: 'A `Vulnerability` as a registry publishes it.',
   })
 
 /**
@@ -1844,14 +1844,12 @@ export const DiffPatch: typeof Patch = /* @__PURE__ */ Patch.meta({
 })
 export const OsIndex: z.ZodObject<{
   versions: typeof OsVersionInfoMap
-  vulnerabilities: z.ZodDefault<
+  vulnerabilities: z.ZodOptional<
     z.ZodRecord<z.ZodString, typeof SignedVulnerability>
   >
 }> = /* @__PURE__ */ object({
   versions: OsVersionInfoMap,
-  vulnerabilities: z
-    .record(z.string(), SignedVulnerability)
-    .default(() => ({})),
+  vulnerabilities: z.record(z.string(), SignedVulnerability).optional(),
 }).meta({
   id: 'OsIndex',
 })
@@ -1939,16 +1937,14 @@ export const PackageInfo: z.ZodObject<{
   authorized: z.ZodRecord<z.ZodString, z.ZodString>
   versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   categories: z.ZodArray<z.ZodString>
-  vulnerabilities: z.ZodDefault<
+  vulnerabilities: z.ZodOptional<
     z.ZodRecord<z.ZodString, typeof SignedVulnerability>
   >
 }> = /* @__PURE__ */ object({
   authorized: z.record(z.string(), z.string()),
   versions: z.record(z.string(), PackageVersionInfo),
   categories: z.array(z.string()),
-  vulnerabilities: z
-    .record(z.string(), SignedVulnerability)
-    .default(() => ({})),
+  vulnerabilities: z.record(z.string(), SignedVulnerability).optional(),
 }).meta({
   id: 'PackageInfo',
 })

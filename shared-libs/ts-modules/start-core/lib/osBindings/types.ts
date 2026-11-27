@@ -1512,12 +1512,12 @@ export type SideloadParams = z.output<typeof schemas.SideloadParams>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
 
 /**
- * A [`Vulnerability`] as a registry publishes it.
+ * A `Vulnerability` as a registry publishes it.
  */
 export type SignedVulnerability = z.output<typeof schemas.SignedVulnerability>
 
 /**
- * A [`Vulnerability`] as a registry publishes it.
+ * A `Vulnerability` as a registry publishes it.
  */
 export type SignedVulnerabilityInput = z.input<
   typeof schemas.SignedVulnerability

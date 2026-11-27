@@ -613,6 +613,7 @@ mod tests {
                 ("0.4.0.6".parse().unwrap(), release(&PLATFORM)),
                 ("0.4.0.7".parse().unwrap(), release(other_platform)),
             ])),
+            vulnerabilities: Default::default(),
         };
         let params: GetOsVersionParams = from_value(version_query_params(
             &"0.4.0.5".parse().unwrap(),
