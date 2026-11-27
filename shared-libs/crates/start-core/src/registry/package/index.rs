@@ -148,7 +148,7 @@ impl Model<PackageVersionInfo> {
         if s9pks.is_empty() {
             return Ok(true);
         }
-        let mut visible = imbl::Vector::new();
+        let mut visible = imbl_value::OrdArray::new();
         for mut entry in std::mem::take(s9pks) {
             if Reader::sees(reader, publisher, &S9pkAccess::of(&entry)?) {
                 if !(publisher || Reader::is_admin(reader)) {

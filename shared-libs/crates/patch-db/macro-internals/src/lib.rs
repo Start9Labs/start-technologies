@@ -609,7 +609,7 @@ fn build_model_enum(base: &DeriveInput, ast: &DataEnum) -> TokenStream {
                 tag_variants_unmatch.extend(quote_spanned! { variant_name.span() =>
                     #match_name::#variant_name(v) => Self::from_value({
                         let mut a = v.into_value();
-                        a[#tag] = patch_db::OrdValue::String(std::sync::Arc::new(#variant_accessor.to_owned()));
+                        a[#tag] = patch_db::OrdValue::from(#variant_accessor);
                         a
                     }),
                 });

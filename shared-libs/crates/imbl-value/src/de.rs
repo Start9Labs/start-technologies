@@ -1,10 +1,8 @@
 use core::fmt;
 use core::str::FromStr;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
-use imbl::shared_ptr::DefaultSharedPtr;
-use imbl::Vector;
+use crate::object::{ValueStr, ValueVector};
 use serde::de::value::StrDeserializer;
 use serde::de::{
     self, Deserialize, DeserializeSeed, EnumAccess, Expected, IntoDeserializer, MapAccess,
@@ -60,7 +58,7 @@ impl<'de, K: ObjectKind> Deserialize<'de> for GenericValue<K> {
 
             #[inline]
             fn visit_string<E>(self, value: String) -> Result<GenericValue<K>, E> {
-                Ok(GenericValue::String(Arc::new(value)))
+                Ok(GenericValue::String(K::Str::from(value)))
             }
 
             #[inline]
@@ -86,7 +84,7 @@ impl<'de, K: ObjectKind> Deserialize<'de> for GenericValue<K> {
             where
                 V: SeqAccess<'de>,
             {
-                let mut vec = Vector::new();
+                let mut vec = ValueVector::<K>::new();
 
                 while let Some(elem) = visitor.next_element()? {
                     vec.push_back(elem);
@@ -167,10 +165,7 @@ impl<'a, K: ObjectKind, M> RefDeserializer<'a, K, M> {
     }
 }
 
-fn visit_array<'a, 'de, K, M, V>(
-    array: &'a Vector<GenericValue<K>>,
-    visitor: V,
-) -> Result<V::Value, Error>
+fn visit_array<'a, 'de, K, M, V>(array: &'a ValueVector<K>, visitor: V) -> Result<V::Value, Error>
 where
     K: ObjectKind,
     M: StrMode<'a, 'de>,
@@ -244,7 +239,7 @@ where
             GenericValue::Null => visitor.visit_unit(),
             GenericValue::Bool(v) => visitor.visit_bool(*v),
             GenericValue::Number(n) => n.deserialize_any(visitor),
-            GenericValue::String(v) => M::visit_str(v, visitor),
+            GenericValue::String(v) => M::visit_str(v.as_str(), visitor),
             GenericValue::Array(v) => visit_array::<K, M, V>(v, visitor),
             GenericValue::Object(v) => visit_object::<K, M, V>(v, visitor),
         }
@@ -353,7 +348,7 @@ where
         V: Visitor<'de>,
     {
         match self.value {
-            GenericValue::String(v) => M::visit_str(v, visitor),
+            GenericValue::String(v) => M::visit_str(v.as_str(), visitor),
             other => Err(other.invalid_type(&visitor)),
         }
     }
@@ -370,7 +365,7 @@ where
         V: Visitor<'de>,
     {
         match self.value {
-            GenericValue::String(v) => M::visit_str(v, visitor),
+            GenericValue::String(v) => M::visit_str(v.as_str(), visitor),
             GenericValue::Array(v) => visit_array::<K, M, V>(v, visitor),
             other => Err(other.invalid_type(&visitor)),
         }
@@ -626,7 +621,7 @@ where
 }
 
 struct SeqRefDeserializer<'a, K: ObjectKind, M> {
-    iter: imbl::vector::Iter<'a, GenericValue<K>, DefaultSharedPtr>,
+    iter: imbl::vector::Iter<'a, GenericValue<K>, K::Ptr>,
     mode: PhantomData<M>,
 }
 
@@ -842,7 +837,7 @@ impl<K: ObjectKind> GenericValue<K> {
                     unreachable!()
                 }
             }
-            GenericValue::String(s) => Unexpected::Str(s),
+            GenericValue::String(s) => Unexpected::Str(s.as_str()),
             GenericValue::Array(_) => Unexpected::Seq,
             GenericValue::Object(_) => Unexpected::Map,
         }

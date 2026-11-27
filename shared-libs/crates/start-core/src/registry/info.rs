@@ -121,7 +121,7 @@ pub(crate) fn info_value(index: &Model<FullIndex>) -> Result<OrdValue, Error> {
         .flat_map(|signers| signers.iter())
         .filter(|(id, _)| id.parse::<Guid>().is_ok_and(|id| trusted.contains(&id)))
         .map(|(id, signer)| (id.clone(), signer.clone()))
-        .collect::<imbl::OrdMap<_, _>>();
+        .collect::<imbl_value::OrdObject>();
     Ok([
         ("name", field("name")),
         ("icon", field("icon")),
@@ -135,7 +135,7 @@ pub(crate) fn info_value(index: &Model<FullIndex>) -> Result<OrdValue, Error> {
     ]
     .into_iter()
     .map(|(key, value)| (InternedString::intern(key), value))
-    .collect::<imbl::OrdMap<_, _>>()
+    .collect::<imbl_value::OrdObject>()
     .into())
 }
 

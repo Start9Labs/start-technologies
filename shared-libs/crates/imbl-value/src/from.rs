@@ -1,7 +1,10 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use imbl::{OrdMap, Vector};
+use imbl::shared_ptr::SharedPointerKind;
+use imbl::GenericVector;
+
+use crate::object::ValueStr;
 use yasi::InternedString;
 
 use crate::{GenericValue, InOMap, ObjectKind, ObjectMap, OrdValue, Value};
@@ -31,7 +34,7 @@ impl<K: ObjectKind> From<GenericValue<K>> for serde_json::Value {
                     .map(|(a, b)| ((&*a).to_owned(), b.into()))
                     .collect(),
             ),
-            GenericValue::String(a) => Self::String((&*a).to_owned()),
+            GenericValue::String(a) => Self::String(a.as_str().to_owned()),
         }
     }
 }
@@ -46,7 +49,7 @@ impl<K: ObjectKind, T: Clone + Into<GenericValue<K>>> From<&[T]> for GenericValu
 impl<K: ObjectKind> From<&str> for GenericValue<K> {
     /// Convert string slice to `Value::String`.
     fn from(value: &str) -> Self {
-        GenericValue::String(Arc::new(value.into()))
+        GenericValue::String(K::Str::from_str_ref(value))
     }
 }
 
@@ -67,7 +70,7 @@ impl<K: ObjectKind> From<()> for GenericValue<K> {
 impl<'a, K: ObjectKind> From<Cow<'a, str>> for GenericValue<K> {
     /// Convert copy-on-write string to `Value::String`.
     fn from(value: Cow<'a, str>) -> Self {
-        GenericValue::String(Arc::new(value.into_owned()))
+        GenericValue::String(K::Str::from(value.into_owned()))
     }
 }
 
@@ -83,8 +86,8 @@ impl From<InOMap<InternedString, Value>> for Value {
     }
 }
 
-impl From<OrdMap<InternedString, OrdValue>> for OrdValue {
-    fn from(value: OrdMap<InternedString, OrdValue>) -> Self {
+impl From<crate::OrdObject> for OrdValue {
+    fn from(value: crate::OrdObject) -> Self {
         Self::Object(value)
     }
 }
@@ -112,7 +115,7 @@ fn convert<A: ObjectKind, B: ObjectKind>(value: GenericValue<A>) -> GenericValue
         GenericValue::Null => GenericValue::Null,
         GenericValue::Bool(b) => GenericValue::Bool(b),
         GenericValue::Number(n) => GenericValue::Number(n),
-        GenericValue::String(s) => GenericValue::String(s),
+        GenericValue::String(s) => GenericValue::String(B::Str::from_arc(s.into_arc())),
         GenericValue::Array(a) => GenericValue::Array(a.into_iter().map(convert).collect()),
         GenericValue::Object(o) => {
             GenericValue::Object(o.into_entries().map(|(k, v)| (k, convert(v))).collect())
@@ -146,14 +149,14 @@ impl<K: ObjectKind, T: Into<GenericValue<K>>> From<Option<T>> for GenericValue<K
 impl<K: ObjectKind> From<String> for GenericValue<K> {
     /// Convert `String` to `Value::String`.
     fn from(value: String) -> Self {
-        GenericValue::String(Arc::new(value))
+        GenericValue::String(K::Str::from(value))
     }
 }
 
 impl<K: ObjectKind> From<Arc<String>> for GenericValue<K> {
     /// Convert `Arc<String>` to `Value::String`.
     fn from(value: Arc<String>) -> Self {
-        GenericValue::String(value)
+        GenericValue::String(K::Str::from_arc(value))
     }
 }
 
@@ -164,9 +167,11 @@ impl<K: ObjectKind, T: Into<GenericValue<K>>> From<Vec<T>> for GenericValue<K> {
     }
 }
 
-impl<K: ObjectKind, T: Clone + Into<GenericValue<K>>> From<Vector<T>> for GenericValue<K> {
+impl<K: ObjectKind, T: Clone + Into<GenericValue<K>>, P: SharedPointerKind>
+    From<GenericVector<T, P>> for GenericValue<K>
+{
     /// Convert a `Vector` to `Value::Array`.
-    fn from(value: Vector<T>) -> Self {
+    fn from(value: GenericVector<T, P>) -> Self {
         GenericValue::Array(value.into_iter().map(|v| v.into()).collect())
     }
 }

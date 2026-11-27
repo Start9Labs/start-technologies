@@ -189,7 +189,7 @@ fn value() -> impl Strategy<Value = OrdValue> {
                 0..4
             )
             .prop_map(|map| {
-                let mut object = imbl_value::imbl::OrdMap::new();
+                let mut object = imbl_value::OrdObject::new();
                 for (key, value) in map {
                     object.insert(key.into(), value);
                 }

@@ -2,13 +2,13 @@ use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display};
 use std::hash::{Hash, Hasher};
 use std::io;
-use std::sync::Arc;
 
-use imbl::Vector;
 use index::Index;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+#[cfg(feature = "arena")]
+pub mod arena;
 pub mod de;
 mod from;
 pub mod in_order_map;
@@ -22,7 +22,7 @@ mod arbitrary;
 
 pub use imbl;
 pub use in_order_map::InOMap;
-pub use object::{InOrder, ObjectKind, ObjectMap, Sorted};
+pub use object::{InOrder, ObjectKind, ObjectMap, OrdObject, Sorted, ValueStr, ValueVector};
 pub use serde_json::{Error as ErrorSource, Number};
 pub use yasi::InternedString;
 
@@ -33,6 +33,8 @@ pub type Value = GenericValue<InOrder>;
 
 /// A JSON value whose objects keep keys sorted.
 pub type OrdValue = GenericValue<Sorted>;
+/// The array behind an [`OrdValue`] array.
+pub type OrdArray = ValueVector<Sorted>;
 
 #[derive(Debug)]
 pub enum ErrorKind {
@@ -88,7 +90,7 @@ pub enum GenericValue<K: ObjectKind> {
     ///
     /// let v = json!("a string");
     /// ```
-    String(Arc<String>),
+    String(K::Str),
 
     /// Represents a JSON array.
     ///
@@ -97,7 +99,7 @@ pub enum GenericValue<K: ObjectKind> {
     ///
     /// let v = json!(["an", "array"]);
     /// ```
-    Array(Vector<GenericValue<K>>),
+    Array(ValueVector<K>),
 
     /// Represents a JSON object.
     ///
@@ -369,7 +371,7 @@ impl<K: ObjectKind> GenericValue<K> {
     /// // The object `{"an": "object"}` is not an array.
     /// assert_eq!(v["b"].as_array(), None);
     /// ```
-    pub fn as_array(&self) -> Option<&Vector<Self>> {
+    pub fn as_array(&self) -> Option<&ValueVector<K>> {
         match self {
             GenericValue::Array(array) => Some(array),
             _ => None,
@@ -387,7 +389,7 @@ impl<K: ObjectKind> GenericValue<K> {
     /// v["a"].as_array_mut().unwrap().clear();
     /// assert_eq!(v, json!({ "a": [] }));
     /// ```
-    pub fn as_array_mut(&mut self) -> Option<&mut Vector<Self>> {
+    pub fn as_array_mut(&mut self) -> Option<&mut ValueVector<K>> {
         match self {
             GenericValue::Array(list) => Some(list),
             _ => None,
@@ -438,7 +440,7 @@ impl<K: ObjectKind> GenericValue<K> {
     /// ```
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            GenericValue::String(s) => Some(s),
+            GenericValue::String(s) => Some(s.as_str()),
             _ => None,
         }
     }
@@ -712,9 +714,8 @@ impl<K: ObjectKind> GenericValue<K> {
             .split('/')
             .skip(1)
             .map(|x| x.replace("~1", "/").replace("~0", "~"))
-            .map(Arc::new)
             .try_fold(self, |target, token| match target {
-                GenericValue::Object(map) => map.get(&**token),
+                GenericValue::Object(map) => map.get(&token),
                 GenericValue::Array(list) => parse_index(&token).and_then(|x| list.get(x)),
                 _ => None,
             })
@@ -768,9 +769,8 @@ impl<K: ObjectKind> GenericValue<K> {
             .split('/')
             .skip(1)
             .map(|x| x.replace("~1", "/").replace("~0", "~"))
-            .map(Arc::new)
             .try_fold(self, |target, token| match target {
-                GenericValue::Object(map) => map.get_mut(&**token),
+                GenericValue::Object(map) => map.get_mut(&token),
                 GenericValue::Array(list) => parse_index(&token).and_then(move |x| list.get_mut(x)),
                 _ => None,
             })
@@ -815,7 +815,7 @@ impl<K: ObjectKind> GenericValue<K> {
         match (self, other) {
             (Self::Array(a), Self::Array(b)) => a.ptr_eq(b),
             (Self::Object(a), Self::Object(b)) => a.ptr_eq(b),
-            (Self::String(a), Self::String(b)) => Arc::ptr_eq(a, b),
+            (Self::String(a), Self::String(b)) => K::Str::ptr_eq(a, b),
             (a, b) => a == b, // primitive - trivial comparison
         }
     }
@@ -865,7 +865,7 @@ impl<K: ObjectKind> PartialEq for GenericValue<K> {
             (GenericValue::Number(a), GenericValue::Number(b)) => a == b,
 
             (GenericValue::Object(a), GenericValue::Object(b)) => a.ptr_eq(b) || a == b,
-            (GenericValue::String(a), GenericValue::String(b)) => Arc::ptr_eq(a, b) || a == b,
+            (GenericValue::String(a), GenericValue::String(b)) => K::Str::ptr_eq(a, b) || a == b,
             _ => false,
         }
     }
@@ -933,7 +933,7 @@ impl<K: ObjectKind> PartialEq<u64> for GenericValue<K> {
 impl<K: ObjectKind> PartialEq<str> for GenericValue<K> {
     fn eq(&self, other: &str) -> bool {
         match self {
-            GenericValue::String(s) => &**s == other,
+            GenericValue::String(s) => s.as_str() == other,
             _ => false,
         }
     }
