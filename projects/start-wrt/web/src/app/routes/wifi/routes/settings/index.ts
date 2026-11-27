@@ -114,55 +114,65 @@ const COUNTRY_CHANGE_MAX_WIDTH = 80
           </label>
         }
       </tui-elastic-container>
+      @let show24 = includesBand(band(), '2g');
+      @let show5 = includesBand(band(), '5g');
       <fieldset>
         <legend>{{ 'Frequency Range' | i18n }}</legend>
-        <tui-textfield tuiChevron [stringify]="stringifyChannel">
-          <label tuiLabel>{{ '2.4 GHz Channel' | i18n }}</label>
-          <input
-            tuiSelect
-            formControlName="channel24"
-            (tuiValueChanges)="onChannel('2g', $event)"
-          />
-          <tui-data-list *tuiDropdown>
-            @for (ch of channels24(); track ch) {
-              <button tuiOption [value]="ch">{{ ch | i18n }}</button>
-            }
-          </tui-data-list>
-        </tui-textfield>
-        <tui-textfield tuiChevron [stringify]="stringifyChannel">
-          <label tuiLabel>{{ '5 GHz Channel' | i18n }}</label>
-          <input
-            tuiSelect
-            formControlName="channel5"
-            (tuiValueChanges)="onChannel('5g', $event)"
-          />
-          <tui-data-list *tuiDropdown>
-            @for (ch of channels5(); track ch) {
-              <button tuiOption [value]="ch">{{ ch | i18n }}</button>
-            }
-          </tui-data-list>
-        </tui-textfield>
+        @if (show24) {
+          <tui-textfield tuiChevron [stringify]="stringifyChannel">
+            <label tuiLabel>{{ '2.4 GHz Channel' | i18n }}</label>
+            <input
+              tuiSelect
+              formControlName="channel24"
+              (tuiValueChanges)="onChannel('2g', $event)"
+            />
+            <tui-data-list *tuiDropdown>
+              @for (ch of channels24(); track ch) {
+                <button tuiOption [value]="ch">{{ ch | i18n }}</button>
+              }
+            </tui-data-list>
+          </tui-textfield>
+        }
+        @if (show5) {
+          <tui-textfield tuiChevron [stringify]="stringifyChannel">
+            <label tuiLabel>{{ '5 GHz Channel' | i18n }}</label>
+            <input
+              tuiSelect
+              formControlName="channel5"
+              (tuiValueChanges)="onChannel('5g', $event)"
+            />
+            <tui-data-list *tuiDropdown>
+              @for (ch of channels5(); track ch) {
+                <button tuiOption [value]="ch">{{ ch | i18n }}</button>
+              }
+            </tui-data-list>
+          </tui-textfield>
+        }
       </fieldset>
       <fieldset>
         <legend>{{ 'Channel Width' | i18n }}</legend>
-        <tui-textfield tuiChevron [stringify]="stringifyWidth">
-          <label tuiLabel>{{ '2.4 GHz Width' | i18n }}</label>
-          <input tuiSelect formControlName="width24" />
-          <tui-data-list *tuiDropdown>
-            @for (w of widths24(); track w) {
-              <button tuiOption [value]="w">{{ stringifyWidth(w) }}</button>
-            }
-          </tui-data-list>
-        </tui-textfield>
-        <tui-textfield tuiChevron [stringify]="stringifyWidth">
-          <label tuiLabel>{{ '5 GHz Width' | i18n }}</label>
-          <input tuiSelect formControlName="width5" />
-          <tui-data-list *tuiDropdown>
-            @for (w of widths5(); track w) {
-              <button tuiOption [value]="w">{{ stringifyWidth(w) }}</button>
-            }
-          </tui-data-list>
-        </tui-textfield>
+        @if (show24) {
+          <tui-textfield tuiChevron [stringify]="stringifyWidth">
+            <label tuiLabel>{{ '2.4 GHz Width' | i18n }}</label>
+            <input tuiSelect formControlName="width24" />
+            <tui-data-list *tuiDropdown>
+              @for (w of widths24(); track w) {
+                <button tuiOption [value]="w">{{ stringifyWidth(w) }}</button>
+              }
+            </tui-data-list>
+          </tui-textfield>
+        }
+        @if (show5) {
+          <tui-textfield tuiChevron [stringify]="stringifyWidth">
+            <label tuiLabel>{{ '5 GHz Width' | i18n }}</label>
+            <input tuiSelect formControlName="width5" />
+            <tui-data-list *tuiDropdown>
+              @for (w of widths5(); track w) {
+                <button tuiOption [value]="w">{{ stringifyWidth(w) }}</button>
+              }
+            </tui-data-list>
+          </tui-textfield>
+        }
       </fieldset>
       @if (service.data()) {
         <footer appFooter></footer>
@@ -240,6 +250,7 @@ export default class WifiSettings {
     { requireSync: true },
   )
 
+  // Band visibility preserves the form's unsaved channel and width selections.
   protected readonly band = toSignal(
     this.form.controls.band.valueChanges.pipe(
       startWith(this.form.controls.band.value),
@@ -248,6 +259,11 @@ export default class WifiSettings {
   )
 
   protected readonly bands = ['2.4 GHz', '5 GHz', 'Both']
+
+  protected readonly includesBand = (selection: string, band: string) =>
+    selection === 'Both' ||
+    (band === '2g' && selection === '2.4 GHz') ||
+    (band === '5g' && selection === '5 GHz')
 
   // Typing over a selection empties the control until an item is picked.
   protected readonly unset = toSignal(
@@ -270,7 +286,6 @@ export default class WifiSettings {
     ),
   ])
 
-  // Translates the 'Auto' option; numeric channels pass through unchanged.
   protected readonly stringifyChannel = (c: string): string =>
     this.i18n.transform(c)
 
@@ -349,10 +364,7 @@ export default class WifiSettings {
         })
         .pipe(filter(Boolean))
         .subscribe(() => {
-          // The SSID change disconnects every WiFi client; a transient toast
-          // can't carry an instruction the user must act on. Hand off to the
-          // persistent ReconnectDialog, which tells the user to rejoin the new
-          // network and reloads once they have.
+          // Reconnection instructions must survive the WiFi disconnect.
           const done = this.service.saveForSsidChange(config)
           this.dialogs
             .open(new PolymorpheusComponent(ReconnectDialog), {
@@ -427,10 +439,7 @@ export default class WifiSettings {
     for (const [key, radio] of Object.entries(data.radios)) {
       const is2g = radio.band === '2g'
       const is5g = radio.band === '5g'
-      const enabledByBand =
-        form.band === 'Both' ||
-        (is2g && form.band === '2.4 GHz') ||
-        (is5g && form.band === '5 GHz')
+      const enabledByBand = this.includesBand(form.band, radio.band)
 
       radios[key] = {
         band: radio.band,

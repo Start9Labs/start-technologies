@@ -2,11 +2,10 @@ use exver::VersionRange;
 use url::Url;
 
 use super::v0_3_5::V0_3_0_COMPAT;
+use super::v0_4_1_2::ui_registries;
 use super::{VersionT, v0_4_2};
 use crate::prelude::*;
-use crate::trusted_keys::{
-    Registries, ensure_builtin_registries, initial_os_registry, ui_registries,
-};
+use crate::trusted_keys::{Registries, ensure_builtin_registries, initial_os_registry};
 
 lazy_static::lazy_static! {
     static ref V0_4_2_1: exver::Version = exver::Version::new([0, 4, 2, 1], []);

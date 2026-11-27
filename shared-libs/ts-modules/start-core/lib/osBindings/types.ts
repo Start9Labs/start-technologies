@@ -592,12 +592,6 @@ export type TransportProtocol = z.output<typeof schemas.TransportProtocol>
 export type TransportProtocolInput = z.input<typeof schemas.TransportProtocol>
 export type TrustContext = z.output<typeof schemas.TrustContext>
 export type TrustContextInput = z.input<typeof schemas.TrustContext>
-export type TrustedOsUpdateSigner = z.output<
-  typeof schemas.TrustedOsUpdateSigner
->
-export type TrustedOsUpdateSignerInput = z.input<
-  typeof schemas.TrustedOsUpdateSigner
->
 export type UploadLimits = z.output<typeof schemas.UploadLimits>
 export type UploadLimitsInput = z.input<typeof schemas.UploadLimits>
 

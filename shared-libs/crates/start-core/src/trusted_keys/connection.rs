@@ -109,16 +109,6 @@ pub(crate) fn ensure_builtin_registries(registries: &mut Registries) {
     }
 }
 
-/// Reads the `registries` map StartOS kept in `public.ui` before 0.4.2.1.
-pub(crate) fn ui_registries(ui: &Value) -> Registries {
-    ui.get("registries")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flatten()
-        .map(|(url, name)| (url.clone(), name.as_str().map(str::to_owned)))
-        .collect()
-}
-
 pub(crate) fn connected_registry_urls(
     registries: &Registries,
 ) -> impl Iterator<Item = Result<Url, Error>> + '_ {

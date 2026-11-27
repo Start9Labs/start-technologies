@@ -188,6 +188,20 @@ export const init = sdk.setupInit(
 export const uninit = sdk.setupUninit(versionGraph)
 ```
 
+## Uninit
+
+`sdk.setupUninit` composes the handlers that run as the service's container comes down: on every shutdown, before an update replaces the package, and on uninstall. `versionGraph` must be among them, since its uninit performs the outgoing half of a [migration path](./versions.md#how-startos-runs-a-migration-path).
+
+Each handler receives a `target`, the data version StartOS wants the data left at:
+
+| Exit                               | `target`                                                                                                       |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Shutdown                           | the running version                                                                                            |
+| Update, downgrade or flavor switch | the current data version, the incoming version, or the overlap of their ranges, as the migration path requires |
+| Uninstall                          | `null`                                                                                                         |
+
+**`target` identifies an uninstall, and nothing else.** A compatible update passes the version already installed, the same value a shutdown passes, so neither `target` nor its type tells an update from a shutdown. Clean up for an uninstall in a handler that acts on `null`, and put work that must happen when the data leaves a version in that version's migrations.
+
 ## runUntilSuccess Pattern
 
 Use `runUntilSuccess(timeout)` to run daemons and oneshots during init, waiting for completion before continuing. This is essential for setup steps that need a running server.

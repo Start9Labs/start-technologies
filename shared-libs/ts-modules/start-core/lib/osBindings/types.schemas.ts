@@ -1920,10 +1920,6 @@ export const TrustContext: z.ZodEnum<{ marketplace: 'marketplace'; os: 'os' }> =
   /* @__PURE__ */ z.enum(['marketplace', 'os']).meta({
     id: 'TrustContext',
   })
-export const TrustedOsUpdateSigner: z.ZodObject<{ label: z.ZodString }> =
-  /* @__PURE__ */ object({ label: z.string() }).meta({
-    id: 'TrustedOsUpdateSigner',
-  })
 export const UploadLimits: z.ZodObject<{
   /**
    * Maximum uploaded bytes, inclusive; null leaves the size unbounded.
