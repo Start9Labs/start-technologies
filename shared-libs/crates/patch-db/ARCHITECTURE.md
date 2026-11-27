@@ -192,7 +192,7 @@ watch$(...path) → BehaviorSubject per unique path → Observable to consumer
 
 - `watch$()` has overloads for 0–6 path segments, providing type-safe deep property access
 - Watched nodes are keyed by their JSON Pointer path string
-- A revision considers watchers whose path overlaps with any operation in the patch (prefix match in either direction)
+- A revision considers watchers whose path overlaps with any operation in the patch (prefix match in either direction), and watchers inside arrays it shifts
 - A dump reconciles equal subtrees and considers every watcher
 - Watches emit subsequent values only when `value !== previousValue`
 
