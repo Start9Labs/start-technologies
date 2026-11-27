@@ -63,14 +63,15 @@ async fn an_unpolled_check_does_not_retain_or_revive_the_authentication_owner() 
 }
 
 #[tokio::test]
-async fn validator_uses_the_existing_clock_policy_without_consuming_rejected_nonces() {
+async fn validator_reports_clock_skew_without_consuming_rejected_nonces() {
     let (_directory, context) = context().await;
     let check = context.replay_check();
     let mut commitment = RequestCommitment::for_bytes(b"hello");
     let now = commitment.timestamp;
     commitment.timestamp = 0;
     let expired = verified(commitment.clone()).await;
-    assert!(check.check(expired).await.is_err());
+    let error = check.check(expired).await.unwrap_err();
+    assert!(ClockSkew::of(&error).unwrap().now.abs_diff(now) <= 2);
     commitment.timestamp = now;
     check.check(verified(commitment).await).await.unwrap();
 }

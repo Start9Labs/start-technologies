@@ -1113,4 +1113,5 @@ export default {
   1319: 'Chipset',
   1320: 'Capteur',
   1321: 'Aucun capteur de température trouvé',
+  1322: "Le serveur a rejeté l'horloge de cet appareil ; vérifiez la date, l'heure et le fuseau horaire de cet appareil",
 } satisfies i18n

@@ -605,4 +605,5 @@ export default {
   653: '{port} envoie chaque profil de sécurité au switch, étiqueté avec son ID de VLAN. Configurez les VLAN du switch avec ces ID.',
   654: '{profile} chevauche le réseau amont {network}',
   655: 'Le routeur peut perdre l’accès au réseau amont ou à Internet. Un réseau WAN plus spécifique peut aussi empêcher les appareils d’accéder à ce tableau de bord. Changez son sous-réseau pour un sous-réseau hors de ce réseau.',
+  656: "Le serveur a rejeté l'horloge de cet appareil ; vérifiez la date, l'heure et le fuseau horaire de cet appareil",
 } satisfies i18n

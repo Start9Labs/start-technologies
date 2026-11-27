@@ -147,6 +147,7 @@ export const ENGLISH: Record<string, number> = {
   'This browser is not enrolled yet': 133,
   'Cancel': 134,
   'Continue': 135,
+  "The server rejected this device's clock; check this device's date, time and time zone": 136,
 }
 
 export default ENGLISH

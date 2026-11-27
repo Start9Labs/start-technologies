@@ -138,6 +138,7 @@ const es: Record<number, string> = {
   133: 'Este navegador aún no está registrado',
   134: 'Cancelar',
   135: 'Continuar',
+  136: 'El servidor rechazó el reloj de este dispositivo; compruebe la fecha, la hora y la zona horaria de este dispositivo',
 }
 
 export default es
