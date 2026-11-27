@@ -50,8 +50,8 @@ pub fn number_strategy<K: ObjectKind>() -> BoxedStrategy<GenericValue<K>> {
 pub fn array_strategy<K: ObjectKind>(
     inner: impl Strategy<Value = GenericValue<K>> + 'static,
 ) -> BoxedStrategy<GenericValue<K>> {
-    imbl::proptest::vector(inner, 0..10)
-        .prop_map(GenericValue::Array)
+    proptest::collection::vec(inner, 0..10)
+        .prop_map(|items| GenericValue::Array(items.into_iter().collect()))
         .boxed()
 }
 

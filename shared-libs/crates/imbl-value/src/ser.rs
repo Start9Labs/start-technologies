@@ -2,9 +2,8 @@ use core::convert::TryFrom;
 use core::fmt::Display;
 use core::result;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
-use imbl::Vector;
+use crate::object::{ValueStr, ValueVector};
 use serde::ser::{Impossible, Serialize};
 use serde_json::{Error, Number, Result};
 
@@ -20,7 +19,7 @@ impl<K: ObjectKind> Serialize for GenericValue<K> {
             GenericValue::Null => serializer.serialize_unit(),
             GenericValue::Bool(b) => serializer.serialize_bool(*b),
             GenericValue::Number(n) => n.serialize(serializer),
-            GenericValue::String(s) => serializer.serialize_str(s),
+            GenericValue::String(s) => serializer.serialize_str(s.as_str()),
             GenericValue::Array(v) => v.serialize(serializer),
             GenericValue::Object(m) => {
                 use serde::ser::SerializeMap;
@@ -156,12 +155,12 @@ impl<K: ObjectKind> serde::Serializer for Serializer<K> {
     fn serialize_char(self, value: char) -> Result<GenericValue<K>> {
         let mut s = String::new();
         s.push(value);
-        Ok(GenericValue::String(Arc::new(s)))
+        Ok(GenericValue::String(K::Str::from(s)))
     }
 
     #[inline]
     fn serialize_str(self, value: &str) -> Result<GenericValue<K>> {
-        Ok(GenericValue::String(Arc::new(value.to_owned())))
+        Ok(GenericValue::String(K::Str::from_str_ref(value)))
     }
 
     fn serialize_bytes(self, value: &[u8]) -> Result<GenericValue<K>> {
@@ -232,7 +231,9 @@ impl<K: ObjectKind> serde::Serializer for Serializer<K> {
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
-        Ok(SerializeVec { vec: Vector::new() })
+        Ok(SerializeVec {
+            vec: ValueVector::<K>::new(),
+        })
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
@@ -256,7 +257,7 @@ impl<K: ObjectKind> serde::Serializer for Serializer<K> {
     ) -> Result<Self::SerializeTupleVariant> {
         Ok(SerializeTupleVariant {
             name: InternedString::intern(variant),
-            vec: Vector::new(),
+            vec: ValueVector::<K>::new(),
         })
     }
 
@@ -290,17 +291,17 @@ impl<K: ObjectKind> serde::Serializer for Serializer<K> {
     where
         T: ?Sized + Display,
     {
-        Ok(GenericValue::String(Arc::new(value.to_string())))
+        Ok(GenericValue::String(K::Str::from(value.to_string())))
     }
 }
 
 pub struct SerializeVec<K: ObjectKind> {
-    vec: Vector<GenericValue<K>>,
+    vec: ValueVector<K>,
 }
 
 pub struct SerializeTupleVariant<K: ObjectKind> {
     name: InternedString,
-    vec: Vector<GenericValue<K>>,
+    vec: ValueVector<K>,
 }
 
 pub enum SerializeMap<K: ObjectKind> {

@@ -45,7 +45,9 @@ pub fn init(dir: &Path) -> io::Result<()> {
         .is_err()
     {
         unsafe { libc::close(fd) };
-        return Err(io::Error::other("the value arena is already backed by a file"));
+        return Err(io::Error::other(
+            "the value arena is already backed by a file",
+        ));
     }
     Ok(())
 }
@@ -117,7 +119,9 @@ unsafe impl Source for Segments {
         let wanted = layout.size() + layout.align() + 2 * page;
         let size = wanted.max(SEGMENT_SIZE).next_multiple_of(page);
         let base = Segments::map(size).ok_or(())?;
-        unsafe { talc.claim(base.as_ptr(), size) }.map(|_| ()).ok_or(())
+        unsafe { talc.claim(base.as_ptr(), size) }
+            .map(|_| ())
+            .ok_or(())
     }
 }
 
