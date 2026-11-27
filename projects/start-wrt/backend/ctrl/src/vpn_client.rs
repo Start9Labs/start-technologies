@@ -17,13 +17,17 @@ use crate::{CliContext, Error, ErrorKind, ServerContext};
 /// VPN client metadata stored in /etc/config/startwrt
 #[derive(Debug, TypedSection)]
 #[uci(ty = "vpn_client")]
-struct UciVpnClient {
+pub(crate) struct UciVpnClient {
     /// WireGuard interface name (e.g., "wg_proton")
     pub interface: String,
     /// Human-readable label
     pub label: String,
     /// "Internet" or another VPN's label (for chaining)
     pub target: String,
+    /// Resolvers reached through the tunnel. netifd gives an interface's own
+    /// `dns` list to the router's resolver.
+    #[uci(default)]
+    pub dns: Vec<String>,
 }
 
 // === Public API Types ===
@@ -970,6 +974,7 @@ pub async fn create(
             interface: interface_name.clone(),
             label: req.label.clone(),
             target: req.target.clone(),
+            dns: parsed.dns.iter().map(IpAddr::to_string).collect(),
         };
         cfgs["startwrt"].append(&meta, Some(&interface_name))?;
 
@@ -1048,7 +1053,7 @@ pub async fn update(
         let mtu = req.mtu.or_else(|| chain_mtu(&cfgs, &req.id));
         let mtu_changed = set_interface_mtu(&mut cfgs, &req.id, mtu, &arena);
         let dns_changed = match &req.dns {
-            Some(dns) => set_interface_dns(&mut cfgs, &req.id, dns, &arena),
+            Some(dns) => set_client_dns(&mut cfgs, &req.id, dns)?,
             None => false,
         };
         if dns_changed {
@@ -1548,7 +1553,7 @@ fn allowed_ip_covers(entry: &str, addr: IpAddr) -> bool {
     entry.parse::<IpAddr>().is_ok_and(|host| host == addr)
 }
 
-fn client_by_interface(cfgs: &Configs, interface: &str) -> Option<UciVpnClient> {
+pub(crate) fn client_by_interface(cfgs: &Configs, interface: &str) -> Option<UciVpnClient> {
     cfgs["startwrt"]
         .sections
         .iter()
@@ -2052,53 +2057,90 @@ fn set_mtu_option<'a>(section: &mut Section<'a>, mtu: Option<u16>, arena: &'a Ar
     true
 }
 
-/// Replace the `dns` list on a WG interface section. Returns `true` when it changed.
-fn set_dns_list<'a>(section: &mut Section<'a>, dns: &[IpAddr], arena: &'a Arena) -> bool {
-    let current: Vec<String> = section
-        .lines
-        .iter()
-        .filter_map(|line| match line {
-            Line::List { list, item, .. } if list.as_str() == "dns" => {
-                Some(item.as_str().to_string())
-            }
-            _ => None,
-        })
-        .collect();
-    let desired: Vec<String> = dns.iter().map(|ip| ip.to_string()).collect();
-    if current == desired {
-        return false;
+/// Set a VPN client's DNS servers. Returns `true` when they changed.
+fn set_client_dns(cfgs: &mut Configs, interface: &str, dns: &[IpAddr]) -> Result<bool, Error> {
+    let desired: Vec<String> = dns.iter().map(IpAddr::to_string).collect();
+    for section in &mut cfgs["startwrt"].sections {
+        let Ok(mut meta) = section.get::<UciVpnClient>() else {
+            continue;
+        };
+        if meta.interface != interface {
+            continue;
+        }
+        if meta.dns == desired {
+            return Ok(false);
+        }
+        meta.dns = desired;
+        section.set(&meta)?;
+        return Ok(true);
     }
-
-    section
-        .lines
-        .retain(|line| !matches!(line, Line::List { list, .. } if list.as_str() == "dns"));
-    for ip in desired {
-        let ip_str: &str = arena.alloc(ip);
-        section.lines.push(Line::List {
-            list: Token::from_str("dns", arena),
-            item: Token::from_str(ip_str, arena),
-            comment: LineComment::None,
-        });
-    }
-    true
+    Ok(false)
 }
 
-/// Set the `dns` list on a WG client interface. Returns `true` when it changed.
-fn set_interface_dns<'a>(
-    cfgs: &mut Configs<'a>,
-    interface: &str,
-    dns: &[IpAddr],
-    arena: &'a Arena,
-) -> bool {
-    cfgs["network"]
+fn is_client_interface(section: &Section, clients: &[String]) -> bool {
+    section
+        .name()
+        .as_deref()
+        .is_some_and(|name| clients.iter().any(|client| client == name))
+        && section
+            .get::<WgInterface>()
+            .is_ok_and(|iface| iface.is_wireguard())
+}
+
+fn client_interfaces(cfgs: &Configs) -> Vec<String> {
+    cfgs["startwrt"]
         .sections
-        .iter_mut()
-        .find(|s| {
-            s.name().as_deref() == Some(interface)
-                && s.get::<WgInterface>()
-                    .is_ok_and(|iface| iface.is_wireguard())
+        .iter()
+        .filter_map(|s| s.get::<UciVpnClient>().ok())
+        .map(|meta| meta.interface)
+        .collect()
+}
+
+/// Copies the IP addresses in each VPN client interface's `dns` list into the
+/// client's metadata. Returns `true` when any metadata changed.
+pub(crate) fn copy_interface_dns(cfgs: &mut Configs) -> Result<bool, Error> {
+    let clients = client_interfaces(cfgs);
+    let lists: Vec<(String, Vec<IpAddr>)> = cfgs["network"]
+        .sections
+        .iter()
+        .filter(|section| is_client_interface(section, &clients))
+        .filter_map(|section| {
+            let name = section.name()?.into_owned();
+            let dns: Vec<IpAddr> = section
+                .get::<uciedit::openwrt::NetworkInterface>()
+                .ok()?
+                .dns
+                .iter()
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            (!dns.is_empty()).then_some((name, dns))
         })
-        .is_some_and(|section| set_dns_list(section, dns, arena))
+        .collect();
+    let mut changed = false;
+    for (interface, dns) in lists {
+        changed |= set_client_dns(cfgs, &interface, &dns)?;
+    }
+    Ok(changed)
+}
+
+/// Removes the `dns` list from each VPN client interface. Returns `true` when
+/// any interface changed.
+pub(crate) fn strip_interface_dns(cfgs: &mut Configs) -> bool {
+    let clients = client_interfaces(cfgs);
+    let mut changed = false;
+    for section in &mut cfgs["network"].sections {
+        if !is_client_interface(section, &clients) {
+            continue;
+        }
+        let before = section.lines.len();
+        section.lines.retain(|line| {
+            !matches!(line,
+                Line::Option { option: name, .. } | Line::List { list: name, .. }
+                    if name.as_str() == "dns")
+        });
+        changed |= section.lines.len() != before;
+    }
+    changed
 }
 
 /// Create a WireGuard client interface section in network config
@@ -2147,16 +2189,6 @@ fn create_wg_client_interface<'a>(
         comment: LineComment::None,
     });
 
-    // peerdns = 0 — prevent netifd from registering this interface's DNS
-    // servers with the system resolver (dnsmasq). Without this, VPN DNS
-    // servers pollute the global resolver and all profiles' DNS queries
-    // leak through the tunnel. Per-profile DNS is handled separately.
-    lines.push(Line::Option {
-        option: Token::from_str("peerdns", arena),
-        value: Token::from_str("0", arena),
-        comment: LineComment::None,
-    });
-
     // mtu — only emitted when the .conf specified one. Omitting it lets
     // wireguard.sh keep the kernel default (1420 on a clean 1500-byte path).
     // A too-high MTU on obfuscated/:443 endpoints silently black-holes large
@@ -2180,9 +2212,7 @@ fn create_wg_client_interface<'a>(
         });
     }
 
-    let mut section = Section { arena, lines };
-    set_dns_list(&mut section, &parsed.dns, arena);
-    cfgs["network"].sections.push(section);
+    cfgs["network"].sections.push(Section { arena, lines });
 
     Ok(())
 }
@@ -2551,6 +2581,7 @@ config vpn_client wg_proton
 \toption interface 'wg_proton'
 \toption label 'Proton VPN'
 \toption target 'Internet'
+\tlist dns '10.2.0.1'
 
 config vpn_server 'wg_guest'
 \toption interface 'wg_guest'
@@ -2591,7 +2622,6 @@ config interface 'wg_proton'
 \toption defaultroute '0'
 \toption peerdns '0'
 \tlist addresses '10.2.0.2/32'
-\tlist dns '10.2.0.1'
 
 config wireguard_wg_proton 'proton_peer0'
 \toption public_key '{peer_pubkey}'
@@ -2737,27 +2767,110 @@ config interface 'wg_guest'
         );
     }
 
+    fn interface_has_dns(cfgs: &Configs, interface: &str) -> bool {
+        cfgs["network"]
+            .sections
+            .iter()
+            .filter(|s| s.name().as_deref() == Some(interface))
+            .flat_map(|s| s.lines.iter())
+            .any(|line| {
+                matches!(line,
+                    Line::Option { option: name, .. } | Line::List { list: name, .. }
+                        if name.as_str() == "dns")
+            })
+    }
+
     #[tokio::test]
-    async fn test_create_wg_client_interface_without_dns_writes_no_dns_list() {
+    async fn test_client_dns_stays_off_the_interface() {
         let dir = tempfile::tempdir().unwrap();
-        setup_base_configs(dir.path());
+        setup_with_vpn_client(dir.path());
         let arena = Arena::new();
         let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
             .await
             .unwrap();
-        let parsed = parse_wireguard_config(&wg_conf_no_dns(&gen_key(), &gen_key())).unwrap();
-        create_wg_client_interface(&mut cfgs, "wg_test", &parsed, &arena).unwrap();
-        assert!(crate::dns::vpn_dns_servers(&cfgs, "wg_test").is_empty());
+        assert_eq!(
+            crate::dns::vpn_dns_servers(&cfgs, "wg_proton"),
+            vec!["10.2.0.1"]
+        );
 
         let dns = [IpAddr::from([1, 1, 1, 1])];
-        assert!(set_interface_dns(&mut cfgs, "wg_test", &dns, &arena));
-        assert!(!set_interface_dns(&mut cfgs, "wg_test", &dns, &arena));
+        assert!(set_client_dns(&mut cfgs, "wg_proton", &dns).unwrap());
+        assert!(!set_client_dns(&mut cfgs, "wg_proton", &dns).unwrap());
         assert_eq!(
-            crate::dns::vpn_dns_servers(&cfgs, "wg_test"),
+            crate::dns::vpn_dns_servers(&cfgs, "wg_proton"),
             vec!["1.1.1.1"]
         );
-        assert!(set_interface_dns(&mut cfgs, "wg_test", &[], &arena));
-        assert!(crate::dns::vpn_dns_servers(&cfgs, "wg_test").is_empty());
+        assert!(!interface_has_dns(&cfgs, "wg_proton"));
+        assert!(set_client_dns(&mut cfgs, "wg_proton", &[]).unwrap());
+        assert!(crate::dns::vpn_dns_servers(&cfgs, "wg_proton").is_empty());
+        assert!(!set_client_dns(&mut cfgs, "wg_missing", &dns).unwrap());
+        assert!(crate::dns::vpn_dns_servers(&cfgs, "wg_missing").is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_interface_dns_moves_into_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        let legacy = network
+            .replace(
+                "\tlist addresses '10.2.0.2/32'\n",
+                "\tlist addresses '10.2.0.2/32'\n\tlist dns '10.2.0.9'\n\tlist dns 'corp.example'\n",
+            )
+            .replace(
+                "\tlist addresses '192.168.101.254/32'\n",
+                "\tlist addresses '192.168.101.254/32'\n\tlist dns '9.9.9.9'\n",
+            );
+        assert_ne!(legacy, network);
+        std::fs::write(dir.path().join("network"), legacy).unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        assert!(copy_interface_dns(&mut cfgs).unwrap());
+        assert!(!copy_interface_dns(&mut cfgs).unwrap());
+        assert_eq!(
+            crate::dns::vpn_dns_servers(&cfgs, "wg_proton"),
+            vec!["10.2.0.9"]
+        );
+        assert!(interface_has_dns(&cfgs, "wg_proton"));
+        assert!(strip_interface_dns(&mut cfgs));
+        assert!(!strip_interface_dns(&mut cfgs));
+        assert!(!interface_has_dns(&cfgs, "wg_proton"));
+        assert!(!copy_interface_dns(&mut cfgs).unwrap());
+        assert_eq!(
+            crate::dns::vpn_dns_servers(&cfgs, "wg_proton"),
+            vec!["10.2.0.9"]
+        );
+        assert!(interface_has_dns(&cfgs, "wg_guest"));
+    }
+
+    #[tokio::test]
+    async fn test_interface_dns_option_moves_into_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_with_vpn_client(dir.path());
+        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        std::fs::write(
+            dir.path().join("network"),
+            network.replace(
+                "\tlist addresses '10.2.0.2/32'\n",
+                "\tlist addresses '10.2.0.2/32'\n\toption dns '10.2.0.9 10.2.0.10'\n",
+            ),
+        )
+        .unwrap();
+
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
+            .await
+            .unwrap();
+        assert!(copy_interface_dns(&mut cfgs).unwrap());
+        assert!(strip_interface_dns(&mut cfgs));
+        assert_eq!(
+            crate::dns::vpn_dns_servers(&cfgs, "wg_proton"),
+            vec!["10.2.0.9", "10.2.0.10"]
+        );
+        assert!(!interface_has_dns(&cfgs, "wg_proton"));
     }
 
     #[test]
@@ -3309,11 +3422,12 @@ MIID...snip...
     }
 
     #[tokio::test]
-    async fn test_create_wg_client_interface_has_defaultroute_and_peerdns() {
+    async fn test_create_wg_client_interface_has_defaultroute_and_no_dns() {
         let dir = tempfile::tempdir().unwrap();
         setup_base_configs(dir.path());
 
         let parsed = parse_wireguard_config(&wg_conf(&gen_key(), &gen_key())).unwrap();
+        assert!(!parsed.dns.is_empty());
 
         let arena = Arena::new();
         let mut cfgs = parse_all(dir.path(), &arena, &["network", "startwrt"])
@@ -3334,13 +3448,7 @@ MIID...snip...
             if option.as_str() == "defaultroute" && value.as_str() == "0")
         });
         assert!(has_defaultroute_0, "should have defaultroute=0");
-
-        let has_peerdns_0 = section.lines.iter().any(|l| {
-            matches!(l,
-            Line::Option { option, value, .. }
-            if option.as_str() == "peerdns" && value.as_str() == "0")
-        });
-        assert!(has_peerdns_0, "should have peerdns=0");
+        assert!(!interface_has_dns(&cfgs, "wg_test"));
     }
 
     // === Config manipulation tests: create_wg_client_peer ===
@@ -3510,6 +3618,7 @@ MIID...snip...
             interface: interface_name.clone(),
             label: "Proton".into(),
             target: "Internet".into(),
+            dns: parsed.dns.iter().map(IpAddr::to_string).collect(),
         };
         cfgs["startwrt"]
             .append(&meta, Some(&interface_name))
@@ -3550,6 +3659,12 @@ MIID...snip...
             .expect("vpn_client metadata should exist");
         assert_eq!(meta_read.label, "Proton");
         assert_eq!(meta_read.target, "Internet");
+        assert_eq!(meta_read.dns, vec!["10.2.0.1"]);
+        assert!(!interface_has_dns(&cfgs2, "wg_proton"));
+        assert_eq!(
+            crate::dns::vpn_dns_servers(&cfgs2, "wg_proton"),
+            vec!["10.2.0.1"]
+        );
     }
 
     #[tokio::test]

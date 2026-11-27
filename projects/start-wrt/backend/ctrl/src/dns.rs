@@ -2,7 +2,6 @@ use std::net::IpAddr;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use uciedit::openwrt::NetworkInterface;
 use uciedit::{parse_all, Arena, Configs};
 
 use crate::prelude::*;
@@ -26,6 +25,11 @@ pub const SMARTDNS_CONF_PATH: &str = "/etc/smartdns/smartdns.conf";
 /// Compute the SmartDNS port for a profile's VLAN tag.
 pub fn smartdns_port_for_vlan(vlan_tag: u16) -> u16 {
     SMARTDNS_SYSTEM_PORT + vlan_tag
+}
+
+/// The dnsmasq `server` entry that forwards to the system SmartDNS group.
+pub fn system_dnsmasq_upstream() -> String {
+    format!("127.0.0.1#{SMARTDNS_SYSTEM_PORT}")
 }
 
 /// A SmartDNS server group with its bind address and upstream servers.
@@ -106,19 +110,13 @@ pub fn profile_dns(cfgs: &Configs, outbound: &str, dns_override: &[DnsServer]) -
     }
 }
 
-/// The `list dns` entries of a VPN interface that are IP addresses.
+/// The DNS servers of an outbound VPN that are IP addresses.
 pub fn vpn_dns_servers(cfgs: &Configs, vpn_interface: &str) -> Vec<String> {
-    cfgs["network"]
-        .sections
-        .iter()
-        .find(|s| s.name().as_deref() == Some(vpn_interface))
-        .and_then(|s| s.get::<NetworkInterface>().ok())
-        .map(|iface| {
-            iface
-                .dns
-                .iter()
+    crate::vpn_client::client_by_interface(cfgs, vpn_interface)
+        .map(|meta| {
+            meta.dns
+                .into_iter()
                 .filter(|s| s.parse::<IpAddr>().is_ok())
-                .cloned()
                 .collect()
         })
         .unwrap_or_default()

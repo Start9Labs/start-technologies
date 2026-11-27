@@ -477,9 +477,57 @@ fn profile_dns(cfgs: &Configs, profile: &Profile) -> dns::ProfileDns {
     dns::profile_dns(cfgs, &profile.outbound, &profile.dns_override)
 }
 
-/// Rewrite DNS forwarding (dnsmasq sections) for ALL profiles.
+fn main_dnsmasq<'c, 'a>(cfgs: &'c mut Configs<'a>) -> Option<&'c mut Section<'a>> {
+    cfgs["dhcp"].sections.iter_mut().find(|section| {
+        section.ty() == "dnsmasq" && !section.name().is_some_and(|n| n.starts_with("dns_"))
+    })
+}
+
+/// Clears `noresolv` only together with the upstream it set.
+fn rewrite_router_dns_forwarding(cfgs: &mut Configs) {
+    let custom = !dns::get_system_dns_servers(cfgs).is_empty();
+    let upstream = dns::system_dnsmasq_upstream();
+    let Some(section) = main_dnsmasq(cfgs) else {
+        return;
+    };
+    let is_upstream = |line: &Line| {
+        matches!(line, Line::List { list, item, .. }
+            if list.as_str() == "server" && item.as_str() == upstream.as_str())
+    };
+    let is_noresolv =
+        |line: &Line| matches!(line, Line::Option { option, .. } if option.as_str() == "noresolv");
+    let forwards = section.lines.iter().any(|line| is_upstream(line));
+    let arena = section.arena;
+    if custom {
+        if !forwards {
+            section.lines.push(Line::List {
+                list: Token::from_str("server", arena),
+                item: Token::from_string(upstream.clone(), arena),
+                comment: LineComment::None,
+            });
+        }
+        let noresolv = section.lines.iter().any(|line| {
+            matches!(line, Line::Option { option, value, .. }
+                if option.as_str() == "noresolv" && value.as_str() == "1")
+        });
+        if !noresolv {
+            section.lines.retain(|line| !is_noresolv(line));
+            section
+                .lines
+                .push(Line::option_from_display("noresolv", "1", arena));
+        }
+    } else if forwards {
+        section
+            .lines
+            .retain(|line| !is_upstream(line) && !is_noresolv(line));
+    }
+}
+
+/// Rewrite DNS forwarding (dnsmasq sections) for the router and ALL profiles.
 /// Call after any operation that changes system DNS settings.
 pub(crate) fn rewrite_all_dns_forwarding(cfgs: &mut Configs) -> Result<(), Error> {
+    rewrite_router_dns_forwarding(cfgs);
+
     // Collect all profiles first to avoid borrow issues
     let profiles: Vec<Profile> = cfgs["startwrt"]
         .sections
@@ -709,21 +757,12 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
         .sections
         .retain(|s| s.name().as_deref() != Some(&section_name));
 
-    // Remove notinterface entry for this profile from main dnsmasq
-    for section in &mut cfgs["dhcp"].sections {
-        if section.ty() == "dnsmasq"
-            && !section
-                .name()
-                .map(|n| n.starts_with("dns_"))
-                .unwrap_or(false)
-        {
-            section.lines.retain(|line| {
-                !matches!(line, Line::List { list, item, .. }
-                    if list.as_str() == "notinterface"
-                        && item.as_str() == profile.id.interface.as_str())
-            });
-            break;
-        }
+    if let Some(section) = main_dnsmasq(cfgs) {
+        section.lines.retain(|line| {
+            !matches!(line, Line::List { list, item, .. }
+                if list.as_str() == "notinterface"
+                    && item.as_str() == profile.id.interface.as_str())
+        });
     }
 
     let servers: Vec<String> = match profile_dns(cfgs, profile) {
@@ -735,7 +774,7 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
             .into_iter()
             .map(|ip| format!("{ip}@{via}"))
             .collect(),
-        dns::ProfileDns::System => vec![format!("127.0.0.1#{}", dns::SMARTDNS_SYSTEM_PORT)],
+        dns::ProfileDns::System => vec![dns::system_dnsmasq_upstream()],
         dns::ProfileDns::Isp | dns::ProfileDns::IspOutsideVpn => vec![],
     };
 
@@ -781,22 +820,13 @@ pub(crate) fn rewrite_dns_forwarding(cfgs: &mut Configs, profile: &Profile) -> R
         Some(&section_name),
     )?;
 
-    // Add notinterface to main dnsmasq
-    for section in &mut cfgs["dhcp"].sections {
-        if section.ty() == "dnsmasq"
-            && !section
-                .name()
-                .map(|n| n.starts_with("dns_"))
-                .unwrap_or(false)
-        {
-            let arena = section.arena;
-            section.lines.push(Line::List {
-                list: Token::from_string("notinterface".to_string(), arena),
-                item: Token::from_string(profile.id.interface.clone(), arena),
-                comment: uciedit::LineComment::None,
-            });
-            break;
-        }
+    if let Some(section) = main_dnsmasq(cfgs) {
+        let arena = section.arena;
+        section.lines.push(Line::List {
+            list: Token::from_str("notinterface", arena),
+            item: Token::from_string(profile.id.interface.clone(), arena),
+            comment: LineComment::None,
+        });
     }
 
     Ok(())
@@ -1140,21 +1170,11 @@ fn delete_config(
         .sections
         .retain(|s| s.name().as_deref() != Some(dns_section_name.as_str()));
 
-    // Remove notinterface entry from main dnsmasq
-    for section in &mut cfgs["dhcp"].sections {
-        if section.ty() == "dnsmasq"
-            && !section
-                .name()
-                .map(|n| n.starts_with("dns_"))
-                .unwrap_or(false)
-        {
-            section.lines.retain(|line| {
-                !matches!(line, Line::List { list, item, .. }
-                    if list.as_str() == "notinterface"
-                        && item.as_str() == id.interface.as_str())
-            });
-            break;
-        }
+    if let Some(section) = main_dnsmasq(cfgs) {
+        section.lines.retain(|line| {
+            !matches!(line, Line::List { list, item, .. }
+                if list.as_str() == "notinterface" && item.as_str() == id.interface.as_str())
+        });
     }
 
     // Remove WiFi stations and VLAN sections referencing this profile's VLAN tag
@@ -8785,12 +8805,12 @@ config dhcp 'guest'
         let dir = tempfile::tempdir().unwrap();
         let ctx = TestContext(dir.path().to_path_buf());
         setup_configs_with_ipv6_vpn(dir.path());
-        let network = std::fs::read_to_string(dir.path().join("network")).unwrap();
+        let startwrt = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
         std::fs::write(
-            dir.path().join("network"),
-            network.replace(
-                "\tlist addresses '10.3.0.2/32'\n",
-                "\tlist addresses '10.3.0.2/32'\n\tlist dns '10.3.0.1'\n",
+            dir.path().join("startwrt"),
+            startwrt.replace(
+                "\toption label 'V4 VPN'\n",
+                "\toption label 'V4 VPN'\n\tlist dns '10.3.0.1'\n",
             ),
         )
         .unwrap();
@@ -8925,6 +8945,65 @@ config dhcp 'guest'
                     .unwrap()
             })
         );
+    }
+
+    async fn router_dnsmasq(dir: &std::path::Path) -> ProfileDnsmasq {
+        let arena = Arena::new();
+        let mut cfgs = parse_all(dir, &arena, &["dhcp"]).await.unwrap();
+        main_dnsmasq(&mut cfgs)
+            .expect("main instance")
+            .get()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_heal_dns_forwarding_routes_router_lookups_to_system_dns() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = TestContext(dir.path().to_path_buf());
+        setup_configs(dir.path());
+        append(
+            dir.path(),
+            "dhcp",
+            "\nconfig dnsmasq\n\toption domainneeded '1'\n\tlist server '/corp.example/10.0.0.1'\n",
+        );
+        let isp = std::fs::read_to_string(dir.path().join("startwrt")).unwrap();
+        append(
+            dir.path(),
+            "startwrt",
+            "\nconfig system_dns system_dns\n\tlist servers '{\"address\":\"9.9.9.9\",\"ssl\":true}'\n",
+        );
+
+        heal_dns_forwarding(ctx.clone()).await.unwrap();
+        let router = router_dnsmasq(dir.path()).await;
+        assert_eq!(router.server, ["/corp.example/10.0.0.1", "127.0.0.1#5300"]);
+        assert_eq!(router.noresolv.as_deref(), Some("1"));
+
+        let modified = || {
+            std::fs::metadata(dir.path().join("dhcp"))
+                .unwrap()
+                .modified()
+                .unwrap()
+        };
+        let healed = modified();
+        heal_dns_forwarding(ctx.clone()).await.unwrap();
+        assert_eq!(modified(), healed);
+
+        std::fs::write(dir.path().join("startwrt"), isp).unwrap();
+        heal_dns_forwarding(ctx.clone()).await.unwrap();
+        let router = router_dnsmasq(dir.path()).await;
+        assert_eq!(router.server, ["/corp.example/10.0.0.1"]);
+        assert_eq!(router.noresolv, None);
+
+        let dhcp = std::fs::read_to_string(dir.path().join("dhcp")).unwrap();
+        let hand_set = dhcp.replace(
+            "\toption domainneeded '1'\n",
+            "\toption domainneeded '1'\n\toption noresolv '1'\n",
+        );
+        assert_ne!(hand_set, dhcp);
+        std::fs::write(dir.path().join("dhcp"), hand_set).unwrap();
+        heal_dns_forwarding(ctx).await.unwrap();
+        let router = router_dnsmasq(dir.path()).await;
+        assert_eq!(router.noresolv.as_deref(), Some("1"));
     }
 
     #[tokio::test]

@@ -607,10 +607,12 @@ struct WanDnsSetRequest {
 }
 // Response: null
 // Backend: stores custom servers in the `startwrt` config (`system_dns`
-// section), sets `peerdns` on wan/wan6 (0 for Custom, 1 for Isp), rewrites
-// per-profile DNS forwarding (dnsmasq + firewall DNAT), regenerates the
-// SmartDNS config, then runs the full reload_system() (network + smartdns +
-// firewall + dnsmasq)
+// section), sets `peerdns` on wan/wan6 (0 for Custom, 1 for Isp), forwards the
+// main dnsmasq — the router's own lookups — to the system SmartDNS group for
+// Custom (`noresolv` + `server 127.0.0.1#5300`) and to the WAN's resolvers for
+// Isp, rewrites per-profile DNS forwarding (dnsmasq + firewall DNAT),
+// regenerates the SmartDNS config, then runs the full reload_system() (network
+// + smartdns + firewall + dnsmasq)
 ```
 
 ### `wan.ddns-get`
@@ -1466,7 +1468,7 @@ struct OutboundVpn {
     /// True when the peer Endpoint is a hostname. Such a VPN can only target
     /// "Internet"; the web UI offers no other target for it.
     hostname_endpoint: bool,
-    /// Resolvers reached through the tunnel (the interface's `list dns`).
+    /// Resolvers reached through the tunnel (the VPN's `list dns`).
     dns: Vec<IpAddr>,
     status: OutboundVpnStatus,
     /// Seconds since the tunnel's latest handshake, measured on the router.
@@ -1514,7 +1516,9 @@ struct OutboundVpnCreateResponse {
 // commented `#MTU` is ignored. The dedicated vpn_<X> egress zone also gets
 // `option mtu_fix 1` (TCP MSS clamp) as a backstop against too-high MTU.
 // The address entries of the .conf's `DNS =` line (or `dns`, when given)
-// become `list dns`; search-domain entries are dropped.
+// become `list dns` on the VPN's `startwrt.vpn_client` section; search-domain
+// entries are dropped. netifd gives an interface's own `dns` list to the
+// router's resolver.
 //
 // DNS for a profile routed through the VPN, first match wins: the profile's
 // custom servers, then the VPN's `list dns`, then the system custom servers —
@@ -1573,14 +1577,14 @@ struct OutboundVpnUpdateRequest {
     /// submits the field's current value.
     #[serde(default)]
     mtu: Option<u16>,
-    /// Replaces the interface's `list dns`. null/absent keeps it.
+    /// Replaces the VPN's `list dns`. null/absent keeps it.
     #[serde(default)]
     dns: Option<Vec<IpAddr>>,
 }
 // Response: null
-// Backend: updates label+target metadata and the interface `mtu` and `dns`
-// options. Bounces the WG interface only when the MTU actually changed; a DNS
-// change rewrites the DNS forwarding of the profiles routed through it.
+// Backend: updates the label, target and `list dns` metadata and the interface
+// `mtu` option. Bounces the WG interface only when the MTU actually changed; a
+// DNS change rewrites the DNS forwarding of the profiles routed through it.
 //
 // Validation: same `target` rules as vpn-client.create, except the disabled
 // and chained-endpoint checks run ONLY when `target` differs from the stored
