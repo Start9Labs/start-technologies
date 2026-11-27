@@ -18,6 +18,7 @@ use crate::context::{CliContext, RpcContext};
 use crate::db::prelude::Map;
 use crate::hostname::ServerHostname;
 use crate::mcp::{EFFECT, Effect};
+use crate::net::bridge::{is_os_target, is_os_target_name};
 use crate::net::forward::{AvailablePorts, START9_BRIDGE_IFACE};
 use crate::net::host::HostApiKind;
 use crate::net::service_interface::{
@@ -64,16 +65,18 @@ impl FromStr for BindId {
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct DerivedAddressInfo {
-    /// User override: enable these addresses (only for public IP & port)
-    /// An opt-in names one literal address and lapses when the gateway renumbers.
-    /// Only an enabled plain public domain carries its group's public IPs across.
+    /// Public-IP opt-ins name literal addresses and lapse when the gateway renumbers.
+    /// An enabled plain public domain carries its group's public IPs across.
     pub enabled: BTreeSet<SocketAddr>,
-    /// User override: disable these addresses (only for domains and private IP & port)
+    /// Named-address and private-IP opt-outs.
     pub disabled: BTreeSet<(InternedString, u16)>,
-    /// User override: IPv6 global-unicast addresses opted into WAN exposure.
-    /// Projected into `HostnameInfo.public` by `update_addresses`, so `public`
-    /// stays the single source of truth for WAN reachability (P2P address
-    /// selection, upstream pinholes). A GUA not in this set is LAN-only.
+    /// Named-address opt-ins retained across discovery changes.
+    #[serde(default)]
+    pub enabled_names: BTreeSet<(InternedString, u16)>,
+    /// Binding policy projected for standalone address consumers.
+    #[serde(default)]
+    pub default_off: bool,
+    /// IPv6 global-unicast WAN opt-ins, projected into `HostnameInfo.public`.
     #[serde(default)]
     pub gua_wan: BTreeSet<SocketAddrV6>,
     /// User override: enable these private IPs regardless of their mDNS address.
@@ -86,7 +89,7 @@ pub struct DerivedAddressInfo {
     /// Address removal retains consent; explicit disabling or gateway removal revokes it.
     #[serde(default)]
     pub insecure_enabled: BTreeSet<(InternedString, u16, GatewayId)>,
-    /// COMPUTED: NetServiceData::update — all possible addresses for this binding
+    /// Discovered address candidates.
     pub available: BTreeSet<HostnameInfo>,
     /// Effective address selections shared by network enforcement and clients.
     #[serde(default)]
@@ -97,7 +100,6 @@ rpc_toolkit::reflect_ts!(DerivedAddressInfo);
 rpc_toolkit::ts_export!(DerivedAddressInfo, namespaces = [""]);
 
 fn override_key(address: &HostnameInfo) -> (InternedString, u16) {
-    // disablable addresses will always have a port
     (address.hostname.clone(), address.port.unwrap_or_default())
 }
 
@@ -137,12 +139,14 @@ impl Model<DerivedAddressInfo> {
 }
 
 impl DerivedAddressInfo {
-    /// Override mutations must refresh selections before publication.
-    pub(super) fn refresh_effective(&mut self) {
+    /// Candidate and override mutations must refresh selections before publication.
+    pub(crate) fn refresh_effective(&mut self) {
+        self.available
+            .retain(|address| !is_os_target_name(&address.hostname));
         self.effective = self.enabled().into_iter().cloned().collect();
     }
 
-    /// Keeps legacy SDK address readers aligned with the effective insecure selections.
+    /// Keeps legacy SDK address readers aligned with the effective selections.
     pub(super) fn project_service_selections(&mut self) {
         let enabled: BTreeSet<_> = self.enabled().into_iter().cloned().collect();
         self.effective = enabled.clone();
@@ -154,9 +158,24 @@ impl DerivedAddressInfo {
         self.available.retain(|a| {
             let restricted = insecure_key(a).is_some_and(|k| self.insecure.contains(&k))
                 || opted_names.contains(&override_key(a));
-            !restricted || enabled.contains(a)
+            !is_os_target_name(&a.hostname) && (!restricted || enabled.contains(a))
         });
         self.disabled.retain(|key| !opted_names.contains(key));
+        if self.default_off {
+            let named_on: BTreeSet<_> = enabled
+                .iter()
+                .filter(|a| !a.metadata.is_ip())
+                .map(override_key)
+                .collect();
+            let named_off: Vec<_> = self
+                .available
+                .iter()
+                .filter(|a| !a.metadata.is_ip() && !a.is_internal())
+                .map(override_key)
+                .filter(|key| !named_on.contains(key))
+                .collect();
+            self.disabled.extend(named_off);
+        }
         let lan_ips: Vec<_> = self
             .available
             .iter()
@@ -194,11 +213,10 @@ impl DerivedAddressInfo {
             .map(|a| a.hostname.clone())
             .collect();
         let mut all_public = BTreeMap::<(GatewayId, bool), bool>::new();
-        for address in previous
-            .available
-            .iter()
-            .filter(|a| (a.public && a.metadata.is_ip()) || a.gua().is_some() || is_domain(a))
-        {
+        for address in previous.available.iter().filter(|a| {
+            !is_os_target_name(&a.hostname)
+                && ((a.public && a.metadata.is_ip()) || a.gua().is_some() || is_domain(a))
+        }) {
             // `gua_wan` is current; a GUA's `public` flag waits for `set_available`.
             let public = address.gua().map_or_else(
                 || enabled.contains(address),
@@ -211,7 +229,7 @@ impl DerivedAddressInfo {
             }
         }
         let mut wan_groups = BTreeMap::new();
-        let mut withheld = Vec::new();
+        let mut new_tls = Vec::new();
         for address in &self.available {
             let (HostnameMetadata::PublicDomain { gateway }, Some(port)) =
                 (&address.metadata, address.port)
@@ -224,22 +242,41 @@ impl DerivedAddressInfo {
                     .or_else(|| all_public.get(&(gateway.clone(), true)))
                     .is_some_and(|all| *all);
                 wan_groups.insert((gateway.clone(), port), all_on);
-            } else if !previous.available.contains(address)
-                && (disabled_domains.contains(&address.hostname)
-                    || !enabled_domains.contains(&address.hostname))
-            {
-                withheld.push(override_key(address));
+            } else if !previous.available.contains(address) {
+                let key = override_key(address);
+                if !self.enabled_names.contains(&key) {
+                    new_tls.push((
+                        key,
+                        !disabled_domains.contains(&address.hostname)
+                            && enabled_domains.contains(&address.hostname),
+                    ));
+                }
             }
         }
-        self.disabled.extend(withheld);
+        for (key, on) in new_tls {
+            self.set_name_enabled(key, on);
+        }
         for ((gateway, port), on) in wan_groups {
             set_nonssl_wan_group(self, &gateway, port, on);
         }
     }
 
-    pub(super) fn set_available(&mut self, available: BTreeSet<HostnameInfo>) {
+    /// Changing defaults preserves served addresses, not undiscovered candidates.
+    pub(super) fn set_available(&mut self, available: BTreeSet<HostnameInfo>, default_off: bool) {
+        if default_off && !self.default_off {
+            let selected: Vec<_> = self.enabled().into_iter().cloned().collect();
+            for address in selected {
+                if !address.metadata.is_ip() {
+                    self.set_name_enabled(override_key(&address), true);
+                } else if !address.public && !address.is_internal() {
+                    self.set_lan_ip(override_key(&address), true);
+                }
+            }
+        }
+        self.default_off = default_off;
         self.available = available
             .into_iter()
+            .filter(|address| !default_off || !address.is_internal())
             .map(|mut address| {
                 if let Some(gua) = address.gua() {
                     address.public = self.gua_wan.contains(&gua);
@@ -247,13 +284,25 @@ impl DerivedAddressInfo {
                 address
             })
             .collect();
+        self.refresh_effective();
+    }
+
+    /// Clears saved opt-ins; recomputing addresses does not restore them.
+    pub(crate) fn disable_all(&mut self) {
+        self.enabled.clear();
+        self.enabled_names.clear();
+        self.gua_wan.clear();
+        self.lan_enabled.clear();
+        self.insecure_enabled.clear();
+        self.disabled
+            .extend(self.available.iter().map(override_key));
+        self.refresh_effective();
     }
 
     fn public_ip_on(&self, address: &HostnameInfo) -> bool {
-        address.to_socket_addr().map_or(
-            true, // should never happen, but would rather see them if it does
-            |sa| self.enabled.contains(&sa),
-        )
+        address
+            .to_socket_addr()
+            .is_some_and(|sa| self.enabled.contains(&sa))
     }
 
     /// A LAN IP inherits consent from its gateway's `.local` row.
@@ -278,7 +327,7 @@ impl DerivedAddressInfo {
     /// Consent overrides the `disabled` entry its name shares with other gateways' rows.
     fn switched_on(&self, address: &HostnameInfo) -> bool {
         insecure_key(address).is_some_and(|k| self.insecure_enabled.contains(&k))
-            || !self.disabled.contains(&override_key(address))
+            || self.name_on(&override_key(address))
     }
 
     /// A private plain-port domain shares one consent state with its gateway IPs.
@@ -308,8 +357,8 @@ impl DerivedAddressInfo {
     }
 
     /// An override decides; without one the mDNS address resolving to it does.
-    fn lan_ip_on(&self, address: &HostnameInfo) -> bool {
-        if !self.insecure_allowed(address) {
+    pub(super) fn lan_ip_on(&self, address: &HostnameInfo) -> bool {
+        if is_os_target_name(&address.hostname) || !self.insecure_allowed(address) {
             return false;
         }
         let key = override_key(address);
@@ -319,10 +368,26 @@ impl DerivedAddressInfo {
         if self.disabled.contains(&key) {
             return false;
         }
-        self.available
+        let mut names = self
+            .available
             .iter()
             .filter(|mdns| mdns_covers(mdns, address))
-            .all(|mdns| self.switched_on(mdns))
+            .peekable();
+        (!self.default_off || names.peek().is_some()) && names.all(|mdns| self.switched_on(mdns))
+    }
+
+    fn name_on(&self, key: &(InternedString, u16)) -> bool {
+        !self.disabled.contains(key) && (!self.default_off || self.enabled_names.contains(key))
+    }
+
+    pub(super) fn set_name_enabled(&mut self, key: (InternedString, u16), enabled: bool) {
+        if enabled {
+            self.disabled.remove(&key);
+            self.enabled_names.insert(key);
+        } else {
+            self.enabled_names.remove(&key);
+            self.disabled.insert(key);
+        }
     }
 
     /// Public GUAs remain reachable independently of the mDNS switch.
@@ -354,12 +419,33 @@ impl DerivedAddressInfo {
         }
     }
 
-    /// Effective addresses after saved overrides and per-gateway plaintext consent.
+    /// Includes explicit consent for unavailable non-reserved addresses.
+    pub(crate) fn has_enabled_intent(&self) -> bool {
+        self.enabled.iter().any(|socket| !is_os_target(socket.ip()))
+            || self
+                .enabled_names
+                .iter()
+                .any(|key| !is_os_target_name(&key.0) && self.name_on(key))
+            || self
+                .lan_enabled
+                .iter()
+                .any(|key| !is_os_target_name(&key.0))
+            || self
+                .insecure_enabled
+                .iter()
+                .any(|key| !is_os_target_name(&key.0))
+            || !self.enabled().is_empty()
+    }
+
+    /// Effective addresses after binding defaults, saved overrides and per-gateway plaintext consent.
     /// Internal addresses remain reachable; public sockets require explicit opt-in.
     pub fn enabled(&self) -> BTreeSet<&HostnameInfo> {
         self.available
             .iter()
             .filter(|h| {
+                if is_os_target_name(&h.hostname) {
+                    return false;
+                }
                 if h.is_internal() {
                     // lo / lxcbr0 are always reachable and never operator-disablable.
                     true
@@ -378,14 +464,17 @@ impl DerivedAddressInfo {
             .collect()
     }
 
-    /// Move the port of every `enabled`/`disabled` override from `old` to `new`.
-    /// A range keys all its overrides on `external_start_port`, so a service-
-    /// driven resize that moves the span must carry the overrides with it — else
-    /// a disabled WAN address silently re-enables under the recomputed defaults.
+    /// Moves native address overrides; plugin endpoints retain their ports.
     pub fn rekey_port(&mut self, old: u16, new: u16) {
         if old == new {
             return;
         }
+        let plugin_keys: BTreeSet<_> = self
+            .available
+            .iter()
+            .filter(|address| matches!(address.metadata, HostnameMetadata::Plugin { .. }))
+            .map(override_key)
+            .collect();
         self.enabled = std::mem::take(&mut self.enabled)
             .into_iter()
             .map(|mut sa| {
@@ -395,10 +484,21 @@ impl DerivedAddressInfo {
                 sa
             })
             .collect();
-        for overrides in [&mut self.disabled, &mut self.lan_enabled] {
+        for overrides in [
+            &mut self.disabled,
+            &mut self.lan_enabled,
+            &mut self.enabled_names,
+        ] {
             *overrides = std::mem::take(overrides)
                 .into_iter()
-                .map(|(h, p)| (h, if p == old { new } else { p }))
+                .map(|(h, p)| {
+                    let port = if p == old && !plugin_keys.contains(&(h.clone(), p)) {
+                        new
+                    } else {
+                        p
+                    };
+                    (h, port)
+                })
                 .collect();
         }
         for overrides in [&mut self.insecure, &mut self.insecure_enabled] {
@@ -416,6 +516,38 @@ impl DerivedAddressInfo {
                 sa
             })
             .collect();
+    }
+
+    pub(super) fn rekey_name(
+        &mut self,
+        old: (InternedString, u16),
+        new: (InternedString, u16),
+    ) -> bool {
+        if old == new {
+            return false;
+        }
+        let mut changed = false;
+        if self.enabled_names.remove(&old) {
+            self.set_name_enabled(new.clone(), true);
+            changed = true;
+        } else if self.disabled.remove(&old) {
+            self.set_name_enabled(new.clone(), false);
+            changed = true;
+        }
+        for overrides in [&mut self.insecure, &mut self.insecure_enabled] {
+            *overrides = std::mem::take(overrides)
+                .into_iter()
+                .map(|(hostname, port, gateway)| {
+                    if (&hostname, port) == (&old.0, old.1) {
+                        changed = true;
+                        (new.0.clone(), new.1, gateway)
+                    } else {
+                        (hostname, port, gateway)
+                    }
+                })
+                .collect();
+        }
+        changed
     }
 
     /// Drops IP overrides whose available addresses belong exclusively to this gateway.
@@ -645,6 +777,17 @@ pub struct BindInfo {
 rpc_toolkit::reflect_ts!(BindInfo);
 rpc_toolkit::ts_export!(BindInfo, namespaces = [""]);
 
+/// Unallocated candidates; absent ports are pending rather than protocol defaults.
+#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct BindingPreview {
+    pub options: BindOptions,
+    pub addresses: DerivedAddressInfo,
+}
+
+rpc_toolkit::reflect_ts!(BindingPreview);
+rpc_toolkit::ts_export!(BindingPreview, namespaces = [""]);
+
 #[derive(Clone, Debug, Deserialize, Serialize, VisitFields, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub struct NetInfo {
@@ -668,33 +811,82 @@ impl BindInfo {
         }
     }
 
+    fn ensure_selectable(&self, address: &HostnameInfo) -> Result<(), Error> {
+        if self.options.default_off && !self.enabled {
+            return Err(Error::new(
+                eyre!("{}", t!("net.host.binding.address-unavailable")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        validate_available_address(&self.addresses, address)
+    }
+
+    pub(crate) fn set_address_enabled(
+        &mut self,
+        address: &HostnameInfo,
+        enabled: bool,
+    ) -> Result<(), Error> {
+        self.ensure_selectable(address)?;
+        set_address_enabled_with_consent(&mut self.addresses, address, enabled, false)
+    }
+
+    pub(crate) fn set_gua_wan(&mut self, address: &HostnameInfo, wan: bool) -> Result<(), Error> {
+        self.ensure_selectable(address)?;
+        if wan && !self.options.allows_public_address(address.ssl) {
+            return Err(Error::new(
+                eyre!("{}", t!("net.host.binding.insecure-public")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        let gua = address.gua().ok_or_else(|| {
+            Error::new(
+                eyre!("{}", t!("net.host.binding.not-global-unicast")),
+                ErrorKind::InvalidRequest,
+            )
+        })?;
+        set_gua_wan_on(&mut self.addresses, address, gua, wan);
+        Ok(())
+    }
+
+    pub(crate) fn unallocated(options: BindOptions) -> Self {
+        Self {
+            enabled: true,
+            options,
+            net: NetInfo {
+                assigned_port: None,
+                assigned_ssl_port: None,
+            },
+            addresses: DerivedAddressInfo::default(),
+            interfaces: BTreeMap::new(),
+        }
+    }
+
     pub fn new(
         available_ports: &mut AvailablePorts,
         options: BindOptions,
         privileged: bool,
     ) -> Result<Self, Error> {
-        let mut assigned_port = None;
-        let mut assigned_ssl_port = None;
-        if let Some(preferred) = options.preferred_ssl_port() {
-            assigned_ssl_port = available_ports
-                .try_alloc(preferred, true, privileged)
-                .or_else(|| Some(available_ports.alloc(true).ok()?));
-        }
-        if options.wants_plain_port() {
-            assigned_port = available_ports
-                .try_alloc(options.preferred_external_port, false, privileged)
-                .or_else(|| Some(available_ports.alloc(false).ok()?));
-        }
+        let assigned_ssl_port = options
+            .preferred_ssl_port()
+            .map(|preferred| available_ports.alloc_preferred([preferred], true, privileged))
+            .transpose()?;
+        let assigned_port = options
+            .wants_plain_port()
+            .then(|| {
+                available_ports.alloc_preferred(
+                    [options.preferred_external_port],
+                    false,
+                    privileged,
+                )
+            })
+            .transpose()?;
 
         Ok(Self {
-            enabled: true,
-            options,
             net: NetInfo {
                 assigned_port,
                 assigned_ssl_port,
             },
-            addresses: DerivedAddressInfo::default(),
-            interfaces: BTreeMap::new(),
+            ..Self::unallocated(options)
         })
     }
     pub fn update(
@@ -712,22 +904,27 @@ impl BindInfo {
         // Free both up front so each leg can reclaim the number it already holds —
         // it is in the user's address book and keys their per-address overrides.
         available_ports.free(held.assigned_port.into_iter().chain(held.assigned_ssl_port));
-        let preferred_ssl_port = options.preferred_ssl_port();
-        let wants_plain_port = options.wants_plain_port();
-        let mut reclaim = |held: Option<u16>, preferred: u16, ssl: bool| {
-            for port in held.into_iter().chain([preferred]) {
-                if let Some(port) = available_ports.try_alloc(port, ssl, privileged) {
-                    return Ok(port);
-                }
-            }
-            available_ports.alloc(ssl)
-        };
-
-        let assigned_ssl_port = preferred_ssl_port
-            .map(|preferred| reclaim(held.assigned_ssl_port, preferred, true))
+        let assigned_ssl_port = options
+            .preferred_ssl_port()
+            .map(|preferred| {
+                available_ports.alloc_preferred(
+                    held.assigned_ssl_port.into_iter().chain([preferred]),
+                    true,
+                    privileged,
+                )
+            })
             .transpose()?;
-        let assigned_port = wants_plain_port
-            .then(|| reclaim(held.assigned_port, options.preferred_external_port, false))
+        let assigned_port = options
+            .wants_plain_port()
+            .then(|| {
+                available_ports.alloc_preferred(
+                    held.assigned_port
+                        .into_iter()
+                        .chain([options.preferred_external_port]),
+                    false,
+                    privileged,
+                )
+            })
             .transpose()?;
 
         Ok(Self {
@@ -758,9 +955,11 @@ impl BindInfo {
     }
 }
 
+/// A protocol safe to expose on enabled public addresses.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct Security {
+    /// Whether TLS precedes application bytes.
     pub ssl: bool,
 }
 
@@ -774,11 +973,17 @@ pub struct BindOptions {
     /// Selects direct-forward transports; HTTP proxies and TLS listeners use TCP.
     #[serde(default)]
     pub transport: crate::net::transport::Transport,
+    /// Zero requests dynamic allocation; it never reserves port zero.
     pub preferred_external_port: u16,
     pub add_ssl: Option<AddSslOptions>,
     pub secure: Option<Security>,
-    /// HTTP request policy shared by every exposed leg of this binding.
+    /// Proxy protocol shared by every exposed leg of this binding.
     pub proxy: Option<ProxyOptions>,
+    /// New address groups require opt-in; existing selections persist.
+    /// Inactive bindings clear selections and reject opt-ins.
+    /// Internal endpoints remain local and are omitted from opt-in candidates.
+    #[serde(default, alias = "publicOnly")]
+    pub default_off: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
@@ -788,6 +993,8 @@ pub struct BindOptions {
     tag = "type"
 )]
 pub enum ProxyOptions {
+    /// Relays raw TCP streams without parsing application messages.
+    Tcp,
     Http {
         /// Adds `X-Forwarded-For` and, on the SSL leg, `X-Forwarded-Proto: https`.
         /// Client-supplied `X-Forwarded-*` headers are stripped on both legs.
@@ -811,6 +1018,8 @@ struct CompatibleBindOptions {
     add_ssl: Option<LegacyProxySslOptions>,
     secure: Option<Security>,
     proxy: Option<ProxyOptions>,
+    #[serde(default, alias = "publicOnly")]
+    default_off: bool,
 }
 
 rpc_toolkit::reflect_ts!(CompatibleBindOptions);
@@ -843,6 +1052,7 @@ impl TryFrom<CompatibleBindOptions> for BindOptions {
             legacy.ssl
         });
         let options = Self {
+            default_off: options.default_off,
             transport: options.transport,
             preferred_external_port: options.preferred_external_port,
             add_ssl,
@@ -859,7 +1069,7 @@ impl TryFrom<CompatibleBindOptions> for BindOptions {
         {
             return Err("HTTP proxying and TLS require TCP transport");
         }
-        if options.serves_own_tls() && options.proxy.is_some() {
+        if options.serves_own_tls() && matches!(options.proxy, Some(ProxyOptions::Http { .. })) {
             return Err("HTTP proxying requires TLS termination for a TLS container");
         }
         Ok(options)
@@ -877,6 +1087,7 @@ impl BindOptions {
 
     pub(crate) fn server_ui() -> Self {
         Self {
+            default_off: false,
             transport: crate::net::transport::Transport::tcp(),
             preferred_external_port: 80,
             add_ssl: Some(AddSslOptions {
@@ -1183,12 +1394,12 @@ pub async fn list_bindings<Kind: HostApiKind>(
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BindingSetAddressEnabledParams {
-    internal_port: u16,
-    address: HostnameInfo,
-    enabled: Option<bool>,
+    pub(crate) internal_port: u16,
+    pub(crate) address: HostnameInfo,
+    pub(crate) enabled: Option<bool>,
     /// Accepts readable and alterable plaintext traffic, including passwords.
     #[serde(default)]
-    allow_insecure: bool,
+    pub(crate) allow_insecure: bool,
 }
 
 rpc_toolkit::reflect_ts!(BindingSetAddressEnabledParams);
@@ -1208,14 +1419,7 @@ pub struct CliBindingSetAddressEnabledParams {
     allow_insecure: bool,
 }
 
-// On a non-SSL port (no SNI) a domain shares the bare IP's packets, so a domain
-// links the IPs at its gateway+port. There are two parallel "levels":
-//   WAN level: public domain(s) + bare WAN IPv4 + the GUA-as-public
-//   LAN level: private domain(s) + bare LAN IPv4 + the GUA-as-local
-// The IPv6 GUA is a single address shared by both — a public GUA is reachable on
-// LAN too, so **public wins**: if the WAN level is on the GUA is public, else if
-// the LAN level is on it is local, else it is off. WAN addresses are opt-in
-// (public IPs), LAN addresses are opt-out (on by default).
+// Plain-port domain aliases share their gateway's exposure; WAN consent dominates GUA LAN intent.
 
 /// Is there a non-SSL public domain at this `gateway` + `port`? Without one the
 /// WAN IPv4 and GUA toggle independently.
@@ -1248,16 +1452,17 @@ pub(crate) fn has_nonssl_private_domain(
 /// Is the LAN level (private domain or bare LAN IPv4) currently on at
 /// `gateway`+`port`? Excludes the GUA.
 fn nonssl_lan_on(addresses: &DerivedAddressInfo, gateway: &GatewayId, port: u16) -> bool {
+    let enabled = addresses.enabled();
     addresses.available.iter().any(|a| {
         if a.ssl || a.port != Some(port) {
             return false;
         }
         match &a.metadata {
             HostnameMetadata::PrivateDomain { gateways } if gateways.contains(gateway) => {
-                !addresses.disabled.contains(&override_key(a))
+                enabled.contains(a)
             }
             HostnameMetadata::Ipv4 { gateway: gw } if !a.public && gw == gateway => {
-                addresses.lan_ip_on(a)
+                enabled.contains(a)
             }
             _ => false,
         }
@@ -1299,7 +1504,8 @@ fn resolve_nonssl_gua(addresses: &mut DerivedAddressInfo, gateway: &GatewayId, p
         } else {
             // Local: LAN-only, following the LAN level.
             addresses.enabled.remove(&sa);
-            addresses.set_lan_ip(key, lan_on);
+            let local = lan_on || addresses.lan_enabled.contains(&key);
+            addresses.set_lan_ip(key, local);
         }
     }
 }
@@ -1338,12 +1544,8 @@ pub(crate) fn set_nonssl_wan_group(
             _ => {}
         }
     }
-    for k in domain_keys {
-        if enabled {
-            addresses.disabled.remove(&k);
-        } else {
-            addresses.disabled.insert(k);
-        }
+    for key in domain_keys {
+        addresses.set_name_enabled(key, enabled);
     }
     for sa in ipv4 {
         if enabled {
@@ -1426,10 +1628,8 @@ pub(crate) fn set_nonssl_lan_group(
         let key = override_key(a);
         if a.metadata.is_ip() {
             addresses.set_lan_ip(key, enabled);
-        } else if enabled {
-            addresses.disabled.remove(&key);
         } else {
-            addresses.disabled.insert(key);
+            addresses.set_name_enabled(key, enabled);
         }
     }
     for gateway in gateways {
@@ -1437,14 +1637,7 @@ pub(crate) fn set_nonssl_lan_group(
     }
 }
 
-/// Toggle one address on/off for a binding's `DerivedAddressInfo`. Public IPs
-/// live in the `enabled` set (keyed by `SocketAddr`); domains live in the
-/// `disabled` set and private IPs in `disabled` or `lan_enabled` (keyed by
-/// `(hostname, port)`). On a non-SSL port a dual-stack public domain links the
-/// WAN IPv4 and IPv6 GUA, so toggling any one of {IPv4, domain, GUA} moves the
-/// whole group ([`set_nonssl_wan_group`]).
-/// Shared by single-port bindings and port ranges (whose addresses all use
-/// `external_start_port` as their port, so the same keying applies).
+// Applies consent to the native address group.
 fn set_address_enabled_on(
     addresses: &mut DerivedAddressInfo,
     address: &HostnameInfo,
@@ -1481,10 +1674,8 @@ fn set_address_enabled_on(
         let key = (address.hostname.clone(), port);
         if address.metadata.is_ip() {
             addresses.set_lan_ip(key, enabled);
-        } else if enabled {
-            addresses.disabled.remove(&key);
         } else {
-            addresses.disabled.insert(key);
+            addresses.set_name_enabled(key, enabled);
         }
         // Non-SSL: a domain ties the v4 and v6 sides together (no SNI). A public
         // domain moves the WAN level; a private domain (or the bare LAN IPv4, when
@@ -1608,13 +1799,24 @@ pub(super) fn set_address_enabled_with_consent(
 /// subtree, so the API distinguishes the two rather than probing both.
 pub async fn set_address_enabled<Kind: HostApiKind>(
     ctx: RpcContext,
+    params: BindingSetAddressEnabledParams,
+    inheritance: Kind::Inheritance,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| set_address_enabled_in::<Kind>(db, params, &inheritance))
+        .await
+        .result
+}
+
+pub(crate) fn set_address_enabled_in<Kind: HostApiKind>(
+    db: &mut crate::db::model::DatabaseModel,
     BindingSetAddressEnabledParams {
         internal_port,
         address,
         enabled,
         allow_insecure,
     }: BindingSetAddressEnabledParams,
-    inheritance: Kind::Inheritance,
+    inheritance: &Kind::Inheritance,
 ) -> Result<(), Error> {
     let enabled = enabled.unwrap_or(true);
     if !enabled && address.is_internal() {
@@ -1623,37 +1825,24 @@ pub async fn set_address_enabled<Kind: HostApiKind>(
             ErrorKind::InvalidRequest,
         ));
     }
-    ctx.db
-        .mutate(|db| {
-            Kind::host_for(&inheritance, db)?
-                .as_bindings_mut()
-                .mutate(|b| {
-                    let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
-                    set_address_enabled_with_consent(
-                        &mut bind.addresses,
-                        &address,
-                        enabled,
-                        allow_insecure,
-                    )
-                })?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-            let gateways = db
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_gateways()
-                .de()?;
-            let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
-        })
-        .await
-        .result?;
-    Ok(())
+    Kind::host_for(inheritance, db)?
+        .as_bindings_mut()
+        .mutate(|bindings| {
+            let binding = bindings
+                .get_mut(&internal_port)
+                .or_not_found(internal_port)?;
+            binding.ensure_selectable(&address)?;
+            set_address_enabled_with_consent(
+                &mut binding.addresses,
+                &address,
+                enabled,
+                allow_insecure,
+            )
+        })?;
+    refresh_addresses::<Kind>(db, inheritance)
 }
 
-/// Toggle one address of a port-range binding (keyed by its internal start
-/// port). The range counterpart of [`set_address_enabled`]; both share the
-/// address-toggle logic in [`set_address_enabled_on`].
+/// Selects a port-range address through the shared plaintext-consent owner.
 pub async fn set_range_address_enabled<Kind: HostApiKind>(
     ctx: RpcContext,
     BindingSetAddressEnabledParams {
@@ -1684,15 +1873,7 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
                         allow_insecure,
                     )
                 })?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-            let gateways = db
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_gateways()
-                .de()?;
-            let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
+            refresh_addresses::<Kind>(db, &inheritance)
         })
         .await
         .result?;
@@ -1702,9 +1883,9 @@ pub async fn set_range_address_enabled<Kind: HostApiKind>(
 #[derive(Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct BindingSetGuaWanParams {
-    internal_port: u16,
-    address: HostnameInfo,
-    wan: bool,
+    pub(crate) internal_port: u16,
+    pub(crate) address: HostnameInfo,
+    pub(crate) wan: bool,
 }
 
 rpc_toolkit::reflect_ts!(BindingSetGuaWanParams);
@@ -1722,91 +1903,85 @@ pub struct CliBindingSetGuaWanParams {
     wan: bool,
 }
 
-/// Opt a single IPv6 GUA on a binding into (or out of) WAN exposure. The flag
-/// is projected into `HostnameInfo.public` by `update_addresses`, so the row's
-/// enable/disable override set switches (`disabled` while local, `enabled`
-/// while public) — the current on/off state is carried across the flip. Errors
-/// if `address` is not an IPv6 global-unicast address.
+fn set_gua_wan_on(
+    addresses: &mut DerivedAddressInfo,
+    address: &HostnameInfo,
+    gua: SocketAddrV6,
+    wan: bool,
+) {
+    let gateway = match &address.metadata {
+        HostnameMetadata::Ipv6 { gateway, .. } if !address.ssl => Some(gateway),
+        _ => None,
+    };
+    match gateway {
+        Some(gateway) if has_nonssl_public_domain(addresses, gateway, gua.port()) => {
+            set_nonssl_wan_group(addresses, gateway, gua.port(), wan);
+        }
+        Some(gateway) => {
+            if wan {
+                addresses.gua_wan.insert(gua);
+            } else {
+                addresses.gua_wan.remove(&gua);
+            }
+            resolve_nonssl_gua(addresses, gateway, gua.port());
+        }
+        None => {
+            if wan {
+                addresses.gua_wan.insert(gua);
+                addresses.enabled.insert(SocketAddr::V6(gua));
+            } else {
+                addresses.gua_wan.remove(&gua);
+                addresses.enabled.remove(&SocketAddr::V6(gua));
+            }
+        }
+    }
+}
+
+/// Selects WAN exposure for a global-unicast IPv6 address; linked public domains follow.
 pub async fn set_gua_wan<Kind: HostApiKind>(
     ctx: RpcContext,
+    params: BindingSetGuaWanParams,
+    inheritance: Kind::Inheritance,
+) -> Result<(), Error> {
+    ctx.db
+        .mutate(|db| set_gua_wan_in::<Kind>(db, params, &inheritance))
+        .await
+        .result
+}
+
+pub(crate) fn set_gua_wan_in<Kind: HostApiKind>(
+    db: &mut crate::db::model::DatabaseModel,
     BindingSetGuaWanParams {
         internal_port,
         address,
         wan,
     }: BindingSetGuaWanParams,
-    inheritance: Kind::Inheritance,
+    inheritance: &Kind::Inheritance,
 ) -> Result<(), Error> {
-    let gua = address.gua().ok_or_else(|| {
-        Error::new(
-            eyre!("address is not an IPv6 global-unicast address"),
-            ErrorKind::InvalidRequest,
-        )
-    })?;
-    ctx.db
-        .mutate(|db| {
-            Kind::host_for(&inheritance, db)?
-                .as_bindings_mut()
-                .mutate(|b| {
-                    let bind = b.get_mut(&internal_port).or_not_found(internal_port)?;
-                    let addrs = &mut bind.addresses;
-                    validate_available_address(addrs, &address)?;
-                    if wan && !bind.options.allows_public_address(address.ssl) {
-                        return Err(Error::new(
-                            eyre!("{}", t!("net.host.binding.insecure-public")),
-                            ErrorKind::InvalidRequest,
-                        ));
-                    }
-                    let sa = SocketAddr::V6(gua);
-                    // A GUA's WAN opt-in is the stored `gua_wan` / `public` flag.
-                    // With a co-located public domain, flipping the GUA drives the
-                    // whole WAN level (the public domain and bare WAN IPv4 follow —
-                    // correct precisely because a public domain is present).
-                    // Otherwise it is a standalone opt-in; `resolve_nonssl_gua`
-                    // derives the GUA's reachability from `gua_wan` + the LAN level.
-                    let gua_gw = match &address.metadata {
-                        HostnameMetadata::Ipv6 { gateway, .. } if !address.ssl => {
-                            Some(gateway.clone())
-                        }
-                        _ => None,
-                    };
-                    match gua_gw {
-                        Some(gateway) if has_nonssl_public_domain(addrs, &gateway, gua.port()) => {
-                            set_nonssl_wan_group(addrs, &gateway, gua.port(), wan);
-                        }
-                        Some(gateway) => {
-                            if wan {
-                                addrs.gua_wan.insert(gua);
-                            } else {
-                                addrs.gua_wan.remove(&gua);
-                            }
-                            resolve_nonssl_gua(addrs, &gateway, gua.port());
-                        }
-                        None => {
-                            // SSL / non-linkable GUA: a plain WAN opt-in toggle.
-                            if wan {
-                                addrs.gua_wan.insert(gua);
-                                addrs.enabled.insert(sa);
-                            } else {
-                                addrs.gua_wan.remove(&gua);
-                                addrs.enabled.remove(&sa);
-                            }
-                        }
-                    }
-                    Ok(())
-                })?;
-            let hostname = ServerHostname::load(db.as_public().as_server_info())?;
-            let gateways = db
-                .as_public()
-                .as_server_info()
-                .as_network()
-                .as_gateways()
-                .de()?;
-            let ports = db.as_private().as_available_ports().de()?;
-            Kind::host_for(&inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
-        })
-        .await
-        .result?;
-    Ok(())
+    Kind::host_for(inheritance, db)?
+        .as_bindings_mut()
+        .mutate(|bindings| {
+            bindings
+                .get_mut(&internal_port)
+                .or_not_found(internal_port)?
+                .set_gua_wan(&address, wan)
+        })?;
+    refresh_addresses::<Kind>(db, inheritance)
+}
+
+fn refresh_addresses<Kind: HostApiKind>(
+    db: &mut crate::db::model::DatabaseModel,
+    inheritance: &Kind::Inheritance,
+) -> Result<(), Error> {
+    let hostname = ServerHostname::load(db.as_public().as_server_info())?;
+    let gateways = db
+        .as_public()
+        .as_server_info()
+        .as_network()
+        .as_gateways()
+        .de()?;
+    let ports = db.as_private().as_available_ports().de()?;
+    Kind::host_for(inheritance, db)?.update_addresses(&hostname, &gateways, &ports)
 }
 
 async fn cli_set_address_enabled<Kind: HostApiKind>(
@@ -2015,6 +2190,9 @@ fn describe(address: &HostnameInfo) -> String {
 }
 
 #[cfg(test)]
+mod default_off_tests;
+
+#[cfg(test)]
 mod test {
     use super::*;
     use crate::GatewayId;
@@ -2091,6 +2269,7 @@ mod test {
     #[test]
     fn udp_bindings_reject_stream_proxy_and_tls_options() {
         for options in [
+            serde_json::json!({"proxy": {"type": "tcp"}}),
             serde_json::json!({"proxy": {"type": "http"}}),
             serde_json::json!({"addSsl": {"preferredExternalPort": 443}}),
             serde_json::json!({"secure": {"ssl": true}}),
@@ -2106,6 +2285,7 @@ mod test {
 
     fn opts(preferred: u16, add_ssl: Option<u16>, ssl: Option<bool>) -> BindOptions {
         BindOptions {
+            default_off: false,
             transport: Default::default(),
             preferred_external_port: preferred,
             add_ssl: add_ssl.map(|preferred_external_port| AddSslOptions {
@@ -2124,6 +2304,16 @@ mod test {
             "alpn": alpn,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn binding_creation_reports_dynamic_port_exhaustion_for_either_leg() {
+        for options in [opts(0, None, Some(false)), opts(0, None, Some(true))] {
+            let mut ports = AvailablePorts::new();
+            ports.try_alloc_range(49152, 16384, true).unwrap();
+            let error = BindInfo::new(&mut ports, options, true).unwrap_err();
+            assert_eq!(error.kind, ErrorKind::Network);
+        }
     }
 
     #[test]
@@ -2184,6 +2374,25 @@ mod test {
         }))
         .unwrap();
         assert!(raw.proxy.is_none());
+    }
+
+    #[test]
+    fn tcp_proxy_round_trips_plain_and_tls_passthrough_without_http_policy() {
+        for secure in [serde_json::Value::Null, serde_json::json!({"ssl": true})] {
+            let input = serde_json::json!({
+                "transport": ["tcp"],
+                "preferredExternalPort": 6881,
+                "addSsl": null,
+                "secure": secure,
+                "proxy": {"type": "tcp"},
+            });
+            let options: BindOptions = serde_json::from_value(input.clone()).unwrap();
+            assert_eq!(options.proxy, Some(ProxyOptions::Tcp));
+            assert!(!options.default_off);
+            let mut expected = input;
+            expected["defaultOff"] = serde_json::json!(false);
+            assert_eq!(serde_json::to_value(options).unwrap(), expected);
+        }
     }
 
     #[test]
@@ -2641,9 +2850,9 @@ mod test {
 
     fn refresh(info: &mut DerivedAddressInfo, available: BTreeSet<HostnameInfo>) {
         let previous = info.clone();
-        info.set_available(available.clone());
+        info.set_available(available.clone(), false);
         info.resolve_address_groups(&previous);
-        info.set_available(available);
+        info.set_available(available, false);
     }
 
     fn domain_row(hostname: &str, ssl: bool, port: u16) -> HostnameInfo {
@@ -3496,6 +3705,33 @@ mod test {
         set_address_enabled_with_consent(&mut info, &renumbered, false, false).unwrap();
         assert!(!info.enabled().contains(&renumbered));
         assert!(info.enabled().contains(&name));
+    }
+
+    #[test]
+    fn service_view_disables_unconsented_default_off_names_for_legacy_readers() {
+        let (mut info, mdns, [eth, _]) = lan_fixture(false);
+        let domain = HostnameInfo {
+            hostname: InternedString::intern("media.lan"),
+            metadata: HostnameMetadata::PrivateDomain {
+                gateways: BTreeSet::from([GatewayId::from(InternedString::intern("eth0"))]),
+            },
+            ..eth.clone()
+        };
+        info.available.insert(domain.clone());
+        info.default_off = true;
+        assert!(info.enabled().is_empty());
+        let mut view = info.clone();
+        view.project_service_selections();
+        assert!(view.disabled.contains(&override_key(&mdns)));
+        assert!(view.disabled.contains(&override_key(&domain)));
+
+        info.set_name_enabled(override_key(&domain), true);
+        assert!(info.enabled().contains(&domain));
+        assert!(!info.enabled().contains(&mdns));
+        let mut view = info.clone();
+        view.project_service_selections();
+        assert!(!view.disabled.contains(&override_key(&domain)));
+        assert!(view.disabled.contains(&override_key(&mdns)));
     }
 
     #[test]

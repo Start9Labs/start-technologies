@@ -441,7 +441,7 @@ async fn publish(
         None
     };
     s3_put(&s9pk_path, private.clone(), &s3dest).await?;
-    cli_add_package_impl(ctx, s9pk, vec![s3url], false, private, readers).await
+    cli_add_package_impl(ctx, s9pk, vec![s3url], None, false, private, readers).await
 }
 
 async fn s3_put(file: &Path, key: Option<KeyStreamInfo>, dest: &Url) -> Result<(), Error> {

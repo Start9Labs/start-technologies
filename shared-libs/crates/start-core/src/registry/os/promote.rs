@@ -136,28 +136,28 @@ async fn promote_assets(
     method: &str,
 ) -> Result<(), Error> {
     for (platform, asset) in assets {
+        crate::registry::asset::require_http_mirrors(&asset.urls)?;
         let commitment = &asset.commitment;
         let signature = ctx
             .id_key()?
             .sign_commitment(commitment, SIG_CONTEXT)
             .await?;
 
-        for url in &asset.urls {
-            call_registry(
-                ctx,
-                to_url.clone(),
-                method,
-                imbl_value::json!({
-                    "version": version,
-                    "platform": platform,
-                    "url": url,
-                    "signature": signature,
-                    "signatures": &asset.signatures,
-                    "commitment": commitment,
-                }),
-            )
-            .await?;
-        }
+        call_registry(
+            ctx,
+            to_url.clone(),
+            method,
+            imbl_value::json!({
+                "version": version,
+                "platform": platform,
+                "urls": &asset.urls,
+                "torrent": &asset.torrent,
+                "signature": signature,
+                "signatures": &asset.signatures,
+                "commitment": commitment,
+            }),
+        )
+        .await?;
     }
     Ok(())
 }

@@ -112,10 +112,6 @@ pub async fn export_url(
                 ))?
                 .as_addresses_mut()
                 .mutate_available(|available: &mut BTreeSet<_>| {
-                    // Dedupe by the same address identity `clear_urls` retains
-                    // on (row-action fields excluded). Without this, re-exporting
-                    // a URL whose actions changed inserts a second `Ord`-distinct
-                    // entry that `clear_urls` also keeps, accumulating duplicates.
                     available.retain(|h| !hostname_info.matches_hostname_info(h, &plugin_id));
                     available.insert(entry);
                     Ok(())
@@ -155,18 +151,15 @@ pub async fn clear_urls(
                 for (_, bind) in host.as_bindings_mut().as_entries_mut()? {
                     bind.as_addresses_mut()
                         .mutate_available(|available: &mut BTreeSet<_>| {
-                            available.retain(|h| {
-                                match &h.metadata {
-                                    HostnameMetadata::Plugin { package_id, .. }
-                                        if package_id == &plugin_id =>
-                                    {
-                                        // Keep if it matches any entry in the except list
-                                        except
-                                            .iter()
-                                            .any(|e| e.matches_hostname_info(h, &plugin_id))
-                                    }
-                                    _ => true,
+                            available.retain(|h| match &h.metadata {
+                                HostnameMetadata::Plugin { package_id, .. }
+                                    if package_id == &plugin_id =>
+                                {
+                                    except
+                                        .iter()
+                                        .any(|e| e.matches_hostname_info(h, &plugin_id))
                                 }
+                                _ => true,
                             });
                             Ok(())
                         })?;

@@ -9,7 +9,7 @@ set_test_profile() {
 }
 
 set_generated_profile() {
-  select_profile generated release dev debug
+  select_profile generated release dev debug bindings
 }
 
 # Unknown profiles fall back to debug; every accepted-profile list must include debug.

@@ -67,6 +67,12 @@ impl KeyStreamInfo {
         })
     }
 
+    pub(crate) fn apply_keystream_at(&self, position: u64, bytes: &mut [u8]) -> Result<(), Error> {
+        self.cipher_at(position)?
+            .try_apply_keystream(bytes)
+            .with_ctx(|_| (ErrorKind::ParseS9pk, t!("s9pk.source.invalid-range")))
+    }
+
     fn cipher_at(&self, position: u64) -> Result<Aes256Ctr128, Error> {
         let mut cipher = Aes256Ctr128::new_from_slices(&*self.key, &*self.iv)
             .map_err(|_| Error::new(eyre!("invalid keystream length"), ErrorKind::Unknown))?;
@@ -237,7 +243,7 @@ mod tests {
         assert_eq!(ciphertext.len(), plaintext.len());
         assert_ne!(ciphertext, plaintext);
 
-        let source = KeyStreamSource::new(Arc::<[u8]>::from(ciphertext.clone()), Some(key));
+        let source = KeyStreamSource::new(Arc::<[u8]>::from(ciphertext.clone()), Some(key.clone()));
         for (position, size) in [
             (0, 1000),
             (0, 1),
@@ -259,6 +265,11 @@ mod tests {
                 .unwrap();
             let range = position as usize..(position + size) as usize;
             assert_eq!(read, plaintext[range.clone()], "fetch {range:?}");
+            let mut transformed = plaintext[range.clone()].to_vec();
+            key.apply_keystream_at(position, &mut transformed).unwrap();
+            assert_eq!(transformed, ciphertext[range.clone()], "encrypt {range:?}");
+            key.apply_keystream_at(position, &mut transformed).unwrap();
+            assert_eq!(transformed, plaintext[range.clone()], "decrypt {range:?}");
 
             let mut copied = Vec::new();
             source.copy_to(position, size, &mut copied).await.unwrap();

@@ -35,6 +35,8 @@ use crate::util::serde::Base64;
 #[serde(rename_all = "camelCase")]
 pub struct AddPackageParams {
     pub urls: Vec<Url>,
+    #[serde(default)]
+    pub torrent: Option<Url>,
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
     pub uploader: AnyVerifyingKey,
@@ -57,6 +59,7 @@ pub async fn add_package(
     ctx: RegistryContext,
     AddPackageParams {
         urls,
+        torrent,
         uploader,
         commitment,
         signature,
@@ -65,6 +68,9 @@ pub async fn add_package(
         readers,
     }: AddPackageParams,
 ) -> Result<(), Error> {
+    if let Some(torrent) = &torrent {
+        crate::registry::bittorrent::validate_torrent_url(torrent)?;
+    }
     let signature =
         crate::sign::compat::verify_commitment(&uploader, &commitment, SIG_CONTEXT, &signature)?;
     ensure_code!(
@@ -77,12 +83,7 @@ pub async fn add_package(
     let uploader_guid = peek.as_index().as_signers().get_signer(&uploader)?;
     peek.as_index().as_readers().resolve_keys(&readers)?;
 
-    let Some(([url], rest)) = urls.split_at_checked(1) else {
-        return Err(Error::new(
-            eyre!("{}", t!("registry.package.add.must-specify-url")),
-            ErrorKind::InvalidRequest,
-        ));
-    };
+    let (url, rest) = crate::registry::asset::require_http_mirrors(&urls)?;
 
     let s9pk = fetch_s9pk(&ctx, url, &commitment, private.clone()).await?;
     for url in rest {
@@ -93,6 +94,9 @@ pub async fn add_package(
 
     let mut info = PackageVersionInfo::from_s9pk(&s9pk, urls, &icons_dir(&ctx.datadir)).await?;
     merge_submitted_signatures(&mut info, &uploader, &signature, signatures)?;
+    for (_, s9pk) in &mut info.s9pks {
+        s9pk.torrent = torrent.clone();
+    }
 
     ctx.db
         .mutate(|db| {
@@ -192,6 +196,8 @@ pub struct CliAddPackageParams {
     pub file: PathBuf,
     #[arg(long, help = "help.arg.package-url")]
     pub url: Vec<Url>,
+    #[arg(long, help = "help.arg.torrent")]
+    pub torrent: Option<Url>,
     #[arg(long, help = "help.arg.no-verify")]
     pub no_verify: bool,
     #[arg(long, help = "help.arg.private-s9pk")]
@@ -212,6 +218,7 @@ pub async fn cli_add_package(
     CliAddPackageParams {
         file,
         url,
+        torrent,
         no_verify,
         private,
         readers,
@@ -223,7 +230,7 @@ pub async fn cli_add_package(
     } else {
         None
     };
-    cli_add_package_impl(ctx, s9pk, url, no_verify, private, readers).await
+    cli_add_package_impl(ctx, s9pk, url, torrent, no_verify, private, readers).await
 }
 
 /// The keystream the CLI identity encrypts a private s9pk with.
@@ -236,6 +243,8 @@ pub async fn derive_keystream(ctx: &CliContext, s9pk: &S9pk) -> Result<KeyStream
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AddPackageRequest<'a> {
     pub urls: &'a [Url],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub torrent: Option<&'a Url>,
     pub signature: AnySignature,
     pub signatures: &'a SignatureMap,
     pub commitment: &'a MerkleArchiveCommitment,
@@ -250,6 +259,7 @@ pub async fn cli_add_package_impl(
     ctx: CliContext,
     s9pk: S9pk,
     url: Vec<Url>,
+    torrent: Option<Url>,
     no_verify: bool,
     private: Option<KeyStreamInfo>,
     readers: Vec<AnyVerifyingKey>,
@@ -305,6 +315,7 @@ pub async fn cli_add_package_impl(
         "package.add",
         to_value(&AddPackageRequest {
             urls: &url,
+            torrent: torrent.as_ref(),
             signature,
             signatures: &s9pk.signatures().await?,
             commitment: &commitment,

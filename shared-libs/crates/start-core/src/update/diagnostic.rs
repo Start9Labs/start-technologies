@@ -158,6 +158,8 @@ async fn run_update(
         let _guard = guard;
         let res = do_update(
             client,
+            // /var/tmp can be RAM-backed before data-disk initialization.
+            None,
             asset,
             notes,
             UpdateProgressHandles {

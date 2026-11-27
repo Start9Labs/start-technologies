@@ -88,7 +88,8 @@ export namespace Mock {
 
   export const ServerId = '1234-5678-9876-5432'
 
-  export const ServerUpdated: T.ServerStatus = {
+  export const ServerStatus: T.ServerStatus = {
+    bittorrentWatcherFailed: false,
     backupConversions: {},
     backupProgress: null,
     updateProgress: null,
@@ -2690,6 +2691,8 @@ PersistentKeepalive = 25`
               disabled: [],
               guaWan: ['[2001:db8:abcd::a3b:2]:1234'],
               lanEnabled: [],
+              enabledNames: [],
+              defaultOff: false,
               available: [
                 {
                   ssl: true,
@@ -2742,6 +2745,7 @@ PersistentKeepalive = 25`
               transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 443,
+              defaultOff: false,
               secure: { ssl: true },
               proxy: null,
             },
@@ -2784,12 +2788,15 @@ PersistentKeepalive = 25`
               disabled: [],
               guaWan: [],
               lanEnabled: [],
+              enabledNames: [],
+              defaultOff: false,
               available: [],
             }),
             options: {
               transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 8332,
+              defaultOff: false,
               secure: { ssl: false },
               proxy: null,
             },
@@ -2832,12 +2839,15 @@ PersistentKeepalive = 25`
               disabled: [],
               guaWan: [],
               lanEnabled: [],
+              enabledNames: [],
+              defaultOff: false,
               available: [],
             }),
             options: {
               transport: ['tcp', 'udp'],
               addSsl: null,
               preferredExternalPort: 8333,
+              defaultOff: false,
               secure: { ssl: false },
               proxy: null,
             },

@@ -44,6 +44,35 @@ export function gatewayName(
   return gateway?.name ?? gateway?.ipInfo?.name ?? id
 }
 
+export function systemDefaultGateways(
+  gateways: Record<string, T.NetworkInterfaceInfo>,
+) {
+  return (
+    [
+      ['IPv4', 'defaultRouteV4'],
+      ['IPv6', 'defaultRouteV6'],
+    ] as const
+  ).flatMap(([family, metric]) => {
+    const routes = Object.entries(gateways).flatMap(([id, gateway]) => {
+      const priority = gateway.ipInfo?.[metric]
+      return isConnectedGateway(gateway) && priority != null
+        ? [
+            {
+              id,
+              name: gatewayName(id, gateway),
+              priority,
+              wanIp: gateway.ipInfo.wanIp,
+            },
+          ]
+        : []
+    })
+    const priority = Math.min(...routes.map(route => route.priority))
+    return routes
+      .filter(route => route.priority === priority)
+      .map(route => ({ family, ...route }))
+  })
+}
+
 @Injectable()
 export class GatewayService {
   private readonly patch = inject<PatchDB<DataModel>>(PatchDB)
@@ -58,7 +87,16 @@ export class GatewayService {
     const network = this.network()
     const id = network?.defaultOutbound
     if (!id) return null
-    return { id, name: gatewayName(id, network.gateways[id]) }
+    return {
+      id,
+      name: gatewayName(id, network.gateways[id]),
+      wanIp: network.gateways[id]?.ipInfo?.wanIp,
+    }
+  })
+
+  readonly systemDefaultGateways = computed(() => {
+    const network = this.network()
+    return network ? systemDefaultGateways(network.gateways) : []
   })
 
   readonly gateways = computed(() => {

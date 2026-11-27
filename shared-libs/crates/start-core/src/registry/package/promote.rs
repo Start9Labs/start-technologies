@@ -246,6 +246,7 @@ pub async fn cli_promote(
             "package.add",
             to_value(&AddPackageRequest {
                 urls: &asset.urls,
+                torrent: asset.torrent.as_ref(),
                 signature,
                 signatures: &asset.signatures,
                 commitment,

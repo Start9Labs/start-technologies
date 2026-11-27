@@ -508,6 +508,13 @@ export const RegistryAsset = <Commitment extends z.ZodType>(
   const self = object({
     publishedAt: z.string(),
     urls: z.array(z.string()),
+    /**
+     * Metainfo describes hosted bytes: ciphertext for a private asset.
+     */
+    torrent: z.string().nullable().optional().meta({
+      description:
+        'Metainfo describes hosted bytes: ciphertext for a private asset.',
+    }),
     commitment: Commitment,
     signatures: z.record(z.string(), AnySignature),
     /**
@@ -677,14 +684,29 @@ export const AddAdminParams: z.ZodObject<{ signer: typeof Guid }> =
 export const AddAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
-  url: z.ZodString
+  /**
+   * @deprecated Use `urls`.
+   */
+  url: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  urls: z.ZodDefault<z.ZodArray<z.ZodString>>
+  torrent: z.ZodDefault<z.ZodNullable<z.ZodString>>
   signature: typeof AnySignature
   signatures: z.ZodDefault<z.ZodRecord<z.ZodString, typeof AnySignature>>
   commitment: typeof Blake3Commitment
 }> = /* @__PURE__ */ object({
   version: z.string(),
   platform: z.string(),
-  url: z.string(),
+  /**
+   * @deprecated Use `urls`.
+   */
+  url: z.string().nullable().optional().meta({
+    description: '@deprecated Use `urls`.',
+  }),
+  urls: z.array(z.string()).default(() => []),
+  torrent: z
+    .string()
+    .nullable()
+    .default(() => null),
   signature: AnySignature,
   signatures: z.record(z.string(), AnySignature).default(() => ({})),
   commitment: Blake3Commitment,
@@ -712,6 +734,7 @@ export const AddMirrorParams: z.ZodObject<{
 })
 export const AddPackageParams: z.ZodObject<{
   urls: z.ZodArray<z.ZodString>
+  torrent: z.ZodDefault<z.ZodNullable<z.ZodString>>
   commitment: typeof MerkleArchiveCommitment
   signature: typeof AnySignature
   signatures: z.ZodDefault<z.ZodRecord<z.ZodString, typeof AnySignature>>
@@ -725,6 +748,10 @@ export const AddPackageParams: z.ZodObject<{
   readers: z.ZodDefault<z.ZodArray<typeof AnyVerifyingKey>>
 }> = /* @__PURE__ */ object({
   urls: z.array(z.string()),
+  torrent: z
+    .string()
+    .nullable()
+    .default(() => null),
   commitment: MerkleArchiveCommitment,
   signature: AnySignature,
   signatures: z.record(z.string(), AnySignature).default(() => ({})),

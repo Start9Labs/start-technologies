@@ -182,10 +182,14 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
         ..Default::default()
     })
     .unwrap();
+    let torrent: Url = "magnet:?xt=urn:btih:0123456789012345678901234567890123456789"
+        .parse()
+        .unwrap();
     cli_add_package_impl(
         cli.clone(),
         local_package().await,
         vec![host.join("base").unwrap()],
+        Some(torrent.clone()),
         false,
         None,
         Vec::new(),
@@ -201,6 +205,7 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
         asset.signatures.keys().collect::<BTreeSet<_>>(),
         [&uploader, &embedded, &publisher].into()
     );
+    assert_eq!(asset.torrent, Some(torrent.clone()));
     for (key, signature) in &asset.signatures {
         key.verify_commitment(&asset.commitment, "s9pk", signature)
             .unwrap();
@@ -226,6 +231,7 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
     let mirrored = &mirrored.package.packages["trust-fixture"].versions[&version].s9pks[0].1;
     assert_eq!(mirrored.signatures, asset.signatures);
     assert_eq!(mirrored.urls.len(), 2);
+    assert_eq!(mirrored.torrent, Some(torrent.clone()));
 
     cli_promote(
         cli.clone(),
@@ -248,6 +254,7 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
         assert_eq!(Some(signature), asset.signatures.get(key));
     }
     assert_eq!(promoted.urls, mirrored.urls);
+    assert_eq!(promoted.torrent, Some(torrent));
 
     ctx.db
         .mutate(|db| db.as_admins_mut().ser(&BTreeSet::<Guid>::new()))
@@ -259,6 +266,7 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
             cli,
             local_package().await,
             vec![host.join("base").unwrap()],
+            None,
             true,
             None,
             Vec::new(),
@@ -379,12 +387,14 @@ async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_
     )
     .await;
     let hosted = vec![host.join("private").unwrap()];
+    let torrent = host.join("private.torrent").unwrap();
 
     assert!(
         cli_add_package_impl(
             cli.clone(),
             local_package().await,
             hosted.clone(),
+            None,
             true,
             None,
             Vec::new()
@@ -396,6 +406,7 @@ async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_
         cli.clone(),
         local_package().await,
         hosted.clone(),
+        Some(torrent.clone()),
         false,
         Some(key.clone()),
         vec![reader_key.clone()],
@@ -405,7 +416,7 @@ async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_
 
     let version = "1.0.0:0";
     let assert_visibility = |url: Url, identities: Vec<(Option<Signer>, bool, bool)>| {
-        let (key, reader_key) = (key.clone(), reader_key.clone());
+        let (key, reader_key, torrent) = (key.clone(), reader_key.clone(), torrent.clone());
         async move {
             for (identity, visible, sees_readers) in identities {
                 let identity = identity.as_ref();
@@ -421,6 +432,7 @@ async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_
                 if visible {
                     let asset = &best[version]["s9pks"][0][1];
                     assert_eq!(asset["private"], to_value(&key).unwrap());
+                    assert_eq!(asset["torrent"], to_value(&torrent).unwrap());
                     assert_eq!(asset.get("readers").is_some(), sees_readers, "{asset}");
                 }
                 let index = rpc(&url, "package.index", imbl_value::json!({}), identity).await;
@@ -685,6 +697,7 @@ async fn registry_rejects_readers_of_public_or_unknown_keys_before_fetching() {
             ctx.clone(),
             AddPackageParams {
                 urls: vec![url.join("base").unwrap()],
+                torrent: None,
                 uploader: uploader.clone(),
                 commitment,
                 signature: signature.clone(),
@@ -800,6 +813,7 @@ async fn registry_rejects_endorsements_signed_for_a_different_actual_bound() {
                 ctx.clone(),
                 AddPackageParams {
                     urls: vec![url.join(name).unwrap()],
+                    torrent: None,
                     uploader: uploader.clone(),
                     commitment,
                     signature: signature.clone(),
@@ -861,6 +875,7 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
                 ctx.clone(),
                 AddPackageParams {
                     urls: vec![url.join("base").unwrap(), url.join(secondary).unwrap()],
+                    torrent: None,
                     uploader: uploader.clone(),
                     commitment,
                     signature: signature.clone(),
@@ -890,6 +905,7 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
         ctx.clone(),
         AddPackageParams {
             urls: urls.clone(),
+            torrent: None,
             uploader: uploader.clone(),
             commitment,
             signature,

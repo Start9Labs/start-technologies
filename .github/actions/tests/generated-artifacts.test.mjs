@@ -72,6 +72,7 @@ test('the bindings generator uses the generated profile and preserves explicit b
     ['dev', [], 'dev-console-unstable'],
     ['release', ['--release'], 'dev-unstable'],
     ['generated', ['--profile', 'generated'], 'dev-unstable'],
+    ['bindings', ['--profile', 'bindings'], 'dev-unstable'],
     ['unknown', [], 'dev-unstable'],
   ]) {
     const [args] = run(`${core}/build/build-ts.sh`, profile, environment)
