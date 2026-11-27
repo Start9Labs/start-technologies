@@ -618,7 +618,10 @@ for (const { name, patch, expected } of [
     })
     db.start()
     source.next([{ id: 4, patch }])
-    assert.deepEqual(cache.value.value.rows.map(row => row.a), expected)
+    assert.deepEqual(
+      cache.value.value.rows.map(row => row.a),
+      expected,
+    )
     assert.deepEqual(values, [2, expected[1]])
   })
 
@@ -632,7 +635,10 @@ for (const { name, patch, expected } of [
     f.start(f.calls[0], 3, arrayDocument())
     f.revision(f.calls[0], 4, patch)
     t.mock.timers.tick(250)
-    assert.deepEqual(f.cache.value.value.rows.map(row => row.a), expected)
+    assert.deepEqual(
+      f.cache.value.value.rows.map(row => row.a),
+      expected,
+    )
     assert.deepEqual(second.values, [2, expected[1]])
     assert.deepEqual(projected.values, [{ a: 2 }, { a: expected[1] }])
   })
