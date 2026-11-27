@@ -323,6 +323,7 @@ pub async fn sync_keys<P: AsRef<Path>>(
     Ok(())
 }
 
+/// Completes the authorized-key file write before returning.
 #[instrument(skip_all)]
 pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Result<(), Error> {
     use tokio::io::AsyncWriteExt;
@@ -337,6 +338,7 @@ pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Resu
         f.write_all(key.0.to_key_format().as_bytes()).await?;
         f.write_all(b"\n").await?;
     }
+    f.flush().await?;
 
     Ok(())
 }
