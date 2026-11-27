@@ -30,6 +30,7 @@ Tests are Jest + `ts-jest` (`jest.config.js`, `rootDir: ./src`). `mime` is mocke
 - **Depends on the _built_ SDK at `../../start-sdk/dist`** (declared in `package.json` as `"@start9labs/start-sdk": "file:../../start-sdk/dist"`) **and on `@start9labs/start-core` at `../../../shared-libs/ts-modules/start-core/dist`**. Editing `projects/start-sdk/` or `shared-libs/ts-modules/start-core/` source alone has no effect here — rebuild first: `cd projects/start-sdk && make bundle` (which builds start-core and bundles it). The Makefile target `projects/start-os/container-runtime/package-lock.json` also depends on `projects/start-sdk/dist/package.json`, so a stale SDK can break `npm ci`/`check`/`test`.
 - **Formatting is the root prettier config** (`.prettierrc.json` at the repo root), applied via `make format` / `make web-format` from the repo root. Never run prettier from inside this directory: the root `.prettierignore` (which protects `__fixtures__/`) only applies when prettier runs from the root cwd.
 - **`CLAUDE.md` is just `@AGENTS.md`** — edit this file, not `CLAUDE.md`.
+- Preserve optional backup results through `System.createBackup` and the RPC response; custom and legacy hooks may return no result.
 
 ## Image build (gotchas)
 

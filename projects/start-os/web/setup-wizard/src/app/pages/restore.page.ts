@@ -59,9 +59,15 @@ import { UNLOCK_PASSWORD } from '../components/unlock-password.dialog'
               @for (server of physicalServers(); track server.id) {
                 <button tuiOption (click)="selectPhysicalBackup(server)">
                   <span tuiTitle>
-                    {{ server.id }}
+                    {{ server.hostname }}
                     <span tuiSubtitle>
-                      {{ server.drive.vendor }} {{ server.drive.model }} ·
+                      {{
+                        (server.scheduled
+                          ? 'Automatic backup'
+                          : 'Manual backup'
+                        ) | i18n
+                      }}
+                      · {{ server.drive.vendor }} {{ server.drive.model }} ·
                       {{ server.partition.logicalname }}
                     </span>
                   </span>
@@ -123,18 +129,27 @@ export default class RestorePage {
 
   selectPhysicalBackup(server: StartOSDiskInfoFull) {
     this.open = false
-    this.showUnlockDialog(server.id, {
-      type: 'disk',
-      logicalname: server.partition.logicalname,
-    })
+    this.showUnlockDialog(
+      server.serverId || server.id,
+      {
+        type: 'disk',
+        logicalname: server.partition.logicalname,
+      },
+      !!server.scheduled,
+    )
   }
 
   private handleCifsResult(result: CifsResult) {
     if (result.servers.length === 1) {
-      this.showUnlockDialog(result.servers[0]!.id, {
-        type: 'cifs',
-        ...result.cifs,
-      })
+      const server = result.servers[0]!
+      this.showUnlockDialog(
+        server.serverId || server.id,
+        {
+          type: 'cifs',
+          ...result.cifs,
+        },
+        !!server.scheduled,
+      )
     } else {
       this.showSelectNetworkBackupDialog(result.cifs, result.servers)
     }
@@ -150,7 +165,11 @@ export default class RestorePage {
       })
       .subscribe(server => {
         if (server) {
-          this.showUnlockDialog(server.id, { type: 'cifs', ...cifs })
+          this.showUnlockDialog(
+            server.serverId || server.id,
+            { type: 'cifs', ...cifs },
+            !!server.scheduled,
+          )
         }
       })
   }
@@ -158,6 +177,7 @@ export default class RestorePage {
   private showUnlockDialog(
     serverId: string,
     target: { type: 'disk'; logicalname: string } | ({ type: 'cifs' } & T.Cifs),
+    scheduled: boolean,
   ) {
     this.dialogs
       .openComponent<string | null>(UNLOCK_PASSWORD)
@@ -168,6 +188,7 @@ export default class RestorePage {
             target,
             serverId,
             password,
+            scheduled,
           }
           this.router.navigate(['/password'])
         }

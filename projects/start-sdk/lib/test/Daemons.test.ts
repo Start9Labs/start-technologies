@@ -771,16 +771,13 @@ describe('setupMain composition', () => {
 })
 
 describe('runUntilSuccess timeout diagnostics', () => {
-  /**
-   * A daemon that never becomes ready, whose ready check reports `loading` on
-   * every poll.
-   */
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
   const stuckChain = (e: T.Effects) =>
     Daemons.of<Manifest>({ effects: e }).addDaemon('stuck', {
       subcontainer: null,
       exec: {
-        // Runs until the chain's teardown aborts it, so the `finally`'s
-        // term() after the timeout doesn't sit out the sigterm budget.
         fn: (_sub, abort) =>
           new Promise<null>(resolve =>
             abort.addEventListener('abort', () => resolve(null), {
@@ -790,8 +787,6 @@ describe('runUntilSuccess timeout diagnostics', () => {
       },
       ready: {
         display: null,
-        // Poll fast so the first result lands well inside the test's budget;
-        // defaultTrigger's 1s lead-in would leave health on `starting`.
         trigger: cooldownTrigger(5),
         fn: () => ({ result: 'loading' as const, message: 'still warming up' }),
       },
@@ -799,23 +794,31 @@ describe('runUntilSuccess timeout diagnostics', () => {
     })
 
   it('names the un-ready daemon with its health result and message', async () => {
-    await expect(
+    const result = expect(
       stuckChain(fakeEffects()).runUntilSuccess(200),
     ).rejects.toThrow(/stuck \(loading; still warming up\)/)
+    await jest.advanceTimersByTimeAsync(200)
+    await result
   })
 
   it('omits the internal sentinel from the message', async () => {
-    await expect(stuckChain(fakeEffects()).runUntilSuccess(50)).rejects.toThrow(
+    const result = expect(
+      stuckChain(fakeEffects()).runUntilSuccess(50),
+    ).rejects.toThrow(
       expect.objectContaining({
         message: expect.not.stringContaining('__RUN_UNTIL_SUCCESS'),
       }),
     )
+    await jest.advanceTimersByTimeAsync(50)
+    await result
   })
 
   it('reports the elapsed budget', async () => {
-    await expect(stuckChain(fakeEffects()).runUntilSuccess(50)).rejects.toThrow(
-      /Timed out after 50ms/,
-    )
+    const result = expect(
+      stuckChain(fakeEffects()).runUntilSuccess(50),
+    ).rejects.toThrow(/Timed out after 50ms/)
+    await jest.advanceTimersByTimeAsync(50)
+    await result
   })
 
   it('surfaces the exit cause of a crash-looping daemon', async () => {
@@ -832,8 +835,10 @@ describe('runUntilSuccess timeout diagnostics', () => {
       },
       requires: [],
     })
-    await expect(chain.runUntilSuccess(200)).rejects.toThrow(
+    const result = expect(chain.runUntilSuccess(200)).rejects.toThrow(
       /crasher \(loading; \d+ failed exit\(s\), last: exited with code 1\)/,
     )
+    await jest.advanceTimersByTimeAsync(200)
+    await result
   })
 })

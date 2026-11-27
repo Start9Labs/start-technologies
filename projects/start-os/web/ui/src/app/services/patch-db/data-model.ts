@@ -11,6 +11,7 @@ export type DataModel = Pick<
     keyboard: FullKeyboard | null
   }
   packageData: AllPackageData
+  scheduledBackups: T.ScheduledBackupState
   sharedVolumes: T.Public['sharedVolumes']
   disks: T.Public['disks']
   backupTargets: T.Public['backupTargets']

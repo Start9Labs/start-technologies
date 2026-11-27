@@ -1,3 +1,4 @@
+import type AutomaticBackups from './routes/backups/automatic-page'
 import { TUI_BREAKPOINT } from '@taiga-ui/core'
 import { inject } from '@angular/core'
 import {
@@ -43,6 +44,15 @@ export default [
         title: titleResolver,
         data: { title: 'Backup Targets' },
         loadComponent: () => import('./routes/backups/targets'),
+      },
+      {
+        path: 'backups/automatic',
+        title: titleResolver,
+        data: { title: 'Automatic backups' },
+        canDeactivate: [
+          (component: AutomaticBackups) => component.canDeactivate(),
+        ],
+        loadComponent: () => import('./routes/backups/automatic-page'),
       },
       {
         path: 'backups',

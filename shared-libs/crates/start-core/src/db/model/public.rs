@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::account::AccountInfo;
+use crate::backup::scheduled::ScheduledBackupState;
 use crate::db::DbAccessByKey;
 use crate::db::model::Database;
 use crate::db::model::package::AllPackageData;
@@ -42,6 +43,8 @@ pub static DB_UI_SEED_CELL: OnceLock<&'static str> = OnceLock::new();
 pub struct Public {
     pub server_info: ServerInfo,
     pub package_data: AllPackageData,
+    #[serde(default)]
+    pub scheduled_backups: ScheduledBackupState,
     #[serde(default)]
     pub ssh_pubkeys: SshKeys,
     /// Each saved registry's last synchronized index, in the server's language.
@@ -164,6 +167,7 @@ impl Public {
                 keyboard,
             },
             package_data: AllPackageData::default(),
+            scheduled_backups: ScheduledBackupState::default(),
             ssh_pubkeys: SshKeys::new(),
             registry_indexes: BTreeMap::new(),
             registry_cache: BTreeMap::new(),

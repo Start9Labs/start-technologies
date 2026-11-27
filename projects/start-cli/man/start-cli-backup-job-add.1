@@ -1,0 +1,65 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-job-add 1  "add "
+.SH NAME
+start\-cli\-backup\-job\-add \- Add an automatic backup job
+.SH SYNOPSIS
+\fBstart\-cli backup job add\fR [\fB\-\-old\-password\fR] [\fB\-\-cron\fR] [\fB\-\-timezone\fR] [\fB\-\-package\-ids\fR] [\fB\-\-exclude\-package\-ids\fR] [\fB\-\-system\-data\fR] [\fB\-\-keep\-rule\fR] [\fB\-\-service\-keep\-rule\fR] [\fB\-\-service\-latest\-only\fR] [\fB\-\-disabled\fR] [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fINAME\fR> <\fITARGET_ID\fR> <\fIPASSWORD\fR>
+.SH DESCRIPTION
+Add an automatic backup job
+.SH OPTIONS
+.TP
+\fB\-\-old\-password\fR \fI<OLD_PASSWORD>\fR
+Previous backup password
+.TP
+\fB\-\-cron\fR \fI<CRON>\fR [default: 0 3 * * *]
+Five\-field cron schedule (minute, hour, day of month, month, weekday)
+.TP
+\fB\-\-timezone\fR \fI<TIMEZONE>\fR [default: UTC]
+IANA timezone for the automatic backup schedule
+.TP
+\fB\-\-package\-ids\fR \fI<PACKAGE_IDS>\fR
+Package IDs to include in the automatic backup
+.TP
+\fB\-\-exclude\-package\-ids\fR \fI<EXCLUDE_PACKAGE_IDS>\fR
+Package IDs to exclude from current and future services
+.TP
+\fB\-\-system\-data\fR \fI<SYSTEM_DATA>\fR
+Include or exclude StartOS System data
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+include
+.IP \(bu 2
+exclude
+.RE
+.TP
+\fB\-\-keep\-rule\fR \fI<INTERVAL:COVERAGE>\fR
+Version\-history rule INTERVAL:COVERAGE; accepts s, m, h, d, or w and may repeat
+.TP
+\fB\-\-service\-keep\-rule\fR \fI<PACKAGE_ID=INTERVAL:COVERAGE>\fR
+Version\-history rule PACKAGE_ID=INTERVAL:COVERAGE; use x_system for System data; may repeat
+.TP
+\fB\-\-service\-latest\-only\fR \fI<PACKAGE_ID>\fR
+Service IDs, or x_system for System data, that should keep only their latest checkpoint
+.TP
+\fB\-\-disabled\fR
+Create the automatic backup job paused
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fINAME\fR>
+Human\-readable automatic backup job name
+.TP
+<\fITARGET_ID\fR>
+Backup target identifier
+.TP
+<\fIPASSWORD\fR>
+Password for backup encryption

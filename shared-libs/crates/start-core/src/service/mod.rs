@@ -23,6 +23,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use url::Url;
 
+use crate::backup::PackageBackupOutput;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::{
     InstalledState, ManifestPreference, PackageState, PackageStateMatchModelRef, UpdatingState,
@@ -473,7 +474,7 @@ impl Service {
         seed: &ServiceActorSeed,
         event_id: Guid,
         path: PathBuf,
-    ) -> Result<(), Error> {
+    ) -> Result<crate::backup::PackageBackupOutput, Error> {
         let container =
             PersistentContainer::new_backup(&seed.ctx, seed.persistent_container.s9pk.clone())
                 .await?;
@@ -487,24 +488,27 @@ impl Service {
             let guard = container
                 .mount_backup(path, crate::disk::mount::filesystem::ReadWrite)
                 .await?;
-            let result = container
-                .execute::<crate::util::serde::NoOutput>(
+            let output = transition::backup::run_backup_procedure(
+                container.execute_backup::<Option<crate::backup::PackageBackupOutput>>(
                     event_id,
-                    ProcedureName::CreateBackup,
                     Value::Null,
-                    None,
-                )
-                .await;
-            let unmount = guard.unmount(true).await;
-            result?;
-            unmount
+                    transition::backup::PACKAGE_BACKUP_TIMEOUT,
+                ),
+                || container.stop_runtime_after_backup_timeout(),
+                guard.unmount(true),
+                async { Ok(()) },
+                transition::backup::PACKAGE_BACKUP_TIMEOUT,
+            )
+            .await?;
+            Ok::<_, Error>(output.unwrap_or_default())
         }
         .await;
         let shutdown = backup.shutdown(None).await;
         let mut errors = ErrorCollection::new();
-        errors.handle(result);
+        let output = errors.handle(result);
         errors.handle(shutdown);
-        errors.into_result()
+        errors.into_result()?;
+        Ok(output.expect("successful backup output"))
     }
 
     #[instrument(skip_all)]
@@ -773,6 +777,8 @@ impl Service {
         progress: Option<InstallProgressHandles>,
     ) -> Result<ServiceRef, Error> {
         let manifest = s9pk.as_manifest().clone();
+        let package_id = manifest.id.clone();
+        let creates_scheduled_backup_review = matches!(kind, InitKind::Install);
         crate::volume::ensure_volume_root(&manifest.id).await?;
         let developer_key = s9pk.as_archive().signer();
         let event_id = Guid::new();
@@ -829,6 +835,10 @@ impl Service {
                 entry.as_registry_mut().ser(registry)?;
                 entry.as_status_info_mut().as_error_mut().ser(&None)?;
 
+                if creates_scheduled_backup_review {
+                    crate::backup::scheduled::create_review_for_new_service(db, &package_id)?;
+                }
+
                 Ok(())
             })
             .await
@@ -850,7 +860,7 @@ impl Service {
         &self,
         guard: impl GenericMountGuard,
         progress: crate::progress::PhaseProgressTrackerHandle,
-    ) -> Result<(), Error> {
+    ) -> Result<PackageBackupOutput, Error> {
         let id = &self.seed.id;
         // Prepare the backup future in the actor first, so the cell is
         // populated before the actor reacts to the DesiredStatus change.
@@ -906,8 +916,9 @@ impl Service {
             handle.complete();
         }
 
-        backup_res?;
-        s9pk_res
+        let output = backup_res?;
+        s9pk_res?;
+        Ok(output)
     }
 
     pub fn container_id(&self) -> Result<ContainerId, Error> {

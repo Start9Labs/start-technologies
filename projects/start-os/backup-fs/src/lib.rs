@@ -680,10 +680,10 @@ impl Filesystem for BackupFS {
         });
     }
 
-    fn opendir(&self, req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+    fn opendir(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         debug!("opendir() called on {:?}", ino);
         let mut h = self.handler();
-        match h.opendir(req, Inode(ino.into()), flags.0) {
+        match h.opendir(Inode(ino.into()), flags.0) {
             Ok(FileHandleId(fh)) => reply.opened(FileHandle(fh), FopenFlags::FOPEN_DIRECT_IO),
             Err(e) => reply.error(errno(e.to_errno_log())),
         }
@@ -691,7 +691,7 @@ impl Filesystem for BackupFS {
 
     fn readdir(
         &self,
-        req: &Request,
+        _req: &Request,
         ino: INodeNo,
         fh: FileHandle,
         offset: u64,
@@ -699,7 +699,6 @@ impl Filesystem for BackupFS {
     ) {
         let mut h = self.handler();
         match h.readdir(
-            req,
             Inode(ino.into()),
             FileHandleId(fh.into()),
             offset as i64,
@@ -719,7 +718,7 @@ impl Filesystem for BackupFS {
 
     fn readdirplus(
         &self,
-        req: &Request,
+        _req: &Request,
         ino: INodeNo,
         fh: FileHandle,
         offset: u64,
@@ -727,7 +726,6 @@ impl Filesystem for BackupFS {
     ) {
         let mut h = self.handler();
         match h.readdir(
-            req,
             Inode(ino.into()),
             FileHandleId(fh.into()),
             offset as i64,
@@ -779,24 +777,16 @@ impl Filesystem for BackupFS {
     fn fsyncdir(
         &self,
         _req: &Request,
-        _ino: INodeNo,
+        ino: INodeNo,
         _fh: FileHandle,
         _datasync: bool,
         reply: ReplyEmpty,
     ) {
-        // Callers like start-os need a way to force a whole-fs
-        // durability checkpoint before `umount -l`. FUSE_SYNCFS would
-        // be the natural hook, but the Linux kernel's `fc->sync_fs`
-        // defaults to 0 for non-bdev FUSE mounts and is never enabled
-        // via any INIT flag — so `syncfs(2)` / `sync -f` silently does
-        // a VFS-level sync and never dispatches to us. FUSE_FSYNCDIR,
-        // however, reaches the daemon reliably (`fsync(dirfd)` /
-        // `fsync .`). Route it to the same whole-fs flush so callers
-        // have a working checkpoint.
+        // Root fsync finishes compaction before the backing mount can detach.
         #[cfg(test)]
         FSYNCDIR_CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut h = self.handler();
-        match h.flush_all_dirty() {
+        match h.sync_directory(Inode(ino.into())) {
             Ok(()) => reply.ok(),
             Err(e) => reply.error(errno(e.to_errno_log())),
         }

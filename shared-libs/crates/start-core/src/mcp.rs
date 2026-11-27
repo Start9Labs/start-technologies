@@ -78,17 +78,21 @@ impl ToolPolicy for StartOsTools {
     }
 }
 
-/// The CLI's translated `about` text, keyed by dotted method name.
+/// The CLI's translated `about` text, keyed by dotted command name or visible alias.
 fn descriptions() -> BTreeMap<String, String> {
     fn walk(command: &clap::Command, prefix: &str, out: &mut BTreeMap<String, String>) {
+        let prefix = if prefix.is_empty() {
+            String::new()
+        } else {
+            format!("{prefix}.")
+        };
         for sub in command.get_subcommands() {
-            let path = if prefix.is_empty() {
-                sub.get_name().to_owned()
-            } else {
-                format!("{prefix}.{}", sub.get_name())
-            };
+            let path = format!("{prefix}{}", sub.get_name());
             if let Some(about) = sub.get_about() {
                 out.insert(path.clone(), about.to_string());
+                for alias in sub.get_visible_aliases() {
+                    out.insert(format!("{prefix}{alias}"), about.to_string());
+                }
             }
             walk(sub, &path, out);
         }
@@ -243,6 +247,8 @@ mod test {
             ("volumes.inspect", Some(false), Some(false)),
             ("package.stop", Some(false), Some(false)),
             ("server.restart", Some(false), Some(false)),
+            ("backup.job.reassign-target", Some(false), Some(true)),
+            ("backup.policy.estimate", Some(true), None),
             ("backup.target.info", Some(false), Some(true)),
             ("notification.remove", Some(false), Some(true)),
             ("server.set-hostname", Some(false), Some(true)),
@@ -254,7 +260,14 @@ mod test {
             assert_eq!(annotations.read_only_hint, read_only, "{name}");
             assert_eq!(annotations.destructive_hint, destructive, "{name}");
         }
-        for name in ["package.list", "package.start", "server.shutdown"] {
+        for name in [
+            "backup.job.create",
+            "backup.policy.preview",
+            "package.backup.restore-scheduled",
+            "package.list",
+            "package.start",
+            "server.shutdown",
+        ] {
             assert!(
                 server.get_tool(name).unwrap().description.is_some(),
                 "{name}"

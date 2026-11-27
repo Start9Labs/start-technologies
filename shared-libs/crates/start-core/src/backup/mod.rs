@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use clap::Parser;
 use rpc_toolkit::{Context, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
@@ -8,12 +9,13 @@ use crate::context::CliContext;
 use crate::mcp::{EFFECT, Effect};
 #[allow(unused_imports)]
 use crate::prelude::*;
-use crate::util::serde::HandlerExtSerde;
+use crate::util::serde::{HandlerExtSerde, StdinDeserializable};
 
 pub mod backup_bulk;
 pub mod history;
 pub mod os;
 pub mod restore;
+pub mod scheduled;
 pub mod target;
 pub mod trash;
 pub mod volume;
@@ -24,6 +26,17 @@ pub struct BackupReport {
     packages: BTreeMap<PackageId, PackageBackupReport>,
     #[serde(default, rename = "sharedVolumes")]
     shared_volumes: BTreeMap<crate::shared_volumes::SharedVolumeId, VolumeBackupReport>,
+}
+
+impl BackupReport {
+    fn has_failures(&self) -> bool {
+        self.server.error.is_some()
+            || self.packages.values().any(|item| item.error.is_some())
+            || self
+                .shared_volumes
+                .values()
+                .any(|item| item.result.error.is_some())
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, VisitFields)]
@@ -47,10 +60,58 @@ pub struct ServerBackupReport {
 rpc_toolkit::reflect_ts!(ServerBackupReport);
 rpc_toolkit::ts_export!(ServerBackupReport, namespaces = [""]);
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
 pub struct PackageBackupReport {
     pub error: Option<String>,
     pub duration_ms: u64,
+
+    #[serde(default)]
+    pub logical_size: Option<u64>,
+
+    #[serde(default)]
+    pub physical_size: Option<u64>,
+
+    #[serde(default)]
+    pub changed_bytes: Option<u64>,
+
+    #[serde(default)]
+    pub measured_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageBackupOutput {
+    #[serde(default)]
+    pub changed_bytes: Option<u64>,
+}
+
+rpc_toolkit::reflect_ts!(PackageBackupOutput);
+rpc_toolkit::ts_export!(PackageBackupOutput, namespaces = [""]);
+
+fn record_package_backup(
+    db: &mut crate::db::model::DatabaseModel,
+    id: &PackageId,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) -> Result<(), Error> {
+    if let Some(package) = db.as_public_mut().as_package_data_mut().as_idx_mut(id) {
+        package.as_last_backup_mut().ser(&Some(timestamp))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn try_backup_coordinator(
+    coordinator: std::sync::Arc<tokio::sync::Mutex<()>>,
+) -> Result<tokio::sync::OwnedMutexGuard<()>, Error> {
+    coordinator
+        .try_lock_owned()
+        .map_err(|_| backup_in_progress_error())
+}
+
+pub(crate) fn backup_in_progress_error() -> Error {
+    Error::new(
+        eyre!("{}", t!("backup.bulk.already-backing-up")),
+        ErrorKind::InvalidRequest,
+    )
 }
 
 rpc_toolkit::reflect_ts!(PackageBackupReport);
@@ -61,6 +122,20 @@ async fn call_remote<P: Serialize + Send + Sync>(
 ) -> Result<Value, Error> {
     args.context
         .call_fronted(args.parent_method, args.method, &args.params)
+        .await
+}
+
+#[derive(Deserialize, Serialize, Parser)]
+#[group(skip)]
+#[serde(transparent)]
+struct StdinParams {
+    #[command(flatten)]
+    params: StdinDeserializable<Value>,
+}
+
+async fn forward_stdin(args: HandlerArgs<CliContext, StdinParams>) -> Result<Value, Error> {
+    args.context
+        .call_fronted(args.parent_method, args.method, &args.params.params.0)
         .await
 }
 
@@ -80,6 +155,14 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
                 .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.create-backup-all-packages")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "estimate-capacity",
+            from_fn_async(scheduled::estimate_capacity_cli)
+                .no_ts()
+                .with_display_serializable()
+                .with_about("about.estimate-backup-capacity")
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
@@ -106,6 +189,34 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
             "target",
             target::target::<C>().with_about("about.commands-backup-target"),
         )
+        .subcommand(
+            "targets",
+            from_fn_async(target::list)
+                .with_metadata(EFFECT, Effect::Read.into())
+                .with_display_serializable()
+                .with_about("about.list-existing-backup-targets")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "job",
+            scheduled::job::<C>().with_about("about.commands-automatic-backup-jobs"),
+        )
+        .subcommand(
+            "activity",
+            scheduled::activity::<C>().with_about("about.commands-backup-activity"),
+        )
+        .subcommand(
+            "checkpoint",
+            scheduled::history::<C>().with_about("about.commands-backup-checkpoint-history"),
+        )
+        .subcommand(
+            "policy",
+            scheduled::policy::<C>().with_about("about.commands-backup-policy"),
+        )
+        .subcommand(
+            "review",
+            scheduled::review::<C>().with_about("about.commands-backup-review"),
+        )
 }
 
 pub fn package_backup<C: Context>() -> ParentHandler<C> {
@@ -123,6 +234,51 @@ pub fn package_backup<C: Context>() -> ParentHandler<C> {
                 .no_display()
                 .with_about("about.restore-packages-from-backup"),
         )
+        .subcommand(
+            "restore-checkpoint",
+            from_fn_async(scheduled::restore_automatic_checkpoint_cli)
+                .no_ts()
+                .no_display()
+                .with_about("about.restore-automatic-backup-checkpoints")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "restore-mixed",
+            from_fn_async(restore::restore_selection_cli)
+                .no_ts()
+                .no_display()
+                .with_about("about.restore-mixed-backup-checkpoints")
+                .with_call_remote::<CliContext>(),
+        )
+        .subcommand(
+            "restore-scheduled",
+            from_fn_async(restore::restore_scheduled_packages_rpc)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+        .subcommand(
+            "restore-selection",
+            from_fn_async(restore::restore_selection_rpc)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
+}
+
+#[cfg(test)]
+mod coordinator_tests {
+    use super::*;
+
+    #[test]
+    fn backup_coordinator_rejects_a_second_request() {
+        let coordinator = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+        let first = try_backup_coordinator(coordinator.clone()).unwrap();
+
+        let error = try_backup_coordinator(coordinator.clone()).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+
+        drop(first);
+        assert!(try_backup_coordinator(coordinator).is_ok());
+    }
 }
 
 #[cfg(test)]
@@ -154,6 +310,7 @@ mod tests {
                     result: PackageBackupReport {
                         error: Some("offline".into()),
                         duration_ms: 12,
+                        ..Default::default()
                     },
                 },
             )]),

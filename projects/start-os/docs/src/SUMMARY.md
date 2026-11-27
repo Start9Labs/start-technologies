@@ -72,6 +72,7 @@
 - [SMTP](smtp.md)
 - [Shared Volumes](shared-volumes.md)
 - [Backups](backups.md)
+- [Automatic Backups](backup-automatic.md)
 - [WiFi](wifi.md)
 - [UPS Monitor](ups-monitor.md)
 - [Internationalization](internationalization.md)

@@ -31,6 +31,7 @@ fn readable_size(file_size: u64, offset: u64, requested: usize) -> usize {
 #[cfg(test)]
 mod non_fuse_tests {
     use std::ffi::OsString;
+    use std::fs;
 
     use tempfile::TempDir;
 
@@ -73,6 +74,117 @@ mod non_fuse_tests {
         assert_eq!(readable_size(10, 4, 20), 6);
         assert_eq!(readable_size(10, 10, 20), 0);
         assert_eq!(readable_size(10, 11, 20), 0);
+    }
+
+    #[test]
+    fn directory_pagination_lists_every_entry_once_and_reaches_eof() {
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
+        let ctrl = controller(&data);
+        let inode = Inode(FUSE_ROOT_ID);
+        let names: Vec<OsString> = (0..70).map(|i| format!("entry-{i:04}").into()).collect();
+        let mut entries = crate::directory::DirectoryContents::new();
+        for name in &names {
+            entries
+                .insert(
+                    &ctrl,
+                    inode,
+                    name.clone(),
+                    crate::directory::DirectoryEntry {
+                        inode: Inode(FUSE_ROOT_ID + 1),
+                        ty: fuser::FileType::RegularFile,
+                    },
+                )
+                .unwrap();
+        }
+        ctrl.save(&InodeAttributes::new(
+            inode,
+            None,
+            FileData::Directory(entries),
+        ))
+        .unwrap();
+        let mut handler = Handler::new(ctrl);
+        let expected: Vec<OsString> = [OsString::from("."), OsString::from("..")]
+            .into_iter()
+            .chain(names)
+            .collect();
+
+        for capacity in [1, 2, 32, 64, 4096] {
+            let fh = handler.opendir(inode, 0).unwrap();
+            let mut offset = 0;
+            let mut listed = Vec::new();
+            for _ in 0..=expected.len() {
+                let mut count = 0;
+                handler
+                    .readdir(inode, fh, offset, |_, name, _, next| {
+                        if count == capacity {
+                            return Ok(true);
+                        }
+                        listed.push(name.to_owned());
+                        offset = next;
+                        count += 1;
+                        Ok(false)
+                    })
+                    .unwrap();
+                if count == 0 {
+                    break;
+                }
+                assert!(
+                    listed.len() <= expected.len(),
+                    "repeated entries at capacity {capacity}"
+                );
+            }
+            assert_eq!(listed, expected, "capacity {capacity}");
+            for resume in [1, 2, 34, 71, 72] {
+                for _ in 0..2 {
+                    let mut replayed = Vec::new();
+                    handler
+                        .readdir(inode, fh, resume, |_, name, _, _| {
+                            replayed.push(name.to_owned());
+                            Ok(false)
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        replayed,
+                        expected[resume as usize..],
+                        "capacity {capacity}, offset {resume}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn root_directory_sync_reclaims_dead_segments_with_open_files() {
+        let data = TempDir::with_prefix("backupfs_data").unwrap();
+        let ctrl = controller(&data);
+        let payload = bytes(1024);
+        let inode = create_file(&ctrl, &payload);
+        let attrs = ctrl.load::<InodeAttributes>(inode).unwrap();
+        for _ in 0..40 {
+            ctrl.save(&attrs).unwrap();
+        }
+        ctrl.syncfs().unwrap();
+        drop(ctrl);
+        let ctrl = controller(&data);
+        let segment_bytes = || {
+            fs::read_dir(data.path().join("segments"))
+                .unwrap()
+                .map(|entry| entry.unwrap().metadata().unwrap().len())
+                .sum::<u64>()
+        };
+        let before = segment_bytes();
+        let mut handler = Handler::new(ctrl.clone());
+        let fh = handler.fopen(inode, true, true, |_, _| Ok(())).unwrap();
+        handler.sync_directory(Inode(FUSE_ROOT_ID + 1)).unwrap();
+        assert!(segment_bytes() >= before);
+        handler.sync_directory(Inode(FUSE_ROOT_ID)).unwrap();
+        assert!(segment_bytes() < before / 2);
+        assert_eq!(
+            handler.read(inode, fh, 0, payload.len(), 0, None).unwrap(),
+            payload
+        );
+        handler.fclose(fh).unwrap();
+        assert_eq!(read_file(ctrl, inode), payload);
     }
 
     #[test]
@@ -686,36 +798,75 @@ pub struct DirHandle {
     pub entries: crate::directory::Bucket,
 }
 
+fn cursor_for_offset(
+    cursors: &BTreeMap<i64, OsString>,
+    offset: i64,
+) -> BkfsResult<Option<OsString>> {
+    if offset == 0 {
+        return Ok(None);
+    }
+
+    cursors
+        .get(&offset)
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| BkfsError::wrap_notrace(io::Error::from_raw_os_error(libc::EINVAL)))
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+
+    #[test]
+    fn directory_cursor_can_be_revisited() {
+        let mut cursors = BTreeMap::new();
+        cursors.insert(21, OsString::from("service-entry"));
+
+        assert_eq!(
+            cursor_for_offset(&cursors, 21).unwrap(),
+            Some(OsString::from("service-entry"))
+        );
+        assert_eq!(
+            cursor_for_offset(&cursors, 21).unwrap(),
+            Some(OsString::from("service-entry"))
+        );
+        assert_eq!(cursors.len(), 1);
+    }
+}
+
 pub struct OverwriteOptions {
     pub gc: bool,
 }
 
 impl Handler {
+    pub fn sync_directory(&mut self, inode: Inode) -> BkfsResult<()> {
+        self.flush_all_dirty()?;
+        if inode.0 == FUSE_ROOT_ID {
+            self.compact();
+        }
+        Ok(())
+    }
+
+    fn compact(&self) {
+        match self.ctrl().compact() {
+            Ok(n) if n > 0 => debug!("compacted {n} dead log segment(s)"),
+            Ok(_) => {}
+            Err(e) => warn!("backup log compaction failed (non-fatal): {e}"),
+        }
+    }
+
     pub fn close_all(&mut self) -> BkfsResult<()> {
         let mut errs = Vec::new();
-        // The commit in flush_all_dirty below covers what these closes log.
         for (_, handle) in std::mem::take(&mut self.open_files) {
             if let Err(e) = handle.close(self) {
                 errs.push(e);
             }
         }
         std::mem::take(&mut self.inodes);
-        // Persist any metadata changes (setattr / xattr / link / unlink
-        // on non-open inodes) that are still sitting in the dirty cache.
-        // Without this, an unmount would drop those changes silently —
-        // which has been the behaviour the user hit when the daemon was
-        // killed mid-backup.
         if let Err(e) = self.flush_all_dirty() {
             errs.push(e);
         }
-        // Reclaim dead log space now that everything is durable. Best-effort:
-        // the data is already safe, so a compaction error must not fail the
-        // unmount — just log it.
-        match self.ctrl().compact() {
-            Ok(n) if n > 0 => debug!("compacted {n} dead log segment(s) on unmount"),
-            Ok(_) => {}
-            Err(e) => warn!("log compaction on unmount failed (non-fatal): {e}"),
-        }
+        self.compact();
         BkfsResult::multiple((), errs)
     }
 
@@ -1307,12 +1458,7 @@ impl Handler {
         Ok(written)
     }
 
-    pub fn opendir(
-        &mut self,
-        _req: &Request,
-        inode: Inode,
-        _flags: i32,
-    ) -> BkfsResult<FileHandleId> {
+    pub fn opendir(&mut self, inode: Inode, _flags: i32) -> BkfsResult<FileHandleId> {
         let inode = self.load_inode(inode)?;
         let entries = match &inode.attrs.contents {
             FileData::Directory(dir) => dir.snapshot(self.ctrl(), inode.inode)?,
@@ -1333,7 +1479,6 @@ impl Handler {
 
     pub fn readdir(
         &mut self,
-        _req: &Request,
         inode: Inode,
         fh: FileHandleId,
         mut offset: i64,
@@ -1345,14 +1490,12 @@ impl Handler {
         }
         // Take the cursor + an O(1) clone of the opendir snapshot, then drop
         // the handle borrow so handle_entry can take &mut self in the loop.
-        let (mut cur, entries) = {
+        let (cur, entries) = {
             let Some(handle) = self.open_dirs.get_mut(&fh) else {
                 return BkfsResult::errno(libc::EACCES); // opened without read perm
             };
-            (
-                handle.cursors.remove(&offset).map(Cow::Owned),
-                handle.entries.clone(),
-            )
+            let cursor = cursor_for_offset(&handle.cursors, offset)?.map(Cow::Owned);
+            (cursor, handle.entries.clone())
         };
 
         let mut range = if let Some(cursor) = cur.as_deref() {
@@ -1386,6 +1529,7 @@ impl Handler {
         };
 
         let mut res: BkfsResult<bool> = Ok(false);
+        let mut cursors = Vec::new();
         for (name, entry) in special
             .into_iter()
             .flatten()
@@ -1396,16 +1540,14 @@ impl Handler {
                 break;
             }
             offset += 1;
-            cur = Some(Cow::Borrowed(name));
+            cursors.push((offset, name.to_owned()));
         }
 
         let Some(handle) = self.open_dirs.get_mut(&fh) else {
             return BkfsResult::errno(libc::EACCES); // opened without read perm
         };
 
-        if let Some(cur) = cur {
-            handle.cursors.insert(offset, cur.into_owned());
-        }
+        handle.cursors.extend(cursors);
 
         res?;
 

@@ -1,0 +1,32 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-backup-job-set-enabled-bulk 1  "set-enabled-bulk "
+.SH NAME
+start\-cli\-backup\-job\-set\-enabled\-bulk \- Enable or disable multiple automatic backup jobs together
+.SH SYNOPSIS
+\fBstart\-cli backup job set\-enabled\-bulk\fR <\fB\-\-enabled\fR> [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIIDS\fR>
+.SH DESCRIPTION
+Enable or disable multiple automatic backup jobs together
+.SH OPTIONS
+.TP
+\fB\-\-enabled\fR \fI<ENABLED>\fR
+Whether to enable the selected jobs
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+true
+.IP \(bu 2
+false
+.RE
+.TP
+\fB\-\-format\fR
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIIDS\fR>
+Automatic backup job identifiers

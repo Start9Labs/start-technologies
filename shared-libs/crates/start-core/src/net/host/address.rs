@@ -811,6 +811,7 @@ mod test {
                 "registryCache": {},
                 "osUpdateCache": null,
                 "ui": {},
+                "scheduledBackups": imbl_value::to_value(&crate::backup::scheduled::ScheduledBackupState::default()).unwrap(),
                 "disks": [],
                 "sharedVolumes": {},
                 "backupTargets": {},

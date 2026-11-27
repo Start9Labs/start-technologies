@@ -47,7 +47,7 @@ To build a product binary, build its crate, e.g. `cargo build -p start-os --bin 
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map, RPC pattern, patch-db data flow
-- [AGENTS.md](AGENTS.md) — build, test, format, and operating rules for this crate
+- [AGENTS.md](AGENTS.md) — build, test, format, and contribution workflow
 
 Topical deep-dives: [rpc-toolkit.md](rpc-toolkit.md), [patchdb.md](patchdb.md),
 [i18n-patterns.md](i18n-patterns.md), [core-rust-patterns.md](core-rust-patterns.md),

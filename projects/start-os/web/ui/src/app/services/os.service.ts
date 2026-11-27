@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
-import { sameUrl } from '@start9labs/shared'
+import { leafProgress, sameUrl } from '@start9labs/shared'
 import { registryStatus } from '@start9labs/marketplace'
 import { T, Version } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
@@ -12,6 +12,7 @@ import {
   map,
   shareReplay,
 } from 'rxjs'
+
 import { DataModel } from './patch-db/data-model'
 
 @Injectable({
@@ -94,7 +95,7 @@ export class OSService {
   )
 
   readonly backingUp$ = this.statusInfo$.pipe(
-    map(status => !!status.backupProgress),
+    map(status => isBackupProgressActive(status.backupProgress)),
     distinctUntilChanged(),
   )
 
@@ -156,6 +157,21 @@ export class OSService {
     if (!sameUrl(selected, target)) return
     if (registryStatus(cache) === 'error') throw registryError(cache)
   }
+}
+
+export function isBackupProgressActive(
+  progress: T.ServerStatus['backupProgress'],
+): boolean {
+  if (!progress) return false
+
+  const overall = leafProgress(progress.overall)
+  if (overall === true) return false
+  if (overall && typeof overall === 'object') return true
+
+  return progress.phases.some(phase => {
+    const phaseProgress = leafProgress(phase.progress)
+    return phaseProgress !== null && phaseProgress !== true
+  })
 }
 
 function registryError(cache: Pick<T.RegistryCache, 'error'> | null): Error {

@@ -34,4 +34,7 @@ JSON-RPC + PatchDB push. The router defers initial navigation
   action descriptions and warnings, a long description) renders as sanitized markdown.
 - `TUI_DIALOGS_CLOSE` is overridden in `app.config.ts` to also close dialogs on a server crash.
 - `FormDialogService` guards unsaved changes with `TuiConfirmService.withConfirm`.
+- In the automatic backup editor, read the native checkbox's `.checked` value on submit
+  and use `:host:has(input:checked)` for dependent text. iOS WebKit can apply the native
+  change after the dialog's Angular event pass.
 - Imports are `src/`-absolute.

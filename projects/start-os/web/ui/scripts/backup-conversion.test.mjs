@@ -3,6 +3,7 @@ import test from 'node:test'
 import '@angular/compiler'
 import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
 import { BehaviorSubject, EMPTY, of } from 'rxjs'
+import { TuiNotificationService } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
 import { loadTypeScript } from './typescript-loader.mjs'
 
@@ -14,12 +15,14 @@ loadTypeScript(
     export class DialogService {}
     export class ErrorService {}
     export class TaskService {}
+    export class i18nPipe {}
+    export class RpcError extends Error {}
   `,
     ],
     ['src/app/services/api/embassy-api.service', 'export class ApiService {}'],
   ]),
 )
-const { DialogService, ErrorService, TaskService } =
+const { DialogService, ErrorService, TaskService, i18nPipe } =
   await import('@start9labs/shared')
 const { ApiService } = await import('src/app/services/api/embassy-api.service')
 const { BackupService } =
@@ -69,6 +72,8 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
     },
   }
   const injector = createEnvironmentInjector([
+    { provide: i18nPipe, useValue: { transform: value => value } },
+    { provide: TuiNotificationService, useValue: { open: () => EMPTY } },
     { provide: ApiService, useValue: api },
     {
       provide: PatchDB,
@@ -109,6 +114,7 @@ function fixture(t, { confirm = of(true), password = of('secret') } = {}) {
   const service = runInInjectionContext(injector, () => new BackupService())
   t.after(() => injector.destroy())
   return {
+    api,
     service,
     observations,
     targets,
@@ -259,4 +265,32 @@ test('dismissing the password prompt starts no background job', async t => {
   const f = fixture(t, { password: EMPTY })
   await f.service.convert('target', 'own')
   assert.deepEqual(f.submissions, [])
+})
+
+test('schedule setup awaits target inspection and sees the pushed catalog', async t => {
+  const f = fixture(t)
+  let finish
+  const inspected = new Promise(resolve => {
+    finish = resolve
+  })
+  f.api.rpc.backup.target.inspect = () => inspected
+  f.targets.next({ destination: target('current') })
+  let settled = false
+  const refresh = f.service.getBackupTargets().then(() => {
+    settled = true
+  })
+  await Promise.resolve()
+  assert.equal(settled, false)
+  f.targets.next({
+    destination: {
+      ...target('current'),
+      name: 'Updated destination',
+      checkedAt: new Date().toISOString(),
+    },
+  })
+  finish()
+  await refresh
+  assert.deepEqual(f.service.scheduleTargets(), [
+    { id: 'destination', name: 'Updated destination' },
+  ])
 })
