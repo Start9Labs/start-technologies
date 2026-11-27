@@ -396,6 +396,21 @@ impl PortForwards {
         legacy
     }
 
+    fn spans_conflict(
+        other: &ForwardAddress,
+        entry: &PortForward,
+        key: &ForwardAddress,
+        count: u16,
+    ) -> bool {
+        other.ip() == key.ip()
+            && entry.transport(other.clone()).overlaps(&key.transport)
+            && other.port() <= key.port().saturating_add(count.saturating_sub(1))
+            && key.port()
+                <= other
+                    .port()
+                    .saturating_add(entry.port_span().saturating_sub(1))
+    }
+
     pub fn overlapping(
         &self,
         key: impl Into<ForwardAddress>,
@@ -405,15 +420,21 @@ impl PortForwards {
         self.0
             .iter()
             .find(|(other, entry)| {
-                **other != key
-                    && other.ip() == key.ip()
-                    && entry.transport((**other).clone()).overlaps(&key.transport)
-                    && other.port() <= key.port().saturating_add(count.saturating_sub(1))
-                    && key.port()
-                        <= other
-                            .port()
-                            .saturating_add(entry.port_span().saturating_sub(1))
+                **other != key && Self::spans_conflict(other, entry, &key, count)
             })
+            .map(|(key, _)| key.clone())
+    }
+
+    /// An exact key match counts as a conflict.
+    pub fn conflicting(
+        &self,
+        key: impl Into<ForwardAddress>,
+        count: u16,
+    ) -> Option<ForwardAddress> {
+        let key = key.into();
+        self.0
+            .iter()
+            .find(|(other, entry)| Self::spans_conflict(other, entry, &key, count))
             .map(|(key, _)| key.clone())
     }
     pub fn occupied(&self, address: impl Into<ForwardAddress>) -> bool {
@@ -933,6 +954,19 @@ fn port_forward_overlap_detection() {
     assert_eq!(forwards.overlapping(src("5.6.7.8:8005"), 1), None);
     // The exact same source key is excluded (collision / re-assert, not overlap).
     assert_eq!(forwards.overlapping(src("1.2.3.4:8000"), 10), None);
+    assert_eq!(
+        forwards.conflicting(src("1.2.3.4:8000"), 10),
+        Some(src("1.2.3.4:8000")),
+    );
+    assert_eq!(
+        forwards.conflicting(src("tcp@1.2.3.4:8005"), 1),
+        Some(src("1.2.3.4:8000")),
+    );
+    assert_eq!(
+        forwards.conflicting(src("tcp@1.2.3.4:443"), 1),
+        Some(src("1.2.3.4:443")),
+    );
+    assert_eq!(forwards.conflicting(src("udp@1.2.3.4:443"), 1), None);
 }
 
 #[test]

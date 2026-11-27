@@ -31,6 +31,7 @@ use crate::middleware::db::SyncDb;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
 use crate::net::forward::{PortForwardController, nft_comments_with_prefix, nft_rule, nft_rule_v6};
 use crate::net::static_server::{EMPTY_DIR, UiContext};
+use crate::net::transport::Transport;
 use crate::prelude::*;
 use crate::rpc_continuations::{OpenAuthedContinuations, RpcContinuations};
 use crate::tunnel::TUNNEL_DEFAULT_LISTEN;
@@ -38,10 +39,14 @@ use crate::tunnel::TUNNEL_DEFAULT_LISTEN;
 /// Legacy HTTP RPC version a tunnel serves.
 const TUNNEL_HTTP_RPC_VERSION: u8 = 0;
 use crate::tunnel::api::tunnel_api;
-use crate::tunnel::db::{DnsRecordEntry, DnsRecords, PortForward, PortForwards, TunnelDatabase};
+use crate::tunnel::db::{
+    DnsRecordEntry, DnsRecords, PortForward, PortForwards, SniRoute, TunnelDatabase,
+};
 use crate::tunnel::dns::DnsProxyController;
 use crate::tunnel::forward::address::ForwardAddress;
+use crate::tunnel::forward::lease::{LeaseKey, Leases};
 use crate::tunnel::migrations::run_migrations;
+use crate::tunnel::web::WebserverInfo;
 use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
 use crate::util::Invoke;
 use crate::util::collections::OrdMapIterMut;
@@ -714,113 +719,61 @@ impl TunnelContext {
     /// Moves forwards to each target's active WAN address.
     pub async fn resync_forward_keys(&self) -> Result<(), Error> {
         let _guard = self.forward_write_lock.lock().await;
-        let old = self.db.peek().await.as_port_forwards().de()?.0;
+        let peek = self.db.peek().await;
+        let old = peek.as_port_forwards().de()?.0;
+        let webserver = peek.as_webserver().de()?;
 
-        let mut want: BTreeMap<ForwardAddress, PortForward> = BTreeMap::new();
-        for (src, entry) in &old {
+        let mut target_ips = BTreeSet::new();
+        for entry in old.values() {
             match entry {
-                PortForward::Dnat {
-                    target,
-                    label,
-                    enabled,
-                    count,
-                    auto,
-                } => {
-                    let ip = crate::tunnel::forward::igd::external_ipv4(self, *target.ip())
-                        .await
-                        .unwrap_or(*src.ip());
-                    want.insert(
-                        ForwardAddress::new(
-                            SocketAddrV4::new(ip, src.port()),
-                            src.transport.clone(),
-                        ),
-                        PortForward::Dnat {
-                            target: *target,
-                            label: label.clone(),
-                            enabled: *enabled,
-                            count: *count,
-                            auto: *auto,
-                        },
-                    );
+                PortForward::Dnat { target, .. } => {
+                    target_ips.insert(*target.ip());
                 }
                 PortForward::Sni { routes, fallback } => {
-                    for (host, route) in routes {
-                        let ip =
-                            crate::tunnel::forward::igd::external_ipv4(self, *route.target.ip())
-                                .await
-                                .unwrap_or(*src.ip());
-                        let key = ForwardAddress::from(SocketAddrV4::new(ip, src.port()));
-                        match want.entry(key.clone()).or_insert_with(|| PortForward::Sni {
-                            routes: BTreeMap::new(),
-                            fallback: None,
-                        }) {
-                            PortForward::Sni { routes, .. } => {
-                                routes.insert(host.clone(), route.clone());
-                            }
-                            PortForward::Dnat { .. } => {
-                                tracing::warn!(
-                                    "dropping SNI route {host} on {key}: external IP now collides with a DNAT forward"
-                                );
-                            }
-                        }
+                    for route in routes.values() {
+                        target_ips.insert(*route.target.ip());
                     }
                     if let Some(f) = fallback {
-                        let ip = crate::tunnel::forward::igd::external_ipv4(self, *f.target.ip())
-                            .await
-                            .unwrap_or(*src.ip());
-                        let key = ForwardAddress::from(SocketAddrV4::new(ip, src.port()));
-                        match want.entry(key.clone()).or_insert_with(|| PortForward::Sni {
-                            routes: BTreeMap::new(),
-                            fallback: None,
-                        }) {
-                            PortForward::Sni { fallback: fb, .. } => {
-                                *fb = Some(f.clone());
-                            }
-                            PortForward::Dnat { .. } => {
-                                tracing::warn!(
-                                    "dropping SNI fallback on {key}: external IP now collides with a DNAT forward"
-                                );
-                            }
-                        }
+                        target_ips.insert(*f.target.ip());
                     }
                 }
             }
         }
-
-        reconcile_sni_demux(&self.sni, &old, &want);
-
-        let old_dnat: BTreeSet<ForwardAddress> = old
-            .iter()
-            .filter_map(|(src, e)| matches!(e, PortForward::Dnat { .. }).then_some(src.clone()))
-            .collect();
-        let new_dnat: BTreeMap<ForwardAddress, (SocketAddrV4, u16, bool)> = want
-            .iter()
-            .filter_map(|(src, e)| match e {
-                PortForward::Dnat {
-                    target,
-                    enabled,
-                    count,
-                    ..
-                } => Some((src.clone(), (*target, *count, *enabled))),
-                _ => None,
-            })
-            .collect();
-        for src in &old_dnat {
-            if !new_dnat.contains_key(src) {
-                if let Some(rc) = self.active_forwards.mutate(|m| m.remove(src)) {
-                    drop(rc);
-                }
+        let mut resolved_ips = BTreeMap::new();
+        for target_ip in target_ips {
+            if let Some(ip) = crate::tunnel::forward::igd::external_ipv4(self, target_ip).await {
+                resolved_ips.insert(target_ip, ip);
             }
         }
-        for (src, (target, count, enabled)) in &new_dnat {
+        let (want, lease_moves) =
+            rekey_forwards(&old, &webserver, |ip| resolved_ips.get(&ip).copied());
+
+        let dnat_specs = |map: &BTreeMap<ForwardAddress, PortForward>| {
+            map.iter()
+                .filter_map(|(src, e)| match e {
+                    PortForward::Dnat {
+                        target,
+                        enabled,
+                        count,
+                        ..
+                    } => Some((src.clone(), (*target, *count, *enabled))),
+                    _ => None,
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        let old_dnat = dnat_specs(&old);
+        let new_dnat = dnat_specs(&want);
+        let mut installed = Vec::new();
+        for (src, spec @ (target, count, enabled)) in &new_dnat {
             if !enabled {
                 continue;
             }
-            if self.active_forwards.peek(|m| m.contains_key(src)) {
+            if old_dnat.get(src) == Some(spec) && self.active_forwards.peek(|m| m.contains_key(src))
+            {
                 continue;
             }
             let prefix = crate::tunnel::forward::igd::prefix_for(self, target.ip()).await;
-            let rc = self
+            match self
                 .forward
                 .add_forward_range(
                     src.address,
@@ -830,20 +783,245 @@ impl TunnelContext {
                     None,
                     src.transport.clone(),
                 )
-                .await?;
-            self.active_forwards.mutate(|m| {
-                m.insert(src.clone(), rc);
-            });
+                .await
+            {
+                Ok(rc) => installed.push((src.clone(), rc)),
+                Err(e) => {
+                    invalidate_active_forwards(
+                        &self.active_forwards,
+                        installed.iter().map(|(s, _)| s).chain(std::iter::once(src)),
+                    );
+                    drop(installed);
+                    self.forward.gc().await.log_err();
+                    return Err(e);
+                }
+            }
         }
-        self.forward.gc().await.log_err();
 
-        self.db
-            .mutate(|db| db.as_port_forwards_mut().ser(&PortForwards(want)))
+        let want = PortForwards(want);
+        let db_res = self
+            .db
+            .mutate(|db| db.as_port_forwards_mut().ser(&want))
             .await
-            .result?;
+            .result;
+        let committed = db_res.is_ok()
+            || self
+                .db
+                .peek()
+                .await
+                .as_port_forwards()
+                .de()
+                .ok()
+                .is_some_and(|pf| pf.0 == want.0);
+        if committed {
+            self.active_forwards.mutate(|m| {
+                for (src, spec) in &old_dnat {
+                    if new_dnat.get(src) != Some(spec) {
+                        m.remove(src);
+                    }
+                }
+                for (src, rc) in installed {
+                    m.insert(src, rc);
+                }
+            });
+            self.forward.gc().await.log_err();
+            reconcile_sni_demux(&self.sni, &old, &want.0);
+            reconcile_leases(&self.leases, &lease_moves);
+        } else {
+            invalidate_active_forwards(&self.active_forwards, installed.iter().map(|(s, _)| s));
+            drop(installed);
+            self.forward.gc().await.log_err();
+        }
+        db_res?;
         Ok(())
     }
 }
+
+fn invalidate_active_forwards<'a>(
+    active: &SyncMutex<BTreeMap<ForwardAddress, Arc<()>>>,
+    sources: impl IntoIterator<Item = &'a ForwardAddress>,
+) {
+    active.mutate(|m| {
+        for done_src in sources {
+            m.retain(|k, _| {
+                !(k.address == done_src.address && k.transport.overlaps(&done_src.transport))
+            });
+        }
+    });
+}
+
+fn insert_sni_slot(
+    want: &mut PortForwards,
+    socket: SocketAddrV4,
+) -> Result<(&mut BTreeMap<String, SniRoute>, &mut Option<SniRoute>), ForwardAddress> {
+    let key = ForwardAddress::from(socket);
+    if !matches!(want.0.get(&key), Some(PortForward::Sni { .. })) {
+        if let Some(conflict) = want.conflicting(ForwardAddress::new(socket, Transport::tcp()), 1) {
+            return Err(conflict);
+        }
+        want.0.insert(
+            key.clone(),
+            PortForward::Sni {
+                routes: BTreeMap::new(),
+                fallback: None,
+            },
+        );
+    }
+    match want.0.get_mut(&key) {
+        Some(PortForward::Sni { routes, fallback }) => Ok((routes, fallback)),
+        _ => unreachable!(),
+    }
+}
+
+fn rekey_forwards(
+    old: &BTreeMap<ForwardAddress, PortForward>,
+    webserver: &WebserverInfo,
+    resolve: impl Fn(Ipv4Addr) -> Option<Ipv4Addr>,
+) -> (
+    BTreeMap<ForwardAddress, PortForward>,
+    Vec<(LeaseKey, LeaseKey)>,
+) {
+    let mut want = PortForwards::default();
+    let mut lease_moves = Vec::new();
+    for stationary in [true, false] {
+        let resolve_for_pass = |src_ip: Ipv4Addr, target_ip: Ipv4Addr| {
+            let ip = resolve(target_ip).unwrap_or(src_ip);
+            ((ip == src_ip) == stationary).then_some(ip)
+        };
+        for (src, entry) in old {
+            match entry {
+                PortForward::Dnat {
+                    target,
+                    enabled,
+                    count,
+                    auto,
+                    ..
+                } => {
+                    let Some(ip) = resolve_for_pass(*src.ip(), *target.ip()) else {
+                        continue;
+                    };
+                    let key = ForwardAddress::new(
+                        SocketAddrV4::new(ip, src.port()),
+                        src.transport.clone(),
+                    );
+                    if *enabled
+                        && src.transport != Transport::udp()
+                        && webserver.reserves_plain_forward(key.address, *count)
+                    {
+                        tracing::warn!(
+                            "dropping DNAT forward {src} -> {target} on {key}: collides with admin UI listener"
+                        );
+                    } else if let Some(conflict) = want.conflicting(key.clone(), *count) {
+                        tracing::warn!(
+                            "dropping DNAT forward {src} -> {target} on {key}: collides with {conflict}"
+                        );
+                    } else {
+                        want.0.insert(key.clone(), entry.clone());
+                        if *auto {
+                            lease_moves.push((LeaseKey::Dnat(src.clone()), LeaseKey::Dnat(key)));
+                        }
+                    }
+                }
+                PortForward::Sni { routes, fallback } => {
+                    for (host, route) in routes {
+                        let Some(ip) = resolve_for_pass(*src.ip(), *route.target.ip()) else {
+                            continue;
+                        };
+                        let socket = SocketAddrV4::new(ip, src.port());
+                        match insert_sni_slot(&mut want, socket) {
+                            Ok((routes, _)) => {
+                                if routes
+                                    .keys()
+                                    .any(|existing| existing.eq_ignore_ascii_case(host))
+                                {
+                                    tracing::warn!(
+                                        "dropping SNI route {host} ({src} -> {}) on {socket}: collides with an existing SNI route",
+                                        route.target,
+                                    );
+                                } else {
+                                    routes.insert(host.clone(), route.clone());
+                                    if route.auto {
+                                        lease_moves.push((
+                                            LeaseKey::Sni {
+                                                source: src.address,
+                                                hostname: host.clone(),
+                                            },
+                                            LeaseKey::Sni {
+                                                source: socket,
+                                                hostname: host.clone(),
+                                            },
+                                        ));
+                                    }
+                                }
+                            }
+                            Err(conflict) => {
+                                tracing::warn!(
+                                    "dropping SNI route {host} ({src} -> {}) on {socket}: collides with {conflict}",
+                                    route.target,
+                                );
+                            }
+                        }
+                    }
+                    if let Some(f) = fallback {
+                        if let Some(ip) = resolve_for_pass(*src.ip(), *f.target.ip()) {
+                            let socket = SocketAddrV4::new(ip, src.port());
+                            if f.enabled && webserver.reserves_plain_forward(socket, 1) {
+                                tracing::warn!(
+                                    "dropping SNI fallback ({src} -> {}) on {socket}: collides with admin UI listener",
+                                    f.target,
+                                );
+                            } else {
+                                match insert_sni_slot(&mut want, socket) {
+                                    Ok((_, fb)) => {
+                                        if fb.is_some() {
+                                            tracing::warn!(
+                                                "dropping SNI fallback ({src} -> {}) on {socket}: collides with an existing SNI fallback",
+                                                f.target,
+                                            );
+                                        } else {
+                                            *fb = Some(f.clone());
+                                            if f.auto {
+                                                lease_moves.push((
+                                                    LeaseKey::SniFallback(src.address),
+                                                    LeaseKey::SniFallback(socket),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    Err(conflict) => {
+                                        tracing::warn!(
+                                            "dropping SNI fallback ({src} -> {}) on {socket}: collides with {conflict}",
+                                            f.target,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (want.0, lease_moves)
+}
+
+fn reconcile_leases(leases: &SyncMutex<Leases>, moved: &[(LeaseKey, LeaseKey)]) {
+    leases.mutate(|l| {
+        let mut next = BTreeMap::new();
+        for (key, exp) in l.iter() {
+            if matches!(key, LeaseKey::Pinhole(_)) {
+                next.insert(key.clone(), *exp);
+            }
+        }
+        for (old_key, new_key) in moved {
+            if let Some(exp) = l.get(old_key) {
+                next.insert(new_key.clone(), *exp);
+            }
+        }
+        *l = next;
+    });
+}
+
 fn reconcile_sni_demux(
     sni: &Arc<crate::tunnel::forward::sni::SniDemux>,
     old: &BTreeMap<ForwardAddress, PortForward>,
@@ -1138,5 +1316,1011 @@ mod tests {
         reconcile_sni_demux(&sni, &forwards, &forwards);
         assert_eq!(sni.snapshot().len(), 1);
         assert_eq!(sni.snapshot()[0].hostname, hostname);
+    }
+
+    fn test_dnat(target: &str, count: u16, enabled: bool) -> PortForward {
+        PortForward::Dnat {
+            target: target.parse().unwrap(),
+            label: None,
+            enabled,
+            count,
+            auto: false,
+        }
+    }
+
+    fn test_sni_route(target: &str, enabled: bool) -> SniRoute {
+        SniRoute {
+            target: target.parse().unwrap(),
+            label: None,
+            enabled,
+            auto: false,
+        }
+    }
+
+    fn assert_valid_port_forwards(forwards: &BTreeMap<ForwardAddress, PortForward>) {
+        let entries: Vec<_> = forwards.iter().collect();
+        for (i, (k1, e1)) in entries.iter().enumerate() {
+            if let PortForward::Sni { routes, fallback } = e1 {
+                assert_eq!(k1.transport, Transport::default());
+                assert!(!routes.is_empty() || fallback.is_some());
+                let lower: BTreeSet<String> =
+                    routes.keys().map(|h| h.to_ascii_lowercase()).collect();
+                assert_eq!(
+                    lower.len(),
+                    routes.len(),
+                    "case-colliding SNI routes on {k1}"
+                );
+            }
+            for (k2, e2) in &entries[i + 1..] {
+                if k1.ip() != k2.ip() {
+                    continue;
+                }
+                if !e1
+                    .transport((*k1).clone())
+                    .overlaps(&e2.transport((*k2).clone()))
+                {
+                    continue;
+                }
+                let hi1 = k1.port().saturating_add(e1.port_span().saturating_sub(1));
+                let hi2 = k2.port().saturating_add(e2.port_span().saturating_sub(1));
+                assert!(
+                    hi1 < k2.port() || hi2 < k1.port(),
+                    "overlapping forwards {k1} ({e1:?}) and {k2} ({e2:?})",
+                );
+            }
+        }
+    }
+
+    fn capture_warnings<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
+        use std::sync::Mutex;
+
+        use tracing::field::{Field, Visit};
+        use tracing_subscriber::layer::{Context as LayerContext, SubscriberExt};
+
+        #[derive(Default)]
+        struct Msg(String);
+        impl Visit for Msg {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" {
+                    self.0 = format!("{value:?}");
+                }
+            }
+        }
+        struct WarnCollector(Arc<Mutex<Vec<String>>>);
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for WarnCollector {
+            fn on_event(&self, event: &tracing::Event<'_>, _ctx: LayerContext<'_, S>) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    let mut msg = Msg::default();
+                    event.record(&mut msg);
+                    self.0.lock().unwrap().push(msg.0);
+                }
+            }
+        }
+
+        let warnings = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry().with(WarnCollector(warnings.clone()));
+        let out = tracing::subscriber::with_default(subscriber, f);
+        let collected = warnings.lock().unwrap().clone();
+        (out, collected)
+    }
+
+    fn rekey_with(
+        old: &BTreeMap<ForwardAddress, PortForward>,
+        webserver: &WebserverInfo,
+        pairs: &[(&str, &str)],
+    ) -> (BTreeMap<ForwardAddress, PortForward>, Vec<String>) {
+        let map: BTreeMap<Ipv4Addr, Ipv4Addr> = pairs
+            .iter()
+            .map(|(k, v)| (k.parse().unwrap(), v.parse().unwrap()))
+            .collect();
+        let ((want, _), warnings) =
+            capture_warnings(|| rekey_forwards(old, webserver, |ip| map.get(&ip).copied()));
+        assert_valid_port_forwards(&want);
+        (want, warnings)
+    }
+
+    fn rekey_default(
+        old: &BTreeMap<ForwardAddress, PortForward>,
+        pairs: &[(&str, &str)],
+    ) -> (BTreeMap<ForwardAddress, PortForward>, Vec<String>) {
+        rekey_with(old, &WebserverInfo::default(), pairs)
+    }
+
+    #[test]
+    fn rekey_forwards_exact_dnat_collision_preserves_stationary_in_both_ip_orders() {
+        for (stationary_ip, moving_ip) in [("1.2.3.4", "5.6.7.8"), ("5.6.7.8", "1.2.3.4")] {
+            let stationary_key: ForwardAddress = format!("{stationary_ip}:443").parse().unwrap();
+            let old = BTreeMap::from([
+                (stationary_key.clone(), test_dnat("10.59.0.2:443", 1, true)),
+                (
+                    format!("{moving_ip}:443").parse().unwrap(),
+                    test_dnat("10.59.0.3:443", 1, true),
+                ),
+            ]);
+            let (want, warnings) = rekey_default(
+                &old,
+                &[("10.59.0.2", stationary_ip), ("10.59.0.3", stationary_ip)],
+            );
+            assert_eq!(want.len(), 1);
+            assert_eq!(
+                want.get(&stationary_key),
+                Some(&test_dnat("10.59.0.2:443", 1, true)),
+            );
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].contains("dropping DNAT forward"));
+        }
+
+        let old = BTreeMap::from([
+            (
+                "1.2.3.4:443".parse().unwrap(),
+                test_dnat("10.59.0.2:443", 1, true),
+            ),
+            (
+                "5.6.7.8:443".parse().unwrap(),
+                test_dnat("10.59.0.3:443", 1, true),
+            ),
+        ]);
+        let (want, warnings) =
+            rekey_default(&old, &[("10.59.0.2", "9.9.9.9"), ("10.59.0.3", "9.9.9.9")]);
+        assert_eq!(want.len(), 1);
+        assert_eq!(
+            want.get(&"9.9.9.9:443".parse().unwrap()),
+            Some(&test_dnat("10.59.0.2:443", 1, true)),
+        );
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn rekey_forwards_overlapping_dnat_ranges_preserve_non_overlap() {
+        for (stationary_ip, moving_ip) in [("1.2.3.4", "5.6.7.8"), ("5.6.7.8", "1.2.3.4")] {
+            let old_range_incumbent = BTreeMap::from([
+                (
+                    format!("{stationary_ip}:8000").parse().unwrap(),
+                    test_dnat("10.59.0.2:8000", 10, true),
+                ),
+                (
+                    format!("{moving_ip}:8005").parse().unwrap(),
+                    test_dnat("10.59.0.3:8005", 1, true),
+                ),
+            ]);
+            let (want, warnings) = rekey_default(
+                &old_range_incumbent,
+                &[("10.59.0.2", stationary_ip), ("10.59.0.3", stationary_ip)],
+            );
+            assert_eq!(want.len(), 1);
+            assert!(want.contains_key(&format!("{stationary_ip}:8000").parse().unwrap()));
+            assert_eq!(warnings.len(), 1);
+
+            let old_single_incumbent = BTreeMap::from([
+                (
+                    format!("{stationary_ip}:8005").parse().unwrap(),
+                    test_dnat("10.59.0.2:8005", 1, true),
+                ),
+                (
+                    format!("{moving_ip}:8000").parse().unwrap(),
+                    test_dnat("10.59.0.3:8000", 10, true),
+                ),
+            ]);
+            let (want, warnings) = rekey_default(
+                &old_single_incumbent,
+                &[("10.59.0.2", stationary_ip), ("10.59.0.3", stationary_ip)],
+            );
+            assert_eq!(want.len(), 1);
+            assert!(want.contains_key(&format!("{stationary_ip}:8005").parse().unwrap()));
+            assert_eq!(warnings.len(), 1);
+        }
+
+        let disjoint = BTreeMap::from([
+            (
+                "1.2.3.4:8000".parse().unwrap(),
+                test_dnat("10.59.0.2:8000", 10, true),
+            ),
+            (
+                "5.6.7.8:8010".parse().unwrap(),
+                test_dnat("10.59.0.3:8010", 10, true),
+            ),
+            (
+                "tcp@1.2.3.4:9000".parse().unwrap(),
+                test_dnat("10.59.0.2:9000", 5, true),
+            ),
+            (
+                "udp@5.6.7.8:9002".parse().unwrap(),
+                test_dnat("10.59.0.3:9002", 1, true),
+            ),
+        ]);
+        let (want, warnings) = rekey_default(
+            &disjoint,
+            &[("10.59.0.2", "1.2.3.4"), ("10.59.0.3", "1.2.3.4")],
+        );
+        assert_eq!(want.len(), 4);
+        assert!(warnings.is_empty());
+
+        let transport_overlap = BTreeMap::from([
+            (
+                "5.6.7.8:8000".parse().unwrap(),
+                test_dnat("10.59.0.2:8000", 10, true),
+            ),
+            (
+                "tcp@1.2.3.4:8005".parse().unwrap(),
+                test_dnat("10.59.0.3:8005", 1, true),
+            ),
+        ]);
+        let (want, warnings) = rekey_default(
+            &transport_overlap,
+            &[("10.59.0.2", "5.6.7.8"), ("10.59.0.3", "5.6.7.8")],
+        );
+        assert_eq!(want.len(), 1);
+        assert!(want.contains_key(&"5.6.7.8:8000".parse().unwrap()));
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn rekey_forwards_dnat_and_sni_collisions_leave_no_empty_sni() {
+        let sni_entry = |target: &str| PortForward::Sni {
+            routes: BTreeMap::from([("app.example.com".to_owned(), test_sni_route(target, true))]),
+            fallback: Some(test_sni_route(target, true)),
+        };
+
+        for (dnat_key, dnat_count) in [
+            ("5.6.7.8:443", 1),
+            ("tcp@5.6.7.8:443", 1),
+            ("5.6.7.8:440", 10),
+            ("tcp@5.6.7.8:440", 10),
+        ] {
+            let dnat_stationary = BTreeMap::from([
+                (
+                    dnat_key.parse().unwrap(),
+                    test_dnat("10.59.0.2:440", dnat_count, true),
+                ),
+                ("1.2.3.4:443".parse().unwrap(), sni_entry("10.59.0.3:443")),
+            ]);
+            let (want, warnings) = rekey_default(
+                &dnat_stationary,
+                &[("10.59.0.2", "5.6.7.8"), ("10.59.0.3", "5.6.7.8")],
+            );
+            assert_eq!(want.len(), 1);
+            assert!(want.contains_key(&dnat_key.parse().unwrap()));
+            assert_eq!(warnings.len(), 2);
+
+            let moving_dnat_key = dnat_key.replace("5.6.7.8", "1.2.3.4");
+            let sni_stationary = BTreeMap::from([
+                ("5.6.7.8:443".parse().unwrap(), sni_entry("10.59.0.2:443")),
+                (
+                    moving_dnat_key.parse().unwrap(),
+                    test_dnat("10.59.0.3:440", dnat_count, true),
+                ),
+            ]);
+            let (want, warnings) = rekey_default(
+                &sni_stationary,
+                &[("10.59.0.2", "5.6.7.8"), ("10.59.0.3", "5.6.7.8")],
+            );
+            assert_eq!(want.len(), 1);
+            assert_eq!(
+                want.get(&"5.6.7.8:443".parse().unwrap()),
+                Some(&sni_entry("10.59.0.2:443")),
+            );
+            assert_eq!(warnings.len(), 1);
+        }
+
+        for udp_key in ["udp@1.2.3.4:443", "udp@1.2.3.4:440"] {
+            let count = if udp_key.ends_with(":440") { 10 } else { 1 };
+            let old = BTreeMap::from([
+                ("5.6.7.8:443".parse().unwrap(), sni_entry("10.59.0.2:443")),
+                (
+                    udp_key.parse().unwrap(),
+                    test_dnat("10.59.0.3:440", count, true),
+                ),
+            ]);
+            let (want, warnings) =
+                rekey_default(&old, &[("10.59.0.2", "5.6.7.8"), ("10.59.0.3", "5.6.7.8")]);
+            assert_eq!(want.len(), 2);
+            assert!(warnings.is_empty());
+
+            let reverse_old = BTreeMap::from([
+                (
+                    udp_key.replace("1.2.3.4", "5.6.7.8").parse().unwrap(),
+                    test_dnat("10.59.0.2:440", count, true),
+                ),
+                ("1.2.3.4:443".parse().unwrap(), sni_entry("10.59.0.3:443")),
+            ]);
+            let (want, warnings) = rekey_default(
+                &reverse_old,
+                &[("10.59.0.2", "5.6.7.8"), ("10.59.0.3", "5.6.7.8")],
+            );
+            assert_eq!(want.len(), 2);
+            assert!(warnings.is_empty());
+        }
+    }
+
+    #[test]
+    fn rekey_forwards_sni_convergence_mixed_case_and_mixed_wan_preserve_incumbents() {
+        for (incumbent_host, moving_host) in [
+            ("shared.example.com", "shared.example.com"),
+            ("App.example.com", "app.example.com"),
+            ("app.example.com", "App.example.com"),
+        ] {
+            let old = BTreeMap::from([
+                (
+                    "1.2.3.4:443".parse().unwrap(),
+                    PortForward::Sni {
+                        routes: BTreeMap::from([
+                            (
+                                moving_host.to_owned(),
+                                test_sni_route("10.59.0.3:443", true),
+                            ),
+                            (
+                                "moved.example.com".to_owned(),
+                                test_sni_route("10.59.0.3:8443", true),
+                            ),
+                        ]),
+                        fallback: Some(test_sni_route("10.59.0.3:444", true)),
+                    },
+                ),
+                (
+                    "5.6.7.8:443".parse().unwrap(),
+                    PortForward::Sni {
+                        routes: BTreeMap::from([(
+                            incumbent_host.to_owned(),
+                            test_sni_route("10.59.0.2:443", true),
+                        )]),
+                        fallback: Some(test_sni_route("10.59.0.2:444", true)),
+                    },
+                ),
+            ]);
+            let (want, warnings) =
+                rekey_default(&old, &[("10.59.0.2", "5.6.7.8"), ("10.59.0.3", "5.6.7.8")]);
+            assert_eq!(want.len(), 1);
+            assert_eq!(
+                want.get(&"5.6.7.8:443".parse().unwrap()),
+                Some(&PortForward::Sni {
+                    routes: BTreeMap::from([
+                        (
+                            incumbent_host.to_owned(),
+                            test_sni_route("10.59.0.2:443", true),
+                        ),
+                        (
+                            "moved.example.com".to_owned(),
+                            test_sni_route("10.59.0.3:8443", true),
+                        ),
+                    ]),
+                    fallback: Some(test_sni_route("10.59.0.2:444", true)),
+                }),
+            );
+            assert_eq!(warnings.len(), 2);
+        }
+
+        let mixed = BTreeMap::from([
+            (
+                "1.2.3.4:443".parse().unwrap(),
+                test_dnat("10.59.0.4:443", 1, true),
+            ),
+            (
+                "5.6.7.8:443".parse().unwrap(),
+                PortForward::Sni {
+                    routes: BTreeMap::from([
+                        (
+                            "stay.example.com".to_owned(),
+                            test_sni_route("10.59.0.2:443", true),
+                        ),
+                        (
+                            "leave.example.com".to_owned(),
+                            test_sni_route("10.59.0.3:443", true),
+                        ),
+                    ]),
+                    fallback: Some(test_sni_route("10.59.0.2:444", true)),
+                },
+            ),
+        ]);
+        let (want, warnings) = rekey_default(
+            &mixed,
+            &[
+                ("10.59.0.2", "5.6.7.8"),
+                ("10.59.0.3", "9.9.9.9"),
+                ("10.59.0.4", "5.6.7.8"),
+            ],
+        );
+        assert_eq!(
+            want.get(&"5.6.7.8:443".parse().unwrap()),
+            Some(&PortForward::Sni {
+                routes: BTreeMap::from([(
+                    "stay.example.com".to_owned(),
+                    test_sni_route("10.59.0.2:443", true),
+                )]),
+                fallback: Some(test_sni_route("10.59.0.2:444", true)),
+            }),
+        );
+        assert_eq!(
+            want.get(&"9.9.9.9:443".parse().unwrap()),
+            Some(&PortForward::Sni {
+                routes: BTreeMap::from([(
+                    "leave.example.com".to_owned(),
+                    test_sni_route("10.59.0.3:443", true),
+                )]),
+                fallback: None,
+            }),
+        );
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn rekey_forwards_respects_webserver_listener_on_destination_wan() {
+        let web = WebserverInfo {
+            enabled: true,
+            listen: Some("5.6.7.8:8443".parse().unwrap()),
+            certificate: None,
+        };
+        let old = BTreeMap::from([
+            (
+                "1.2.3.4:8440".parse().unwrap(),
+                test_dnat("10.59.0.2:8440", 10, true),
+            ),
+            (
+                "udp@1.2.3.4:8443".parse().unwrap(),
+                test_dnat("10.59.0.2:8443", 1, true),
+            ),
+            (
+                "1.2.3.4:8443".parse().unwrap(),
+                PortForward::Sni {
+                    routes: BTreeMap::from([(
+                        "ui-share.example.com".to_owned(),
+                        test_sni_route("10.59.0.2:8443", true),
+                    )]),
+                    fallback: Some(test_sni_route("10.59.0.2:8444", true)),
+                },
+            ),
+        ]);
+        let (want, warnings) = rekey_with(&old, &web, &[("10.59.0.2", "5.6.7.8")]);
+        assert!(!want.contains_key(&"5.6.7.8:8440".parse().unwrap()));
+        assert!(want.contains_key(&"udp@5.6.7.8:8443".parse().unwrap()));
+        assert_eq!(
+            want.get(&"5.6.7.8:8443".parse().unwrap()),
+            Some(&PortForward::Sni {
+                routes: BTreeMap::from([(
+                    "ui-share.example.com".to_owned(),
+                    test_sni_route("10.59.0.2:8443", true),
+                )]),
+                fallback: None,
+            }),
+        );
+        assert_eq!(warnings.len(), 2);
+
+        let disabled_dnat = BTreeMap::from([(
+            "1.2.3.4:8443".parse().unwrap(),
+            test_dnat("10.59.0.2:8443", 1, false),
+        )]);
+        let (want, warnings) = rekey_with(&disabled_dnat, &web, &[("10.59.0.2", "5.6.7.8")]);
+        assert!(want.contains_key(&"5.6.7.8:8443".parse().unwrap()));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn rekey_forwards_non_colliding_rekey_succeeds_without_warnings() {
+        let old = BTreeMap::from([
+            (
+                "1.2.3.4:8000".parse().unwrap(),
+                test_dnat("10.59.0.2:8000", 5, true),
+            ),
+            (
+                "tcp@1.2.3.4:9000".parse().unwrap(),
+                test_dnat("10.59.0.2:9000", 1, false),
+            ),
+            (
+                "1.2.3.4:443".parse().unwrap(),
+                PortForward::Sni {
+                    routes: BTreeMap::from([(
+                        "ok.example.com".to_owned(),
+                        test_sni_route("10.59.0.2:443", true),
+                    )]),
+                    fallback: Some(test_sni_route("10.59.0.2:444", true)),
+                },
+            ),
+        ]);
+        let (want, warnings) = rekey_default(&old, &[("10.59.0.2", "9.9.9.9")]);
+        assert!(warnings.is_empty());
+        assert_eq!(want.len(), 3);
+        assert_eq!(
+            want.get(&"9.9.9.9:8000".parse().unwrap()),
+            Some(&test_dnat("10.59.0.2:8000", 5, true)),
+        );
+        assert_eq!(
+            want.get(&"tcp@9.9.9.9:9000".parse().unwrap()),
+            Some(&test_dnat("10.59.0.2:9000", 1, false)),
+        );
+        assert!(want.contains_key(&"9.9.9.9:443".parse().unwrap()));
+    }
+
+    fn db_with_pinned_clients(clients: &[(&str, &str)]) -> TunnelDatabase {
+        let mut db = TunnelDatabase::default();
+        let mut subnet = WgSubnetConfig::default();
+        for (client_ip, wan_ip) in clients {
+            let mut cfg = WgConfig::generate("dev".into(), WgClientKind::Server);
+            cfg.wan_ip = Some(wan_ip.parse().unwrap());
+            subnet.clients.0.insert(client_ip.parse().unwrap(), cfg);
+        }
+        db.wg
+            .subnets
+            .0
+            .insert("10.59.0.1/24".parse().unwrap(), subnet);
+        db
+    }
+
+    #[tokio::test]
+    async fn resync_forward_keys_preserves_stationary_dnat_and_enforces_non_overlap() {
+        let mut db = db_with_pinned_clients(&[("10.59.0.2", "1.2.3.4"), ("10.59.0.3", "1.2.3.4")]);
+        let incumbent_key: ForwardAddress = "1.2.3.4:443".parse().unwrap();
+        let mover_key: ForwardAddress = "5.6.7.8:443".parse().unwrap();
+        db.port_forwards
+            .0
+            .insert(incumbent_key.clone(), test_dnat("10.59.0.2:443", 1, true));
+        db.port_forwards
+            .0
+            .insert(mover_key.clone(), test_dnat("10.59.0.3:443", 1, true));
+        db.port_forwards.0.insert(
+            "1.2.3.4:8000".parse().unwrap(),
+            test_dnat("10.59.0.2:8000", 10, false),
+        );
+        db.port_forwards.0.insert(
+            "5.6.7.8:8005".parse().unwrap(),
+            test_dnat("10.59.0.3:8005", 1, false),
+        );
+        db.port_forwards.0.insert(
+            "5.6.7.8:9000".parse().unwrap(),
+            test_dnat("10.59.0.3:9000", 1, false),
+        );
+
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+        let incumbent_rc = Arc::new(());
+        let mover_rc = Arc::new(());
+        ctx.active_forwards.mutate(|m| {
+            m.insert(incumbent_key.clone(), incumbent_rc.clone());
+            m.insert(mover_key.clone(), mover_rc.clone());
+        });
+
+        ctx.resync_forward_keys().await.unwrap();
+
+        let after = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert_eq!(
+            after.0.get(&incumbent_key),
+            Some(&test_dnat("10.59.0.2:443", 1, true)),
+        );
+        assert!(!after.0.contains_key(&mover_key));
+        assert!(after.0.contains_key(&"1.2.3.4:8000".parse().unwrap()));
+        assert!(!after.0.contains_key(&"1.2.3.4:8005".parse().unwrap()));
+        assert_eq!(
+            after.0.get(&"1.2.3.4:9000".parse().unwrap()),
+            Some(&test_dnat("10.59.0.3:9000", 1, false)),
+        );
+        assert_valid_port_forwards(&after.0);
+        ctx.active_forwards.peek(|m| {
+            assert!(Arc::ptr_eq(m.get(&incumbent_key).unwrap(), &incumbent_rc));
+            assert!(!m.contains_key(&mover_key));
+        });
+    }
+
+    #[tokio::test]
+    async fn resync_forward_keys_prevents_sni_overlap_and_preserves_incumbent_sni() {
+        let mut db = db_with_pinned_clients(&[("10.59.0.2", "1.2.3.4"), ("10.59.0.3", "1.2.3.4")]);
+        db.port_forwards.0.insert(
+            "1.2.3.4:440".parse().unwrap(),
+            test_dnat("10.59.0.2:440", 10, false),
+        );
+        db.port_forwards.0.insert(
+            "5.6.7.8:443".parse().unwrap(),
+            PortForward::Sni {
+                routes: BTreeMap::from([(
+                    "range-hit.example.com".to_owned(),
+                    test_sni_route("10.59.0.3:443", false),
+                )]),
+                fallback: Some(test_sni_route("10.59.0.3:443", false)),
+            },
+        );
+        db.port_forwards.0.insert(
+            "tcp@1.2.3.4:8443".parse().unwrap(),
+            test_dnat("10.59.0.2:8443", 1, false),
+        );
+        db.port_forwards.0.insert(
+            "5.6.7.8:8443".parse().unwrap(),
+            PortForward::Sni {
+                routes: BTreeMap::from([(
+                    "tcp-hit.example.com".to_owned(),
+                    test_sni_route("10.59.0.3:8443", false),
+                )]),
+                fallback: None,
+            },
+        );
+        db.port_forwards.0.insert(
+            "1.2.3.4:9443".parse().unwrap(),
+            PortForward::Sni {
+                routes: BTreeMap::from([(
+                    "shared.example.com".to_owned(),
+                    test_sni_route("10.59.0.2:9443", false),
+                )]),
+                fallback: Some(test_sni_route("10.59.0.2:9444", false)),
+            },
+        );
+        db.port_forwards.0.insert(
+            "5.6.7.8:9443".parse().unwrap(),
+            PortForward::Sni {
+                routes: BTreeMap::from([
+                    (
+                        "shared.example.com".to_owned(),
+                        test_sni_route("10.59.0.3:9443", false),
+                    ),
+                    (
+                        "unique.example.com".to_owned(),
+                        test_sni_route("10.59.0.3:9445", false),
+                    ),
+                ]),
+                fallback: Some(test_sni_route("10.59.0.3:9444", false)),
+            },
+        );
+
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+        ctx.resync_forward_keys().await.unwrap();
+
+        let after = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert!(!after.0.contains_key(&"1.2.3.4:443".parse().unwrap()));
+        assert!(!after.0.contains_key(&"1.2.3.4:8443".parse().unwrap()));
+        assert_eq!(
+            after.0.get(&"1.2.3.4:9443".parse().unwrap()),
+            Some(&PortForward::Sni {
+                routes: BTreeMap::from([
+                    (
+                        "shared.example.com".to_owned(),
+                        test_sni_route("10.59.0.2:9443", false),
+                    ),
+                    (
+                        "unique.example.com".to_owned(),
+                        test_sni_route("10.59.0.3:9445", false),
+                    ),
+                ]),
+                fallback: Some(test_sni_route("10.59.0.2:9444", false)),
+            }),
+        );
+        assert_valid_port_forwards(&after.0);
+    }
+
+    #[tokio::test]
+    async fn resync_forward_keys_retires_replaced_active_handle_and_reconciles_leases() {
+        use std::time::{Duration, Instant};
+
+        use crate::tunnel::forward::address::PinholeAddress;
+
+        let mut db = db_with_pinned_clients(&[
+            ("10.59.0.2", "9.9.9.9"),
+            ("10.59.0.3", "1.2.3.4"),
+            ("10.59.0.4", "9.9.9.9"),
+            ("10.59.0.5", "5.6.7.8"),
+        ]);
+        let replaced_key: ForwardAddress = "1.2.3.4:443".parse().unwrap();
+        let incumbent_9: ForwardAddress = "9.9.9.9:443".parse().unwrap();
+        db.port_forwards.0.insert(
+            replaced_key.clone(),
+            PortForward::Dnat {
+                target: "10.59.0.2:443".parse().unwrap(),
+                label: None,
+                enabled: true,
+                count: 1,
+                auto: true,
+            },
+        );
+        db.port_forwards
+            .0
+            .insert(incumbent_9.clone(), test_dnat("10.59.0.4:443", 1, true));
+        db.port_forwards.0.insert(
+            "5.6.7.8:443".parse().unwrap(),
+            test_dnat("10.59.0.3:443", 1, false),
+        );
+        let swap_a: ForwardAddress = "1.2.3.4:7000".parse().unwrap();
+        let swap_b: ForwardAddress = "5.6.7.8:7000".parse().unwrap();
+        db.port_forwards.0.insert(
+            swap_a.clone(),
+            PortForward::Dnat {
+                target: "10.59.0.5:7000".parse().unwrap(),
+                label: None,
+                enabled: false,
+                count: 1,
+                auto: true,
+            },
+        );
+        db.port_forwards.0.insert(
+            swap_b.clone(),
+            PortForward::Dnat {
+                target: "10.59.0.3:7000".parse().unwrap(),
+                label: None,
+                enabled: false,
+                count: 1,
+                auto: true,
+            },
+        );
+        let sni_old: SocketAddrV4 = "5.6.7.8:8443".parse().unwrap();
+        let sni_new: SocketAddrV4 = "1.2.3.4:8443".parse().unwrap();
+        db.port_forwards.0.insert(
+            sni_old.into(),
+            PortForward::Sni {
+                routes: BTreeMap::from([(
+                    "auto.example.com".to_owned(),
+                    SniRoute {
+                        target: "10.59.0.3:8443".parse().unwrap(),
+                        label: None,
+                        enabled: false,
+                        auto: true,
+                    },
+                )]),
+                fallback: Some(SniRoute {
+                    target: "10.59.0.3:8444".parse().unwrap(),
+                    label: None,
+                    enabled: false,
+                    auto: true,
+                }),
+            },
+        );
+
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+        let replaced_rc = Arc::new(());
+        let incumbent_rc = Arc::new(());
+        ctx.active_forwards.mutate(|m| {
+            m.insert(replaced_key.clone(), replaced_rc.clone());
+            m.insert(incumbent_9.clone(), incumbent_rc.clone());
+        });
+
+        let now = Instant::now();
+        let exp_dropped = now + Duration::from_secs(60);
+        let exp_swap_a = now + Duration::from_secs(120);
+        let exp_swap_b = now + Duration::from_secs(240);
+        let exp_sni = now + Duration::from_secs(360);
+        let exp_fb = now + Duration::from_secs(480);
+        let exp_pinhole = now + Duration::from_secs(600);
+        let pinhole_key = LeaseKey::Pinhole("[2001:db8::2]:443".parse::<PinholeAddress>().unwrap());
+        ctx.leases.mutate(|l| {
+            l.insert(LeaseKey::Dnat(replaced_key.clone()), exp_dropped);
+            l.insert(LeaseKey::Dnat(swap_a.clone()), exp_swap_a);
+            l.insert(LeaseKey::Dnat(swap_b.clone()), exp_swap_b);
+            l.insert(
+                LeaseKey::Sni {
+                    source: sni_old,
+                    hostname: "auto.example.com".to_owned(),
+                },
+                exp_sni,
+            );
+            l.insert(LeaseKey::SniFallback(sni_old), exp_fb);
+            l.insert(pinhole_key.clone(), exp_pinhole);
+        });
+
+        ctx.resync_forward_keys().await.unwrap();
+
+        let after = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert_valid_port_forwards(&after.0);
+        assert_eq!(
+            after.0.get(&replaced_key),
+            Some(&test_dnat("10.59.0.3:443", 1, false)),
+        );
+        ctx.active_forwards.peek(|m| {
+            assert!(!m.contains_key(&replaced_key));
+            assert!(Arc::ptr_eq(m.get(&incumbent_9).unwrap(), &incumbent_rc));
+        });
+        ctx.leases.peek(|l| {
+            assert!(!l.contains_key(&LeaseKey::Dnat(replaced_key)));
+            assert_eq!(l.get(&LeaseKey::Dnat(swap_b)), Some(&exp_swap_a));
+            assert_eq!(l.get(&LeaseKey::Dnat(swap_a)), Some(&exp_swap_b));
+            assert_eq!(
+                l.get(&LeaseKey::Sni {
+                    source: sni_new,
+                    hostname: "auto.example.com".to_owned(),
+                }),
+                Some(&exp_sni),
+            );
+            assert_eq!(l.get(&LeaseKey::SniFallback(sni_new)), Some(&exp_fb));
+            assert_eq!(l.get(&pinhole_key), Some(&exp_pinhole));
+            assert_eq!(l.len(), 5);
+        });
+    }
+
+    #[tokio::test]
+    async fn resync_forward_keys_failed_install_leaves_state_intact_and_recovers_on_reversal() {
+        use std::time::{Duration, Instant};
+
+        let mut db = db_with_pinned_clients(&[("10.59.0.2", "5.6.7.8"), ("10.59.0.3", "5.6.7.8")]);
+        let old_key: ForwardAddress = "1.2.3.4:443".parse().unwrap();
+        let dnat_entry = PortForward::Dnat {
+            target: "10.59.0.2:443".parse().unwrap(),
+            label: None,
+            enabled: true,
+            count: 1,
+            auto: true,
+        };
+        db.port_forwards
+            .0
+            .insert(old_key.clone(), dnat_entry.clone());
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+
+        let sni_port = (0..5)
+            .find_map(|_| {
+                let probe = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).ok()?;
+                let port = probe.local_addr().ok()?.port();
+                drop(probe);
+                ctx.sni
+                    .register(
+                        Ipv4Addr::LOCALHOST,
+                        port,
+                        &["keep.example.com".to_owned()],
+                        "10.59.0.3:8443".parse().unwrap(),
+                        None,
+                    )
+                    .ok()
+                    .map(|()| port)
+            })
+            .expect("bind ephemeral loopback port for SNI test");
+        ctx.db
+            .mutate(|db| {
+                db.as_port_forwards_mut().mutate(|pf| {
+                    pf.0.insert(
+                        ForwardAddress::from(SocketAddrV4::new(Ipv4Addr::LOCALHOST, sni_port)),
+                        PortForward::Sni {
+                            routes: BTreeMap::from([(
+                                "keep.example.com".to_owned(),
+                                test_sni_route("10.59.0.3:8443", true),
+                            )]),
+                            fallback: None,
+                        },
+                    );
+                    Ok(())
+                })
+            })
+            .await
+            .result
+            .unwrap();
+
+        let handle = Arc::new(());
+        ctx.active_forwards.mutate(|m| {
+            m.insert(old_key.clone(), handle.clone());
+        });
+        let exp = Instant::now() + Duration::from_secs(300);
+        ctx.leases.mutate(|l| {
+            l.insert(LeaseKey::Dnat(old_key.clone()), exp);
+        });
+
+        assert!(ctx.resync_forward_keys().await.is_err());
+
+        let after_err = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert_eq!(after_err.0.get(&old_key), Some(&dnat_entry));
+        ctx.active_forwards.peek(|m| {
+            assert!(Arc::ptr_eq(m.get(&old_key).unwrap(), &handle));
+        });
+        ctx.leases.peek(|l| {
+            assert_eq!(l.get(&LeaseKey::Dnat(old_key.clone())), Some(&exp));
+        });
+        assert_eq!(ctx.sni.snapshot().len(), 1);
+
+        ctx.db
+            .mutate(|db| {
+                let clients = db
+                    .as_wg_mut()
+                    .as_subnets_mut()
+                    .as_idx_mut(&"10.59.0.1/24".parse().unwrap())
+                    .unwrap()
+                    .as_clients_mut();
+                clients
+                    .as_idx_mut(&"10.59.0.2".parse().unwrap())
+                    .unwrap()
+                    .as_wan_ip_mut()
+                    .ser(&Some("1.2.3.4".parse().unwrap()))?;
+                clients
+                    .as_idx_mut(&"10.59.0.3".parse().unwrap())
+                    .unwrap()
+                    .as_wan_ip_mut()
+                    .ser(&Some(Ipv4Addr::LOCALHOST))
+            })
+            .await
+            .result
+            .unwrap();
+        ctx.resync_forward_keys().await.unwrap();
+        ctx.active_forwards.peek(|m| {
+            assert!(Arc::ptr_eq(m.get(&old_key).unwrap(), &handle));
+        });
+        assert_eq!(ctx.sni.snapshot().len(), 1);
+
+        let mut replace_db = db_with_pinned_clients(&[
+            ("10.59.0.2", "9.9.9.9"),
+            ("10.59.0.3", "1.2.3.4"),
+            ("10.59.0.4", "9.9.9.9"),
+        ]);
+        replace_db
+            .port_forwards
+            .0
+            .insert(old_key.clone(), test_dnat("10.59.0.2:443", 1, true));
+        replace_db.port_forwards.0.insert(
+            "9.9.9.9:443".parse().unwrap(),
+            test_dnat("10.59.0.4:443", 1, false),
+        );
+        replace_db.port_forwards.0.insert(
+            "5.6.7.8:443".parse().unwrap(),
+            test_dnat("10.59.0.3:443", 1, true),
+        );
+        let (_dir2, ctx2) = TunnelContext::for_test(replace_db).await;
+        ctx2.active_forwards.mutate(|m| {
+            m.insert(old_key.clone(), Arc::new(()));
+        });
+        assert!(ctx2.resync_forward_keys().await.is_err());
+        ctx2.active_forwards.peek(|m| {
+            assert!(!m.contains_key(&old_key));
+        });
+    }
+
+    #[tokio::test]
+    async fn manual_dnat_add_and_remove_serialize_and_revalidate_under_forward_write_lock() {
+        let mut db = db_with_pinned_clients(&[("10.59.0.2", "1.2.3.4")]);
+        let remove_key: ForwardAddress = "1.2.3.4:9443".parse().unwrap();
+        db.port_forwards
+            .0
+            .insert(remove_key.clone(), test_dnat("10.59.0.2:9443", 1, false));
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+        let guard = ctx.forward_write_lock.lock().await;
+        let ctx_add = ctx.clone();
+        let mut add = tokio::spawn(async move {
+            crate::tunnel::api::add_forward(
+                ctx_add,
+                serde_json::from_value(serde_json::json!({
+                    "externalPort": 8443,
+                    "target": "10.59.0.2:8443",
+                }))
+                .unwrap(),
+            )
+            .await
+        });
+        let ctx_rm = ctx.clone();
+        let mut rm = tokio::spawn(async move {
+            crate::tunnel::api::remove_forward(
+                ctx_rm,
+                serde_json::from_value(serde_json::json!({ "source": "1.2.3.4:9443" })).unwrap(),
+            )
+            .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut add)
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut rm)
+                .await
+                .is_err()
+        );
+        let replaced_sni = PortForward::Sni {
+            routes: BTreeMap::from([(
+                "keep.example.com".to_owned(),
+                test_sni_route("10.59.0.2:9443", false),
+            )]),
+            fallback: None,
+        };
+        ctx.db
+            .mutate(|db| {
+                db.as_wg_mut()
+                    .as_subnets_mut()
+                    .as_idx_mut(&"10.59.0.1/24".parse().unwrap())
+                    .unwrap()
+                    .as_clients_mut()
+                    .as_idx_mut(&"10.59.0.2".parse().unwrap())
+                    .unwrap()
+                    .as_wan_ip_mut()
+                    .ser(&Some("5.6.7.8".parse().unwrap()))?;
+                db.as_port_forwards_mut().mutate(|pf| {
+                    pf.0.insert(
+                        "5.6.7.8:8443".parse().unwrap(),
+                        test_dnat("10.59.0.9:8443", 1, false),
+                    );
+                    pf.0.insert(remove_key.clone(), replaced_sni.clone());
+                    Ok(())
+                })
+            })
+            .await
+            .result
+            .unwrap();
+        drop(guard);
+        let add_err = add.await.unwrap().unwrap_err();
+        assert!(add_err.to_string().contains("5.6.7.8:8443"), "{add_err}");
+        rm.await.unwrap().unwrap();
+        let after = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert_eq!(after.0.get(&remove_key), Some(&replaced_sni));
     }
 }

@@ -637,8 +637,7 @@ impl TunnelContext {
                 ..
             }) if *fallback.target.ip() == peer && (!auto_only || fallback.auto) => {
                 self.remove_sni_fallback_locked(source, fallback.target)
-                    .await;
-                true
+                    .await
             }
             _ => false,
         }
@@ -652,8 +651,41 @@ impl TunnelContext {
         auto_only: bool,
     ) {
         let _guard = self.forward_write_lock.lock().await;
+        self.remove_sni_routes_locked(source, target, hostnames, auto_only)
+            .await;
+    }
+
+    pub(super) async fn remove_sni_routes_locked(
+        &self,
+        source: SocketAddrV4,
+        target: SocketAddrV4,
+        hostnames: &[String],
+        auto_only: bool,
+    ) -> bool {
+        let candidates: Vec<String> = self
+            .db
+            .peek()
+            .await
+            .as_port_forwards()
+            .de()
+            .ok()
+            .and_then(|pf| match pf.0.get(&source.into()) {
+                Some(PortForward::Sni { routes, .. }) => Some(
+                    routes
+                        .iter()
+                        .filter(|(hostname, route)| {
+                            route.target == target
+                                && hostnames.contains(hostname)
+                                && (!auto_only || route.auto)
+                        })
+                        .map(|(hostname, _)| hostname.clone())
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
         let hostnames = hostnames.to_vec();
-        let Some(removed) = self
+        let (committed, removed) = match self
             .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
@@ -682,14 +714,37 @@ impl TunnelContext {
             .await
             .result
             .log_err()
-        else {
-            return;
+        {
+            Some(removed) => (true, removed),
+            None => {
+                let retained = self.db.peek().await.as_port_forwards().de().ok();
+                let removed: Vec<String> = retained
+                    .as_ref()
+                    .map(|pf| {
+                        candidates
+                            .iter()
+                            .filter(|h| match pf.0.get(&source.into()) {
+                                Some(PortForward::Sni { routes, .. }) => {
+                                    routes.get(*h).is_none_or(|r| r.target != target)
+                                }
+                                _ => true,
+                            })
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let committed = retained.is_some() && removed.len() == candidates.len();
+                (committed, removed)
+            }
         };
-        self.sni
-            .unregister(*source.ip(), source.port(), &removed, target);
-        for hostname in removed {
-            lease::forget(self, &LeaseKey::Sni { source, hostname });
+        if !removed.is_empty() {
+            self.sni
+                .unregister(*source.ip(), source.port(), &removed, target);
+            for hostname in removed {
+                lease::forget(self, &LeaseKey::Sni { source, hostname });
+            }
         }
+        committed
     }
 
     /// Persists and registers SNI-demuxed hostname routes.
@@ -951,32 +1006,70 @@ impl TunnelContext {
         &self,
         source: SocketAddrV4,
         target: SocketAddrV4,
-    ) {
-        self.sni
-            .unregister_fallback(*source.ip(), source.port(), target);
-        lease::forget(self, &LeaseKey::SniFallback(source));
-        self.db
+    ) -> bool {
+        let had_fallback = self
+            .db
+            .peek()
+            .await
+            .as_port_forwards()
+            .de()
+            .ok()
+            .is_some_and(|pf| match pf.0.get(&source.into()) {
+                Some(PortForward::Sni { fallback, .. }) => {
+                    fallback.as_ref().is_some_and(|f| f.target == target)
+                }
+                _ => false,
+            });
+        let (committed, removed) = match self
+            .db
             .mutate(|db| {
                 db.as_port_forwards_mut().mutate(|pf| {
                     use crate::tunnel::db::PortForward;
+                    let mut removed = false;
                     let mut now_empty = false;
                     if let Some(PortForward::Sni { routes, fallback }) =
                         pf.0.get_mut(&source.into())
                     {
                         if fallback.as_ref().is_some_and(|f| f.target == target) {
                             *fallback = None;
+                            removed = true;
                         }
                         now_empty = routes.is_empty() && fallback.is_none();
                     }
                     if now_empty {
                         pf.0.remove(&source.into());
                     }
-                    Ok(())
+                    Ok(removed)
                 })
             })
             .await
             .result
-            .log_err();
+            .log_err()
+        {
+            Some(removed) => (true, removed),
+            None => {
+                let gone = self
+                    .db
+                    .peek()
+                    .await
+                    .as_port_forwards()
+                    .de()
+                    .ok()
+                    .is_some_and(|pf| match pf.0.get(&source.into()) {
+                        Some(PortForward::Sni { fallback, .. }) => {
+                            fallback.as_ref().is_none_or(|f| f.target != target)
+                        }
+                        _ => true,
+                    });
+                (gone, gone && had_fallback)
+            }
+        };
+        if removed {
+            self.sni
+                .unregister_fallback(*source.ip(), source.port(), target);
+            lease::forget(self, &LeaseKey::SniFallback(source));
+        }
+        committed
     }
 }
 
