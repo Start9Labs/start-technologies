@@ -9,6 +9,8 @@ use index::Index;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+#[cfg(feature = "arena")]
+pub mod arena;
 pub mod de;
 mod from;
 pub mod in_order_map;
