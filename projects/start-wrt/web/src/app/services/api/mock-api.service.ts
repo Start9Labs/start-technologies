@@ -526,7 +526,7 @@ export class MockApiService extends ApiService {
     return {
       public_key: generatedKey,
       ip,
-      client_config: `[Interface]\nPrivateKey = ${params.peer.public_key ? '<PRIVATE_KEY>' : 'MOCK_PRIVATE_KEY'}\nAddress = ${ip}/32\nDNS = ${server?.server_address.replace(/\.\d+$/, '.1') ?? '192.168.1.1'}\n\n[Peer]\nPublicKey = ${server?.public_key ?? 'mockServerKey'}\nPresharedKey = MOCK_PRESHARED_KEY\nEndpoint = ${server?.endpoint ?? 'mock'}:${server?.listen_port ?? 51820}\nAllowedIPs = ${params.peer.route_all ? '0.0.0.0/0, ::/0' : (server?.server_address.replace(/\.\d+$/, '.0/24') ?? '192.168.1.0/24')}`,
+      client_config: `[Interface]\nPrivateKey = ${params.peer.public_key ? '<PRIVATE_KEY>' : 'MOCK_PRIVATE_KEY'}\nAddress = ${ip}/32\nDNS = ${server?.server_address.replace(/\.\d+$/, '.1') ?? '192.168.1.1'}, lan\n\n[Peer]\nPublicKey = ${server?.public_key ?? 'mockServerKey'}\nPresharedKey = MOCK_PRESHARED_KEY\nEndpoint = ${server?.endpoint ?? 'mock'}:${server?.listen_port ?? 51820}\nAllowedIPs = ${params.peer.route_all ? '0.0.0.0/0, ::/0' : (server?.server_address.replace(/\.\d+$/, '.0/24') ?? '192.168.1.0/24')}`,
     }
   }
 

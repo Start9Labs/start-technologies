@@ -19,6 +19,9 @@ pub struct DnsServer {
 }
 rpc_toolkit::reflect_ts!(DnsServer);
 
+/// The domain every profile instance serves its devices under.
+pub const LAN_DOMAIN: &str = "lan";
+
 /// SmartDNS bind port constants.
 pub const SMARTDNS_SYSTEM_PORT: u16 = 5300;
 pub const SMARTDNS_CONF_PATH: &str = "/etc/smartdns/smartdns.conf";

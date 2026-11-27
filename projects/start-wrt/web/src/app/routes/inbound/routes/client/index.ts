@@ -231,7 +231,7 @@ export default class InboundClients {
       '[Interface]',
       'PrivateKey = <PRIVATE_KEY>',
       `Address = ${peer.ip}/32`,
-      `DNS = ${gateway}`,
+      `DNS = ${gateway}, lan`,
       '',
       '[Peer]',
       `PublicKey = ${server.public_key}`,
