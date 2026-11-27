@@ -270,13 +270,16 @@ pub async fn subscribe(
         reader,
     } = params;
     let pointer = subscription_pointer(pointer)?;
+    let reported_os_version = os_version.as_ref().map(ToString::to_string);
     let mirror = visible_mirror(&context, os_version, language, reader).await?;
     if let Some(stream) = rpc_stream {
         let (start, sub) = subscription_start(&mirror.db, Some(pointer), since.as_ref()).await?;
+        crate::registry::metrics::record_subscription(&context, reported_os_version);
         stream_subscription(stream, mirror, sub);
         Ok(SubscribeIndexResult::Stream(start))
     } else {
         let (dump, sub) = subscription(&mirror.db, Some(pointer)).await?;
+        crate::registry::metrics::record_subscription(&context, reported_os_version);
         let guid = legacy_subscription(&context, mirror, sub).await;
         Ok(SubscribeIndexResult::Continuation(SubscribeRes {
             dump,

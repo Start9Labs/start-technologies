@@ -135,10 +135,9 @@ fn export_manpage_start_registry() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../../projects/start-registry/man"
     );
-    std::fs::create_dir_all(dir).unwrap();
     let command = super::with_manifest_version(
         app().into_command(),
         std::path::Path::new(dir).parent().unwrap(),
     );
-    clap_mangen::generate_to(command, dir).unwrap();
+    super::export_manpages(command, dir);
 }

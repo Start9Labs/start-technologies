@@ -166,67 +166,6 @@ export const Dump: z.ZodObject<{ id: z.ZodInt; value: z.ZodUnknown }> =
   /* @__PURE__ */ object({ id: z.int(), value: z.unknown() }).meta({
     id: 'Dump',
   })
-export const GetDownloadsParams: z.ZodObject<{
-  /**
-   * Filter by package ID
-   */
-  pkgId: z.ZodDefault<z.ZodNullable<z.ZodString>>
-  /**
-   * Filter by version
-   */
-  version: z.ZodDefault<z.ZodNullable<z.ZodString>>
-  /**
-   * Start of time range (RFC 3339)
-   */
-  after: z.ZodDefault<z.ZodNullable<z.ZodString>>
-  /**
-   * End of time range (RFC 3339)
-   */
-  before: z.ZodDefault<z.ZodNullable<z.ZodString>>
-}> = /* @__PURE__ */ object({
-  /**
-   * Filter by package ID
-   */
-  pkgId: z
-    .string()
-    .nullable()
-    .default(() => null)
-    .meta({
-      description: 'Filter by package ID',
-    }),
-  /**
-   * Filter by version
-   */
-  version: z
-    .string()
-    .nullable()
-    .default(() => null)
-    .meta({
-      description: 'Filter by version',
-    }),
-  /**
-   * Start of time range (RFC 3339)
-   */
-  after: z
-    .string()
-    .nullable()
-    .default(() => null)
-    .meta({
-      description: 'Start of time range (RFC 3339)',
-    }),
-  /**
-   * End of time range (RFC 3339)
-   */
-  before: z
-    .string()
-    .nullable()
-    .default(() => null)
-    .meta({
-      description: 'End of time range (RFC 3339)',
-    }),
-}).meta({
-  id: 'GetDownloadsParams',
-})
 export const GetOsAssetParams: z.ZodObject<{
   version: z.ZodString
   platform: z.ZodString
@@ -259,39 +198,6 @@ export const GetOsVersionParams: z.ZodObject<{
     .default(() => null),
 }).meta({
   id: 'GetOsVersionParams',
-})
-export const GetUsersParams: z.ZodObject<{
-  /**
-   * Start of time range (RFC 3339)
-   */
-  after: z.ZodDefault<z.ZodNullable<z.ZodString>>
-  /**
-   * End of time range (RFC 3339)
-   */
-  before: z.ZodDefault<z.ZodNullable<z.ZodString>>
-}> = /* @__PURE__ */ object({
-  /**
-   * Start of time range (RFC 3339)
-   */
-  after: z
-    .string()
-    .nullable()
-    .default(() => null)
-    .meta({
-      description: 'Start of time range (RFC 3339)',
-    }),
-  /**
-   * End of time range (RFC 3339)
-   */
-  before: z
-    .string()
-    .nullable()
-    .default(() => null)
-    .meta({
-      description: 'End of time range (RFC 3339)',
-    }),
-}).meta({
-  id: 'GetUsersParams',
 })
 export const GitHash: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'GitHash',
@@ -429,6 +335,13 @@ export const MerkleArchiveCommitment: z.ZodIntersection<
   .meta({
     id: 'MerkleArchiveCommitment',
   })
+export const MetricsInterval: z.ZodEnum<{
+  day: 'day'
+  week: 'week'
+  month: 'month'
+}> = /* @__PURE__ */ z.enum(['day', 'week', 'month']).meta({
+  id: 'MetricsInterval',
+})
 
 /**
  * JSON Patch 'move' operation representation
@@ -485,6 +398,23 @@ export const PackageVersionCount: z.ZodObject<{
   count: z.int(),
 }).meta({
   id: 'PackageVersionCount',
+})
+export const PeriodCount: z.ZodObject<{
+  period: z.ZodString
+  count: z.ZodInt
+}> = /* @__PURE__ */ object({ period: z.string(), count: z.int() }).meta({
+  id: 'PeriodCount',
+})
+export const PeriodUsers: z.ZodObject<{
+  period: z.ZodString
+  uniqueServers: z.ZodInt
+  checkins: z.ZodInt
+}> = /* @__PURE__ */ object({
+  period: z.string(),
+  uniqueServers: z.int(),
+  checkins: z.int(),
+}).meta({
+  id: 'PeriodUsers',
 })
 export const PluginId: z.ZodEnum<{ 'url-v0': 'url-v0' }> = /* @__PURE__ */ z
   .enum(['url-v0'])
@@ -657,15 +587,6 @@ export const TestOperation: z.ZodObject<{
 }).meta({
   id: 'TestOperation',
   description: "JSON Patch 'test' operation representation",
-})
-export const UsersResponse: z.ZodObject<{
-  uniqueServers: z.ZodInt
-  totalCheckins: z.ZodInt
-}> = /* @__PURE__ */ object({
-  uniqueServers: z.int(),
-  totalCheckins: z.int(),
-}).meta({
-  id: 'UsersResponse',
 })
 export const Version: typeof literal_0 = /* @__PURE__ */ literal_0.meta({
   id: 'Version',
@@ -880,10 +801,12 @@ export const DownloadsResponse: z.ZodObject<{
   totalRequests: z.ZodInt
   byPackage: z.ZodArray<typeof CountEntry>
   byPackageVersion: z.ZodArray<typeof PackageVersionCount>
+  series: z.ZodOptional<z.ZodArray<typeof PeriodCount>>
 }> = /* @__PURE__ */ object({
   totalRequests: z.int(),
   byPackage: z.array(CountEntry),
   byPackageVersion: z.array(PackageVersionCount),
+  series: z.array(PeriodCount).optional(),
 }).meta({
   id: 'DownloadsResponse',
 })
@@ -964,6 +887,79 @@ export const ExportPackageVersionParams: z.ZodIntersection<
   .meta({
     id: 'ExportPackageVersionParams',
   })
+export const GetDownloadsParams: z.ZodObject<{
+  /**
+   * Filter by package ID
+   */
+  pkgId: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  /**
+   * Filter by version
+   */
+  version: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  /**
+   * Start of time range (RFC 3339)
+   */
+  after: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  /**
+   * End of time range (RFC 3339)
+   */
+  before: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  /**
+   * Also report each period in the range
+   */
+  interval: z.ZodDefault<z.ZodNullable<typeof MetricsInterval>>
+}> = /* @__PURE__ */ object({
+  /**
+   * Filter by package ID
+   */
+  pkgId: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Filter by package ID',
+    }),
+  /**
+   * Filter by version
+   */
+  version: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Filter by version',
+    }),
+  /**
+   * Start of time range (RFC 3339)
+   */
+  after: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Start of time range (RFC 3339)',
+    }),
+  /**
+   * End of time range (RFC 3339)
+   */
+  before: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'End of time range (RFC 3339)',
+    }),
+  /**
+   * Also report each period in the range
+   */
+  interval: MetricsInterval.nullable()
+    .default(() => null)
+    .meta({
+      description: 'Also report each period in the range',
+    }),
+}).meta({
+  id: 'GetDownloadsParams',
+})
 export const GetPackageParams: z.ZodIntersection<
   z.ZodObject<{
     id: z.ZodDefault<z.ZodNullable<typeof PackageId>>
@@ -990,6 +986,51 @@ export const GetPackageParams: z.ZodIntersection<
   .meta({
     id: 'GetPackageParams',
   })
+export const GetUsersParams: z.ZodObject<{
+  /**
+   * Start of time range (RFC 3339)
+   */
+  after: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  /**
+   * End of time range (RFC 3339)
+   */
+  before: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  /**
+   * Also report each period in the range
+   */
+  interval: z.ZodDefault<z.ZodNullable<typeof MetricsInterval>>
+}> = /* @__PURE__ */ object({
+  /**
+   * Start of time range (RFC 3339)
+   */
+  after: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'Start of time range (RFC 3339)',
+    }),
+  /**
+   * End of time range (RFC 3339)
+   */
+  before: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: 'End of time range (RFC 3339)',
+    }),
+  /**
+   * Also report each period in the range
+   */
+  interval: MetricsInterval.nullable()
+    .default(() => null)
+    .meta({
+      description: 'Also report each period in the range',
+    }),
+}).meta({
+  id: 'GetUsersParams',
+})
 export const HardwareRequirements: z.ZodObject<{
   device: z.ZodDefault<z.ZodArray<typeof DeviceFilter>>
   ram: z.ZodDefault<z.ZodNullable<z.ZodInt>>
@@ -1019,12 +1060,14 @@ export const MetricsSummary: z.ZodObject<{
   totalCheckins: z.ZodInt
   uniqueServers: z.ZodInt
   totalPackageRequests: z.ZodInt
+  totalSubscriptions: z.ZodInt
   byArch: z.ZodArray<typeof CountEntry>
   byOsVersion: z.ZodArray<typeof CountEntry>
 }> = /* @__PURE__ */ object({
   totalCheckins: z.int(),
   uniqueServers: z.int(),
   totalPackageRequests: z.int(),
+  totalSubscriptions: z.int(),
   byArch: z.array(CountEntry),
   byOsVersion: z.array(CountEntry),
 }).meta({
@@ -1506,6 +1549,28 @@ export const SubscribeRes: z.ZodObject<{
   guid: typeof Guid
 }> = /* @__PURE__ */ object({ dump: Dump, guid: Guid }).meta({
   id: 'SubscribeRes',
+})
+export const SubscriptionsResponse: z.ZodObject<{
+  totalSubscriptions: z.ZodInt
+  byOsVersion: z.ZodArray<typeof CountEntry>
+  series: z.ZodOptional<z.ZodArray<typeof PeriodCount>>
+}> = /* @__PURE__ */ object({
+  totalSubscriptions: z.int(),
+  byOsVersion: z.array(CountEntry),
+  series: z.array(PeriodCount).optional(),
+}).meta({
+  id: 'SubscriptionsResponse',
+})
+export const UsersResponse: z.ZodObject<{
+  uniqueServers: z.ZodInt
+  totalCheckins: z.ZodInt
+  series: z.ZodOptional<z.ZodArray<typeof PeriodUsers>>
+}> = /* @__PURE__ */ object({
+  uniqueServers: z.int(),
+  totalCheckins: z.int(),
+  series: z.array(PeriodUsers).optional(),
+}).meta({
+  id: 'UsersResponse',
 })
 export const VersionSignerParams: z.ZodObject<{
   version: z.ZodString
@@ -2220,6 +2285,18 @@ export const Api = {
             GetDownloadsParams,
           ),
           _RETURN: /* @__PURE__ */ DownloadsResponse,
+          _ITEM: /* @__PURE__ */ z.never(),
+          _FINAL: /* @__PURE__ */ z.null(),
+        },
+        subscriptions: {
+          _PARAMS: /* @__PURE__ */ z.intersection(
+            z.intersection(
+              object({ format: IoFormat.nullable().default(() => null) }),
+              empty,
+            ),
+            GetUsersParams,
+          ),
+          _RETURN: /* @__PURE__ */ SubscriptionsResponse,
           _ITEM: /* @__PURE__ */ z.never(),
           _FINAL: /* @__PURE__ */ z.null(),
         },
