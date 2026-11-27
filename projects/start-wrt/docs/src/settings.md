@@ -18,13 +18,13 @@ Theme and Language changes are previewed immediately when you select them, and s
 
 ### Remote Access
 
-Controls whether the web interface (and SSH) accepts connections arriving on the WAN port — ports 80, 443, and 22. Devices on your local network can always reach the web interface at `router.lan`, whatever this is set to.
+Controls whether the web interface (and SSH) accepts connections arriving on the WAN port — ports 80, 443, and 22. Devices on the Admin [Security Profile](security-profiles.md) can always reach the web interface at `router.lan`, whatever this is set to. Devices on other profiles cannot reach it from inside your network.
 
-**To manage your router when you are away from home, use an [Inbound VPN](inbound-vpn.md)** — this works regardless of the Remote Access setting. VPN clients join your network as local devices (with the access granted by their [Security Profile](security-profiles.md)), so once connected you browse to the web interface exactly as you would at home. No port forwards or address whitelists on the router are needed. If your router sits behind another router, forward the VPN's WireGuard port on that upstream router; if your ISP uses [CGNAT](cgnat.md), inbound connections cannot reach your router at all — consider [StartTunnel](/start-tunnel/) as a gateway.
+**To manage your router when you are away from home, use an [Inbound VPN](inbound-vpn.md)** on the Admin profile — this works regardless of the Remote Access setting. VPN clients join your network as local devices with the access granted by the VPN server's Security Profile, so once connected you browse to the web interface exactly as you would at home. No port forwards or address whitelists on the router are needed. If your router sits behind another router, forward the VPN's WireGuard port on that upstream router; if your ISP uses [CGNAT](cgnat.md), inbound connections cannot reach your router at all — consider [StartTunnel](/start-tunnel/) as a gateway.
 
 The options control direct WAN-side access only:
 
-- **Never** (default) — No WAN-side access at all, even from an upstream private network. The web interface is reachable only from the local network (including through an Inbound VPN).
+- **Never** (default) — No WAN-side access at all, even from an upstream private network. The web interface is reachable only from the Admin profile (including through an Inbound VPN on that profile).
 - **When behind NAT** — WAN-side connections are accepted only from private source addresses (RFC 1918 for IPv4, ULA for IPv6), and only while the router's own WAN address is itself private. This is for routers that sit behind another router (e.g. an ISP box): devices on that upstream network can reach the web interface. From the public Internet, the web interface is never reachable in this mode — even if a public, globally routable address later appears on the WAN. Anyone on that upstream network can reach the router's sign-in, so choose it only if you trust every device there.
 - **Always** — WAN-side connections are accepted from any address. With a public IP, the web interface is reachable from anywhere on the Internet via the WAN IP or a [Dynamic DNS](ddns.md) domain.
 

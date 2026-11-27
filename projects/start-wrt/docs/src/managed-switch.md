@@ -180,7 +180,7 @@ Everything a profile allows applies to the device as usual: its Internet access,
 
 ## Making Changes Later
 
-- **Reaching the switch's settings page.** Plug a computer into an Admin port. From a computer on another profile, you can instead forward the page through the router over [SSH](ssh.md), with no cable to move: run `ssh -N -L 8080:192.168.0.250:80 root@<router address>` with your switch's address, and open `http://localhost:8080` while it runs. The SSH key you add for this gives full control of the router, so add one only from a computer you would trust with the router itself.
+- **Reaching the switch's settings page.** Open it from a device on the Admin profile, such as a computer plugged into an Admin port.
 
 - **Adding a profile.** Create it in StartWRT first; the router adds it to the managed-switch port by itself. Then add its VLAN on the switch: tagged on the uplink, untagged on the ports that should carry it, with their PVID changed to match. Until you do, devices on those ports keep their old profile, and the new profile has no port on the switch.
 

@@ -113,6 +113,10 @@ iCloud Private Relay and **Limit IP Address Tracking** do not affect local names
 
 To keep encrypted or filtered DNS for every device, set it up on the router instead: choose **Custom** DNS with **Secure (DoH)** in [WAN Settings](wan.md) or on a [Security Profile](security-profiles.md#creating-a-profile), and the router still answers `.lan` names itself.
 
+### Why doesn't the router's web interface open from some devices?
+
+Only devices on the Admin [Security Profile](security-profiles.md) can open the web interface or connect over [SSH](ssh.md). From a device on any other profile, `router.lan` refuses the connection (`ERR_CONNECTION_REFUSED` in Chrome). To manage the router, join the Wi-Fi with a password that belongs to the Admin profile or plug into an Admin Ethernet port. Away from home, connect through an [Inbound VPN](inbound-vpn.md) on the Admin profile.
+
 ### Why can't I reach the router or devices on other profiles while a VPN app is on?
 
 A VPN app that sends all traffic through its tunnel also sends traffic for your local network there, where it never arrives. The router's address and your other devices time out (`ERR_CONNECTION_TIMED_OUT` or `ERR_ADDRESS_UNREACHABLE` in Chrome) until you disconnect the VPN.

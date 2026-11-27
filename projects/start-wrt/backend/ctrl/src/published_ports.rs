@@ -2079,20 +2079,60 @@ pub(crate) fn sync_hairpin(
             changed = true;
         }
     }
-    changed |= sync_v6_hairpin_rules(firewall)?;
+    changed |= sync_hairpin_rules(firewall)?;
     Ok(changed)
 }
 
+/// Admits a router service at the router's public address: hostname routes,
+/// the HTTP redirect in front of them, or an inbound VPN's listen port.
+fn is_public_router_service(rule: &FirewallRule) -> bool {
+    rule.src == crate::profiles::DEFAULT_WAN_ZONE
+        && rule.target == FirewallTarget::ACCEPT
+        && rule._pp_hairpin.is_none()
+        && (rule._apf_label.as_deref() == Some(crate::port_control::KIND_SNI)
+            || crate::vpn_server::is_wireguard_rule(rule))
+}
+
+/// Rebuilds the LAN-side copies of WAN admission rules wholesale; nothing
+/// else maintains them.
+///
 /// IPv6 has no DNAT to reflect, so each unrestricted `pp_*_v6` WAN rule is
 /// copied once per hairpin zone (its own excluded — same-zone traffic never
-/// crosses the router) with only `src` changed. The copies are rebuilt
-/// wholesale from the WAN rules; nothing else maintains them.
-fn sync_v6_hairpin_rules(firewall: &mut uciedit::Config<'_>) -> Result<bool, Error> {
+/// crosses the router) with only `src` changed. Each public router service
+/// is copied once per non-masquerading zone, which reaches it at the public
+/// address as the Internet does.
+pub(crate) fn sync_hairpin_rules(firewall: &mut uciedit::Config<'_>) -> Result<bool, Error> {
+    let lan_zones: Vec<String> = firewall
+        .sections
+        .iter()
+        .filter_map(|s| s.get::<FirewallZone>().ok())
+        .filter(|zone| zone.masq != Some(true))
+        .map(|zone| zone.name)
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect();
     let mut desired: Vec<(String, FirewallRule)> = Vec::new();
     for section in &firewall.sections {
         let Ok(rule) = section.get::<FirewallRule>() else {
             continue;
         };
+        if is_public_router_service(&rule) {
+            let stem = section
+                .name()
+                .map(|name| name.into_owned())
+                .unwrap_or_else(|| uci_name_fragment(&rule.name));
+            for zone in lan_zones.iter().filter(|zone| **zone != rule.src) {
+                let copy = FirewallRule {
+                    name: format!("{} from {zone}", rule.name),
+                    src: zone.clone(),
+                    _apf_label: None,
+                    _pp_hairpin: Some("1".into()),
+                    ..rule.clone()
+                };
+                desired.push((format!("{stem}_{}", uci_name_fragment(zone)), copy));
+            }
+            continue;
+        }
         if !is_pp_v6_rule(&rule) || rule._pp_hairpin.is_some() || rule.src_ip.is_some() {
             continue;
         }
@@ -4499,6 +4539,86 @@ config rule 'pp_x_v6_vlan_gone'
         assert_eq!(
             v6_copies(&cfg),
             vec![("pp_x_v6_lan_iot".to_string(), "lan_iot".to_string())]
+        );
+    }
+
+    #[test]
+    fn sync_copies_public_router_services_to_every_lan_zone() {
+        let arena = Arena::new();
+        let content = format!(
+            "{FORWARDINGS}
+config zone 'z_vpn'
+\toption name 'vpn_wg_x'
+\tlist network 'wg_x'
+\toption input 'REJECT'
+\toption output 'ACCEPT'
+\toption forward 'REJECT'
+\toption masq '1'
+
+config rule 'apf_sni_443'
+\toption name 'SNI demux (hostname routes)'
+\toption src 'wan'
+\tlist proto 'tcp'
+\toption dest_ip '203.0.113.7'
+\toption dest_port '443'
+\toption target 'ACCEPT'
+\toption family 'ipv4'
+\toption enabled '1'
+\toption _apf_label 'SNI'
+
+config rule 'allow_wireguard_wg_guest'
+\toption name 'Allow-WireGuard-wg_guest'
+\toption src 'wan'
+\toption dest_port '51820'
+\tlist proto 'udp'
+\toption target 'ACCEPT'
+
+config rule 'startwrt_remote_443'
+\toption name 'startwrt_remote_443'
+\toption src 'wan'
+\toption dest_port '443'
+\tlist proto 'tcp'
+\toption target 'ACCEPT'
+"
+        );
+        let mut cfg = uciedit::Config::parse_str(&arena, &content).unwrap();
+        assert!(sync_hairpin_rules(&mut cfg).unwrap());
+        assert_eq!(
+            v6_copies(&cfg),
+            [
+                ("apf_sni_443_lan", "lan"),
+                ("apf_sni_443_lan_guest", "lan_guest"),
+                ("apf_sni_443_lan_iot", "lan_iot"),
+                ("allow_wireguard_wg_guest_lan", "lan"),
+                ("allow_wireguard_wg_guest_lan_guest", "lan_guest"),
+                ("allow_wireguard_wg_guest_lan_iot", "lan_iot"),
+            ]
+            .map(|(name, src)| (name.to_string(), src.to_string()))
+        );
+        let copy = cfg
+            .sections
+            .iter()
+            .find(|s| s.name().as_deref() == Some("apf_sni_443_lan_guest"))
+            .unwrap()
+            .get::<FirewallRule>()
+            .unwrap();
+        assert_eq!(copy.name, "SNI demux (hostname routes) from lan_guest");
+        assert_eq!(copy._apf_label, None);
+        assert_eq!(copy.dest_ip.as_deref(), Some("203.0.113.7"));
+        assert_eq!(copy.dest_port.as_deref(), Some("443"));
+        assert!(!sync_hairpin_rules(&mut cfg).unwrap(), "already current");
+
+        cfg.sections
+            .retain(|s| s.name().as_deref() != Some("apf_sni_443"));
+        assert!(sync_hairpin_rules(&mut cfg).unwrap());
+        assert_eq!(
+            v6_copies(&cfg),
+            [
+                ("allow_wireguard_wg_guest_lan", "lan"),
+                ("allow_wireguard_wg_guest_lan_guest", "lan_guest"),
+                ("allow_wireguard_wg_guest_lan_iot", "lan_iot"),
+            ]
+            .map(|(name, src)| (name.to_string(), src.to_string()))
         );
     }
 
