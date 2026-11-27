@@ -400,27 +400,64 @@ fn remote_access_rule_specs(
     }
 }
 
+fn is_remote_access_section(section: &uciedit::Section<'_>) -> bool {
+    section.ty() == "rule"
+        && (section
+            .name()
+            .is_some_and(|name| name.starts_with(REMOTE_RULE_PREFIX))
+            || section.lines.iter().any(|line| {
+                matches!(
+                    line,
+                    uciedit::Line::Option { option, value, .. }
+                        if option.as_str() == "name"
+                            && value.as_str().starts_with(REMOTE_RULE_PREFIX)
+                )
+            }))
+}
+
+fn remote_access_section_matches(section: &uciedit::Section<'_>, want: &FirewallRule) -> bool {
+    let mut seen = 0u8;
+    let lines_ok = section.lines.iter().all(|line| match line {
+        uciedit::Line::Option { option, .. } => {
+            let bit = match option.as_str().as_ref() {
+                "name" => 1 << 0,
+                "src" => 1 << 1,
+                "src_ip" => 1 << 2,
+                "dest_port" => 1 << 3,
+                "proto" => 1 << 4,
+                "target" => 1 << 5,
+                "family" => 1 << 6,
+                _ => return false,
+            };
+            let fresh = seen & bit == 0;
+            seen |= bit;
+            fresh
+        }
+        uciedit::Line::List { list, .. } => {
+            let fresh = list.as_str() == "proto" && seen & (1 << 4) == 0;
+            seen |= 1 << 4;
+            fresh
+        }
+        _ => true,
+    });
+    lines_ok && section.get::<FirewallRule>().ok().as_ref() == Some(want)
+}
+
 pub(crate) fn apply_remote_access_config(
     cfgs: &mut Configs,
     mode: &str,
     wan_ipv4: Option<Ipv4Addr>,
     wan_ipv6s: &[Ipv6Addr],
-) {
-    cfgs["firewall"].sections.retain(|section| {
-        let Ok(rule) = section.get::<FirewallRule>() else {
-            return true;
-        };
-        !rule.name.starts_with(REMOTE_RULE_PREFIX)
-    });
-
+) -> bool {
+    let mut desired = Vec::new();
     for spec in remote_access_rule_specs(mode, wan_ipv4, wan_ipv6s) {
         for &port in REMOTE_ACCESS_PORTS {
             let name = match spec.suffix {
                 Some(suffix) => format!("{REMOTE_RULE_PREFIX}{port}_{suffix}"),
                 None => format!("{REMOTE_RULE_PREFIX}{port}"),
             };
-            let rule = FirewallRule {
-                name: name.clone(),
+            desired.push(FirewallRule {
+                name,
                 src: "wan".to_string(),
                 src_ip: spec.src_ip.map(str::to_string),
                 dest_port: Some(port.to_string()),
@@ -428,10 +465,41 @@ pub(crate) fn apply_remote_access_config(
                 target: FirewallTarget::ACCEPT,
                 family: spec.family.map(str::to_string),
                 ..Default::default()
-            };
-            cfgs["firewall"].append(&rule, Some(name.as_str())).ok();
+            });
         }
     }
+
+    let mut matched = vec![false; desired.len()];
+    let mut existing_count = 0usize;
+    let all_match = cfgs["firewall"]
+        .sections
+        .iter()
+        .filter(|section| is_remote_access_section(section))
+        .all(|section| {
+            existing_count += 1;
+            let Some(name) = section.name() else {
+                return false;
+            };
+            let Some(idx) = desired.iter().position(|want| want.name == name.as_ref()) else {
+                return false;
+            };
+            if matched[idx] || !remote_access_section_matches(section, &desired[idx]) {
+                return false;
+            }
+            matched[idx] = true;
+            true
+        });
+    if all_match && existing_count == desired.len() {
+        return false;
+    }
+
+    cfgs["firewall"]
+        .sections
+        .retain(|section| !is_remote_access_section(section));
+    for rule in &desired {
+        cfgs["firewall"].append(rule, Some(rule.name.as_str())).ok();
+    }
+    true
 }
 
 /// Decodes an address from `/proc/net/tcp{,6}`: hex 32-bit words in host (little-endian)
@@ -576,10 +644,37 @@ async fn reload_firewall(mode: &str, wan_ipv4: Option<Ipv4Addr>, wan_ipv6s: &[Ip
     kill_rejected_wan_ssh_sessions(mode, wan_ipv4, wan_ipv6s);
 }
 
+async fn stale_config(uci_root: &Path, cfgs: &Configs<'_>) -> Option<&'static str> {
+    for name in ["firewall", "startwrt"] {
+        let current = tokio::fs::metadata(uci_root.join(name))
+            .await
+            .and_then(|m| m.modified())
+            .map(chrono::DateTime::<Utc>::from)
+            .ok();
+        if current != cfgs[name].modified {
+            return Some(name);
+        }
+    }
+    None
+}
+
+async fn write_firewall_checked(uci_root: &Path, cfgs: &Configs<'_>) -> Result<(), uciedit::Error> {
+    // Lock in the same lexicographic order as `uciedit::write_all`.
+    let mut firewall = uciedit::LockedConfig::open(uci_root.join("firewall")).await?;
+    let mut startwrt = uciedit::LockedConfig::open(uci_root.join("startwrt")).await?;
+    if let Some(expected) = cfgs["firewall"].modified {
+        firewall.check_modified(expected).await?;
+    }
+    if let Some(expected) = cfgs["startwrt"].modified {
+        startwrt.check_modified(expected).await?;
+    }
+    firewall.dump(&cfgs["firewall"]).await
+}
+
 #[instrument(skip_all)]
 pub async fn apply_remote_access<C: CtrlContext>(ctx: C) -> Result<Value, Error> {
     let mut retries = 4;
-    loop {
+    let wan_ipv4 = loop {
         let arena = Arena::new();
         let mut cfgs = parse_all(ctx.uci_root(), &arena, &["startwrt", "firewall"]).await?;
 
@@ -591,9 +686,21 @@ pub async fn apply_remote_access<C: CtrlContext>(ctx: C) -> Result<Value, Error>
             (None, Vec::new())
         };
 
-        apply_remote_access_config(&mut cfgs, &prefs.remote_access, wan_ipv4, &wan_ipv6s);
+        if !apply_remote_access_config(&mut cfgs, &prefs.remote_access, wan_ipv4, &wan_ipv6s) {
+            if let Some(name) = stale_config(&ctx.uci_root(), &cfgs).await {
+                if retries > 0 {
+                    retries -= 1;
+                    continue;
+                }
+                return Err(uciedit::Error::Conflict {
+                    src: uciedit::Source::Path(ctx.uci_root().join(name)),
+                }
+                .into());
+            }
+            break wan_ipv4;
+        }
 
-        match dump_all(ctx.uci_root(), cfgs).await {
+        match write_firewall_checked(&ctx.uci_root(), &cfgs).await {
             Err(uciedit::Error::Conflict { .. }) if retries > 0 => {
                 retries -= 1;
                 continue;
@@ -604,18 +711,16 @@ pub async fn apply_remote_access<C: CtrlContext>(ctx: C) -> Result<Value, Error>
             Ok(()) => {
                 if ctx.effectful() {
                     reload_firewall(&prefs.remote_access, wan_ipv4, &wan_ipv6s).await;
-                    // Apply mode changes to the shared SNI fallback.
-                    if let (Some(pc), Some(wan)) =
-                        (crate::port_control::PORT_CONTROL.get(), wan_ipv4)
-                    {
-                        let pc = pc.clone();
-                        tokio::spawn(async move { pc.sync_sni_fallback(wan).await });
-                    }
                 }
-                return Ok(Value::Null);
+                break wan_ipv4;
             }
         }
+    };
+    if let (Some(pc), Some(wan)) = (crate::port_control::PORT_CONTROL.get(), wan_ipv4) {
+        let pc = pc.clone();
+        tokio::spawn(async move { pc.sync_sni_fallback(wan).await });
     }
+    Ok(Value::Null)
 }
 
 #[instrument(skip_all)]
@@ -1631,6 +1736,274 @@ config zone wan
 
         // Should still have exactly 4 rules, not 8
         assert_eq!(count_remote_rules(dir.path()).await, 3);
+    }
+
+    fn pin_and_stat(path: &Path) -> (u64, std::time::SystemTime) {
+        use std::time::{Duration, SystemTime};
+
+        let past = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(past)
+            .unwrap();
+        stat_file(path)
+    }
+
+    fn stat_file(path: &Path) -> (u64, std::time::SystemTime) {
+        use std::os::unix::fs::MetadataExt;
+
+        let meta = std::fs::metadata(path).unwrap();
+        (meta.ino(), meta.modified().unwrap())
+    }
+
+    #[tokio::test]
+    async fn apply_remote_access_skips_write_when_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall_config(
+            dir.path(),
+            "config preferences preferences\n\toption remote_access 'always'\n",
+        );
+
+        let ctx = TestContext(dir.path().to_path_buf());
+        apply_remote_access(ctx.clone()).await.unwrap();
+        assert_eq!(count_remote_rules(dir.path()).await, 3);
+
+        // Trailing unrelated rule exercises non-EOF remote-access sections.
+        let mut firewall = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        firewall.push_str(
+            "\nconfig rule custom_rule\n\toption name 'custom_rule'\n\toption src 'wan'\n\toption proto 'tcp'\n\toption target 'ACCEPT'\n",
+        );
+        std::fs::write(dir.path().join("firewall"), firewall).unwrap();
+
+        let fw_before = pin_and_stat(&dir.path().join("firewall"));
+        let sw_before = pin_and_stat(&dir.path().join("startwrt"));
+
+        apply_remote_access(ctx.clone()).await.unwrap();
+
+        assert_eq!(
+            stat_file(&dir.path().join("firewall")),
+            fw_before,
+            "unchanged apply_remote_access must not rewrite firewall"
+        );
+        assert_eq!(
+            stat_file(&dir.path().join("startwrt")),
+            sw_before,
+            "unchanged apply_remote_access must not rewrite startwrt"
+        );
+
+        // Swapped remote-access rule order is still a no-op.
+        {
+            let arena = Arena::new();
+            let mut cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+            let first = cfgs["firewall"]
+                .sections
+                .iter()
+                .position(|s| s.name().as_deref() == Some("startwrt_remote_80"))
+                .unwrap();
+            let second = cfgs["firewall"]
+                .sections
+                .iter()
+                .position(|s| s.name().as_deref() == Some("startwrt_remote_443"))
+                .unwrap();
+            cfgs["firewall"].sections.swap(first, second);
+            dump_all(dir.path(), cfgs).await.unwrap();
+        }
+        let fw_before = pin_and_stat(&dir.path().join("firewall"));
+        let sw_before = pin_and_stat(&dir.path().join("startwrt"));
+        apply_remote_access(ctx).await.unwrap();
+        assert_eq!(stat_file(&dir.path().join("firewall")), fw_before);
+        assert_eq!(stat_file(&dir.path().join("startwrt")), sw_before);
+
+        // Default `never` mode with no remote-access rules is also a no-op.
+        let never_dir = tempfile::tempdir().unwrap();
+        setup_firewall_config(
+            never_dir.path(),
+            "config preferences preferences\n\toption remote_access 'never'\n",
+        );
+        let fw_before = pin_and_stat(&never_dir.path().join("firewall"));
+        let sw_before = pin_and_stat(&never_dir.path().join("startwrt"));
+        apply_remote_access(TestContext(never_dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        assert_eq!(stat_file(&never_dir.path().join("firewall")), fw_before);
+        assert_eq!(stat_file(&never_dir.path().join("startwrt")), sw_before);
+
+        // No-op freshness check flags concurrent writes to either firewall or startwrt.
+        {
+            let arena = Arena::new();
+            let cfgs = parse_all(never_dir.path(), &arena, &["startwrt", "firewall"])
+                .await
+                .unwrap();
+            assert_eq!(stale_config(never_dir.path(), &cfgs).await, None);
+
+            std::fs::write(never_dir.path().join("firewall"), "config zone wan\n").unwrap();
+            assert_eq!(
+                stale_config(never_dir.path(), &cfgs).await,
+                Some("firewall")
+            );
+        }
+        {
+            let arena = Arena::new();
+            let cfgs = parse_all(never_dir.path(), &arena, &["startwrt", "firewall"])
+                .await
+                .unwrap();
+            assert_eq!(stale_config(never_dir.path(), &cfgs).await, None);
+
+            std::fs::write(
+                never_dir.path().join("startwrt"),
+                "config preferences preferences\n\toption remote_access 'always'\n",
+            )
+            .unwrap();
+            assert_eq!(
+                stale_config(never_dir.path(), &cfgs).await,
+                Some("startwrt")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_remote_access_rewrites_on_mode_or_rule_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall_config(
+            dir.path(),
+            "config preferences preferences\n\toption remote_access 'always'\n",
+        );
+        let ctx = TestContext(dir.path().to_path_buf());
+        apply_remote_access(ctx.clone()).await.unwrap();
+        assert_eq!(count_remote_rules(dir.path()).await, 3);
+
+        // Missing rule triggers rewrite.
+        {
+            let arena = Arena::new();
+            let mut cfgs = parse_all(dir.path(), &arena, &["firewall"]).await.unwrap();
+            cfgs["firewall"]
+                .sections
+                .retain(|s| s.name().as_deref() != Some("startwrt_remote_22"));
+            dump_all(dir.path(), cfgs).await.unwrap();
+        }
+        let fw_before = pin_and_stat(&dir.path().join("firewall"));
+        apply_remote_access(ctx.clone()).await.unwrap();
+        assert_ne!(stat_file(&dir.path().join("firewall")), fw_before);
+        assert_eq!(count_remote_rules(dir.path()).await, 3);
+
+        // Extra stale rule triggers rewrite.
+        let mut fw = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        fw.push_str(
+            "\nconfig rule startwrt_remote_80_ipv6\n\toption name 'startwrt_remote_80_ipv6'\n\toption src 'wan'\n\toption src_ip 'fc00::/7'\n\toption dest_port '80'\n\toption proto 'tcp'\n\toption target 'ACCEPT'\n\toption family 'ipv6'\n",
+        );
+        std::fs::write(dir.path().join("firewall"), fw).unwrap();
+        let fw_before = pin_and_stat(&dir.path().join("firewall"));
+        apply_remote_access(ctx.clone()).await.unwrap();
+        assert_ne!(stat_file(&dir.path().join("firewall")), fw_before);
+        assert_eq!(count_remote_rules(dir.path()).await, 3);
+
+        // Stray list option on an existing remote rule triggers rewrite.
+        let fw = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        let drifted = fw.replacen(
+            "\toption target 'ACCEPT'\n",
+            "\toption target 'ACCEPT'\n\tlist src_ip '10.0.0.0/8'\n",
+            1,
+        );
+        std::fs::write(dir.path().join("firewall"), drifted).unwrap();
+        let fw_before = pin_and_stat(&dir.path().join("firewall"));
+        apply_remote_access(ctx.clone()).await.unwrap();
+        assert_ne!(stat_file(&dir.path().join("firewall")), fw_before);
+        assert!(!std::fs::read_to_string(dir.path().join("firewall"))
+            .unwrap()
+            .contains("list src_ip"));
+
+        // Duplicate single-valued option (uciedit first-wins vs fw4 last-wins) triggers rewrite.
+        let fw = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        let drifted = fw.replacen(
+            "\toption target 'ACCEPT'\n",
+            "\toption target 'ACCEPT'\n\toption target 'DROP'\n",
+            1,
+        );
+        std::fs::write(dir.path().join("firewall"), drifted).unwrap();
+        let fw_before = pin_and_stat(&dir.path().join("firewall"));
+        apply_remote_access(ctx.clone()).await.unwrap();
+        assert_ne!(stat_file(&dir.path().join("firewall")), fw_before);
+        assert!(!std::fs::read_to_string(dir.path().join("firewall"))
+            .unwrap()
+            .contains("DROP"));
+
+        // Malformed anonymous remote rule (fails FirewallRule parse) is detected and removed.
+        let mut fw = std::fs::read_to_string(dir.path().join("firewall")).unwrap();
+        fw.push_str("\nconfig rule\n\toption name 'startwrt_remote_broken'\n");
+        std::fs::write(dir.path().join("firewall"), fw).unwrap();
+        let fw_before = pin_and_stat(&dir.path().join("firewall"));
+        apply_remote_access(ctx.clone()).await.unwrap();
+        assert_ne!(stat_file(&dir.path().join("firewall")), fw_before);
+        assert!(!std::fs::read_to_string(dir.path().join("firewall"))
+            .unwrap()
+            .contains("startwrt_remote_broken"));
+
+        // Mode change from `always` to `never` removes rules and rewrites firewall only.
+        std::fs::write(
+            dir.path().join("startwrt"),
+            "config preferences preferences\n\toption remote_access 'never'\n",
+        )
+        .unwrap();
+        let fw_before = pin_and_stat(&dir.path().join("firewall"));
+        let sw_before = pin_and_stat(&dir.path().join("startwrt"));
+        apply_remote_access(ctx).await.unwrap();
+        assert_ne!(stat_file(&dir.path().join("firewall")), fw_before);
+        assert_eq!(
+            stat_file(&dir.path().join("startwrt")),
+            sw_before,
+            "apply_remote_access must not rewrite startwrt even when firewall changes"
+        );
+        assert_eq!(count_remote_rules(dir.path()).await, 0);
+    }
+
+    #[tokio::test]
+    async fn apply_remote_access_config_reports_wan_ip_and_rule_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        setup_firewall_config(
+            dir.path(),
+            "config preferences preferences\n\toption remote_access 'behind-nat'\n",
+        );
+
+        let private_a: Ipv4Addr = "192.168.1.2".parse().unwrap();
+        let private_b: Ipv4Addr = "10.0.0.5".parse().unwrap();
+        let public_v4: Ipv4Addr = "203.0.113.5".parse().unwrap();
+        let ula_v6: Ipv6Addr = "fd00::1".parse().unwrap();
+        let gua_v6: Ipv6Addr = "2001:db8::1".parse().unwrap();
+
+        let apply = |mode: &str, wan_ipv4: Option<Ipv4Addr>, wan_ipv6s: Vec<Ipv6Addr>| {
+            let root = dir.path().to_path_buf();
+            let mode = mode.to_string();
+            async move {
+                let arena = Arena::new();
+                let mut cfgs = parse_all(&root, &arena, &["startwrt", "firewall"])
+                    .await
+                    .unwrap();
+                let changed = apply_remote_access_config(&mut cfgs, &mode, wan_ipv4, &wan_ipv6s);
+                if changed {
+                    dump_all(&root, cfgs).await.unwrap();
+                }
+                changed
+            }
+        };
+
+        assert!(apply("behind-nat", Some(private_a), vec![]).await);
+        assert_eq!(count_remote_rules(dir.path()).await, 9);
+        assert!(!apply("behind-nat", Some(private_a), vec![]).await);
+        assert!(!apply("behind-nat", Some(private_b), vec![]).await);
+
+        // Private -> public IPv4 transition removes rules; repeat is a no-op.
+        assert!(apply("behind-nat", Some(public_v4), vec![]).await);
+        assert_eq!(count_remote_rules(dir.path()).await, 0);
+        assert!(!apply("behind-nat", Some(public_v4), vec![]).await);
+
+        // ULA -> GUA IPv6 transition adds then removes the 3 ULA rules.
+        assert!(apply("behind-nat", None, vec![ula_v6]).await);
+        assert_eq!(count_remote_rules(dir.path()).await, 3);
+        assert!(!apply("behind-nat", None, vec![ula_v6]).await);
+        assert!(apply("behind-nat", None, vec![gua_v6]).await);
+        assert_eq!(count_remote_rules(dir.path()).await, 0);
     }
 
     #[test]

@@ -336,10 +336,10 @@ on `ifup`, `ifupdate`, and `ifdown` of `wan` or `wan6`.
 ```rust
 // Request: {}
 // Response: null
-// Backend: re-applies the remote-access preference to the firewall against the
-// current WAN IPs, reloads the firewall, and kills WAN-side dropbear (SSH)
-// sessions from sources the mode no longer admits, so they don't survive a rule
-// change via conntrack ESTABLISHED state
+// Backend: reconciles the remote-access firewall rules against the preference
+// and current WAN IPs; when the rules change, writes UCI, reloads the firewall,
+// and kills WAN-side dropbear (SSH) sessions from sources the mode no longer
+// admits, so they don't survive a rule change via conntrack ESTABLISHED state
 ```
 
 ### `system.set-timezone`
