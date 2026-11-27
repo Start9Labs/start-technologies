@@ -15,8 +15,7 @@ export { isNetworkError }
 const POLL_INTERVAL_MS = 3000
 /** Bounds recovery probes before their owner discards a stalled transport. */
 export const PROBE_TIMEOUT_MS = 5000
-// How long a declared disruption's context (message / recovery intent) stays
-// armed waiting for the connection to actually drop.
+/** How long a declared disruption's message waits for the drop. */
 const CONTEXT_TTL_MS = 30_000
 // Generous upper bound on how long we show "Reconnecting" before force-navigating
 // to the new address regardless of the probe (reconnectAt only). Covers what the
@@ -40,22 +39,13 @@ export interface DisruptionOptions {
    * router answers again rather than the moment it dropped.
    */
   successMessage?: string
-  /**
-   * Poll THIS absolute URL (cross-origin, no-cors) instead of systemInfo on the
-   * current origin. Used when the current origin is gone for good (a bare-IP
-   * address that the router is moving away from), so the systemInfo poll could
-   * never recover.
-   */
+  /** Origin polled with a no-cors fetch instead of systemInfo; any HTTP answer counts. */
   probeUrl?: string
   /** Where to send the browser on recovery when onReconnect === 'navigate'. */
   navigateTo?: string
 }
 
-/**
- * The single sticky toast shown while the router is unreachable. Its subtitle
- * tracks {@link ConnectionService.message} so callers can tailor the copy (e.g.
- * the SSID to rejoin) without spawning a second toast.
- */
+/** The single sticky toast shown while the router is unreachable; its subtitle is {@link ConnectionService.message}. */
 @Component({
   template: `
     <tui-loader size="m" [inheritColor]="true" />
@@ -78,15 +68,9 @@ class DisconnectedToast {
 }
 
 /**
- * Global owner of "router is unreachable" UX. Replaces the per-flow
- * RECONNECTING_DIALOG / ReconnectDialog modals and the old
- * NetworkRestartService.suppress() plumbing.
- *
- * Any network-level error (transport code 0) anywhere funnels here via
- * {@link reportUnreachable}; the first caller shows ONE sticky toast and starts
- * ONE cancelling poll loop, and concurrent callers (the ~15 background form
- * pollers) collapse into it. On recovery it dismisses the toast, confirms with
- * a single "Connection restored" toast, and runs the recovery intent.
+ * Owns the "Reconnecting" indicator. The first {@link reportUnreachable} of an
+ * outage opens one sticky toast and one poll loop; recovery closes both and
+ * runs the outage's recovery intent.
  */
 @Injectable({ providedIn: 'root' })
 export class ConnectionService {
@@ -141,18 +125,7 @@ export class ConnectionService {
     })
   }
 
-  /**
-   * Declare that an in-flight action is about to restart the network. Pre-seeds
-   * the indicator's (cosmetic) message so that whichever path next observes the
-   * drop — the action's own error or a background poller — shows the right copy.
-   * Shows nothing if connectivity survives the restart.
-   *
-   * Note: only the message is stashed, NOT the recovery intent. onReconnect is
-   * honored solely from the reportUnreachable() call that observes the drop, so
-   * a stale context can't trigger an unexpected reload (see reportUnreachable).
-   * The stash lives at most CONTEXT_TTL_MS; worst case is a slightly stale
-   * message on an unrelated blip in that window — harmless, clears on recover.
-   */
+  /** Supplies the message for an outage that starts within CONTEXT_TTL_MS. */
   expectDisruption(opts: DisruptionOptions = {}): void {
     this.pending = { message: opts.message }
     clearTimeout(this.pendingId)
@@ -162,34 +135,22 @@ export class ConnectionService {
     )
   }
 
-  /**
-   * Enter the unreachable state: show the sticky toast and poll until the router
-   * responds. Idempotent — extra calls while already unreachable only refine the
-   * message / recovery intent. No-op while {@link suppress}ed (a flow is owning
-   * reconnection itself, e.g. an OS update, or the page is navigating away).
-   */
+  /** Options a report leaves unset keep the active outage's values. */
   reportUnreachable(opts: DisruptionOptions = {}): void {
     if (this.suppressed) return
 
-    // Honor the recovery intent ONLY from the call that actually observed the
-    // drop — never inherited from a prior expectDisruption() context. Otherwise
-    // a background-poller blip within CONTEXT_TTL_MS of e.g. a Wi-Fi SSID change
-    // (whose caller armed 'reload') could reload the page out from under the
-    // user. The cosmetic message may still fall back to the pending context.
+    // Pending disruption context supplies copy, never recovery intent.
     if (opts.onReconnect) this.onReconnect = opts.onReconnect
-    // Set before the early-return below so a later/concurrent observer of the
-    // same drop can still register the success copy / recovery target. If a
-    // background poller armed the generic systemInfo poll first, setting
-    // probeUrl here switches the running poll over to the destination probe on
-    // its next tick.
     if (opts.successMessage) this.successMessage = opts.successMessage
     if (opts.probeUrl) this.probeUrl = opts.probeUrl
     if (opts.navigateTo) this.navigateTo = opts.navigateTo
-    this.message.set(
-      opts.message ||
-        this.pending?.message ||
-        this.i18n.transform('Trying to reach the router'),
-    )
+    if (opts.message || !this.unreachable()) {
+      this.message.set(
+        opts.message ||
+          this.pending?.message ||
+          this.i18n.transform('Trying to reach the router'),
+      )
+    }
 
     if (this.unreachable()) return
     this.unreachable.set(true)
@@ -251,20 +212,13 @@ export class ConnectionService {
   }
 
   private async poll(): Promise<void> {
-    // When a recovery target is armed, the current origin is gone — probe the
-    // destination cross-origin instead of systemInfo on a dead origin.
     if (this.probeUrl) {
       if (await this.reachable(this.probeUrl)) this.recover()
       return
     }
     try {
-      // The recovery probe doubles as stale-UI detection for disruptive
-      // updates (a sysupgrade reboot lands here once a request fails), and
-      // system.info is no_auth so the check works even when the update wiped
-      // the session. It is only a fallback: primary detection is the
-      // firmware metadata/header checked on every RPC response —
-      // a quick daemon restart (CLI deploy) never drops a request, so this
-      // path alone would miss it.
+      // Fallback stale-UI check after a reboot; every RPC response carries
+      // the primary one. system.info needs no sign-in.
       this.staleUi.check(await this.api.systemInfo(PROBE_TIMEOUT_MS))
     } catch (e) {
       // Still unreachable only on a network-level failure; any RPC/HTTP
@@ -277,25 +231,9 @@ export class ConnectionService {
     this.recover()
   }
 
-  /**
-   * Reachable = the router answered at all. A no-cors fetch resolves on ANY
-   * response (opaque) and rejects only on a DNS/TLS/connection failure, which
-   * is exactly the signal we want; we never read the body. The probe preserves
-   * the page's scheme (no mixed-content block) and the cert is reissued for the
-   * new IP and router.lan, so https validates once the router is back.
-   *
-   * Probes the tiny no-auth /static/local-root-ca.crt rather than the ~100KB SPA index
-   * so a 3s poll stays cheap.
-   *
-   * Edge case: an untrusted self-signed HTTPS target (a client that hasn't
-   * trusted this device's root CA) fails the background TLS handshake silently,
-   * so this never resolves for that target — handled by reconnectAt's fallback
-   * force-redirect (a top-level nav surfaces the cert prompt). http and
-   * root-CA-trusting clients recover here directly.
-   */
+  /** True when the origin answers at all; an untrusted certificate fails it silently. */
   private async reachable(url: string): Promise<boolean> {
-    // Mock has no real router to probe; treat the destination as reachable so
-    // the flow recovers (recover() skips the actual navigation under mock too).
+    // Mock mode answers every probe; recover() then skips the reload or navigation.
     if (this.isMock) return true
     try {
       await fetch(`${url}/static/local-root-ca.crt?_probe=${Date.now()}`, {

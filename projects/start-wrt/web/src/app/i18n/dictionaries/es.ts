@@ -605,4 +605,5 @@ export default {
   653: '{port} envía cada perfil de seguridad al switch etiquetado con su ID de VLAN. Configura las VLAN del switch con estos IDs.',
   654: '{profile} se superpone con la red superior {network}',
   655: 'El router puede perder el acceso a la red superior o a Internet. Una red WAN más específica también puede impedir que los dispositivos accedan a este panel. Cambie su subred a una fuera de esa red.',
+  656: 'El router no ha vuelto a estar disponible desde la actualización. Esta página se recargará cuando responda.',
 } satisfies i18n

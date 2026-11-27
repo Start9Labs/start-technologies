@@ -13,6 +13,7 @@ import {
   PROBE_TIMEOUT_MS,
 } from './connection.service'
 import { RpcSocketService } from '@start9labs/shared'
+import { WA_SESSION_STORAGE, WA_WINDOW } from '@ng-web-apis/common'
 import { StaleUiService } from './stale-ui.service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { fill } from 'src/app/i18n/validation-errors'
@@ -32,6 +33,8 @@ export class SystemService {
   private readonly sockets = inject(RpcSocketService)
   private readonly staleUi = inject(StaleUiService)
   private readonly i18n = inject(i18nPipe)
+  private readonly storage = inject(WA_SESSION_STORAGE)
+  private readonly window = inject(WA_WINDOW)
   private targetVersion = ''
 
   readonly info = signal<SystemInfoRes | null>(null)
@@ -58,9 +61,9 @@ export class SystemService {
 
   async init(): Promise<void> {
     // Confirmation deferred across the post-update reload in pollForReconnect.
-    const updatedTo = sessionStorage.getItem(UPDATED_TO_KEY)
+    const updatedTo = this.storage?.getItem(UPDATED_TO_KEY)
     if (updatedTo) {
-      sessionStorage.removeItem(UPDATED_TO_KEY)
+      this.storage?.removeItem(UPDATED_TO_KEY)
       this.alerts
         .open(
           fill(this.i18n.transform('Updated to v{version}'), {
@@ -94,7 +97,14 @@ export class SystemService {
     this.staleUi.check(info)
   }
 
+  canStartUpdate(): boolean {
+    return !this.updating() && !this.connection.unreachable()
+  }
+
   async startUpdate(targetVersion: string): Promise<void> {
+    if (!this.canStartUpdate()) {
+      throw new Error(this.i18n.transform('Failed to start update'))
+    }
     this.targetVersion = targetVersion
     this.updating.set(true)
     // Mute background FormService poll errors for the whole update window —
@@ -140,9 +150,6 @@ export class SystemService {
   }
 
   private onUpdateFailed(): void {
-    // A clean failure never reboots the device. Clearing `updating` (and
-    // leaving `rebooting` false) lets the progress dialog close without a
-    // spurious "Device is restarting…" flash; surface the error as a toast.
     this.updating.set(false)
     this.connection.resume()
     this.alerts
@@ -154,15 +161,11 @@ export class SystemService {
 
   private async pollForReconnect(): Promise<void> {
     const maxAttempts = 60
-    // A successful update reboots the device, so a poll throws a network
-    // error before it comes back; a failed update reaches here via
-    // a dropped progress stream without the device ever going unreachable.
     let wentOffline = false
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 5000))
       try {
         const info = await this.api.systemInfo(PROBE_TIMEOUT_MS)
-        // Device is reachable again.
         this.rebooting.set(false)
         this.connection.resume()
         if (wentOffline) {
@@ -170,19 +173,14 @@ export class SystemService {
             this.onUpdateFailed()
             return
           }
-          // It really rebooted — sysupgrade wiped the session store, so the
-          // user is headed to login either way. If the new firmware ships a
-          // different UI bundle, reload outright to land there on the NEW
-          // bundle (index.html revalidates its ETag, so the reload is
-          // guaranteed fresh); the confirmation toast rides sessionStorage
-          // across the reload and init() shows it after login.
+          // index.html revalidates its ETag; init() shows the confirmation
+          // after the reload.
           if (this.staleUi.isStale(info)) {
-            sessionStorage.setItem(UPDATED_TO_KEY, this.targetVersion)
-            window.location.reload()
+            this.storage?.setItem(UPDATED_TO_KEY, this.targetVersion)
+            this.window.location.reload()
             return
           }
-          // Same-bundle update (e.g. a re-flash): confirm success, then send
-          // the user to login rather than waiting for their next action to 401.
+          // Same UI bundle, as after a re-flash.
           this.alerts
             .open(
               fill(this.i18n.transform('Updated to v{version}'), {
@@ -193,8 +191,7 @@ export class SystemService {
             .subscribe()
           this.auth.setUnverified()
         } else {
-          // Never lost contact — the update failed before any reboot and the
-          // session is still valid. Just refresh.
+          // Never lost contact; the session is still valid.
           await this.init()
         }
         return
@@ -206,8 +203,14 @@ export class SystemService {
         // A non-network error means the device responded — keep polling.
       }
     }
-    // Timed out — user will need to refresh manually
     this.rebooting.set(false)
     this.connection.resume()
+    this.connection.reportUnreachable({
+      message: this.i18n.transform(
+        'The router has not come back since the update. This page reloads when it does.',
+      ),
+      probeUrl: this.window.location.origin,
+      onReconnect: 'reload',
+    })
   }
 }

@@ -77,7 +77,7 @@ const getTheme = (theme: string): Theme =>
               tuiButton
               appearance="positive"
               type="button"
-              [disabled]="system.updating()"
+              [disabled]="!system.canStartUpdate()"
               (click)="onUpdate()"
             >
               {{ 'Update now' | i18n }}

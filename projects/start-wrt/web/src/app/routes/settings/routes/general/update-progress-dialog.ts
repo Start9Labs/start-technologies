@@ -9,12 +9,8 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 import { SystemService } from 'src/app/services/system.service'
 
 /**
- * Blocking progress dialog for a system update. Owns the update lifecycle:
- * kicks off `SystemService.startUpdate` on open, shows a spinner through the
- * update and reboot, and closes itself once the device reconnects (or the
- * update fails to start). The OS-update flow owns its own reconnect handling
- * (see SystemService.pollForReconnect) rather than the global
- * ConnectionService indicator used by other network-disrupting actions.
+ * Blocking progress dialog for a system update. Starts the update on open and
+ * closes when it cannot start or once it has finished.
  */
 @Component({
   template: `
@@ -46,8 +42,7 @@ export class UpdateProgressDialog implements OnInit {
   private readonly i18n = inject(i18nPipe)
   protected readonly context = injectContext<TuiDialogContext<void, string>>()
 
-  // Latches once the update is underway, so the completion effect does not
-  // fire on the initial idle state before `startUpdate` flips `updating`.
+  // Set once the update is underway; the idle state before it never closes.
   private active = false
 
   constructor() {
@@ -63,6 +58,7 @@ export class UpdateProgressDialog implements OnInit {
 
   ngOnInit(): void {
     this.system.startUpdate(this.context.data).catch((e: any) => {
+      this.context.completeWith()
       this.alerts
         .open(e?.message || this.i18n.transform('Failed to start update'), {
           appearance: 'negative',
