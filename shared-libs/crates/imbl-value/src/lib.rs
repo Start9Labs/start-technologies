@@ -22,7 +22,7 @@ mod arbitrary;
 
 pub use imbl;
 pub use in_order_map::InOMap;
-pub use object::{InOrder, ObjectKind, ObjectMap, Sorted, ValueStr, ValueVector};
+pub use object::{InOrder, ObjectKind, ObjectMap, OrdObject, Sorted, ValueStr, ValueVector};
 pub use serde_json::{Error as ErrorSource, Number};
 pub use yasi::InternedString;
 
@@ -33,6 +33,8 @@ pub type Value = GenericValue<InOrder>;
 
 /// A JSON value whose objects keep keys sorted.
 pub type OrdValue = GenericValue<Sorted>;
+/// The array behind an [`OrdValue`] array.
+pub type OrdArray = ValueVector<Sorted>;
 
 #[derive(Debug)]
 pub enum ErrorKind {

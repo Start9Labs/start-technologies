@@ -89,7 +89,6 @@ extern crate imbl_value;
 use std::error::Error;
 use std::{fmt, mem};
 
-use imbl_value::imbl::OrdMap;
 use imbl_value::OrdValue;
 use json_ptr::{JsonPointer, SegList};
 use serde::{Deserialize, Serialize};
@@ -592,7 +591,7 @@ pub fn merge(doc: &mut OrdValue, patch: &OrdValue) {
     }
 
     if !doc.is_object() {
-        *doc = OrdValue::Object(OrdMap::new());
+        *doc = OrdValue::Object(Default::default());
     }
     let map = doc.as_object_mut().unwrap();
     for (key, value) in patch.as_object().unwrap() {

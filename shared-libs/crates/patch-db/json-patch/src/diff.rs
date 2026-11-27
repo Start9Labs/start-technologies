@@ -298,7 +298,7 @@ mod tests {
             from in proptest::collection::vec(proptest::prelude::any::<OrdValue>(), 0..12),
             edits in proptest::collection::vec((0usize..3, 0usize..16, proptest::prelude::any::<OrdValue>()), 0..8),
         ) {
-            let from: imbl_value::imbl::Vector<OrdValue> = from.into_iter().collect();
+            let from: imbl_value::OrdArray = from.into_iter().collect();
             let mut to = from.clone();
             for (kind, at, value) in edits {
                 match kind {

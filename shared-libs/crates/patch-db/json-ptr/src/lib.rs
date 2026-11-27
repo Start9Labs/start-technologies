@@ -5,7 +5,6 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Add, AddAssign, Bound, Range, RangeBounds};
 use std::str::FromStr;
 
-use imbl::Vector;
 use imbl_value::{GenericValue, InternedString, ObjectKind, ObjectMap};
 use thiserror::Error;
 
@@ -334,7 +333,7 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                         if let Some(next) = self.get_segment(idx + 1) {
                             if recursive {
                                 if next == "0" {
-                                    l.push_back(GenericValue::Array(Vector::new()));
+                                    l.push_back(GenericValue::Array(Default::default()));
                                 } else {
                                     l.push_back(GenericValue::Object(K::Map::default()))
                                 }
@@ -356,7 +355,7 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                                 if next == "0" {
                                     o.insert(
                                         InternedString::intern(seg),
-                                        GenericValue::Array(Vector::new()),
+                                        GenericValue::Array(Default::default()),
                                     );
                                 } else {
                                     o.insert(
@@ -390,7 +389,7 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                     if let Some(next) = self.get_segment(idx + 1) {
                         if num == l.len() && recursive {
                             if next == "0" {
-                                l.insert(num, GenericValue::Array(Vector::new()));
+                                l.insert(num, GenericValue::Array(Default::default()));
                             } else {
                                 l.insert(num, GenericValue::Object(K::Map::default()))
                             }
@@ -411,7 +410,7 @@ impl<S: AsRef<str>, V: SegList> JsonPointer<S, V> {
                                 if next == "0" {
                                     o.insert(
                                         InternedString::intern(seg),
-                                        GenericValue::Array(Vector::new()),
+                                        GenericValue::Array(Default::default()),
                                     );
                                 } else {
                                     o.insert(

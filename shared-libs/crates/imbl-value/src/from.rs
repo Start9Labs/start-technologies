@@ -86,8 +86,8 @@ impl From<InOMap<InternedString, Value>> for Value {
     }
 }
 
-impl From<<crate::Sorted as ObjectKind>::Map> for OrdValue {
-    fn from(value: <crate::Sorted as ObjectKind>::Map) -> Self {
+impl From<crate::OrdObject> for OrdValue {
+    fn from(value: crate::OrdObject) -> Self {
         Self::Object(value)
     }
 }

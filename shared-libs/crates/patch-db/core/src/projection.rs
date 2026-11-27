@@ -1,5 +1,4 @@
-use imbl_value::imbl::OrdMap;
-use imbl_value::OrdValue;
+use imbl_value::{OrdArray, OrdObject, OrdValue};
 use json_patch::{AddOperation, Patch, PatchOperation, ReplaceOperation};
 use json_ptr::JsonPointer;
 
@@ -153,7 +152,7 @@ impl Projection {
         }
         match value {
             OrdValue::Object(map) => {
-                let mut projected = OrdMap::new();
+                let mut projected = OrdObject::new();
                 for (key, child) in map.iter() {
                     path.push(key.to_string());
                     if self.reach(&segments(path)) != Reach::Out {
@@ -164,7 +163,7 @@ impl Projection {
                 OrdValue::Object(projected)
             }
             OrdValue::Array(items) => {
-                let mut projected = imbl_value::imbl::Vector::new();
+                let mut projected = OrdArray::new();
                 if self.cuts_below(&segments(path)) {
                     return OrdValue::Array(projected);
                 }

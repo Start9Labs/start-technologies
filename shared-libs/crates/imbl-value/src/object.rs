@@ -117,10 +117,13 @@ impl ObjectKind for InOrder {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Sorted {}
 
+/// The map behind an [`crate::OrdValue`] object.
+pub type OrdObject = GenericOrdMap<InternedString, GenericValue<Sorted>, SortedPtr>;
+
 impl ObjectKind for Sorted {
     type Ptr = SortedPtr;
     type Str = SortedStr;
-    type Map = GenericOrdMap<InternedString, GenericValue<Sorted>, SortedPtr>;
+    type Map = OrdObject;
 }
 
 impl<V: Clone> ObjectMap<V> for InOMap<InternedString, V> {
