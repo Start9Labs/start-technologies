@@ -5,16 +5,19 @@ import {
   InitializingComponent,
   TaskService,
 } from '@start9labs/shared'
-import { TuiButton } from '@taiga-ui/core'
+import { TuiButton, TuiNotification, TuiTitle } from '@taiga-ui/core'
+import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
 import { ApiService } from '../services/api.service'
 import { SetupObservation } from '../services/setup-observation'
 
 @Component({
   template: `
     @if (observation.error(); as err) {
-      <section>
-        <h1>{{ 'Error initializing server' | i18n }}</h1>
-        <p>{{ err }}</p>
+      <section tuiCardLarge>
+        <header tuiHeader>
+          <h1 tuiTitle>{{ 'Error initializing server' | i18n }}</h1>
+        </header>
+        <div tuiNotification appearance="negative">{{ err }}</div>
         <button tuiButton (click)="restart()">
           {{ 'Restart server' | i18n }}
         </button>
@@ -33,17 +36,21 @@ import { SetupObservation } from '../services/setup-observation'
     }
 
     section {
-      border-radius: 0.25rem;
-      padding: 1rem;
+      /* Overrides the setup wizard's global [tuiCardLarge] width. */
+      inline-size: auto;
       margin: 1.5rem;
-      text-align: center;
-      background: #e0e0e0;
-      color: #333;
-      --tui-background-neutral-1: rgba(0, 0, 0, 0.1);
     }
   `,
   providers: [SetupObservation],
-  imports: [InitializingComponent, TuiButton, i18nPipe],
+  imports: [
+    InitializingComponent,
+    TuiButton,
+    TuiNotification,
+    TuiTitle,
+    TuiCardLarge,
+    TuiHeader,
+    i18nPipe,
+  ],
 })
 export default class LoadingPage {
   private readonly api = inject(ApiService)
