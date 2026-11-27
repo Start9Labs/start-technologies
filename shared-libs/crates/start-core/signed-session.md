@@ -21,9 +21,10 @@ ingress policy. The request authority ranks an allowed candidate first; the veri
 proof determines the matched name. Dial-IP and proxy aliases do not change the
 client's selected signing identity. No query parameter selects a trusted context.
 
-There are two binary handshake records. Each record has a two-byte big-endian length
-and exactly two consecutive CBOR objects: a body followed by a structured proof.
-The record has at most 1,024 bytes, with CBOR nesting bounded at 16 levels. Extra
+There are two binary handshake records, or four after a retry answer. Each record has a
+two-byte big-endian length and exactly two consecutive CBOR objects: a body followed by a
+structured proof. A retry answer is the one exception: a single unsigned body. A record has
+at most 1,024 bytes, with CBOR nesting bounded at 16 levels. Extra
 objects, trailing data, duplicate/unknown fields and invalid binary lengths are
 rejected. Maps use text keys; admission values are untagged. Binary fields are definite
 CBOR byte strings, not Base64 or integer arrays. CBOR integers preserve the full
@@ -41,6 +42,9 @@ Each body has `protocol: "Start-RPC-Session"`, `version: 1` and a `hello` map:
    SHA-256 of the exact captured client record contents, excluding the length prefix.
    Provisional setup and diagnostic recovery without an account identity include signed
    `temporary: true`; committed account identities omit it. Missing `temporary` means false for existing-server compatibility.
+3. Server → client, unsigned and in place of the server hello: `role: "retry"` and
+   `timestamp`, the server's clock in Unix seconds as a CBOR integer. See the freshness
+   rules below.
 
 Temporary identities must not enter fingerprint history. Normal browser encrypted RPC and
 continuations reject them before sending application payloads; only explicit setup/init/diagnostic
@@ -79,20 +83,19 @@ authorization. Enrollment and revocation affect subsequent calls on the same ope
 connection. No callback receives unauthenticated plaintext as an admitted request.
 
 Each physical connection gets fresh DH keys, commitment and nonce. Client signing
-finishes before the 30-second network/admission deadline; provider handles may be
-reused, prepared hellos may not. The existing signed-timestamp freshness policy still
-applies while signing and connecting, and the server never relaxes it. When an opened
-browser connection fails before a complete answer record arrives, the browser reads the
-server's `Date` header. If that time differs from the one it signed with by more than half
-the tolerance, the browser forgets the offset it remembers for that host. For the RPC
-target it then signs one fresh hello on a new connection with the server's time. A GUID
-continuation is spent by its first upgrade, even when admission fails, and is never
-retried. Once an admission signed with a measured offset succeeds, later connections to
-that host start from that offset. The browser measures the offset again before opening a
-GUID continuation while one is remembered, and before any connection once the device clock
-has moved more than half the tolerance against its monotonic clock; a failed measurement
-fails that connection unopened. Native clients and the browser's signed HTTP requests sign
-with the local clock. The server signs only after validating the initiation.
+finishes before the 30-second network/admission deadline, except for the hello answering
+a retry, which signs within it; provider handles may be reused, prepared hellos may not. The existing signed-timestamp freshness policy still
+applies while signing and connecting, and the server never relaxes it. Clients sign with
+the local clock. A synchronized server that finds a hello valid except for its timestamp
+(`ClockSkew` from `accept_nonce`) answers with an unsigned retry record and accepts one more
+hello on the same socket within the handshake deadline; every other rejection, and a second
+timestamp rejection, drops the connection without a reply. A client that receives a retry
+answer signs one fresh hello, with a new ephemeral key and nonce, stamped with the server's
+`timestamp`, and reports a wrong device clock when that hello is rejected. The retry stays on
+the upgraded socket, so a GUID continuation survives it. An unsynchronized server never sends
+one. A forged retry time can only make the client sign a hello bound to its own ephemeral
+key; a rejected timestamp never reaches the nonce cache. HTTP request proofs sign with the
+local clock. The server signs only after validating the initiation.
 
 The first message exposes the client's public identity on `ws://`; `wss://` protects
 it. Private signing keys never travel. Identity proof is separate from enrollment,

@@ -12,3 +12,4 @@ release-notes: false
 - Preserve deployment URL prefixes ending in a slash for RPC and continuation calls.
 - Preserve logical HTTP hostnames and ports when `.local` resolution pins an encrypted RPC or continuation's dial address.
 - Warn on registry CLI server-identity changes without interrupting commands; remember the new verified key while preserving JSON output and exit status.
+- When this computer's clock is wrong, sign encrypted connections to StartOS, StartTunnel and registries again with the server's clock, and say the clock is wrong if the server still rejects it.
