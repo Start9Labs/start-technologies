@@ -1,3 +1,4 @@
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 use axum::body::Body;
@@ -26,6 +27,7 @@ const MAX_HEADER_LEN: usize = 4096;
 const NONCE_LEN: usize = 12;
 const TAG_LEN: usize = 16;
 const BASE32: base32::Alphabet = base32::Alphabet::Rfc4648 { padding: false };
+const MAX_BACKUP_BYTES: u64 = 256 << 20;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,6 +156,110 @@ pub struct BackupRestoreRes {
 }
 rpc_toolkit::reflect_ts!(BackupRestoreRes);
 
+fn is_activity_db_entry(path: &str) -> bool {
+    let p = path.trim_start_matches('/').trim_start_matches("./");
+    let p = p.trim_start_matches('/');
+    let db = |b| matches!(p.strip_prefix(b), Some("" | "-journal" | "-wal" | "-shm"));
+    db(crate::activity::ACTIVITY_DB.trim_start_matches('/'))
+        || db(crate::migrate::LEGACY_ACTIVITY_DB)
+}
+
+fn copy_gzip_bounded(archive: &[u8], out: &mut impl Write) -> Result<(), Error> {
+    let mut dec = flate2::read::MultiGzDecoder::new(archive).take(MAX_BACKUP_BYTES + 1);
+    match std::io::copy(&mut dec, out) {
+        Ok(n) if n > MAX_BACKUP_BYTES => Err(Error::new(
+            eyre!("Backup archive exceeds 256 MiB limit"),
+            ErrorKind::InvalidRequest,
+        )),
+        Ok(n) if n > 0 => Ok(()),
+        _ => Err(invalid_archive()),
+    }
+}
+
+fn strip_activity_db(archive: Zeroizing<Vec<u8>>) -> Result<Zeroizing<Vec<u8>>, Error> {
+    let mut raw = Zeroizing::new(Vec::new());
+    copy_gzip_bounded(&archive, &mut *raw)?;
+    strip_tar(archive, &raw).ok_or_else(invalid_archive)
+}
+
+fn strip_tar(archive: Zeroizing<Vec<u8>>, raw: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
+    let (mut kept, mut cur) = (Vec::new(), 0usize);
+    let mut tar = tar::Archive::new(Cursor::new(raw));
+    for entry in tar.entries_with_seek().ok()? {
+        let entry = entry.ok()?;
+        let ty = entry.header().entry_type();
+        let mut pos = usize::try_from(entry.raw_file_position()).ok()?;
+        let mut size = entry.size();
+        if ty.is_gnu_sparse() {
+            let mut ext = entry.header().as_gnu()?.is_extended();
+            while ext {
+                ext = raw.get(pos..pos.checked_add(512)?)?[504] == 1;
+                pos += 512;
+            }
+            size = entry.header().entry_size().ok()?;
+        }
+        let padded = usize::try_from(size.div_ceil(512).checked_mul(512)?).ok()?;
+        let end = pos.checked_add(padded)?;
+        (end >= cur && end <= raw.len()).then_some(())?;
+        let path = entry.path().ok()?;
+        if ty.is_pax_global_extensions() || !is_activity_db_entry(&path.to_string_lossy()) {
+            kept.push(&raw[cur..end]);
+        }
+        cur = end;
+    }
+    if kept.iter().map(|s| s.len()).sum::<usize>() == cur {
+        return Some(archive);
+    }
+    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    kept.iter().try_for_each(|s| enc.write_all(s)).ok()?;
+    enc.write_all(&[0u8; 1024]).ok()?;
+    Some(Zeroizing::new(enc.finish().ok()?))
+}
+
+async fn remove_temp_file(path: &Path) {
+    if let Err(e) = tokio::fs::remove_file(path).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!("failed to remove temporary backup {}: {e}", path.display());
+        }
+    }
+}
+
+async fn prepare_restore_archive(tmp: &Path, archive: Zeroizing<Vec<u8>>) -> Result<String, Error> {
+    let f = move || copy_gzip_bounded(&archive, &mut std::io::sink()).map(|_| archive);
+    let archive = tokio::task::spawn_blocking(f).await??;
+    startos::util::io::write_file_private_atomic(tmp, &*archive).await?;
+    let mut tar = Command::new("tar");
+    tar.arg("-tzf").arg(tmp);
+    if let Ok(out) = tar.invoke(ErrorKind::Filesystem.into()).await {
+        return Ok(String::from_utf8_lossy(&out).into_owned());
+    }
+    remove_temp_file(tmp).await;
+    Err(invalid_archive())
+}
+
+async fn apply_restore_preserving_activity<Fut: std::future::Future<Output = Result<(), Error>>>(
+    root: &Path,
+    tmp_path: &Path,
+    apply: impl FnOnce() -> Fut,
+) -> Result<(), Error> {
+    let quiesce = crate::activity::quiesce();
+    let before = match crate::activity::snapshot(root).await {
+        Ok(b) => b,
+        Err(e) => {
+            remove_temp_file(tmp_path).await;
+            return Err(e);
+        }
+    };
+    let applied = apply().await;
+    remove_temp_file(tmp_path).await;
+    let restored = before.restore(root).await;
+    drop(quiesce);
+    if let Err(e) = restored {
+        tracing::error!("failed to preserve activity log across restore: {e}");
+    }
+    applied
+}
+
 async fn encrypted_backup(password: String) -> Result<Vec<u8>, Error> {
     crate::auth::check_admin_password(&password).await?;
     let archive = Zeroizing::new(
@@ -162,7 +268,7 @@ async fn encrypted_backup(password: String) -> Result<Vec<u8>, Error> {
             .invoke(ErrorKind::Filesystem.into())
             .await?,
     );
-    tokio::task::spawn_blocking(move || encrypt(&archive, &password)).await?
+    tokio::task::spawn_blocking(move || encrypt(&strip_activity_db(archive)?, &password)).await?
 }
 
 async fn decrypted_archive(
@@ -307,56 +413,22 @@ async fn restore(
                                 Error::new(eyre!("Failed to read upload: {e}"), ErrorKind::Network)
                             })?;
 
-                    let archive = match decrypted_archive(body_bytes.into(), password).await {
-                        Ok(archive) => archive,
-                        Err(e) => {
-                            crate::activity::log(
-                                "backup",
-                                "restored",
-                                false,
-                                "Failed to restore config backup",
-                                Some(&e.to_string()),
-                            );
-                            return Err(e.into());
-                        }
-                    };
-
-                    let tmp_path = "/tmp/backup-restore.tar.gz";
-                    startos::util::io::write_file_private_atomic(tmp_path, &*archive)
-                        .await
-                        .map_err(Error::from)?;
-                    drop(archive);
-
-                    let Ok(listing) = Command::new("tar")
-                        .args(["-tzf", tmp_path])
-                        .invoke(ErrorKind::Filesystem.into())
-                        .await
-                    else {
-                        let _ = tokio::fs::remove_file(tmp_path).await;
-                        crate::activity::log(
-                            "backup",
-                            "restored",
-                            false,
-                            "Failed to restore config backup",
-                            Some("Invalid backup archive"),
-                        );
-                        return Err(Error::new(
-                            eyre!("Invalid backup archive"),
-                            ErrorKind::InvalidRequest,
-                        )
-                        .into());
-                    };
-
-                    let log_history = crate::logs::snapshot_history(Path::new("/")).await;
-
-                    let apply = Command::new("sysupgrade")
-                        .args(["--restore-backup", tmp_path])
-                        .invoke(ErrorKind::Filesystem.into())
-                        .await;
-
-                    let _ = tokio::fs::remove_file(tmp_path).await;
-
-                    if let Err(e) = apply {
+                    let (root, tmp) = (Path::new("/"), Path::new("/tmp/backup-restore.tar.gz"));
+                    let (listing, log_history) = async {
+                        let archive = decrypted_archive(body_bytes.into(), password).await?;
+                        let listing = prepare_restore_archive(tmp, archive).await?;
+                        let log_history = crate::logs::snapshot_history(root).await;
+                        let run = || async {
+                            let mut cmd = Command::new("sysupgrade");
+                            cmd.arg("--restore-backup").arg(tmp);
+                            cmd.invoke(ErrorKind::Filesystem.into()).await?;
+                            Ok(())
+                        };
+                        apply_restore_preserving_activity(root, tmp, run).await?;
+                        Ok::<_, Error>((listing, log_history))
+                    }
+                    .await
+                    .inspect_err(|e| {
                         crate::activity::log(
                             "backup",
                             "restored",
@@ -364,10 +436,8 @@ async fn restore(
                             "Failed to restore config backup",
                             Some(&e.to_string()),
                         );
-                        return Err(e.into());
-                    }
+                    })?;
 
-                    let listing = String::from_utf8_lossy(&listing);
                     if let Err(e) =
                         crate::migrate::forget_unless_restored(Path::new("/"), &listing).await
                     {
@@ -495,6 +565,10 @@ pub fn backup<C: Context>() -> ParentHandler<C> {
 
 #[cfg(test)]
 mod tests {
+    use flate2::read::MultiGzDecoder;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+
     use super::*;
 
     const ARCHIVE: &[u8] = b"\x1f\x8b\x08\x00 router settings and private keys";
@@ -598,5 +672,360 @@ mod tests {
         let backup = encrypt(ARCHIVE, PASSWORD).unwrap();
         let error = decrypted_archive(backup, None).await.unwrap_err();
         assert_eq!(error.kind, ErrorKind::IncorrectPassword);
+    }
+
+    fn build_tar_gz(entries: &[(&str, u32, Option<&str>, &[u8])]) -> Vec<u8> {
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        builder.preserve_absolute(true);
+        for &(path, mode, link_target, data) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_mode(mode);
+            if let Some(target) = link_target {
+                header.set_entry_type(tar::EntryType::Symlink);
+                header.set_size(0);
+                builder.append_link(&mut header, path, target).unwrap();
+            } else {
+                header.set_entry_type(tar::EntryType::Regular);
+                header.set_size(data.len() as u64);
+                builder.append_data(&mut header, path, data).unwrap();
+            }
+        }
+        builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn is_activity_db_entry_matches_current_legacy_and_sidecars() {
+        for path in [
+            "var/lib/startwrt/activity.db",
+            "./var/lib/startwrt/activity.db",
+            "/var/lib/startwrt/activity.db",
+            "/./var/lib/startwrt/activity.db",
+            "var/lib/startwrt/activity.db-journal",
+            "var/lib/startwrt/activity.db-wal",
+            "var/lib/startwrt/activity.db-shm",
+            "etc/startwrt/activity.db",
+            "./etc/startwrt/activity.db",
+            "/etc/startwrt/activity.db",
+            "etc/startwrt/activity.db-journal",
+            "etc/startwrt/activity.db-wal",
+            "etc/startwrt/activity.db-shm",
+        ] {
+            assert!(is_activity_db_entry(path), "should match {path}");
+        }
+        for path in [
+            "var/lib/startwrt/run-state",
+            "var/lib/startwrt/activity.db.bak",
+            "var/log/messages",
+            "etc/startwrt/activity.db.bak",
+            "etc/startwrt/auth.db",
+            "etc/config/system",
+        ] {
+            assert!(!is_activity_db_entry(path), "should not match {path}");
+        }
+    }
+
+    #[test]
+    fn encrypt_backup_omits_activity_db_and_preserves_other_entries() {
+        let long_path = format!("etc/startwrt/certs/{}.pem", "a".repeat(100));
+        let archive = build_tar_gz(&[
+            (
+                "etc/config/network",
+                0o644,
+                None,
+                b"config interface 'lan'\n",
+            ),
+            ("etc/shadow", 0o600, None, b"root:hash:0:0:99999:7:::\n"),
+            ("etc/localtime", 0o777, Some("/tmp/localtime"), b""),
+            (&long_path, 0o644, None, b"LONG-CERT"),
+            ("var/log/messages", 0o600, None, b"syslog line\n"),
+            ("var/lib/startwrt/activity.db", 0o644, None, b"sqlite-db"),
+            ("./var/lib/startwrt/activity.db-journal", 0o644, None, b"j"),
+            ("/var/lib/startwrt/activity.db-wal", 0o644, None, b"w"),
+            ("var/lib/startwrt/activity.db-shm", 0o644, None, b"s"),
+            ("etc/startwrt/activity.db", 0o644, None, b"legacy-db"),
+            ("etc/startwrt/activity.db-journal", 0o644, None, b"lj"),
+            ("/etc/startwrt/activity.db-wal", 0o644, None, b"lw"),
+            ("./etc/startwrt/activity.db-shm", 0o644, None, b"ls"),
+        ]);
+
+        let stripped = strip_activity_db(Zeroizing::new(archive)).unwrap();
+        let encrypted = encrypt(&stripped, PASSWORD).unwrap();
+        let decrypted = decrypt(&encrypted, PASSWORD).unwrap();
+
+        let mut tar = tar::Archive::new(MultiGzDecoder::new(decrypted.as_slice()));
+        let mut seen = Vec::new();
+        for entry in tar.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().into_owned();
+            let mode = entry.header().mode().unwrap();
+            let link = entry
+                .link_name()
+                .unwrap()
+                .map(|p| p.to_string_lossy().into_owned());
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).unwrap();
+            seen.push((path, mode, link, data));
+        }
+
+        let paths: Vec<&str> = seen.iter().map(|(p, _, _, _)| p.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "etc/config/network",
+                "etc/shadow",
+                "etc/localtime",
+                long_path.as_str(),
+                "var/log/messages",
+            ]
+        );
+        assert_eq!(seen[1].1, 0o600);
+        assert_eq!(seen[2].2.as_deref(), Some("/tmp/localtime"));
+        assert_eq!(seen[3].3, b"LONG-CERT");
+        assert_eq!(seen[4].3, b"syslog line\n");
+    }
+
+    #[test]
+    fn strip_activity_db_returns_unchanged_when_absent() {
+        let archive = build_tar_gz(&[("etc/config/system", 0o644, None, b"config system\n")]);
+        assert_eq!(
+            &*strip_activity_db(Zeroizing::new(archive.clone())).unwrap(),
+            &archive
+        );
+    }
+
+    fn gzip_bytes(raw: &[u8]) -> Vec<u8> {
+        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(raw).unwrap();
+        enc.finish().unwrap()
+    }
+
+    fn append_raw_member(out: &mut Vec<u8>, name: &str, ty: tar::EntryType, data: &[u8]) {
+        let mut header = tar::Header::new_ustar();
+        header.as_old_mut().name[..name.len()].copy_from_slice(name.as_bytes());
+        header.set_mode(0o644);
+        header.set_entry_type(ty);
+        header.set_size(data.len() as u64);
+        header.set_cksum();
+        out.extend_from_slice(header.as_bytes());
+        out.extend_from_slice(data);
+        let rem = data.len() % 512;
+        if rem != 0 {
+            out.resize(out.len() + (512 - rem), 0);
+        }
+    }
+
+    #[test]
+    fn strip_activity_db_preserves_gnu_sparse_entries() {
+        let mut raw = Vec::new();
+        append_raw_member(
+            &mut raw,
+            "etc/config/before",
+            tar::EntryType::Regular,
+            b"before",
+        );
+
+        let mut header = tar::Header::new_gnu();
+        header.set_path("etc/sparse.bin").unwrap();
+        header.set_mode(0o644);
+        header.set_entry_type(tar::EntryType::GNUSparse);
+        header.set_size(5 * 512);
+        {
+            let gnu = header.as_gnu_mut().unwrap();
+            for i in 0..4 {
+                gnu.sparse[i].set_offset((i as u64) * 1024);
+                gnu.sparse[i].set_length(512);
+            }
+            gnu.set_is_extended(true);
+            gnu.set_real_size(4608);
+        }
+        header.set_cksum();
+        raw.extend_from_slice(header.as_bytes());
+
+        let mut ext = tar::GnuExtSparseHeader::new();
+        ext.sparse_mut()[0].set_offset(4096);
+        ext.sparse_mut()[0].set_length(512);
+        ext.set_is_extended(false);
+        raw.extend_from_slice(ext.as_bytes());
+        for chunk in 0u8..5 {
+            raw.extend_from_slice(&[b'A' + chunk; 512]);
+        }
+
+        append_raw_member(
+            &mut raw,
+            "var/lib/startwrt/activity.db",
+            tar::EntryType::Regular,
+            b"stale-db",
+        );
+        append_raw_member(
+            &mut raw,
+            "etc/config/after",
+            tar::EntryType::Regular,
+            b"after",
+        );
+        raw.resize(raw.len() + 1024, 0);
+
+        let stripped = strip_activity_db(Zeroizing::new(gzip_bytes(&raw))).unwrap();
+        let mut tar = tar::Archive::new(MultiGzDecoder::new(stripped.as_slice()));
+        let mut seen = Vec::new();
+        for entry in tar.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().into_owned();
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).unwrap();
+            seen.push((path, data));
+        }
+
+        assert_eq!(seen.len(), 3);
+        assert_eq!(
+            seen[0],
+            ("etc/config/before".to_string(), b"before".to_vec())
+        );
+        assert_eq!(seen[1].0, "etc/sparse.bin");
+        assert_eq!(seen[1].1.len(), 4608);
+        assert_eq!(&seen[1].1[0..512], &[b'A'; 512]);
+        assert_eq!(&seen[1].1[512..1024], &[0u8; 512]);
+        assert_eq!(&seen[1].1[4096..4608], &[b'E'; 512]);
+        assert_eq!(seen[2], ("etc/config/after".to_string(), b"after".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn prepare_restore_archive_validates_and_cleans_up_invalid_archive() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+
+        let archive = build_tar_gz(&[(
+            "etc/config/system",
+            0o644,
+            None,
+            b"config system 'restored'\n",
+        )]);
+        let ok_path = tmp_dir.path().join("valid-restore.tar.gz");
+        let listing = prepare_restore_archive(&ok_path, Zeroizing::new(archive))
+            .await
+            .unwrap();
+        assert!(listing.contains("etc/config/system"));
+        assert!(ok_path.exists());
+
+        let mut enc = GzEncoder::new(Vec::new(), Compression::fast());
+        let chunk = vec![0u8; 1 << 20];
+        for _ in 0..(MAX_BACKUP_BYTES >> 20) {
+            enc.write_all(&chunk).unwrap();
+        }
+        enc.write_all(&[0u8]).unwrap();
+        let oversized = enc.finish().unwrap();
+
+        let err = strip_activity_db(Zeroizing::new(oversized.clone())).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert!(err
+            .to_string()
+            .contains("Backup archive exceeds 256 MiB limit"));
+
+        for (name, bytes, expected_msg) in [
+            (
+                "not-gzip.tar.gz",
+                b"not a tar.gz".to_vec(),
+                "Invalid backup archive",
+            ),
+            ("empty.tar.gz", gzip_bytes(b""), "Invalid backup archive"),
+            (
+                "non-tar.tar.gz",
+                gzip_bytes(&[b'x'; 1024]),
+                "Invalid backup archive",
+            ),
+            (
+                "oversized.tar.gz",
+                oversized,
+                "Backup archive exceeds 256 MiB limit",
+            ),
+        ] {
+            let bad_path = tmp_dir.path().join(name);
+            let err = prepare_restore_archive(&bad_path, Zeroizing::new(bytes))
+                .await
+                .unwrap_err();
+            assert_eq!(err.kind, ErrorKind::InvalidRequest, "case {name}");
+            assert!(
+                err.to_string().contains(expected_msg),
+                "case {name}: unexpected error {err}"
+            );
+            assert!(!bad_path.exists(), "case {name} left temp file behind");
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_restore_preserving_activity_handles_snapshot_apply_and_restore_failures() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let rel = crate::activity::ACTIVITY_DB.trim_start_matches('/');
+
+        // (a) snapshot fails (DB path is a directory): apply never runs, tmp_path removed, Err returned.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(rel)).unwrap();
+        let tmp = root.join("restore-a.tar.gz");
+        std::fs::write(&tmp, b"archive").unwrap();
+        let called = AtomicBool::new(false);
+        let err = apply_restore_preserving_activity(root, &tmp, || {
+            called.store(true, Ordering::SeqCst);
+            async { Ok(()) }
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Filesystem);
+        assert!(!called.load(Ordering::SeqCst));
+        assert!(!tmp.exists());
+        crate::activity::list(ServerContext::default(), Default::default())
+            .await
+            .unwrap();
+
+        // (b) apply fails after overwriting the DB: original DB is restored, tmp_path removed, apply Err returned.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db_path = root.join(rel);
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        std::fs::write(&db_path, b"original-db").unwrap();
+        let tmp = root.join("restore-b.tar.gz");
+        std::fs::write(&tmp, b"archive").unwrap();
+        let err = apply_restore_preserving_activity(root, &tmp, || async {
+            std::fs::write(&db_path, b"overwritten-db").unwrap();
+            Err(Error::new(
+                eyre!("sysupgrade failed"),
+                ErrorKind::Filesystem,
+            ))
+        })
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("sysupgrade failed"));
+        assert!(!tmp.exists());
+        assert_eq!(std::fs::read(&db_path).unwrap(), b"original-db");
+        crate::activity::list(ServerContext::default(), Default::default())
+            .await
+            .unwrap();
+
+        // (c) apply succeeds but restore fails (DB replaced by non-empty dir): logs error, returns Ok(()), and releases quiesce.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db_path = root.join(rel);
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        std::fs::write(&db_path, b"original-db").unwrap();
+        let tmp = root.join("restore-c.tar.gz");
+        std::fs::write(&tmp, b"archive").unwrap();
+        apply_restore_preserving_activity(root, &tmp, || async {
+            assert!(
+                crate::activity::list(ServerContext::default(), Default::default())
+                    .await
+                    .is_err()
+            );
+            std::fs::remove_file(&db_path).unwrap();
+            std::fs::create_dir_all(db_path.join("blocker")).unwrap();
+            std::fs::write(db_path.join("blocker/file"), b"x").unwrap();
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(db_path.is_dir());
+        assert!(!tmp.exists());
+        crate::activity::list(ServerContext::default(), Default::default())
+            .await
+            .unwrap();
     }
 }

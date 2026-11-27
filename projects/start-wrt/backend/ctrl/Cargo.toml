@@ -82,6 +82,7 @@ socket2 = { version = "0.6.0", features = ["all"] }
 startos = { package = "start-core", path = "../../../../shared-libs/crates/start-core" }
 strum = { version = "0.27.1", features = ["derive"] }
 syslog-tracing = "0.3"
+tar = "0.4.40"
 tempfile = "3.14.0"
 thiserror = "2.0.12"
 tokio = { version = "1.41.1", features = [

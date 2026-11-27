@@ -624,7 +624,7 @@ async fn expand_log_retention(root: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-const LEGACY_ACTIVITY_DB: &str = "etc/startwrt/activity.db";
+pub(crate) const LEGACY_ACTIVITY_DB: &str = "etc/startwrt/activity.db";
 
 /// Lines the follower wrote to the old file on this boot follow a log
 /// already at the new location. A log file other than the shipped one stays.
@@ -636,12 +636,12 @@ async fn store_logs_under_var(root: &Path) -> Result<(), Error> {
         move_file(&root.join(from), &root.join(to), Collision::Append).await?;
     }
     let _ = tokio::fs::remove_dir(root.join("etc/log")).await;
-    move_file(
-        &root.join(LEGACY_ACTIVITY_DB),
-        &root.join(crate::activity::ACTIVITY_DB.trim_start_matches('/')),
-        Collision::Keep,
-    )
-    .await?;
+    let src = LEGACY_ACTIVITY_DB;
+    let dst = crate::activity::ACTIVITY_DB.trim_start_matches('/');
+    if move_file(&root.join(src), &root.join(dst), Collision::Keep).await? {
+        let (jf, jt) = (format!("{src}-journal"), format!("{dst}-journal"));
+        move_file(&root.join(jf), &root.join(jt), Collision::Keep).await?;
+    }
 
     let arena = Arena::new();
     let mut cfgs = parse_all(uci_root(root), &arena, &["system"]).await?;
@@ -672,10 +672,10 @@ enum Collision {
 }
 
 /// A missing source is a no-op. Crosses filesystems.
-async fn move_file(from: &Path, to: &Path, collision: Collision) -> Result<(), Error> {
+async fn move_file(from: &Path, to: &Path, collision: Collision) -> Result<bool, Error> {
     match tokio::fs::symlink_metadata(from).await {
         Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e.into()),
     }
     if let Some(parent) = to.parent() {
@@ -683,23 +683,23 @@ async fn move_file(from: &Path, to: &Path, collision: Collision) -> Result<(), E
     }
     if tokio::fs::try_exists(to).await? {
         match collision {
-            Collision::Keep => return Ok(()),
+            Collision::Keep => return Ok(false),
             Collision::Append => {
                 let moved = tokio::fs::read(from).await?;
                 let mut dest = tokio::fs::OpenOptions::new().append(true).open(to).await?;
                 dest.write_all(&moved).await?;
                 dest.flush().await?;
                 tokio::fs::remove_file(from).await?;
-                return Ok(());
+                return Ok(true);
             }
         }
     }
     if tokio::fs::rename(from, to).await.is_ok() {
-        return Ok(());
+        return Ok(true);
     }
     tokio::fs::copy(from, to).await?;
     tokio::fs::remove_file(from).await?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -1165,6 +1165,40 @@ config forwarding
         assert!(!dir.path().join("etc/log").exists());
         assert_eq!(read(&dir, "var/lib/startwrt/activity.db"), "new");
         assert_eq!(read(&dir, LEGACY_ACTIVITY_DB), "old");
+    }
+
+    #[tokio::test]
+    async fn legacy_activity_journal_moves_only_with_legacy_db() {
+        let legacy_journal = format!("{LEGACY_ACTIVITY_DB}-journal");
+
+        // (a) Destination DB absent: both legacy DB and its rollback journal move to /var.
+        let dir = router(None, true);
+        write(&dir, "etc/config/system", SHIPPED_SYSTEM);
+        write(&dir, LEGACY_ACTIVITY_DB, "legacy-db");
+        write(&dir, &legacy_journal, "legacy-journal");
+        store_logs_under_var(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "var/lib/startwrt/activity.db"), "legacy-db");
+        assert_eq!(
+            read(&dir, "var/lib/startwrt/activity.db-journal"),
+            "legacy-journal"
+        );
+        assert!(!dir.path().join(LEGACY_ACTIVITY_DB).exists());
+        assert!(!dir.path().join(&legacy_journal).exists());
+
+        // (b) Destination DB already exists: neither legacy DB nor legacy journal is moved.
+        let dir = router(None, true);
+        write(&dir, "etc/config/system", SHIPPED_SYSTEM);
+        write(&dir, "var/lib/startwrt/activity.db", "live-db");
+        write(&dir, LEGACY_ACTIVITY_DB, "legacy-db");
+        write(&dir, &legacy_journal, "legacy-journal");
+        store_logs_under_var(dir.path()).await.unwrap();
+        assert_eq!(read(&dir, "var/lib/startwrt/activity.db"), "live-db");
+        assert!(!dir
+            .path()
+            .join("var/lib/startwrt/activity.db-journal")
+            .exists());
+        assert_eq!(read(&dir, LEGACY_ACTIVITY_DB), "legacy-db");
+        assert_eq!(read(&dir, &legacy_journal), "legacy-journal");
     }
 
     #[tokio::test]

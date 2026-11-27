@@ -326,6 +326,14 @@ fn list_conffiles(rootfs_mount: &str) -> HashSet<String> {
         }
     }
 
+    let legacy = format!("/{}", crate::migrate::LEGACY_ACTIVITY_DB);
+    for base in [crate::activity::ACTIVITY_DB, &legacy] {
+        for path in [base.to_string(), format!("{base}-journal")] {
+            if Path::new(&format!("{rootfs_mount}{path}")).is_file() {
+                files.insert(path);
+            }
+        }
+    }
     // Remove excluded files
     for exclude in CONFFILES_EXCLUDE {
         files.remove(*exclude);
@@ -1130,6 +1138,159 @@ Conffiles:
         let dir = TempDir::new().unwrap();
         let files = list_conffiles(dir.path().to_str().unwrap());
         assert!(files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn staged_keep_d_preserves_activity_db_on_update() {
+        let stage_script = include_str!("../../../build/stage-files.sh");
+        let keep_d_body = stage_script
+            .split("<< 'KEEPEOF'\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\nKEEPEOF").next())
+            .expect("KEEPEOF block in stage-files.sh");
+        assert!(
+            keep_d_body
+                .lines()
+                .any(|l| l.trim() == crate::activity::ACTIVITY_DB),
+            "stage-files.sh keep.d/startwrt must list {}",
+            crate::activity::ACTIVITY_DB
+        );
+
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let keep_d = root.join("lib/upgrade/keep.d");
+        fs::create_dir_all(&keep_d).unwrap();
+        fs::write(keep_d.join("startwrt"), keep_d_body).unwrap();
+
+        let activity_db = format!("{}{}", root.display(), crate::activity::ACTIVITY_DB);
+        crate::activity::log_to(
+            &activity_db,
+            "system",
+            "update",
+            true,
+            "Before update entry",
+            None,
+        );
+        fs::create_dir_all(root.join("etc/startwrt")).unwrap();
+        fs::write(root.join("etc/startwrt/auth.db"), "secret-auth").unwrap();
+
+        let files = list_conffiles(root.to_str().unwrap());
+        assert!(
+            files.contains(crate::activity::ACTIVITY_DB),
+            "staged keep.d/startwrt must keep {}",
+            crate::activity::ACTIVITY_DB
+        );
+        assert!(!files.contains(crate::auth::AUTH_DB_PATH));
+
+        let backup = backup_conffiles(root.to_str().unwrap());
+        let restore_dir = TempDir::new().unwrap();
+        restore_conffiles(restore_dir.path().to_str().unwrap(), &backup)
+            .await
+            .unwrap();
+
+        let restored_db = format!(
+            "{}{}",
+            restore_dir.path().display(),
+            crate::activity::ACTIVITY_DB
+        );
+        let conn = rusqlite::Connection::open(&restored_db).unwrap();
+        let summary: String = conn
+            .query_row("SELECT summary FROM activity LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(summary, "Before update entry");
+    }
+
+    #[tokio::test]
+    async fn list_conffiles_preserves_activity_db_from_older_image_without_keep_d_entry() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let keep_d = root.join("lib/upgrade/keep.d");
+        fs::create_dir_all(&keep_d).unwrap();
+        fs::write(keep_d.join("startwrt"), "/etc/startwrt/migrations\n").unwrap();
+
+        let activity_db = format!("{}{}", root.display(), crate::activity::ACTIVITY_DB);
+        let activity_journal = format!("{}-journal", crate::activity::ACTIVITY_DB);
+        crate::activity::log_to(
+            &activity_db,
+            "system",
+            "boot",
+            true,
+            "Older image activity entry",
+            None,
+        );
+        fs::write(format!("{}{activity_journal}", root.display()), b"journal").unwrap();
+
+        let files = list_conffiles(root.to_str().unwrap());
+        assert!(files.contains(crate::activity::ACTIVITY_DB));
+        assert!(files.contains(&activity_journal));
+
+        let backup = backup_conffiles(root.to_str().unwrap());
+        let restore_dir = TempDir::new().unwrap();
+        restore_conffiles(restore_dir.path().to_str().unwrap(), &backup)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fs::read(format!(
+                "{}{activity_journal}",
+                restore_dir.path().display()
+            ))
+            .unwrap(),
+            b"journal"
+        );
+        let restored_db = format!(
+            "{}{}",
+            restore_dir.path().display(),
+            crate::activity::ACTIVITY_DB
+        );
+        let conn = rusqlite::Connection::open(&restored_db).unwrap();
+        let summary: String = conn
+            .query_row("SELECT summary FROM activity LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(summary, "Older image activity entry");
+    }
+
+    #[tokio::test]
+    async fn list_conffiles_preserves_legacy_activity_db_and_journal_from_pre_1_3_image() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let keep_d = root.join("lib/upgrade/keep.d");
+        fs::create_dir_all(&keep_d).unwrap();
+        fs::write(keep_d.join("startwrt"), "/etc/startwrt/migrations\n").unwrap();
+
+        let legacy_path = format!("/{}", crate::migrate::LEGACY_ACTIVITY_DB);
+        let legacy_journal = format!("{legacy_path}-journal");
+        let legacy_db = format!("{}{legacy_path}", root.display());
+        crate::activity::log_to(
+            &legacy_db,
+            "system",
+            "boot",
+            true,
+            "Pre-1.3 activity entry",
+            None,
+        );
+        fs::write(format!("{}{legacy_journal}", root.display()), b"journal").unwrap();
+
+        let files = list_conffiles(root.to_str().unwrap());
+        assert!(files.contains(&legacy_path));
+        assert!(files.contains(&legacy_journal));
+
+        let backup = backup_conffiles(root.to_str().unwrap());
+        let restore_dir = TempDir::new().unwrap();
+        restore_conffiles(restore_dir.path().to_str().unwrap(), &backup)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fs::read(format!("{}{legacy_journal}", restore_dir.path().display())).unwrap(),
+            b"journal"
+        );
+        let restored_db = format!("{}{legacy_path}", restore_dir.path().display());
+        let conn = rusqlite::Connection::open(&restored_db).unwrap();
+        let summary: String = conn
+            .query_row("SELECT summary FROM activity LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(summary, "Pre-1.3 activity entry");
     }
 
     // ── backup / restore round-trip ──────────────────────────────────

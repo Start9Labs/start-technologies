@@ -371,6 +371,7 @@ async fn do_update(
         None,
     );
     write_pending_marker(target_ver);
+    let _quiesce = crate::activity::quiesce();
     // `sysupgrade` must survive cancellation of the daemon's update task.
     let status = Command::new("sysupgrade").arg(firmware_path).status().await;
     clear_pending_marker();
