@@ -14,7 +14,7 @@ Every server Start9 has sold, newest first: the Server One (6600H) — the only 
 - **Networking:** 1× Gigabit Ethernet, no Wi-Fi
 - **Ports:** 2× USB 3.0, 2× USB 2.0, 1× USB-C 3.1, 2× HDMI
 - **Power:** 19 V DC, 3.2 A minimum; shipped with a 19 V / 3.2 A supply and a C5/C6 mains cord
-- **Dimensions / weight:** 4.5″ × 4.2″ × 1.5″ (11.4 × 10.6 × 3.75 cm), 0.81 lb (0.37 kg)
+- **Dimensions / weight:** 4.5″ × 4.2″ × 1.6″ (11.4 × 10.6 × 4.0 cm), 0.81 lb (0.37 kg)
 - **Warranty:** 1 year
 - **Firmware:** manufacturer BIOS
 - **StartOS image:** x86_64, standard
@@ -33,7 +33,7 @@ Every server Start9 has sold, newest first: the Server One (6600H) — the only 
 - **Networking:** 1× Gigabit Ethernet, no Wi-Fi
 - **Ports:** 2× USB 3.0, 2× USB 2.0, 1× USB-C 3.1, 2× HDMI
 - **Power:** 19 V DC, 3.2 A minimum; most units shipped with a 19 V / 4.7 A supply and a C7/C8 mains cord
-- **Dimensions / weight:** 4.5″ × 4.2″ × 1.5″ (11.4 × 10.6 × 3.75 cm), 0.81 lb (0.37 kg)
+- **Dimensions / weight:** 4.5″ × 4.2″ × 1.6″ (11.4 × 10.6 × 4.0 cm), 0.81 lb (0.37 kg)
 - **Warranty:** 1 year
 - **Firmware:** manufacturer BIOS
 - **StartOS image:** x86_64, standard
