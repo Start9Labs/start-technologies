@@ -9786,6 +9786,13 @@ about.view-or-edit-injected-dns-records:
   fr_FR: "Voir ou modifier les enregistrements DNS injectés"
   pl_PL: "Wyświetl lub edytuj wstrzyknięte rekordy DNS"
 
+tunnel.web.already-initialized-disabled:
+  en_US: "The web interface is already initialized and currently disabled. To enable it, run: start-tunnel web enable"
+  de_DE: "Die Weboberfläche ist bereits initialisiert und derzeit deaktiviert. Zum Aktivieren führen Sie aus: start-tunnel web enable"
+  es_ES: "La interfaz web ya está inicializada y actualmente está deshabilitada. Para habilitarla, ejecute: start-tunnel web enable"
+  fr_FR: "L'interface web est déjà initialisée et actuellement désactivée. Pour l'activer, exécutez : start-tunnel web enable"
+  pl_PL: "Interfejs webowy jest już zainicjalizowany i obecnie wyłączony. Aby go włączyć, uruchom: start-tunnel web enable"
+
 tunnel.web.listen-port-forwarded:
   en_US: "An enabled plain port forward includes this listen port; disable or remove it, or use SNI hostnames first."
   de_DE: "Eine aktivierte einfache Portweiterleitung enthält diesen Port; deaktivieren oder entfernen Sie sie zuerst oder verwenden Sie SNI-Hostnamen."
