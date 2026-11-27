@@ -1,9 +1,8 @@
 # Overlays — dialogs, toasts, dropdowns, hints
 
-- **Dialogs — `TuiResponsiveDialogService`** (desktop dialog ↔ mobile sheet automatically; the
-  monorepo wraps it as `DialogService` in `@start9labs/shared` with i18n-typed
-  `openPrompt/openConfirm/openAlert/openComponent` — components there never call Taiga's service
-  directly). Flow:
+- **Dialogs — `TuiResponsiveDialogService`** (desktop dialog ↔ mobile sheet automatically). An
+  app may wrap it in a dialog service with i18n-typed prompt/confirm/alert/component openers;
+  where `FRONTEND.md` names one, components call it and never Taiga's service directly. Flow:
 
 ```ts
 // caller
@@ -38,7 +37,7 @@ page, with no wrapper dialog; the extra key needs the options cast to
 - **Toasts — `TuiNotificationService`** (`.open(msg, { appearance: 'positive' | 'negative', …
 }).subscribe()` fire-and-forget; `autoClose: 0` + `closable: false` for sticky states, content
   can be a `PolymorpheusComponent`). **Blocking loaders — `TuiNotificationMiddleService`**: hold
-  the subscription open, `unsubscribe()` in `finally` (that's what `TaskService` does).
+  the subscription open, `unsubscribe()` in `finally` (that's what an action wrapper does).
   Inline banners are `<div tuiNotification appearance="…">` (host-directive form, not the
   element form). A banner that asks for one of
   two choices is a `form`: the primary action is its default submit button and the alternative
@@ -59,21 +58,20 @@ page, with no wrapper dialog; the extra key needs the options cast to
 - **Hints**: `[tuiHint]` (template content allowed), tuned globally via `tuiHintOptionsProvider`.
   It goes on the control, `<button [tuiHint]="…"><tui-icon … /></button>`, never on the icon
   inside it, so the whole control shows it.
-- **Text from outside the OS never reaches Taiga as a raw string.** Taiga renders string
+- **Text from outside the app never reaches Taiga as a raw string.** Taiga renders string
   content — hint, dialog `label` and content, confirm, notification, `tui-error` — through
-  `[innerHTML]`. Text a package authors (spec descriptions, warnings, footnotes and pattern
-  descriptions, action descriptions and warnings, a long description) renders as sanitized
-  markdown, through the triple in components.md, in a template or component:
+  `[innerHTML]`. Text a third party authors (a plugin's or package's descriptions, warnings,
+  footnotes) renders as sanitized markdown, through the triple in components.md, in a template
+  or component:
   `<tui-icon [tuiTooltip]="tooltip"><ng-template #tooltip><div class="g-markdown" safeLinks [innerHTML]="hint | markdown | dompurify"></div></ng-template></tui-icon>`
   — nested, so an `@if` around it keeps a single root and the icon its textfield slot. Where
   only a string fits (`tui-error`), pass dompurified markdown and put `safeLinks` on the host.
-  A value the OS interpolates into its own message — a name, a title, a hostname, error text
-  — is plain text: interpolate it, or `escapeHtml` it inside OS-authored dialog markup, and
-  escape a templated label such as `displayAs` whole, after rendering. `DialogService`
-  escapes every `label` itself.
+  A value the app interpolates into its own message — a name, a title, a hostname, error text
+  — is plain text: interpolate it, or escape it inside app-authored dialog markup, and escape a
+  templated label whole, after rendering. A dialog wrapper escapes every `label` itself.
 - **Drawers/sheets**: `<tui-drawer *tuiPopup="open()" (click.self)="toggle(false)">` with
   URL-driven `open` state.
 - Dialogs close on route activation — `TUI_DIALOGS_CLOSE`'s default — so a dialog doesn't watch
   the router to close itself. The exception is a mobile sheet opened with `closable: false`,
-  which gates the token through `closable` and stays open. StartOS overrides the token to close
-  on a server crash too: app-level policy expressed as one token override.
+  which gates the token through `closable` and stays open. Further close triggers, such as a
+  server crash, are app-level policy expressed as one override of that token.

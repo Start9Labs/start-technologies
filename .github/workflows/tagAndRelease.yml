@@ -6,7 +6,6 @@ on:
       REFERENCE_REGISTRY:
         description: "Registry where published versions are permanent (used to check if a version is already taken). Defaults to the caller's REFERENCE_REGISTRY variable."
         type: string
-        default: ${{ vars.REFERENCE_REGISTRY }}
       FREE_DISK_SPACE:
         description: 'Free up disk space before building'
         type: boolean
@@ -14,19 +13,15 @@ on:
       RELEASE_REGISTRY:
         description: "Test registry to publish to. Defaults to the caller's RELEASE_REGISTRY variable."
         type: string
-        default: ${{ vars.RELEASE_REGISTRY }}
       S3_S9PKS_BASE_URL:
         description: "S3 base URL for package uploads. Defaults to the caller's S3_S9PKS_BASE_URL variable."
         type: string
-        default: ${{ vars.S3_S9PKS_BASE_URL }}
       REGISTRY_PROXY:
         description: "Proxy URL start-cli uses to reach the registries, e.g. socks5h://proxy.example:9050 for .onion registries. The proxy must already be reachable from the runner. Defaults to the caller's REGISTRY_PROXY variable."
         type: string
-        default: ${{ vars.REGISTRY_PROXY }}
       PACKAGE_READER_KEYS:
         description: "Public keys of the registry reader keys (`start-cli registry admin reader add`) that may read a private repository's package, one per line, in DER Base64 or PEM. Defaults to the caller's PACKAGE_READER_KEYS variable."
         type: string
-        default: ${{ vars.PACKAGE_READER_KEYS }}
     secrets:
       DEV_KEY:
         description: 'Developer signing key'
@@ -40,6 +35,11 @@ on:
       PACKAGES_TOKEN:
         description: "Forgejo token that can write the repository owner's packages; publishes a private repository's package on Forgejo without S3"
         required: false
+
+# A `vars` input default reaches nested workflows unevaluated on Forgejo's runner.
+env:
+  REFERENCE_REGISTRY: ${{ inputs.REFERENCE_REGISTRY || vars.REFERENCE_REGISTRY }}
+  REGISTRY_PROXY: ${{ inputs.REGISTRY_PROXY || vars.REGISTRY_PROXY }}
 
 jobs:
   Tag:
@@ -59,7 +59,7 @@ jobs:
       - name: Configure registry proxy
         uses: Start9Labs/start-technologies/.github/actions/configure-registry-proxy@master
         with:
-          proxy: ${{ inputs.REGISTRY_PROXY }}
+          proxy: ${{ env.REGISTRY_PROXY }}
 
       - name: Set up developer signing key
         uses: Start9Labs/start-technologies/.github/actions/configure-developer-key@master
@@ -76,7 +76,6 @@ jobs:
         run: |
           PACKAGE_ID="${{ steps.extract.outputs.package_id }}"
           VERSION="${{ steps.extract.outputs.version }}"
-          REFERENCE_REGISTRY="${{ inputs.REFERENCE_REGISTRY }}"
           if [ -z "$REFERENCE_REGISTRY" ]; then
             echo "::error::No reference registry: set the REFERENCE_REGISTRY variable or pass the input."
             exit 1

@@ -1107,8 +1107,15 @@ export const ENGLISH: Record<string, number> = {
   'Last synced': 1312,
   'just now': 1313,
   'Enter your master password to continue.': 1314,
-  'Provided by': 1315,
-  'Select a dependency provider': 1316,
-  'Lock provider': 1317,
-  'Unlock provider': 1318,
+  'Processor': 1315,
+  'Graphics': 1316, // as in, a graphics card
+  'Storage drive': 1317,
+  'Network adapter': 1318,
+  'Chipset': 1319,
+  'Sensor': 1320, // as in, a temperature sensor
+  'No temperature sensors found': 1321,
+  'Provided by': 1322,
+  'Select a dependency provider': 1323,
+  'Lock provider': 1324,
+  'Unlock provider': 1325,
 }
