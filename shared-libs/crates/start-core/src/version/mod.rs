@@ -95,31 +95,33 @@ pub(crate) use v0_4_1_2::retired_alpha_keys;
 pub type Current = v0_4_3::Version; // VERSION_BUMP
 
 impl Current {
+    /// Starts migrations from key-sorted objects, including legacy database files.
     #[instrument(skip(self, db))]
     pub async fn pre_init(self, db: &PatchDb) -> Result<(), Error> {
-        let mut dump = db.dump(&ROOT).await;
+        let mut dump = Value::from(db.dump(&ROOT).await.value);
         let from = from_value::<Version>(
-            version_accessor(&mut dump.value)
+            version_accessor(&mut dump)
                 .or_not_found("`version` in db")?
                 .clone(),
         )?
         .as_version_t()?;
         match from.semver().cmp(&self.semver()) {
             Ordering::Greater => {
-                db.apply_function(|mut db| {
+                db.apply_function(|db| {
+                    let mut db = Value::from(db);
                     rollback_to_unchecked(&from, &self, &mut db)?;
-                    Ok::<_, Error>((db, ()))
+                    Ok::<_, Error>((OrdValue::from(db), ()))
                 })
                 .await
                 .result?;
             }
             Ordering::Less | Ordering::Equal => {
                 let upgrade =
-                    Upgrade::load(&from, &self, applied_migration_revision(&mut dump.value)?)
-                        .await?;
-                db.apply_function(|mut db| {
+                    Upgrade::load(&from, &self, applied_migration_revision(&mut dump)?).await?;
+                db.apply_function(|db| {
+                    let mut db = Value::from(db);
                     upgrade.apply(&from, &self, &mut db)?;
-                    Ok::<_, Error>((to_value(&from_value::<Database>(db.clone())?)?, ()))
+                    Ok::<_, Error>((to_ord_value(&from_value::<Database>(db)?)?, ()))
                 })
                 .await
                 .result?;

@@ -36,7 +36,9 @@ pub fn run_migrations(db: &mut Model<TunnelDatabase>) -> Result<(), Error> {
     for migration in MIGRATIONS {
         let name = migration.name();
         if !migrations.contains(name) {
-            migration.action(ModelExt::as_value_mut(db))?;
+            let mut value = Value::from(std::mem::take(ModelExt::as_value_mut(db)));
+            migration.action(&mut value)?;
+            *ModelExt::as_value_mut(db) = OrdValue::from(value);
             migrations.insert(name.into());
         }
     }

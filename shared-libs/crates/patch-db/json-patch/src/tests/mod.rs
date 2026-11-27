@@ -11,7 +11,8 @@ use super::*;
 fn parse_from_value() {
     use PatchOperation::*;
 
-    let json = json!([{"op": "add", "path": "/a/b", "value": 1}, {"op": "remove", "path": "/c"}]);
+    let json =
+        ord_json!([{"op": "add", "path": "/a/b", "value": 1}, {"op": "remove", "path": "/c"}]);
     let patch: Patch = from_value(json).unwrap();
 
     assert_eq!(
@@ -19,7 +20,7 @@ fn parse_from_value() {
         Patch(vec![
             Add(AddOperation {
                 path: "/a/b".parse().unwrap(),
-                value: json!(1),
+                value: ord_json!(1),
             }),
             Remove(RemoveOperation {
                 path: "/c".parse().unwrap(),
@@ -45,7 +46,7 @@ fn parse_from_string() {
         Patch(vec![
             Add(AddOperation {
                 path: "/a/b".parse().unwrap(),
-                value: json!(1),
+                value: ord_json!(1),
             }),
             Remove(RemoveOperation {
                 path: "/c".parse().unwrap()
@@ -85,12 +86,12 @@ fn merge_tests() {
 
 #[test]
 fn many_ops_no_stack_overflow() {
-    let mut doc = json!({"items": {}});
+    let mut doc = ord_json!({"items": {}});
     let ops: Vec<PatchOperation> = (0..10_000)
         .map(|i| {
             PatchOperation::Add(AddOperation {
                 path: format!("/items/{i}").parse().unwrap(),
-                value: json!(i),
+                value: ord_json!(i),
             })
         })
         .collect();
@@ -101,20 +102,20 @@ fn many_ops_no_stack_overflow() {
 
 #[test]
 fn many_ops_undo_on_failure() {
-    let original = json!({"items": {}});
+    let original = ord_json!({"items": {}});
     let mut doc = original.clone();
     let mut ops: Vec<PatchOperation> = (0..1000)
         .map(|i| {
             PatchOperation::Add(AddOperation {
                 path: format!("/items/{i}").parse().unwrap(),
-                value: json!(i),
+                value: ord_json!(i),
             })
         })
         .collect();
     // Final op fails: test against a wrong value at a valid path
     ops.push(PatchOperation::Test(TestOperation {
         path: "/items/0".parse().unwrap(),
-        value: json!("wrong"),
+        value: ord_json!("wrong"),
     }));
     let p = Patch(ops);
     assert!(patch(&mut doc, &p).is_err());

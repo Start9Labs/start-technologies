@@ -921,7 +921,7 @@ mod tests {
         let s9pks: Vec<_> = s9pks.into_iter().map(|hw| json!([hw, null])).collect();
         (
             v.parse().unwrap(),
-            json!({ "releaseNotes": v, "s9pks": s9pks }).into(),
+            OrdValue::from(json!({ "releaseNotes": v, "s9pks": s9pks })).into(),
         )
     }
 
@@ -1002,7 +1002,7 @@ mod tests {
         let values = |entries: BTreeMap<VersionString, Model<PackageVersionInfo>>| {
             entries
                 .into_iter()
-                .map(|(version, info)| (version, Value::from(info)))
+                .map(|(version, info)| (version, OrdValue::from(info)))
                 .collect::<BTreeMap<_, _>>()
         };
         assert_eq!(values(actual), values(versions(expected)));
@@ -1104,7 +1104,7 @@ mod tests {
 
         let (_, info) = version_info_signed_by(1);
         let info = to_value(&info).unwrap();
-        let index: Model<PackageIndex> = json!({
+        let index: Model<PackageIndex> = imbl_value::ord_json!({
             "categories": {},
             "packages": { "demo": {
                 "authorized": {},
@@ -1185,7 +1185,7 @@ mod tests {
             [{ "arch": null, "ram": null, "device": [] }, to_value(&generic.s9pks[0].1).unwrap()],
             [{ "arch": ["x86_64"], "ram": null, "device": [] }, to_value(&native.s9pks[0].1).unwrap()],
         ]);
-        let mut index: Model<PackageIndex> = json!({
+        let mut index: Model<PackageIndex> = imbl_value::ord_json!({
             "categories": {},
             "packages": { "demo": {
                 "authorized": {}, "categories": [],
@@ -1250,7 +1250,7 @@ mod tests {
         first.s9pks[0].1.published_at = "2026-01-01T00:00:00Z".parse().unwrap();
         let (_, mut second) = version_info_signed_by(2);
         second.s9pks[0].1.published_at = "2026-03-01T00:00:00Z".parse().unwrap();
-        let index: Model<PackageIndex> = json!({
+        let index: Model<PackageIndex> = imbl_value::ord_json!({
             "categories": {},
             "packages": { "demo": {
                 "authorized": {},

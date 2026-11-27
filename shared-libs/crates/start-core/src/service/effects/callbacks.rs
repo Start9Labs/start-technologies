@@ -72,7 +72,7 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
         self: &Arc<Self>,
         key: K,
         watch: TypedDbWatch<T>,
-        mut relevant: impl FnMut(&Value) -> bool + Send + 'static,
+        mut relevant: impl FnMut(&OrdValue) -> bool + Send + 'static,
         handler: CallbackHandler,
     ) {
         self.inner.mutate(|map| {
@@ -93,7 +93,8 @@ impl<K: Ord + Clone + Send + Sync + 'static> DbWatchedCallbacks<K> {
                                     this.remove(&k).and_then(CallbackHandlers::detach_watcher)
                                 {
                                     if let Err(e) =
-                                        async { cbs.call((this.arguments)(value)?).await }.await
+                                        async { cbs.call((this.arguments)(value.into())?).await }
+                                            .await
                                     {
                                         tracing::error!("Error in {label} callback: {e}");
                                         tracing::debug!("{e:?}");
@@ -433,7 +434,7 @@ impl ServiceCallbacks {
         &self,
         package_id: PackageId,
         watch: TypedDbWatch<T>,
-        relevant: impl FnMut(&Value) -> bool + Send + 'static,
+        relevant: impl FnMut(&OrdValue) -> bool + Send + 'static,
         handler: CallbackHandler,
     ) {
         self.get_shared_volumes

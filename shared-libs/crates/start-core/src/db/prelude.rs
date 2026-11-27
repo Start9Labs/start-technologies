@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use imbl::OrdMap;
-pub use imbl_value::Value;
+use imbl_value::ObjectMap;
+pub use imbl_value::{GenericValue, ObjectKind, OrdValue, Value};
 use patch_db::value::InternedString;
 pub use patch_db::{HasModel, MutateResult, PatchDb};
 use serde::de::DeserializeOwned;
@@ -20,7 +21,14 @@ where
     patch_db::value::to_value(value).with_kind(ErrorKind::Serialization)
 }
 
-pub fn from_value<T>(value: Value) -> Result<T, Error>
+pub fn to_ord_value<T>(value: &T) -> Result<OrdValue, Error>
+where
+    T: Serialize,
+{
+    patch_db::value::to_ord_value(value).with_kind(ErrorKind::Serialization)
+}
+
+pub fn from_value<T>(value: GenericValue<impl ObjectKind>) -> Result<T, Error>
 where
     T: DeserializeOwned,
 {
@@ -29,11 +37,11 @@ where
 
 pub type TypedPatchDb<T> = patch_db::TypedPatchDb<T, Error>;
 
-/// &mut Model<T> <=> &mut Value
+/// &mut Model<T> <=> &mut OrdValue
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct Model<T> {
-    value: Value,
+    value: OrdValue,
     phantom: PhantomData<T>,
 }
 impl<T: DeserializeOwned> Model<T> {
@@ -43,10 +51,10 @@ impl<T: DeserializeOwned> Model<T> {
 }
 impl<T: Serialize> Model<T> {
     pub fn new(value: &T) -> Result<Self, Error> {
-        Ok(Self::from(to_value(value)?))
+        Ok(Self::from(to_ord_value(value)?))
     }
     pub fn ser(&mut self, value: &T) -> Result<(), Error> {
-        self.value = to_value(value)?;
+        self.value = to_ord_value(value)?;
         Ok(())
     }
 }
@@ -97,35 +105,35 @@ impl<T> Clone for Model<T> {
         }
     }
 }
-impl<T> From<Value> for Model<T> {
-    fn from(value: Value) -> Self {
+impl<T> From<OrdValue> for Model<T> {
+    fn from(value: OrdValue) -> Self {
         Self {
             value,
             phantom: PhantomData,
         }
     }
 }
-impl<T> From<Model<T>> for Value {
+impl<T> From<Model<T>> for OrdValue {
     fn from(value: Model<T>) -> Self {
         value.value
     }
 }
-impl<'a, T> From<&'a Value> for &'a Model<T> {
-    fn from(value: &'a Value) -> Self {
+impl<'a, T> From<&'a OrdValue> for &'a Model<T> {
+    fn from(value: &'a OrdValue) -> Self {
         unsafe { std::mem::transmute(value) }
     }
 }
-impl<'a, T> From<&'a Model<T>> for &'a Value {
+impl<'a, T> From<&'a Model<T>> for &'a OrdValue {
     fn from(value: &'a Model<T>) -> Self {
         unsafe { std::mem::transmute(value) }
     }
 }
-impl<'a, T> From<&'a mut Value> for &mut Model<T> {
-    fn from(value: &'a mut Value) -> Self {
+impl<'a, T> From<&'a mut OrdValue> for &mut Model<T> {
+    fn from(value: &'a mut OrdValue) -> Self {
         unsafe { std::mem::transmute(value) }
     }
 }
-impl<'a, T> From<&'a mut Model<T>> for &mut Value {
+impl<'a, T> From<&'a mut Model<T>> for &mut OrdValue {
     fn from(value: &'a mut Model<T>) -> Self {
         unsafe { std::mem::transmute(value) }
     }
@@ -163,7 +171,7 @@ impl<T> Model<Option<T>> {
         use patch_db::ModelExt;
         match opt {
             Some(a) => a.transmute(|a| a),
-            None => Self::from_value(Value::Null),
+            None => Self::from_value(OrdValue::Null),
         }
     }
 }
@@ -241,7 +249,7 @@ where
         use serde::ser::Error;
         let v = value.into_value();
         match &mut self.value {
-            Value::Object(o) => {
+            OrdValue::Object(o) => {
                 let prev = o.insert(T::key_string(key)?, v);
                 Ok(prev.map(|v| Model::from_value(v)))
             }
@@ -265,7 +273,7 @@ where
     {
         use serde::ser::Error;
         match &mut self.value {
-            Value::Object(o) => {
+            OrdValue::Object(o) => {
                 use patch_db::ModelExt;
                 let s = T::key_str(key)?;
                 let exists = o.contains_key(s.as_ref());
@@ -295,7 +303,7 @@ where
     pub fn keys(&self) -> Result<BTreeSet<T::Key>, Error> {
         use serde::de::Error;
         match &self.value {
-            Value::Object(o) => o
+            OrdValue::Object(o) => o
                 .keys()
                 .cloned()
                 .map(|k| Ok(T::Key::from_str(&*k)?))
@@ -312,7 +320,7 @@ where
         use patch_db::ModelExt;
         use serde::de::Error;
         match self.value {
-            Value::Object(o) => o
+            OrdValue::Object(o) => o
                 .into_iter()
                 .map(|(k, v)| Ok((T::Key::from_str(&*k)?, Model::from_value(v))))
                 .collect(),
@@ -327,7 +335,7 @@ where
         use patch_db::ModelExt;
         use serde::de::Error;
         match &self.value {
-            Value::Object(o) => o
+            OrdValue::Object(o) => o
                 .iter()
                 .map(|(k, v)| Ok((T::Key::from_str(&**k)?, Model::value_as(v))))
                 .collect(),
@@ -342,8 +350,8 @@ where
         use patch_db::ModelExt;
         use serde::de::Error;
         match &mut self.value {
-            Value::Object(o) => o
-                .iter_mut()
+            OrdValue::Object(o) => o
+                .entries_mut()
                 .map(|(k, v)| Ok((T::Key::from_str(&**k)?, Model::value_as_mut(v))))
                 .collect(),
             v => Err(patch_db::value::Error {
@@ -359,7 +367,7 @@ impl<T: Map> Model<T> {
         use serde::de::Error;
         let s = T::key_str(key)?;
         match &self.value {
-            Value::Object(o) => Ok(o.contains_key(s.as_ref())),
+            OrdValue::Object(o) => Ok(o.contains_key(s.as_ref())),
             v => Err(patch_db::value::Error {
                 source: patch_db::value::ErrorSource::custom(format!("expected object found {v}")),
                 kind: patch_db::value::ErrorKind::Deserialization,
@@ -371,7 +379,7 @@ impl<T: Map> Model<T> {
         use patch_db::ModelExt;
         let s = T::key_str(key).ok()?;
         match &self.value {
-            Value::Object(o) if o.contains_key(s.as_ref()) => Some(self.transmute(|v| {
+            OrdValue::Object(o) if o.contains_key(s.as_ref()) => Some(self.transmute(|v| {
                 use patch_db::value::index::Index;
                 s.as_ref().index_into_owned(v).unwrap()
             })),
@@ -382,7 +390,7 @@ impl<T: Map> Model<T> {
         use patch_db::ModelExt;
         let s = T::key_str(key).ok()?;
         match &self.value {
-            Value::Object(o) if o.contains_key(s.as_ref()) => Some(self.transmute_ref(|v| {
+            OrdValue::Object(o) if o.contains_key(s.as_ref()) => Some(self.transmute_ref(|v| {
                 use patch_db::value::index::Index;
                 s.as_ref().index_into(v).unwrap()
             })),
@@ -393,7 +401,7 @@ impl<T: Map> Model<T> {
         use patch_db::ModelExt;
         let s = T::key_str(key).ok()?;
         match &mut self.value {
-            Value::Object(o) if o.contains_key(s.as_ref()) => Some(self.transmute_mut(|v| {
+            OrdValue::Object(o) if o.contains_key(s.as_ref()) => Some(self.transmute_mut(|v| {
                 use patch_db::value::index::Index;
                 s.as_ref().index_or_insert(v)
             })),
@@ -403,7 +411,7 @@ impl<T: Map> Model<T> {
     pub fn remove(&mut self, key: &T::Key) -> Result<Option<Model<T::Value>>, Error> {
         use serde::ser::Error;
         match &mut self.value {
-            Value::Object(o) => {
+            OrdValue::Object(o) => {
                 let v = o.remove(T::key_str(key)?.as_ref());
                 Ok(v.map(patch_db::ModelExt::from_value))
             }
@@ -430,8 +438,8 @@ where
         let mut to_remove = Vec::new();
 
         match &mut self.value {
-            Value::Object(o) => {
-                for (k, v) in o.iter_mut() {
+            OrdValue::Object(o) => {
+                for (k, v) in o.entries_mut() {
                     let key = T::Key::from_str(&**k)?;
                     if !f(&key, patch_db::ModelExt::value_as_mut(v))? {
                         to_remove.push(k.clone());
@@ -451,7 +459,7 @@ where
         }
 
         // Remove entries that didn't pass the filter
-        if let Value::Object(o) = &mut self.value {
+        if let OrdValue::Object(o) = &mut self.value {
             for k in to_remove {
                 o.remove(&k);
             }

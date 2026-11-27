@@ -44,7 +44,6 @@ use crate::tunnel::forward::address::ForwardAddress;
 use crate::tunnel::migrations::run_migrations;
 use crate::tunnel::wg::{WIREGUARD_INTERFACE_NAME, WgServer, current_ifindex};
 use crate::util::Invoke;
-use crate::util::collections::OrdMapIterMut;
 use crate::util::sync::{SyncMutex, Watch};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Parser)]
@@ -329,7 +328,7 @@ impl TunnelContext {
         let net_iface = db
             .mutate(|db| {
                 db.as_gateways_mut().mutate(|g| {
-                    for (_, v) in OrdMapIterMut::from(&mut *g) {
+                    for (_, v) in g.iter_mut() {
                         v.ip_info = None;
                     }
                     for (id, info) in ip_info {

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::ops::Deref;
 
-use imbl_value::Value;
+use imbl_value::OrdValue;
 use json_patch::{AddOperation, Patch, PatchOperation, RemoveOperation, ReplaceOperation};
 use json_ptr::{JsonPointer, SegList};
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ impl Revision {
 #[cfg_attr(feature = "reflect", derive(visit_rs::VisitFields))]
 pub struct Dump {
     pub id: u64,
-    pub value: Value,
+    pub value: OrdValue,
 }
 
 /// What a subscriber lacks: the whole value, or the revisions since its last one
@@ -54,7 +54,7 @@ impl DiffPatch {
         self.0.prepend(ptr)
     }
 
-    pub fn add(value: Value) -> Self {
+    pub fn add(value: OrdValue) -> Self {
         DiffPatch(Patch(vec![PatchOperation::Add(AddOperation {
             path: JsonPointer::default(),
             value,
@@ -277,6 +277,6 @@ impl Deref for DiffPatch {
     }
 }
 
-pub fn diff(left: &Value, right: &Value) -> DiffPatch {
+pub fn diff(left: &OrdValue, right: &OrdValue) -> DiffPatch {
     DiffPatch(json_patch::diff(left, right))
 }

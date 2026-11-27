@@ -51,7 +51,6 @@ use crate::net::port_map::{probe, upnp};
 use crate::net::transport::{Transport, TransportProtocol};
 use crate::net::utils::ipv6_is_link_local;
 use crate::prelude::*;
-use crate::util::collections::OrdMapIterMut;
 use crate::util::sync::{SyncMutex, Watch};
 
 /// Refresh cadence for active mappings and backoff-eligible retries.
@@ -454,7 +453,7 @@ fn report(
     let now = Utc::now();
     interfaces.send_if_modified(|m| {
         let mut changed = false;
-        for (_, info) in OrdMapIterMut::from(m) {
+        for (_, info) in m.iter_mut() {
             if candidate_gateways(info).iter().any(|(g, _)| *g == gw) {
                 changed |= update(&mut info.port_map, now);
             }
@@ -471,7 +470,7 @@ fn report_local(
     let now = Utc::now();
     interfaces.send_if_modified(|m| {
         let mut changed = false;
-        for (_, info) in OrdMapIterMut::from(m) {
+        for (_, info) in m.iter_mut() {
             let owns = info
                 .ip_info
                 .as_ref()

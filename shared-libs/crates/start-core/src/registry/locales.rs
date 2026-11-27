@@ -216,10 +216,10 @@ mod tests {
                 )
                 .await
                 .value,
-            json!("ノート")
+            imbl_value::ord_json!("ノート")
         );
 
-        let admins = json!([crate::rpc_continuations::Guid::new()]);
+        let admins = imbl_value::ord_json!([crate::rpc_continuations::Guid::new()]);
         db.put(&"/admins".parse::<JsonPointer>().unwrap(), &admins)
             .await
             .unwrap();

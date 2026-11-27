@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use imbl_value::{json, Value};
+use imbl_value::{ord_json, OrdValue};
 use json_ptr::{JsonPointer, ROOT};
 use patch_db::{Catchup, DiffPatch, Error, JsonCatchup, PatchDb, Revision};
 use proptest::prelude::*;
@@ -25,7 +25,7 @@ async fn init_db(db_name: String) -> PatchDb {
     let db = PatchDb::open(db_name).await.unwrap();
     db.put(
         &JsonPointer::<&'static str>::default(),
-        &json!({
+        &ord_json!({
             "a": "test1",
             "b": {
                 "a": "test2",
@@ -59,7 +59,7 @@ async fn basic() {
     let path = unique_db_path("basic");
     let db = init_db(path.clone()).await;
     let ptr: JsonPointer = "/b/b".parse().unwrap();
-    let mut get_res: Value = db.get(&ptr).await.unwrap();
+    let mut get_res: OrdValue = db.get(&ptr).await.unwrap();
     assert_eq!(get_res.as_u64(), Some(1));
     db.put(&ptr, "hello").await.unwrap();
     get_res = db.get(&ptr).await.unwrap();
@@ -73,7 +73,7 @@ async fn catch_up_replays_scoped_revisions_within_its_epoch() {
     let db = PatchDb::in_memory();
     db.put(
         &ROOT,
-        &json!({ "public": { "a": 1 }, "private": { "b": 1 } }),
+        &ord_json!({ "public": { "a": 1 }, "private": { "b": 1 } }),
     )
     .await
     .unwrap();
@@ -100,7 +100,7 @@ async fn catch_up_replays_scoped_revisions_within_its_epoch() {
     assert_eq!(revisions.iter().map(|rev| rev.id).collect::<Vec<_>>(), [3]);
     let mut value = dump.value;
     json_patch::patch(&mut value, &revisions[0].patch).unwrap();
-    assert_eq!(value, json!({ "a": 2 }));
+    assert_eq!(value, ord_json!({ "a": 2 }));
 
     let (_, catchup, _) = db.catch_up_and_sub(public.clone(), Some((&epoch, 4))).await;
     assert!(matches!(catchup, Catchup::Replay { id: 4, revisions } if revisions.is_empty()));
@@ -120,7 +120,7 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
     let db = PatchDb::in_memory();
     db.put(
         &ROOT,
-        &json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
+        &ord_json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
     )
     .await
     .unwrap();
@@ -132,7 +132,7 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
     let Catchup::Dump(dump) = catchup else {
         panic!("expected a dump")
     };
-    assert_eq!(dump.value, json!({ "x": { "state": 1 } }));
+    assert_eq!(dump.value, ord_json!({ "x": { "state": 1 } }));
     assert_eq!(
         db.dump_projected(&pkgs, &projection).await.value,
         dump.value
@@ -146,7 +146,7 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
         .unwrap();
     db.put(
         &"/pkgs/y".parse::<JsonPointer>().unwrap(),
-        &json!({ "state": 2, "icon": "big" }),
+        &ord_json!({ "state": 2, "icon": "big" }),
     )
     .await
     .unwrap();
@@ -155,7 +155,10 @@ async fn projected_subscriptions_dump_replay_and_stream_only_their_projection() 
     assert_eq!(shared.recv().await.unwrap().id, 3);
     let mut value = dump.value.clone();
     json_patch::patch(&mut value, &streamed.patch).unwrap();
-    assert_eq!(value, json!({ "x": { "state": 1 }, "y": { "state": 2 } }));
+    assert_eq!(
+        value,
+        ord_json!({ "x": { "state": 1 }, "y": { "state": 2 } })
+    );
 
     let (_, catchup, _) = db
         .catch_up_and_sub_projected(pkgs, projection, Some((&epoch, dump.id)))
@@ -174,7 +177,7 @@ async fn reprojection_sends_what_it_adds_before_later_revisions() {
     let db = PatchDb::in_memory();
     db.put(
         &ROOT,
-        &json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
+        &ord_json!({ "pkgs": { "x": { "state": 1, "icon": "big" } }, "other": 0 }),
     )
     .await
     .unwrap();
@@ -187,7 +190,7 @@ async fn reprojection_sends_what_it_adds_before_later_revisions() {
         panic!("expected a dump")
     };
     let mut replica = dump.value;
-    assert_eq!(replica, json!({ "x": { "state": 1 } }));
+    assert_eq!(replica, ord_json!({ "x": { "state": 1 } }));
 
     db.put(&"/pkgs/x/icon".parse::<JsonPointer>().unwrap(), &"bigger")
         .await
@@ -201,13 +204,19 @@ async fn reprojection_sends_what_it_adds_before_later_revisions() {
     };
     assert_eq!(extension.id, 2);
     json_patch::patch(&mut replica, &extension.patch).unwrap();
-    assert_eq!(replica, json!({ "x": { "state": 1, "icon": "bigger" } }));
+    assert_eq!(
+        replica,
+        ord_json!({ "x": { "state": 1, "icon": "bigger" } })
+    );
     let Update::Revision(revision) = sub.receiver.recv().await.unwrap() else {
         panic!("expected a revision")
     };
     assert_eq!(revision.id, 3);
     json_patch::patch(&mut replica, &revision.patch).unwrap();
-    assert_eq!(replica, json!({ "x": { "state": 1, "icon": "biggest" } }));
+    assert_eq!(
+        replica,
+        ord_json!({ "x": { "state": 1, "icon": "biggest" } })
+    );
 
     assert!(db.reproject(sub.id, states).await);
     let Update::Extend(narrowed) = sub.receiver.recv().await.unwrap() else {
@@ -232,9 +241,12 @@ async fn reprojection_sends_what_it_adds_before_later_revisions() {
 #[tokio::test]
 async fn json_catch_up_replays_within_its_epoch_and_streams_later_revisions() {
     let db = PatchDb::in_memory();
-    db.put(&ROOT, &json!({ "index": { "package": {} }, "other": 0 }))
-        .await
-        .unwrap();
+    db.put(
+        &ROOT,
+        &ord_json!({ "index": { "package": {} }, "other": 0 }),
+    )
+    .await
+    .unwrap();
     let index: JsonPointer = "/index".parse().unwrap();
     let capacity = NonZeroUsize::new(8).unwrap();
     let (epoch, catchup, _) = db
@@ -309,17 +321,17 @@ async fn in_memory_handles_share_state_and_independent_databases_do_not() {
     let db = PatchDb::in_memory();
     let dump = db.dump(&ROOT).await;
     assert_eq!(dump.id, 0);
-    assert_eq!(dump.value, Value::Null);
+    assert_eq!(dump.value, OrdValue::Null);
 
     let other = PatchDb::in_memory();
     let clone = db.clone();
     let mut sub = clone.subscribe(ROOT.to_owned()).await;
     db.close().await;
-    clone.put(&ROOT, &json!({"count": 1})).await.unwrap();
-    assert_eq!(clone.get_value(&ROOT).await, json!({"count": 1}));
+    clone.put(&ROOT, &ord_json!({"count": 1})).await.unwrap();
+    assert_eq!(clone.get_value(&ROOT).await, ord_json!({"count": 1}));
     assert_eq!(sub.try_recv().unwrap().id, 1);
     assert_eq!(other.sequence().await, 0);
-    assert_eq!(other.get_value(&ROOT).await, Value::Null);
+    assert_eq!(other.get_value(&ROOT).await, OrdValue::Null);
     clone.close().await;
     assert!(matches!(
         sub.try_recv(),
@@ -328,21 +340,21 @@ async fn in_memory_handles_share_state_and_independent_databases_do_not() {
 
     let fresh = PatchDb::in_memory();
     assert_eq!(fresh.sequence().await, 0);
-    assert_eq!(fresh.get_value(&ROOT).await, Value::Null);
+    assert_eq!(fresh.get_value(&ROOT).await, OrdValue::Null);
 }
 
 #[tokio::test]
 async fn in_memory_subscriptions_watches_and_noops() {
     let db = PatchDb::in_memory();
-    db.put(&ROOT, &json!({"count": 0, "other": true}))
+    db.put(&ROOT, &ord_json!({"count": 0, "other": true}))
         .await
         .unwrap();
     let ptr: JsonPointer = "/count".parse().unwrap();
     let (dump, mut sub) = db.dump_and_sub(ptr.clone()).await;
     assert_eq!(dump.id, 1);
-    assert_eq!(dump.value, json!(0));
+    assert_eq!(dump.value, ord_json!(0));
     let mut watch = db.watch(ptr.clone()).await;
-    assert_eq!(watch.peek_and_mark_seen().unwrap(), json!(0));
+    assert_eq!(watch.peek_and_mark_seen().unwrap(), ord_json!(0));
 
     let revision = db.put(&ptr, &1).await.unwrap().unwrap();
     assert_eq!(revision.id, 2);
@@ -350,8 +362,8 @@ async fn in_memory_subscriptions_watches_and_noops() {
     assert_eq!(scoped.id, 2);
     let mut scoped_value = dump.value;
     json_patch::patch(&mut scoped_value, &scoped.patch).unwrap();
-    assert_eq!(scoped_value, json!(1));
-    assert_eq!(watch.peek().unwrap(), json!(1));
+    assert_eq!(scoped_value, ord_json!(1));
+    assert_eq!(watch.peek().unwrap(), ord_json!(1));
 
     assert!(db.put(&ptr, &1).await.unwrap().is_none());
     assert_eq!(db.sequence().await, 2);
@@ -366,7 +378,7 @@ async fn in_memory_subscriptions_watches_and_noops() {
         sub.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
     ));
-    assert_eq!(watch.peek().unwrap(), json!(1));
+    assert_eq!(watch.peek().unwrap(), ord_json!(1));
     assert!(db.exists(&ptr).await);
     assert_eq!(db.get::<u64, _, _>(&ptr).await.unwrap(), 1);
     assert_eq!(db.keys(&ROOT).await.len(), 2);
@@ -375,10 +387,10 @@ async fn in_memory_subscriptions_watches_and_noops() {
 #[tokio::test]
 async fn in_memory_failed_mutations_preserve_state_and_revision() {
     let db = PatchDb::in_memory();
-    let initial = json!({"count": 1});
+    let initial = ord_json!({"count": 1});
     db.put(&ROOT, &initial).await.unwrap();
     let mut sub = db.subscribe(ROOT.to_owned()).await;
-    let patch: DiffPatch = imbl_value::from_value(json!([
+    let patch: DiffPatch = imbl_value::from_value(ord_json!([
         {"op": "replace", "path": "/count", "value": 2},
         {"op": "remove", "path": "/missing"}
     ]))
@@ -386,12 +398,12 @@ async fn in_memory_failed_mutations_preserve_state_and_revision() {
     assert!(db.apply(patch).await.is_err());
 
     let failed = db
-        .apply_function(|_| Err::<(Value, ()), _>(Error::NodeDoesNotExist(ROOT.to_owned())))
+        .apply_function(|_| Err::<(OrdValue, ()), _>(Error::NodeDoesNotExist(ROOT.to_owned())))
         .await;
     assert!(failed.result.is_err());
     assert!(failed.revision.is_none());
     let panicked = db
-        .apply_function(|_| -> Result<(Value, ()), Error> { panic!("mutation panic") })
+        .apply_function(|_| -> Result<(OrdValue, ()), Error> { panic!("mutation panic") })
         .await;
     assert!(matches!(panicked.result, Err(Error::Panic(_))));
     assert!(panicked.revision.is_none());
@@ -407,18 +419,21 @@ async fn in_memory_failed_mutations_preserve_state_and_revision() {
 async fn in_memory_function_mutations() {
     let db = PatchDb::in_memory();
     let applied = db
-        .apply_function(|_| Ok::<_, Error>((json!({"count": 1}), "applied")))
+        .apply_function(|_| Ok::<_, Error>((ord_json!({"count": 1}), "applied")))
         .await;
-    assert_eq!(applied.result.unwrap(), (json!({"count": 1}), "applied"));
+    assert_eq!(
+        applied.result.unwrap(),
+        (ord_json!({"count": 1}), "applied")
+    );
     assert_eq!(applied.revision.unwrap().id, 1);
     let (value, result) = db
         .run_idempotent(|value| async move {
-            assert_eq!(value, json!({"count": 1}));
-            Ok::<_, Error>((json!({"count": 2}), "updated"))
+            assert_eq!(value, ord_json!({"count": 1}));
+            Ok::<_, Error>((ord_json!({"count": 2}), "updated"))
         })
         .await
         .unwrap();
-    assert_eq!(value, json!({"count": 2}));
+    assert_eq!(value, ord_json!({"count": 2}));
     assert_eq!(result, "updated");
     assert_eq!(db.sequence().await, 2);
     assert_eq!(db.get_value(&ROOT).await, value);
@@ -432,7 +447,7 @@ async fn write_past_compaction_boundary(db: &PatchDb) {
         );
     }
     assert_eq!(db.sequence().await, 4097);
-    assert_eq!(db.get_value(&ROOT).await, json!(4097));
+    assert_eq!(db.get_value(&ROOT).await, ord_json!(4097));
 }
 
 #[tokio::test]
@@ -449,7 +464,7 @@ async fn file_storage_reopens_after_compaction() {
     db.close().await;
     let reopened = PatchDb::open(&path).await.unwrap();
     assert_eq!(reopened.sequence().await, 4097);
-    assert_eq!(reopened.get_value(&ROOT).await, json!(4097));
+    assert_eq!(reopened.get_value(&ROOT).await, ord_json!(4097));
     assert_eq!(reopened.put(&ROOT, &4098).await.unwrap().unwrap().id, 4098);
     reopened.close().await;
     cleanup_db(&path).await;

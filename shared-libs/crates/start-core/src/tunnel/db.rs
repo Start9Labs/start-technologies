@@ -566,14 +566,14 @@ async fn cli_apply(
             .await?
             .apply_function(|db| {
                 let res = apply_expr(
-                    serde_json::to_value(patch_db::Value::from(db))
+                    serde_json::to_value(patch_db::OrdValue::from(db))
                         .with_kind(ErrorKind::Deserialization)?
                         .into(),
                     &expr,
                 )?;
 
                 Ok::<_, Error>((
-                    to_value(
+                    to_ord_value(
                         &serde_json::from_value::<TunnelDatabase>(res.clone().into()).with_ctx(
                             |_| {
                                 (
@@ -608,7 +608,7 @@ pub async fn apply(
     ctx.db
         .mutate(|db| {
             let res = apply_expr(
-                serde_json::to_value(patch_db::Value::from(db.clone()))
+                serde_json::to_value(patch_db::OrdValue::from(db.clone()))
                     .with_kind(ErrorKind::Deserialization)?
                     .into(),
                 &expr,

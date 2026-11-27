@@ -2,60 +2,69 @@ use std::fmt::{self, Display};
 
 use yasi::InternedString;
 
-use crate::{InOMap, Value};
+use crate::{GenericValue, ObjectKind, ObjectMap};
 
 /// Used in panic messages.
-struct Type<'a>(&'a Value);
+struct Type<'a, K: ObjectKind>(&'a GenericValue<K>);
 
-impl<'a> Display for Type<'a> {
+impl<'a, K: ObjectKind> Display for Type<'a, K> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match *self.0 {
-            Value::Null => formatter.write_str("null"),
-            Value::Bool(_) => formatter.write_str("boolean"),
-            Value::Number(_) => formatter.write_str("number"),
-            Value::String(_) => formatter.write_str("string"),
-            Value::Array(_) => formatter.write_str("array"),
-            Value::Object(_) => formatter.write_str("object"),
+            GenericValue::Null => formatter.write_str("null"),
+            GenericValue::Bool(_) => formatter.write_str("boolean"),
+            GenericValue::Number(_) => formatter.write_str("number"),
+            GenericValue::String(_) => formatter.write_str("string"),
+            GenericValue::Array(_) => formatter.write_str("array"),
+            GenericValue::Object(_) => formatter.write_str("object"),
         }
     }
 }
 pub trait Index {
     /// Return None if the key is not already in the array or object.
     #[doc(hidden)]
-    fn index_into<'v>(&self, v: &'v Value) -> Option<&'v Value>;
+    fn index_into<'v, K: ObjectKind>(&self, v: &'v GenericValue<K>) -> Option<&'v GenericValue<K>>;
 
     /// Return None if the key is not already in the array or object.
     #[doc(hidden)]
-    fn index_into_mut<'v>(&self, v: &'v mut Value) -> Option<&'v mut Value>;
+    fn index_into_mut<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> Option<&'v mut GenericValue<K>>;
 
     /// Return None if the key is not already in the array or object.
     #[doc(hidden)]
-    fn index_into_owned(&self, v: Value) -> Option<Value>;
+    fn index_into_owned<K: ObjectKind>(&self, v: GenericValue<K>) -> Option<GenericValue<K>>;
 
     /// Panic if array index out of bounds. If key is not already in the object,
     /// insert it with a value of null. Panic if Value is a type that cannot be
     /// indexed into, except if Value is null then it can be treated as an empty
     /// object.
     #[doc(hidden)]
-    fn index_or_insert<'v>(&self, v: &'v mut Value) -> &'v mut Value;
+    fn index_or_insert<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> &'v mut GenericValue<K>;
 }
 
 impl Index for usize {
-    fn index_into<'v>(&self, v: &'v Value) -> Option<&'v Value> {
+    fn index_into<'v, K: ObjectKind>(&self, v: &'v GenericValue<K>) -> Option<&'v GenericValue<K>> {
         match v {
-            Value::Array(vec) => vec.get(*self),
+            GenericValue::Array(vec) => vec.get(*self),
             _ => None,
         }
     }
-    fn index_into_mut<'v>(&self, v: &'v mut Value) -> Option<&'v mut Value> {
+    fn index_into_mut<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> Option<&'v mut GenericValue<K>> {
         match v {
-            Value::Array(vec) => vec.get_mut(*self),
+            GenericValue::Array(vec) => vec.get_mut(*self),
             _ => None,
         }
     }
-    fn index_into_owned(&self, v: Value) -> Option<Value> {
+    fn index_into_owned<K: ObjectKind>(&self, v: GenericValue<K>) -> Option<GenericValue<K>> {
         match v {
-            Value::Array(mut vec) => {
+            GenericValue::Array(mut vec) => {
                 if vec.len() > *self {
                     Some(vec.remove(*self))
                 } else {
@@ -65,9 +74,12 @@ impl Index for usize {
             _ => None,
         }
     }
-    fn index_or_insert<'v>(&self, v: &'v mut Value) -> &'v mut Value {
+    fn index_or_insert<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> &'v mut GenericValue<K> {
         match v {
-            Value::Array(vec) => {
+            GenericValue::Array(vec) => {
                 let len = vec.len();
                 vec.get_mut(*self).unwrap_or_else(|| {
                     panic!(
@@ -82,48 +94,60 @@ impl Index for usize {
 }
 
 impl Index for str {
-    fn index_into<'v>(&self, v: &'v Value) -> Option<&'v Value> {
+    fn index_into<'v, K: ObjectKind>(&self, v: &'v GenericValue<K>) -> Option<&'v GenericValue<K>> {
         match v {
-            Value::Object(map) => map.get(self),
+            GenericValue::Object(map) => map.get(self),
             _ => None,
         }
     }
-    fn index_into_mut<'v>(&self, v: &'v mut Value) -> Option<&'v mut Value> {
+    fn index_into_mut<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> Option<&'v mut GenericValue<K>> {
         match v {
-            Value::Object(map) => map.get_mut(self),
+            GenericValue::Object(map) => map.get_mut(self),
             _ => None,
         }
     }
-    fn index_into_owned(&self, v: Value) -> Option<Value> {
+    fn index_into_owned<K: ObjectKind>(&self, v: GenericValue<K>) -> Option<GenericValue<K>> {
         match v {
-            Value::Object(mut map) => map.remove(self),
+            GenericValue::Object(mut map) => map.remove(self),
             _ => None,
         }
     }
-    fn index_or_insert<'v>(&self, v: &'v mut Value) -> &'v mut Value {
-        if let Value::Null = v {
-            *v = Value::Object(InOMap::new());
+    fn index_or_insert<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> &'v mut GenericValue<K> {
+        if let GenericValue::Null = v {
+            *v = GenericValue::Object(K::Map::default());
         }
         match v {
-            Value::Object(map) => map
-                .entry(InternedString::intern(self))
-                .or_insert(Value::Null),
+            GenericValue::Object(map) => {
+                map.get_or_insert_with(InternedString::intern(self), || GenericValue::Null)
+            }
             _ => panic!("cannot access key {:?} in JSON {}", self, Type(v)),
         }
     }
 }
 
 impl Index for String {
-    fn index_into<'v>(&self, v: &'v Value) -> Option<&'v Value> {
+    fn index_into<'v, K: ObjectKind>(&self, v: &'v GenericValue<K>) -> Option<&'v GenericValue<K>> {
         self[..].index_into(v)
     }
-    fn index_into_mut<'v>(&self, v: &'v mut Value) -> Option<&'v mut Value> {
+    fn index_into_mut<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> Option<&'v mut GenericValue<K>> {
         self[..].index_into_mut(v)
     }
-    fn index_into_owned(&self, v: Value) -> Option<Value> {
+    fn index_into_owned<K: ObjectKind>(&self, v: GenericValue<K>) -> Option<GenericValue<K>> {
         self[..].index_into_owned(v)
     }
-    fn index_or_insert<'v>(&self, v: &'v mut Value) -> &'v mut Value {
+    fn index_or_insert<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> &'v mut GenericValue<K> {
         self[..].index_or_insert(v)
     }
 }
@@ -132,25 +156,32 @@ impl<'a, T> Index for &'a T
 where
     T: ?Sized + Index,
 {
-    fn index_into<'v>(&self, v: &'v Value) -> Option<&'v Value> {
+    fn index_into<'v, K: ObjectKind>(&self, v: &'v GenericValue<K>) -> Option<&'v GenericValue<K>> {
         (**self).index_into(v)
     }
-    fn index_into_mut<'v>(&self, v: &'v mut Value) -> Option<&'v mut Value> {
+    fn index_into_mut<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> Option<&'v mut GenericValue<K>> {
         (**self).index_into_mut(v)
     }
-    fn index_into_owned(&self, v: Value) -> Option<Value> {
+    fn index_into_owned<K: ObjectKind>(&self, v: GenericValue<K>) -> Option<GenericValue<K>> {
         (**self).index_into_owned(v)
     }
-    fn index_or_insert<'v>(&self, v: &'v mut Value) -> &'v mut Value {
+    fn index_or_insert<'v, K: ObjectKind>(
+        &self,
+        v: &'v mut GenericValue<K>,
+    ) -> &'v mut GenericValue<K> {
         (**self).index_or_insert(v)
     }
 }
 
-impl<I> std::ops::Index<I> for Value
+impl<I, K> std::ops::Index<I> for GenericValue<K>
 where
     I: Index,
+    K: ObjectKind,
 {
-    type Output = Value;
+    type Output = Self;
 
     /// Index into a `serde_json::Value` using the syntax `value[0]` or
     /// `value["k"]`.
@@ -180,15 +211,15 @@ where
     /// assert_eq!(data["a"], json!(null)); // returns null for undefined values
     /// assert_eq!(data["a"]["b"], json!(null)); // does not panic
     /// ```
-    fn index(&self, index: I) -> &Value {
-        static NULL: Value = Value::Null;
-        index.index_into(self).unwrap_or(&NULL)
+    fn index(&self, index: I) -> &Self {
+        index.index_into(self).unwrap_or(&GenericValue::Null)
     }
 }
 
-impl<I> std::ops::IndexMut<I> for Value
+impl<I, K> std::ops::IndexMut<I> for GenericValue<K>
 where
     I: Index,
+    K: ObjectKind,
 {
     /// Write into a `serde_json::Value` using the syntax `value[0] = ...` or
     /// `value["k"] = ...`.
@@ -223,7 +254,7 @@ where
     ///
     /// println!("{}", data);
     /// ```
-    fn index_mut(&mut self, index: I) -> &mut Value {
+    fn index_mut(&mut self, index: I) -> &mut Self {
         index.index_or_insert(self)
     }
 }

@@ -2,9 +2,9 @@ use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 use yasi::InternedString;
 
-use crate::Value;
+use crate::{GenericValue, ObjectKind};
 
-impl Arbitrary for Value {
+impl<K: ObjectKind> Arbitrary for GenericValue<K> {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
     fn arbitrary() -> Self::Strategy {
@@ -15,12 +15,12 @@ impl Arbitrary for Value {
     }
 }
 
-pub fn value_strategy() -> BoxedStrategy<Value> {
+pub fn value_strategy<K: ObjectKind>() -> BoxedStrategy<GenericValue<K>> {
     let leaf = proptest::prop_oneof![
-        Just(Value::Null),
-        any::<bool>().prop_map(Value::Bool),
+        Just(GenericValue::Null),
+        any::<bool>().prop_map(GenericValue::Bool),
         number_strategy(),
-        ".*".prop_map(|s| Value::from(s)),
+        ".*".prop_map(|s| GenericValue::from(s)),
     ];
     leaf.prop_recursive(8, 256, 10, |inner| {
         prop_oneof![array_strategy(inner.clone()), object_strategy(inner)]
@@ -28,7 +28,7 @@ pub fn value_strategy() -> BoxedStrategy<Value> {
     .boxed()
 }
 
-pub fn number_strategy() -> BoxedStrategy<Value> {
+pub fn number_strategy<K: ObjectKind>() -> BoxedStrategy<GenericValue<K>> {
     #[derive(Debug, Arbitrary)]
     enum Number {
         PosInt(u64),
@@ -43,23 +43,27 @@ pub fn number_strategy() -> BoxedStrategy<Value> {
                 serde_json::Number::from_f64(a).unwrap_or(serde_json::Number::from(0))
             }
         })
-        .prop_map(Value::Number)
+        .prop_map(GenericValue::Number)
         .boxed()
 }
 
-pub fn array_strategy(inner: impl Strategy<Value = Value> + 'static) -> BoxedStrategy<Value> {
+pub fn array_strategy<K: ObjectKind>(
+    inner: impl Strategy<Value = GenericValue<K>> + 'static,
+) -> BoxedStrategy<GenericValue<K>> {
     imbl::proptest::vector(inner, 0..10)
-        .prop_map(Value::Array)
+        .prop_map(GenericValue::Array)
         .boxed()
 }
 
-pub fn object_strategy(inner: impl Strategy<Value = Value> + 'static) -> BoxedStrategy<Value> {
+pub fn object_strategy<K: ObjectKind>(
+    inner: impl Strategy<Value = GenericValue<K>> + 'static,
+) -> BoxedStrategy<GenericValue<K>> {
     prop::collection::hash_map(".*", inner, 0..10)
         .prop_map(|map| {
             map.into_iter()
                 .map(|(k, v)| (InternedString::intern(k), v))
                 .collect()
         })
-        .prop_map(Value::Object)
+        .prop_map(GenericValue::Object)
         .boxed()
 }

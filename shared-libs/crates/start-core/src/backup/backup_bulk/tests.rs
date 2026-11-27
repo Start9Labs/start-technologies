@@ -90,7 +90,7 @@ async fn backup_outcomes_persist_in_history_without_notifications() {
 }
 
 fn database(state: ConversionState) -> DatabaseModel {
-    let mut db = DatabaseModel::from(imbl_value::json!({
+    let mut db = DatabaseModel::from(imbl_value::ord_json!({
         "public": {"serverInfo": {"statusInfo": {"backupProgress": null, "backupConversions": {}}}}
     }));
     let active = ConversionJobs::from([(

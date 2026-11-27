@@ -8,23 +8,29 @@ not that one. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it works.
 
 ## Layout
 
-- `src/lib.rs` — the `Value` enum (`Null`, `Bool`, `Number`, `String(Arc<String>)`, `Array(Vector<Value>)`,
-  `Object(InOMap<InternedString, Value>)`) and its core surface: `get`/`get_mut`, the `as_*` checkers/accessors,
-  JSON-pointer ops, `Index`-trait indexing, `Display`/`Debug`, `Eq`/`Ord`/`Hash`, conversion to/from
-  `serde_json::Value`, and the `to_value`/`from_value` helpers. Re-exports `imbl`, `InOMap`,
+- `src/lib.rs` — the `GenericValue<K>` enum (`Null`, `Bool`, `Number`, `String(Arc<String>)`,
+  `Array(Vector<GenericValue<K>>)`, `Object(K::Map)`), its aliases `Value` (`InOMap` objects) and `OrdValue`
+  (`imbl::OrdMap` objects), and its core surface: `get`/`get_mut`, the `as_*` checkers/accessors,
+  JSON-pointer ops, `Index`-trait indexing, `Display`/`Debug`, `Eq`/`Ord`/`Hash`, and the
+  `to_value`/`to_ord_value`/`from_value` helpers. Re-exports `imbl`, `InOMap`,
   `serde_json::{Number, Error as ErrorSource}`, and `yasi::InternedString`.
-- `src/ser.rs` — `Serialize` impl for `Value` plus a custom `Serializer` that turns any `T: Serialize` into a `Value`.
-- `src/de.rs` — `Deserialize` impl for `Value` with the `MapAccess`/`SeqAccess` visitors.
-- `src/from.rs` — `From`/`Into` impls: `serde_json::Value` ↔ `Value`, and slice/array/`str` → `Value`.
-- `src/index.rs` — the `Index` trait and impls for `usize`/`&str` indexing, plus the `parse_index` helper.
+- `src/object.rs` — `ObjectKind` (selects a value's object map: `InOrder` or `Sorted`) and `ObjectMap`, the map
+  operations the rest of the crate uses on objects.
+- `src/ser.rs` — `Serialize` impl for `GenericValue` plus a custom `Serializer<K>` that turns any `T: Serialize`
+  into a `GenericValue<K>`.
+- `src/de.rs` — `Deserialize` impl for `GenericValue`, and one by-reference `Deserializer` that both
+  `GenericValue` and `&GenericValue` forward to: the owned form copies strings, the borrowed form lends them.
+- `src/from.rs` — `From`/`Into` impls: `serde_json::Value` ↔ `GenericValue`, `Value` ↔ `OrdValue`, and
+  slice/array/`str` → `GenericValue`.
+- `src/index.rs` — the `Index` trait and impls for `usize`/`str`/`String` indexing.
 - `src/macros.rs` — the `json!` macro (and `json_internal!`/`json_internal_vec!`/`json_unexpected!` helpers)
-  for ergonomic `Value` construction.
+  for ergonomic `Value` construction, and `ord_json!`, which builds an `OrdValue` from the same syntax.
 - `src/in_order_map/mod.rs` — `InOMap<K, V>`, an insertion-order-preserving persistent map backed by
   `imbl::Vector<(K, V)>`, with get/insert/remove/update plus union/difference/intersection set ops.
 - `src/in_order_map/my_visitor.rs` — `MyVisitor`, the serde `Visitor` for deserializing an `InOMap`.
 - `src/arbitrary.rs` — proptest `Arbitrary` impl and `value_strategy`/`number_strategy`/`array_strategy`/`object_strategy`.
   Gated behind the `arbitrary` feature.
-- RPC's `ts` consumer owns TypeScript bridges for `Value` (`unknown`) and `InOMap` (map).
+- RPC's `ts` consumer owns TypeScript bridges for `Value` and `OrdValue` (`unknown`) and `InOMap` (map).
 
 ## Build & test (run from the repo root)
 
@@ -40,8 +46,15 @@ cargo build -p imbl-value --features arbitrary  # build with the proptest strate
   O(n), not O(1). It exists to keep object keys in insertion order through deserialize → serialize round-trips.
 - **`Value::String` is `Arc<String>`** — clones are cheap (refcount bump). The same cheap-clone property
   holds for `Array`/`Object` via `imbl`'s structural sharing.
-- **Object keys are `yasi::InternedString`, not `String`.** `Object` is `InOMap<InternedString, Value>`;
-  use the re-exported `imbl_value::InternedString` for keys.
+- **Object keys are `yasi::InternedString`, not `String`.** `Value`'s objects are `InOMap<InternedString, Value>`
+  and `OrdValue`'s are `OrdMap<InternedString, OrdValue>`; use the re-exported `imbl_value::InternedString`
+  for keys.
+- **Deserializing an owned value never takes it apart.** `from_value` walks the value by reference, so a
+  value shared with another (a database snapshot, a clone) costs the same as `T::deserialize(&value)`.
+  Both forms fall back to `deserialize_any` when asked for a number they don't hold.
+- **Write value behavior once, against `GenericValue<K>`.** `Value` and `OrdValue` share every impl; reach
+  objects through `ObjectMap` rather than a concrete map. `json!` builds a `Value`; convert with
+  `OrdValue::from`.
 - **(De)serialization is derived from `serde_json`.** `ser.rs`/`de.rs` (and `index.rs`, `macros.rs`) are
   adapted from `serde_json`'s `value` module, rewritten against the `imbl`-backed `Value`. Keep `ser.rs` and
   `de.rs` in sync with each other, and prefer porting upstream fixes over inventing new behavior. The

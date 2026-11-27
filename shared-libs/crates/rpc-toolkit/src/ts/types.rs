@@ -1439,7 +1439,7 @@ impl<T: TS> TS for Option<T> {
     }
 }
 
-impl_ts!(imbl_value::Value => "z.unknown()", "z.ZodUnknown");
+impl_ts!(imbl_value::Value, imbl_value::OrdValue => "z.unknown()", "z.ZodUnknown");
 impl_ts_map!(imbl_value::InOMap<K,V> where [K: Eq + Clone, V: Clone]);
 impl_ts!(yasi::InternedString => "z.string()", "z.ZodString");
 #[cfg(feature = "exver")]

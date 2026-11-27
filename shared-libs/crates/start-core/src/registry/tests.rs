@@ -522,7 +522,7 @@ async fn legacy_subscriptions_filter_initial_dumps_and_live_revisions() {
     let public_guid: Guid = from_value(public["result"]["guid"].clone()).unwrap();
     drop(ctx.rpc_continuations.get_ws_handler(&public_guid).await);
     let private = rpc(&url, "db.subscribe", json!({}), Some(&reader)).await;
-    let mut view = private["result"]["dump"]["value"].clone();
+    let mut view = OrdValue::from(private["result"]["dump"]["value"].clone());
     assert!(
         view["package"]["packages"].get("secret").is_some(),
         "{private}"
@@ -655,7 +655,7 @@ async fn watches_multiplex_with_ordinary_calls_and_revoke_private_packages() {
             response["result"]["value"].clone(),
         );
     }
-    let mut view = dumps.remove(&41).unwrap();
+    let mut view = OrdValue::from(dumps.remove(&41).unwrap());
     assert!(view["package"]["packages"].get("secret").is_some());
     assert!(
         view["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]

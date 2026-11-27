@@ -44,7 +44,7 @@ const LOCAL: &str = "local";
 
 impl DbAccess<CertStore> for CertDatabase {
     fn access(db: &Model<Self>) -> &Model<CertStore> {
-        db.transmute_ref(|v| LOCAL.index_into(v).unwrap_or(&patch_db::value::NULL))
+        db.transmute_ref(|v| LOCAL.index_into(v).unwrap_or(&patch_db::OrdValue::Null))
     }
 }
 impl DbAccessMut<CertStore> for CertDatabase {

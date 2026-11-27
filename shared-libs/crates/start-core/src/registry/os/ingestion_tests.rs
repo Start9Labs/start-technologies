@@ -441,7 +441,10 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
             .unwrap();
         patch_db::json_patch::patch(&mut view, &revision.patch).unwrap();
         if index == 0 {
-            assert_eq!(view["0.4.0.5"]["releaseNotes"], revised_notes);
+            assert_eq!(
+                view["0.4.0.5"]["releaseNotes"],
+                OrdValue::from(revised_notes.clone())
+            );
             assert!(view["0.4.0.5"].get("headline").is_none());
         } else {
             assert_eq!(view["0.4.0.5"]["releaseNotes"].as_str(), Some("RPC edit"));

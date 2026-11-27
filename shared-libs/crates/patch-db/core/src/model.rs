@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use imbl_value::{InternedString, Value};
+use imbl_value::{InternedString, ObjectMap, OrdValue};
 use json_ptr::JsonPointer;
 
 pub struct Pointer<T> {
@@ -35,35 +35,35 @@ pub trait HasModel: Sized {
 mod sealed {
     use super::*;
     pub trait ModelMarker {
-        fn into_value(self) -> Value;
-        fn from_value(value: Value) -> Self;
-        fn as_value<'a>(&'a self) -> &'a Value;
-        fn value_as<'a>(value: &'a Value) -> &'a Self;
-        fn as_value_mut<'a>(&'a mut self) -> &'a mut Value;
-        fn value_as_mut<'a>(value: &'a mut Value) -> &'a mut Self;
+        fn into_value(self) -> OrdValue;
+        fn from_value(value: OrdValue) -> Self;
+        fn as_value<'a>(&'a self) -> &'a OrdValue;
+        fn value_as<'a>(value: &'a OrdValue) -> &'a Self;
+        fn as_value_mut<'a>(&'a mut self) -> &'a mut OrdValue;
+        fn value_as_mut<'a>(value: &'a mut OrdValue) -> &'a mut Self;
     }
     impl<T> ModelMarker for T
     where
-        T: From<Value> + Into<Value> + Sized,
-        for<'a> &'a T: From<&'a Value> + Into<&'a Value>,
-        for<'a> &'a mut T: From<&'a mut Value> + Into<&'a mut Value>,
+        T: From<OrdValue> + Into<OrdValue> + Sized,
+        for<'a> &'a T: From<&'a OrdValue> + Into<&'a OrdValue>,
+        for<'a> &'a mut T: From<&'a mut OrdValue> + Into<&'a mut OrdValue>,
     {
-        fn into_value(self) -> Value {
+        fn into_value(self) -> OrdValue {
             self.into()
         }
-        fn from_value(value: Value) -> Self {
+        fn from_value(value: OrdValue) -> Self {
             value.into()
         }
-        fn as_value<'a>(&'a self) -> &'a Value {
+        fn as_value<'a>(&'a self) -> &'a OrdValue {
             self.into()
         }
-        fn value_as<'a>(value: &'a Value) -> &'a Self {
+        fn value_as<'a>(value: &'a OrdValue) -> &'a Self {
             value.into()
         }
-        fn as_value_mut<'a>(&'a mut self) -> &'a mut Value {
+        fn as_value_mut<'a>(&'a mut self) -> &'a mut OrdValue {
             self.into()
         }
-        fn value_as_mut<'a>(value: &'a mut Value) -> &'a mut Self {
+        fn value_as_mut<'a>(value: &'a mut OrdValue) -> &'a mut Self {
             value.into()
         }
     }
@@ -73,46 +73,46 @@ pub trait Model<T>: sealed::ModelMarker + Sized {
     type Model<U>: Model<U>;
 }
 pub trait ModelExt<T>: Model<T> {
-    fn into_value(self) -> Value {
+    fn into_value(self) -> OrdValue {
         <Self as sealed::ModelMarker>::into_value(self)
     }
-    fn from_value(value: Value) -> Self {
+    fn from_value(value: OrdValue) -> Self {
         <Self as sealed::ModelMarker>::from_value(value)
     }
-    fn as_value<'a>(&'a self) -> &'a Value {
+    fn as_value<'a>(&'a self) -> &'a OrdValue {
         <Self as sealed::ModelMarker>::as_value(self)
     }
-    fn value_as<'a>(value: &'a Value) -> &'a Self {
+    fn value_as<'a>(value: &'a OrdValue) -> &'a Self {
         <Self as sealed::ModelMarker>::value_as(value)
     }
-    fn as_value_mut<'a>(&'a mut self) -> &'a mut Value {
+    fn as_value_mut<'a>(&'a mut self) -> &'a mut OrdValue {
         <Self as sealed::ModelMarker>::as_value_mut(self)
     }
-    fn value_as_mut<'a>(value: &'a mut Value) -> &'a mut Self {
+    fn value_as_mut<'a>(value: &'a mut OrdValue) -> &'a mut Self {
         <Self as sealed::ModelMarker>::value_as_mut(value)
     }
-    fn transmute<U>(self, f: impl FnOnce(Value) -> Value) -> Self::Model<U> {
+    fn transmute<U>(self, f: impl FnOnce(OrdValue) -> OrdValue) -> Self::Model<U> {
         Self::Model::<U>::from_value(f(<Self as sealed::ModelMarker>::into_value(self)))
     }
     fn transmute_ref<'a, U>(
         &'a self,
-        f: impl for<'b> FnOnce(&'b Value) -> &'b Value,
+        f: impl for<'b> FnOnce(&'b OrdValue) -> &'b OrdValue,
     ) -> &'a Self::Model<U> {
         Self::Model::<U>::value_as(f(<Self as sealed::ModelMarker>::as_value(self)))
     }
     fn transmute_mut<'a, U>(
         &'a mut self,
-        f: impl for<'b> FnOnce(&'b mut Value) -> &'b mut Value,
+        f: impl for<'b> FnOnce(&'b mut OrdValue) -> &'b mut OrdValue,
     ) -> &'a mut Self::Model<U> {
         Self::Model::<U>::value_as_mut(f(<Self as sealed::ModelMarker>::as_value_mut(self)))
     }
     fn children_mut<'a>(
         &'a mut self,
-    ) -> impl IntoIterator<Item = (&'a InternedString, &'a mut Value)> + Send + Sync {
+    ) -> impl IntoIterator<Item = (&'a InternedString, &'a mut OrdValue)> + Send + Sync {
         ModelExt::<T>::as_value_mut(self)
             .as_object_mut()
             .into_iter()
-            .flat_map(|o| o.iter_mut().map(|(k, v)| (&*k, v)))
+            .flat_map(|o| o.entries_mut())
     }
 }
 impl<T, M: Model<T>> ModelExt<T> for M {}
@@ -128,7 +128,7 @@ pub trait DestructureMut {
 mod test {
     use std::marker::PhantomData;
 
-    use imbl_value::{from_value, json, to_value, Value};
+    use imbl_value::{from_value, ord_json, to_ord_value, OrdValue};
     use serde::de::DeserializeOwned;
     use serde::{Deserialize, Serialize};
 
@@ -138,7 +138,7 @@ mod test {
     #[repr(transparent)]
     #[derive(Debug)]
     pub struct Model<T> {
-        value: Value,
+        value: OrdValue,
         phantom: PhantomData<T>,
     }
     impl<T: DeserializeOwned> Model<T> {
@@ -148,7 +148,7 @@ mod test {
     }
     impl<T: Serialize> Model<T> {
         pub fn ser(&mut self, value: &T) -> Result<(), imbl_value::Error> {
-            self.value = to_value(value)?;
+            self.value = to_ord_value(value)?;
             Ok(())
         }
     }
@@ -160,35 +160,35 @@ mod test {
             }
         }
     }
-    impl<T> From<Value> for Model<T> {
-        fn from(value: Value) -> Self {
+    impl<T> From<OrdValue> for Model<T> {
+        fn from(value: OrdValue) -> Self {
             Self {
                 value,
                 phantom: PhantomData,
             }
         }
     }
-    impl<T> From<Model<T>> for Value {
+    impl<T> From<Model<T>> for OrdValue {
         fn from(value: Model<T>) -> Self {
             value.value
         }
     }
-    impl<'a, T> From<&'a Value> for &'a Model<T> {
-        fn from(value: &'a Value) -> Self {
+    impl<'a, T> From<&'a OrdValue> for &'a Model<T> {
+        fn from(value: &'a OrdValue) -> Self {
             unsafe { std::mem::transmute(value) }
         }
     }
-    impl<'a, T> From<&'a Model<T>> for &'a Value {
+    impl<'a, T> From<&'a Model<T>> for &'a OrdValue {
         fn from(value: &'a Model<T>) -> Self {
             unsafe { std::mem::transmute(value) }
         }
     }
-    impl<'a, T> From<&'a mut Value> for &mut Model<T> {
-        fn from(value: &'a mut Value) -> Self {
+    impl<'a, T> From<&'a mut OrdValue> for &mut Model<T> {
+        fn from(value: &'a mut OrdValue) -> Self {
             unsafe { std::mem::transmute(value) }
         }
     }
-    impl<'a, T> From<&'a mut Model<T>> for &mut Value {
+    impl<'a, T> From<&'a mut Model<T>> for &mut OrdValue {
         fn from(value: &'a mut Model<T>) -> Self {
             unsafe { std::mem::transmute(value) }
         }
@@ -229,14 +229,14 @@ mod test {
             current_key: "key".into(),
             other_field: "other".into(),
         };
-        let mut model = Model::<RenamedFields>::from(to_value(&original).unwrap());
+        let mut model = Model::<RenamedFields>::from(to_ord_value(&original).unwrap());
         assert_eq!(model.as_current_name().clone().de().unwrap(), "name");
         assert_eq!(model.as_current_key().clone().de().unwrap(), "key");
         assert_eq!(model.as_other_field().clone().de().unwrap(), "other");
         model.as_current_key_mut().ser(&"changed".into()).unwrap();
         assert_eq!(
-            Value::from(model),
-            json!({"legacyName": "name", "legacyKey": "changed", "otherField": "other"})
+            OrdValue::from(model),
+            ord_json!({"legacyName": "name", "legacyKey": "changed", "otherField": "other"})
         );
     }
 
@@ -255,7 +255,7 @@ mod test {
             RenamedVariant::CurrentName("key".into()),
             RenamedVariant::DerivedName("key".into()),
         ] {
-            let encoded = to_value(&variant).unwrap();
+            let encoded = to_ord_value(&variant).unwrap();
             let model = Model::<RenamedVariant>::from(encoded.clone());
             let matched = model.into_match();
             let key = match &matched {
@@ -265,7 +265,7 @@ mod test {
             };
             assert_eq!(key, "key");
             assert_eq!(
-                Value::from(Model::<RenamedVariant>::from_match(matched)),
+                OrdValue::from(Model::<RenamedVariant>::from_match(matched)),
                 encoded
             );
         }
@@ -273,7 +273,7 @@ mod test {
 
     #[test]
     fn unknown_variants_preserve_the_value_through_model_ext() {
-        let unknown = json!({"kind": "unknown", "value": "key"});
+        let unknown = ord_json!({"kind": "unknown", "value": "key"});
         let mut model = Model::<RenamedVariant>::from(unknown.clone());
         assert!(matches!(
             model.as_match(),
@@ -297,7 +297,7 @@ mod test {
 
     #[test]
     fn test() {
-        let mut model = Model::<Foo>::from(imbl_value::json!({
+        let mut model = Model::<Foo>::from(imbl_value::ord_json!({
             "a": {
                 "b": "ReplaceMe"
             }
@@ -306,7 +306,7 @@ mod test {
         mutate_fn(&mut model);
         assert_eq!(
             crate::model::sealed::ModelMarker::as_value(&model),
-            &json!({
+            &ord_json!({
                 "a": {
                     "b": "Replaced"
                 }

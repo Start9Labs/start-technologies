@@ -5,11 +5,17 @@ fn failure_details_follow_attempts_without_discarding_cached_catalogs() {
     let mut db = database();
     let package = Subscription::Index(url());
     let os = Subscription::Os(url());
-    publish_snapshot(&mut db, &package, &to_value(&index()).unwrap(), &device()).unwrap();
+    publish_snapshot(
+        &mut db,
+        &package,
+        &to_ord_value(&index()).unwrap(),
+        &device(),
+    )
+    .unwrap();
     publish_snapshot(
         &mut db,
         &os,
-        &to_value(&OsIndex::default()).unwrap(),
+        &to_ord_value(&OsIndex::default()).unwrap(),
         &device(),
     )
     .unwrap();
@@ -51,8 +57,8 @@ fn failure_details_follow_attempts_without_discarding_cached_catalogs() {
         assert_eq!(os_cache.status, RegistryStatus::Error);
         assert_eq!(os_cache.error.as_deref(), Some(message));
         assert_eq!(
-            to_value(&os_cache.versions).unwrap(),
-            to_value(&versions).unwrap()
+            to_ord_value(&os_cache.versions).unwrap(),
+            to_ord_value(&versions).unwrap()
         );
 
         for subscription in [&package, &os] {
@@ -90,11 +96,17 @@ fn failure_details_follow_attempts_without_discarding_cached_catalogs() {
         )
         .unwrap();
     }
-    publish_snapshot(&mut db, &package, &to_value(&index()).unwrap(), &device()).unwrap();
+    publish_snapshot(
+        &mut db,
+        &package,
+        &to_ord_value(&index()).unwrap(),
+        &device(),
+    )
+    .unwrap();
     publish_snapshot(
         &mut db,
         &os,
-        &to_value(&OsIndex::default()).unwrap(),
+        &to_ord_value(&OsIndex::default()).unwrap(),
         &device(),
     )
     .unwrap();

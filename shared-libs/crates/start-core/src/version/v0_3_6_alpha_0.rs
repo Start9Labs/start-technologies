@@ -1072,7 +1072,7 @@ mod test {
         store.put(&ROOT, &db).await.unwrap();
         Current::default().pre_init(&store).await.unwrap();
 
-        let migrated = store.dump(&ROOT).await.value;
+        let migrated = Value::from(store.dump(&ROOT).await.value);
         assert_eq!(
             migrated["public"]["serverInfo"]["version"],
             to_value(&Current::default().semver()).unwrap()
@@ -1082,6 +1082,6 @@ mod test {
             json!({ "pubkeys": {}, "tokens": {} })
         );
         Current::default().pre_init(&store).await.unwrap();
-        assert_eq!(store.dump(&ROOT).await.value, migrated);
+        assert_eq!(Value::from(store.dump(&ROOT).await.value), migrated);
     }
 }

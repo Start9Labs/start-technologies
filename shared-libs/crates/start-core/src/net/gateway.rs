@@ -52,7 +52,6 @@ use crate::net::{
 };
 use crate::prelude::*;
 use crate::util::Invoke;
-use crate::util::collections::OrdMapIterMut;
 use crate::util::future::{NonDetachingJoinHandle, Until};
 use crate::util::io::open_file;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
@@ -1728,7 +1727,7 @@ async fn watcher(
 
                         watch_ip_info.send_if_modified(|m| {
                             let mut changed = false;
-                            for (iface, info) in OrdMapIterMut::from(m) {
+                            for (iface, info) in m.iter_mut() {
                                 if !ifaces.contains(iface) {
                                     info.ip_info = None;
                                     changed = true;
@@ -3575,7 +3574,7 @@ impl NetworkInterfaceController {
                         .de()
                     {
                         Ok(mut info) => {
-                            for (_, info) in OrdMapIterMut::from(&mut info) {
+                            for (_, info) in info.iter_mut() {
                                 info.ip_info = None;
                                 info.dns.refresh(None);
                             }
@@ -4219,7 +4218,7 @@ exit 0
         }
         assert_eq!(v4.len(), NON_PUBLIC_V4.len() + 1);
 
-        for (_, info) in OrdMapIterMut::from(&mut ifaces) {
+        for (_, info) in ifaces.iter_mut() {
             info.ip_info = None;
         }
         assert_eq!(
@@ -4785,7 +4784,7 @@ mod dns_config_tests {
     #[tokio::test]
     async fn invalid_requester_dns_never_changes_gateway_or_dns() {
         let (_temp, db, interfaces) = policy_fixture().await;
-        let before: Value = db.peek().await.clone().into();
+        let before: OrdValue = db.peek().await.clone().into();
         for servers in [
             imbl_value::json!([]),
             imbl_value::json!(["bad"]),
@@ -4809,7 +4808,7 @@ mod dns_config_tests {
                     .await
                     .is_err()
             );
-            let after: Value = db.peek().await.clone().into();
+            let after: OrdValue = db.peek().await.clone().into();
             assert_eq!(before, after);
         }
     }
@@ -4835,7 +4834,7 @@ mod dns_config_tests {
             imbl_value::json!({"package": "pkg", "gateway": "wg0"}),
         )
         .await;
-        let before: Value = db.peek().await.clone().into();
+        let before: OrdValue = db.peek().await.clone().into();
         for gateway in ["eth0", "missing"] {
             let params =
                 imbl_value::json!({"package": "pkg", "gateway": gateway, "dns": {"servers": null}});
@@ -4853,7 +4852,7 @@ mod dns_config_tests {
                     .await
                     .is_err()
             );
-            let after: Value = db.peek().await.clone().into();
+            let after: OrdValue = db.peek().await.clone().into();
             assert_eq!(before, after);
         }
     }

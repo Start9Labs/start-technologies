@@ -116,7 +116,8 @@ mod tests {
     #[test]
     fn persisted_reports_page_newest_first_and_keep_the_original_target_name() {
         let mut db = DatabaseModel::from(
-            to_value(&serde_json::json!({"private": {"backupHistory": {}}})).unwrap(),
+            imbl_value::to_ord_value(&serde_json::json!({"private": {"backupHistory": {}}}))
+                .unwrap(),
         );
         for (started, name, error) in [
             ("2026-11-01T01:00:00Z", "Original", None),
@@ -131,7 +132,7 @@ mod tests {
             );
             record(&mut db, &run).unwrap();
         }
-        let db = DatabaseModel::from(to_value(&db).unwrap());
+        let db = DatabaseModel::from(imbl_value::to_ord_value(&db).unwrap());
         let first = page(
             &db,
             HistoryParams {

@@ -78,7 +78,7 @@ mod tests {
                 let db = PatchDb::in_memory();
                 db.put(&ROOT, &fixture).await.unwrap();
                 Current::default().pre_init(&db).await.unwrap();
-                let mut migrated = db.dump(&ROOT).await.value;
+                let mut migrated = Value::from(db.dump(&ROOT).await.value);
                 assert_eq!(
                     migrated["public"]["serverInfo"]["version"],
                     to_value(&Current::default().semver()).unwrap()
@@ -87,7 +87,7 @@ mod tests {
                 assert_eq!(migrated["public"]["serverInfo"]["trustedKeys"], saved_trust);
                 assert_eq!(migrated["private"]["sessions"], saved_sessions);
                 Current::default().pre_init(&db).await.unwrap();
-                assert_eq!(db.dump(&ROOT).await.value, migrated);
+                assert_eq!(Value::from(db.dump(&ROOT).await.value), migrated);
                 rollback_to_unchecked(&Current::default(), &v0_4_1_1::Version, &mut migrated)
                     .unwrap();
                 assert_eq!(

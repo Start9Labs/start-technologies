@@ -19,7 +19,7 @@ import { TableComponent } from 'src/app/routes/portal/components/table.component
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { FormDialogService } from 'src/app/services/form-dialog.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
-import { toAuthorityName } from 'src/app/utils/acme'
+import { defaultAuthority, toAuthorityName } from 'src/app/utils/acme'
 import { configBuilderToSpec } from 'src/app/utils/configBuilderToSpec'
 import {
   GatewayAddressGroup,
@@ -211,7 +211,7 @@ export class GatewayComponent {
                 'Select a Certificate Authority to issue SSL/TLS certificates for this domain',
               ),
               values: authorities,
-              default: Object.keys(network.acme)[0] || 'local',
+              default: defaultAuthority(Object.keys(network.acme)),
             }),
           }
         : {}),

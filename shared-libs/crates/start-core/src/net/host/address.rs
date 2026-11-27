@@ -805,7 +805,7 @@ mod test {
             })),
             ..Default::default()
         };
-        DatabaseModel::from(imbl_value::json!({
+        DatabaseModel::from(imbl_value::ord_json!({
             "public": {
                 "registryIndexes": {},
                 "registryCache": {},

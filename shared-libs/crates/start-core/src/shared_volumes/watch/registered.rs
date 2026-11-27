@@ -44,7 +44,7 @@ pub(super) struct RegisteredSource {
 }
 
 pub(super) fn changes(
-    updates: impl Stream<Item = Result<Value, Error>>,
+    updates: impl Stream<Item = Result<OrdValue, Error>>,
 ) -> impl Stream<Item = Result<(), Error>> {
     let mut previous = None;
     updates.try_filter_map(move |value| {

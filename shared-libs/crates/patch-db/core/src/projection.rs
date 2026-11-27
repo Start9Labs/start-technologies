@@ -1,4 +1,5 @@
-use imbl_value::{InOMap, Value};
+use imbl_value::imbl::OrdMap;
+use imbl_value::OrdValue;
 use json_patch::{AddOperation, Patch, PatchOperation, ReplaceOperation};
 use json_ptr::JsonPointer;
 
@@ -146,13 +147,13 @@ impl Projection {
     }
 
     /// The projected value at a path the projection reaches.
-    pub fn project_value(&self, path: &mut Vec<String>, value: &Value) -> Value {
+    pub fn project_value(&self, path: &mut Vec<String>, value: &OrdValue) -> OrdValue {
         if self.keeps_whole(&segments(path)) {
             return value.clone();
         }
         match value {
-            Value::Object(map) => {
-                let mut projected = InOMap::new();
+            OrdValue::Object(map) => {
+                let mut projected = OrdMap::new();
                 for (key, child) in map.iter() {
                     path.push(key.to_string());
                     if self.reach(&segments(path)) != Reach::Out {
@@ -160,32 +161,32 @@ impl Projection {
                     }
                     path.pop();
                 }
-                Value::Object(projected)
+                OrdValue::Object(projected)
             }
-            Value::Array(items) => {
+            OrdValue::Array(items) => {
                 let mut projected = imbl_value::imbl::Vector::new();
                 if self.cuts_below(&segments(path)) {
-                    return Value::Array(projected);
+                    return OrdValue::Array(projected);
                 }
                 for (index, child) in items.iter().enumerate() {
                     path.push(index.to_string());
                     projected.push_back(if self.reach(&segments(path)) == Reach::Out {
-                        Value::Null
+                        OrdValue::Null
                     } else {
                         self.project_value(path, child)
                     });
                     path.pop();
                 }
-                Value::Array(projected)
+                OrdValue::Array(projected)
             }
             other => other.clone(),
         }
     }
 
     /// The projected subtree value; null when the projection excludes the subtree itself.
-    pub fn project_root(&self, value: &Value) -> Value {
+    pub fn project_root(&self, value: &OrdValue) -> OrdValue {
         if self.reach(&[]) == Reach::Out {
-            return Value::Null;
+            return OrdValue::Null;
         }
         self.project_value(&mut Vec::new(), value)
     }
@@ -211,13 +212,13 @@ impl Projection {
         ptr: &JsonPointer,
         revision: &Revision,
         shifted: &[JsonPointer],
-        after: Option<&Value>,
+        after: Option<&OrdValue>,
     ) -> Option<Revision> {
         if shifted
             .iter()
             .any(|array| array.len() < ptr.len() && ptr.starts_with(array))
         {
-            let value = ptr.get(after?).cloned().unwrap_or(Value::Null);
+            let value = ptr.get(after?).cloned().unwrap_or(OrdValue::Null);
             return Some(Revision {
                 id: revision.id,
                 patch: DiffPatch(Patch(vec![PatchOperation::Replace(ReplaceOperation {
@@ -246,7 +247,7 @@ impl Projection {
         if resent.is_empty() {
             return Some(self.project_revision(scoped));
         }
-        let after = ptr.get(after?).cloned().unwrap_or(Value::Null);
+        let after = ptr.get(after?).cloned().unwrap_or(OrdValue::Null);
         let DiffPatch(Patch(ops)) = scoped.patch;
         let last: Vec<Option<usize>> = resent
             .iter()
@@ -316,7 +317,7 @@ impl Projection {
     ///
     /// They only add what the wider projection keeps and this one does not; whatever this one
     /// keeps but the wider one drops is the replica's to prune.
-    pub fn extension(&self, wider: &Projection, value: &Value) -> DiffPatch {
+    pub fn extension(&self, wider: &Projection, value: &OrdValue) -> DiffPatch {
         let mut ops = Vec::new();
         if wider.reach(&[]) != Reach::Out {
             extend(self, wider, &mut Vec::new(), false, value, &mut ops);
@@ -336,7 +337,7 @@ fn extend(
     wider: &Projection,
     path: &mut Vec<String>,
     in_array: bool,
-    value: &Value,
+    value: &OrdValue,
     ops: &mut Vec<PatchOperation>,
 ) {
     let here = segments(path);
@@ -349,7 +350,7 @@ fn extend(
         return;
     }
     match value {
-        Value::Object(map) => {
+        OrdValue::Object(map) => {
             for (key, child) in map.iter() {
                 path.push(key.to_string());
                 if wider.reach(&segments(path)) != Reach::Out {
@@ -358,7 +359,7 @@ fn extend(
                 path.pop();
             }
         }
-        Value::Array(items) => {
+        OrdValue::Array(items) => {
             if held.cuts_below(&here) && !wider.cuts_below(&here) {
                 let value = wider.project_value(path, value);
                 ops.push(set(path, in_array, value));
@@ -378,7 +379,7 @@ fn extend(
 
 /// Sets a path whose parent the replica already holds: `replace` at an array element or the
 /// root, `add` for an object member, which also replaces.
-fn set(path: &[String], in_array: bool, value: Value) -> PatchOperation {
+fn set(path: &[String], in_array: bool, value: OrdValue) -> PatchOperation {
     let mut ptr = JsonPointer::default();
     for segment in path {
         ptr.push_end(segment);
@@ -400,7 +401,7 @@ fn op_path(op: &PatchOperation) -> &JsonPointer {
 }
 
 /// The arrays a patch inserts into or removes from, read from the document after it.
-pub fn shifted_arrays(patch: &DiffPatch, after: &Value) -> Vec<JsonPointer> {
+pub fn shifted_arrays(patch: &DiffPatch, after: &OrdValue) -> Vec<JsonPointer> {
     let mut arrays: Vec<JsonPointer> = Vec::new();
     for op in patch.0 .0.iter() {
         if matches!(op, PatchOperation::Add(_) | PatchOperation::Remove(_)) {
@@ -409,7 +410,7 @@ pub fn shifted_arrays(patch: &DiffPatch, after: &Value) -> Vec<JsonPointer> {
                 continue;
             }
             let parent = path.slice(..path.len() - 1).unwrap_or_default().to_owned();
-            if matches!(parent.get(after), Some(Value::Array(_))) && !arrays.contains(&parent) {
+            if matches!(parent.get(after), Some(OrdValue::Array(_))) && !arrays.contains(&parent) {
                 arrays.push(parent);
             }
         }

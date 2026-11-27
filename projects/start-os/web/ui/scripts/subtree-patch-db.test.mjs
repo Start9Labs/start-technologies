@@ -7,6 +7,7 @@ import {
   minimalSelection,
   NOTHING,
   normalizeSelector,
+  PatchDB,
   projectNarrowed,
   projectOperations,
   projectRoot,
@@ -565,6 +566,98 @@ test('numeric watch paths select that key or position', () => {
     projectRoot([{ include: '/arr/1' }], { arr: ['a', 'b', 'c'] }),
     { arr: [null, 'b', null] },
   )
+})
+
+const arrayDocument = () => ({
+  rows: [
+    { a: 1, b: 10 },
+    { a: 2, b: 20 },
+    { a: 3, b: 30 },
+  ],
+})
+
+for (const { name, patch, expected } of [
+  {
+    name: 'an insertion',
+    patch: [{ op: 'add', path: '/rows/0', value: { a: 4, b: 40 } }],
+    expected: [4, 1, 2, 3],
+  },
+  {
+    name: 'a removal',
+    patch: [{ op: 'remove', path: '/rows/0' }],
+    expected: [2, 3],
+  },
+  {
+    name: 'a prepend window shift',
+    patch: [
+      { op: 'add', path: '/rows/0', value: { a: 4, b: 40 } },
+      { op: 'remove', path: '/rows/3' },
+    ],
+    expected: [4, 1, 2],
+  },
+  {
+    name: 'an append window shift',
+    patch: [
+      { op: 'remove', path: '/rows/0' },
+      { op: 'add', path: '/rows/2', value: { a: 4, b: 40 } },
+    ],
+    expected: [2, 3, 4],
+  },
+]) {
+  test(`ordinary positional watches follow ${name}`, t => {
+    const source = new Subject()
+    const cache = new BehaviorSubject({ id: 3, value: arrayDocument() })
+    const db = new PatchDB(source, cache)
+    const values = []
+    const subscription = db
+      .watch$('rows', 1, 'a')
+      .subscribe(value => values.push(value))
+    t.after(() => {
+      subscription.unsubscribe()
+      db.stop()
+    })
+    db.start()
+    source.next([{ id: 4, patch }])
+    assert.deepEqual(
+      cache.value.value.rows.map(row => row.a),
+      expected,
+    )
+    assert.deepEqual(values, [2, expected[1]])
+  })
+
+  test(`covered positional watches follow ${name}`, t => {
+    const f = fixture(t)
+    f.watch('rows')
+    const second = f.watch('rows', 1, 'a')
+    const projected = f.project({ include: ['/a'] }, 'rows', 1)
+    f.db.start()
+    assert.deepEqual(f.calls[0].selection, [{ include: '/rows' }])
+    f.start(f.calls[0], 3, arrayDocument())
+    f.revision(f.calls[0], 4, patch)
+    t.mock.timers.tick(250)
+    assert.deepEqual(
+      f.cache.value.value.rows.map(row => row.a),
+      expected,
+    )
+    assert.deepEqual(second.values, [2, expected[1]])
+    assert.deepEqual(projected.values, [{ a: 2 }, { a: expected[1] }])
+  })
+}
+
+test('an array shift leaves unchanged positional watches quiet', t => {
+  const f = fixture(t)
+  f.watch('rows')
+  const first = f.watch('rows', 0)
+  const projected = f.project({ include: ['/a'] }, 'rows', 0)
+  f.db.start()
+  f.start(f.calls[0], 3, arrayDocument())
+  f.revision(f.calls[0], 4, [
+    { op: 'add', path: '/rows/1', value: { a: 4, b: 40 } },
+    { op: 'remove', path: '/rows/3' },
+  ])
+  t.mock.timers.tick(250)
+  assert.equal(first.values.length, 1)
+  assert.equal(projected.values.length, 1)
 })
 
 test('a held array keeps its positions through insertions and removals', t => {

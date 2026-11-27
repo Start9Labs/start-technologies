@@ -1153,7 +1153,7 @@ mod password_snapshot_tests {
 
     #[test]
     fn startos_password_replacement_invalidates_verified_snapshot() {
-        let mut db = Model::<crate::db::model::Database>::from(imbl_value::json!({
+        let mut db = Model::<crate::db::model::Database>::from(imbl_value::ord_json!({
             "private": { "password": "verified" }
         }));
         let verified_hash = RpcContext::password_hash(&db).unwrap();
@@ -1172,7 +1172,7 @@ mod password_snapshot_tests {
 
     #[test]
     fn tunnel_password_replacement_or_removal_invalidates_verified_snapshot() {
-        let mut db = Model::<TunnelDatabase>::from(imbl_value::json!({
+        let mut db = Model::<TunnelDatabase>::from(imbl_value::ord_json!({
             "password": "verified"
         }));
         let verified_hash = TunnelContext::password_hash(&db).unwrap();

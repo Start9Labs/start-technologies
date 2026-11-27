@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use patch_db::{HasModel, Value};
+use imbl_value::Value;
+use patch_db::HasModel;
 use serde::{Deserialize, Serialize};
 
 use crate::PackageId;

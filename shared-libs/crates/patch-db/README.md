@@ -12,7 +12,7 @@ patch-db stores your application state as a single JSON document. Instead of opa
 - **Observable** — subscribers watch arbitrary subtrees via JSON Pointers and receive scoped patches in real time
 - **Storage options** — the Rust backend supports in-memory databases or disk persistence with CBOR serialization, automatic compaction, and crash-safe backup files
 - **Type-safe** — derive macros on the Rust side; generic type parameters and deep `watch$()` overloads on the TypeScript side
-- **Immutable values** — the Rust side uses `imbl_value::Value` for efficient structural sharing
+- **Immutable values** — the Rust side uses `imbl_value::OrdValue` for efficient structural sharing; object keys are kept sorted, and no insertion order is preserved
 
 ## Quick start
 

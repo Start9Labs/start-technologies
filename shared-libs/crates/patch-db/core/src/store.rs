@@ -11,8 +11,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use fd_lock_rs::FdLock;
 use futures::{Future, FutureExt};
-use imbl::Vector;
-use imbl_value::{InOMap, InternedString, Value};
+use imbl_value::{InternedString, OrdValue};
 use json_patch::PatchError;
 use json_ptr::{JsonPointer, SegList, ROOT};
 use lazy_static::lazy_static;
@@ -44,7 +43,7 @@ struct FileStorage {
 
 pub struct Store {
     storage: Option<FileStorage>,
-    persistent: Value,
+    persistent: OrdValue,
     revision: u64,
     broadcast: Broadcast,
 }
@@ -94,7 +93,7 @@ impl Store {
                 serde_cbor::StreamDeserializer::new(serde_cbor::de::IoRead::new(&mut *f));
             let mut revision: u64 = stream.next().transpose()?.unwrap_or(0);
             let mut stream = stream.change_output_type();
-            let mut persistent: Value = stream.next().transpose()?.unwrap_or(Value::Null);
+            let mut persistent: OrdValue = stream.next().transpose()?.unwrap_or(OrdValue::Null);
             let mut stream = stream.change_output_type();
             while let Some(Ok(patch)) = stream.next() {
                 if let Err(_) = json_patch::patch(&mut persistent, &patch) {
@@ -107,7 +106,7 @@ impl Store {
                             .mode(STORE_FILE_MODE)
                             .open(path.with_extension("failed"))?,
                         "{}",
-                        imbl_value::to_value(&patch).map_err(Error::JSON)?,
+                        imbl_value::to_ord_value(&patch).map_err(Error::JSON)?,
                     )?;
                 }
                 revision += 1;
@@ -142,19 +141,19 @@ impl Store {
         Ok(())
     }
     pub(crate) fn exists<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> bool {
-        ptr.get(&self.persistent).unwrap_or(&Value::Null) != &Value::Null
+        ptr.get(&self.persistent).unwrap_or(&OrdValue::Null) != &OrdValue::Null
     }
     pub(crate) fn keys<S: AsRef<str>, V: SegList>(
         &self,
         ptr: &JsonPointer<S, V>,
     ) -> BTreeSet<InternedString> {
-        match ptr.get(&self.persistent).unwrap_or(&Value::Null) {
-            Value::Object(o) => o.keys().cloned().collect(),
+        match ptr.get(&self.persistent).unwrap_or(&OrdValue::Null) {
+            OrdValue::Object(o) => o.keys().cloned().collect(),
             _ => BTreeSet::new(),
         }
     }
-    pub(crate) fn get_value<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> Value {
-        ptr.get(&self.persistent).unwrap_or(&Value::Null).clone()
+    pub(crate) fn get_value<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> OrdValue {
+        ptr.get(&self.persistent).unwrap_or(&OrdValue::Null).clone()
     }
     pub(crate) fn get<T: for<'de> Deserialize<'de>, S: AsRef<str>, V: SegList>(
         &self,
@@ -165,7 +164,7 @@ impl Store {
     pub(crate) fn dump<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> Dump {
         Dump {
             id: self.revision,
-            value: ptr.get(&self.persistent).cloned().unwrap_or(Value::Null),
+            value: ptr.get(&self.persistent).cloned().unwrap_or(OrdValue::Null),
         }
     }
     pub(crate) fn sequence(&self) -> u64 {
@@ -197,7 +196,7 @@ impl Store {
     pub(crate) async fn put_value<S: AsRef<str>, V: SegList>(
         &mut self,
         ptr: &JsonPointer<S, V>,
-        value: &Value,
+        value: &OrdValue,
     ) -> Result<Option<Arc<Revision>>, Error> {
         let mut patch = match ptr.get(&self.persistent) {
             Some(existing) => diff(existing, value),
@@ -211,7 +210,8 @@ impl Store {
         ptr: &JsonPointer<S, V>,
         value: &T,
     ) -> Result<Option<Arc<Revision>>, Error> {
-        self.put_value(ptr, &imbl_value::to_value(&value)?).await
+        self.put_value(ptr, &imbl_value::to_ord_value(&value)?)
+            .await
     }
     /// Sets `*committed` once the backup rename makes rollback unsafe.
     pub(crate) async fn compress(&mut self, committed: &mut bool) -> Result<(), Error> {
@@ -330,20 +330,18 @@ impl Drop for Store {
         }
 
         match &self.persistent {
-            Value::Array(vec) if !vec.is_empty() => {}
-            Value::Object(map) if !map.is_empty() => {}
+            OrdValue::Array(vec) if !vec.is_empty() => {}
+            OrdValue::Object(map) if !map.is_empty() => {}
             _ => return,
         }
 
-        fn take_children(value: &mut Value, stack: &mut Vec<Value>) {
+        fn take_children(value: &mut OrdValue, stack: &mut Vec<OrdValue>) {
             match value {
-                Value::Array(vec) => {
+                OrdValue::Array(vec) => {
                     stack.extend(std::mem::take(vec));
                 }
-                Value::Object(map) => {
-                    let vec: Vector<(InternedString, Value)> =
-                        std::mem::replace(map, InOMap::new()).into();
-                    stack.extend(vec.into_iter().map(|(_, v)| v));
+                OrdValue::Object(map) => {
+                    stack.extend(std::mem::take(map).into_iter().map(|(_, v)| v));
                 }
                 _ => {}
             }
@@ -419,7 +417,7 @@ impl PatchDb {
         Self {
             store: Arc::new(RwLock::new(Store {
                 storage: None,
-                persistent: Value::Null,
+                persistent: OrdValue::Null,
                 revision: 0,
                 broadcast: Broadcast::new(),
             })),
@@ -582,7 +580,7 @@ impl PatchDb {
     ) -> BTreeSet<InternedString> {
         self.store.read().await.keys(ptr)
     }
-    pub async fn get_value<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> Value {
+    pub async fn get_value<S: AsRef<str>, V: SegList>(&self, ptr: &JsonPointer<S, V>) -> OrdValue {
         self.store.read().await.get_value(ptr)
     }
     pub async fn get<T: for<'de> Deserialize<'de>, S: AsRef<str>, V: SegList>(
@@ -605,9 +603,9 @@ impl PatchDb {
         let rev = store.apply(patch).await?;
         Ok(rev)
     }
-    pub async fn apply_function<F, T, E>(&self, f: F) -> MutateResult<(Value, T), E>
+    pub async fn apply_function<F, T, E>(&self, f: F) -> MutateResult<(OrdValue, T), E>
     where
-        F: FnOnce(Value) -> Result<(Value, T), E> + UnwindSafe,
+        F: FnOnce(OrdValue) -> Result<(OrdValue, T), E> + UnwindSafe,
         E: From<Error>,
     {
         async {
@@ -627,11 +625,11 @@ impl PatchDb {
         .await
         .into()
     }
-    pub async fn run_idempotent<F, Fut, T, E>(&self, f: F) -> Result<(Value, T), E>
+    pub async fn run_idempotent<F, Fut, T, E>(&self, f: F) -> Result<(OrdValue, T), E>
     where
-        F: Fn(Value) -> Fut + Send + Sync + UnwindSafe,
+        F: Fn(OrdValue) -> Fut + Send + Sync + UnwindSafe,
         for<'a> &'a F: UnwindSafe,
-        Fut: std::future::Future<Output = Result<(Value, T), E>> + UnwindSafe,
+        Fut: std::future::Future<Output = Result<(OrdValue, T), E>> + UnwindSafe,
         E: From<Error>,
     {
         loop {
@@ -718,7 +716,7 @@ impl<T: HasModel + DeserializeOwned + Serialize, E: From<Error>> TypedPatchDb<T,
         let res = Self::load_unchecked(db);
         res.map_mutate(|db| {
             Ok(T::Model::from_value(
-                imbl_value::to_value(
+                imbl_value::to_ord_value(
                     &imbl_value::from_value::<T>(db.into_value()).map_err(Error::from)?,
                 )
                 .map_err(Error::from)?,

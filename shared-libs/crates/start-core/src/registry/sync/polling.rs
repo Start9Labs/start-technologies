@@ -65,7 +65,7 @@ pub(super) async fn poll(
                 .await?
             }
         };
-        publish(db, subscription, &value, device).await?;
+        publish(db, subscription, &OrdValue::from(value), device).await?;
     }
     Ok(())
 }

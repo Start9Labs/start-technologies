@@ -1,30 +1,31 @@
 use core::convert::TryFrom;
 use core::fmt::Display;
 use core::result;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use imbl::Vector;
 use serde::ser::{Impossible, Serialize};
 use serde_json::{Error, Number, Result};
 
-use crate::{to_value, InOMap as Map, InternedString, Value};
+use crate::{GenericValue, InternedString, ObjectKind, ObjectMap};
 
-impl Serialize for Value {
+impl<K: ObjectKind> Serialize for GenericValue<K> {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
     where
         S: ::serde::Serializer,
     {
         match self {
-            Value::Null => serializer.serialize_unit(),
-            Value::Bool(b) => serializer.serialize_bool(*b),
-            Value::Number(n) => n.serialize(serializer),
-            Value::String(s) => serializer.serialize_str(s),
-            Value::Array(v) => v.serialize(serializer),
-            Value::Object(m) => {
+            GenericValue::Null => serializer.serialize_unit(),
+            GenericValue::Bool(b) => serializer.serialize_bool(*b),
+            GenericValue::Number(n) => n.serialize(serializer),
+            GenericValue::String(s) => serializer.serialize_str(s),
+            GenericValue::Array(v) => v.serialize(serializer),
+            GenericValue::Object(m) => {
                 use serde::ser::SerializeMap;
                 let mut map = serializer.serialize_map(Some(m.len()))?;
-                for (k, v) in m {
+                for (k, v) in m.entries() {
                     map.serialize_entry(k, v)?;
                 }
                 map.end()
@@ -53,116 +54,131 @@ impl Serialize for Value {
 ///     input.serialize(serde_json::value::Serializer)
 /// }
 /// ```
-pub struct Serializer;
+pub struct Serializer<K>(PhantomData<fn() -> K>);
 
-impl serde::Serializer for Serializer {
-    type Ok = Value;
+impl<K> Serializer<K> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<K> Default for Serializer<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K: ObjectKind> serde::Serializer for Serializer<K> {
+    type Ok = GenericValue<K>;
     type Error = Error;
 
-    type SerializeSeq = SerializeVec;
-    type SerializeTuple = SerializeVec;
-    type SerializeTupleStruct = SerializeVec;
-    type SerializeTupleVariant = SerializeTupleVariant;
-    type SerializeMap = SerializeMap;
-    type SerializeStruct = SerializeMap;
-    type SerializeStructVariant = SerializeStructVariant;
+    type SerializeSeq = SerializeVec<K>;
+    type SerializeTuple = SerializeVec<K>;
+    type SerializeTupleStruct = SerializeVec<K>;
+    type SerializeTupleVariant = SerializeTupleVariant<K>;
+    type SerializeMap = SerializeMap<K>;
+    type SerializeStruct = SerializeMap<K>;
+    type SerializeStructVariant = SerializeStructVariant<K>;
 
     #[inline]
-    fn serialize_bool(self, value: bool) -> Result<Value> {
-        Ok(Value::Bool(value))
+    fn serialize_bool(self, value: bool) -> Result<GenericValue<K>> {
+        Ok(GenericValue::Bool(value))
     }
 
     #[inline]
-    fn serialize_i8(self, value: i8) -> Result<Value> {
+    fn serialize_i8(self, value: i8) -> Result<GenericValue<K>> {
         self.serialize_i64(value as i64)
     }
 
     #[inline]
-    fn serialize_i16(self, value: i16) -> Result<Value> {
+    fn serialize_i16(self, value: i16) -> Result<GenericValue<K>> {
         self.serialize_i64(value as i64)
     }
 
     #[inline]
-    fn serialize_i32(self, value: i32) -> Result<Value> {
+    fn serialize_i32(self, value: i32) -> Result<GenericValue<K>> {
         self.serialize_i64(value as i64)
     }
 
-    fn serialize_i64(self, value: i64) -> Result<Value> {
-        Ok(Value::Number(value.into()))
+    fn serialize_i64(self, value: i64) -> Result<GenericValue<K>> {
+        Ok(GenericValue::Number(value.into()))
     }
 
-    fn serialize_i128(self, value: i128) -> Result<Value> {
+    fn serialize_i128(self, value: i128) -> Result<GenericValue<K>> {
         if let Ok(value) = u64::try_from(value) {
-            Ok(Value::Number(value.into()))
+            Ok(GenericValue::Number(value.into()))
         } else if let Ok(value) = i64::try_from(value) {
-            Ok(Value::Number(value.into()))
+            Ok(GenericValue::Number(value.into()))
         } else {
             Err(<Error as serde::ser::Error>::custom("number out of range"))
         }
     }
 
     #[inline]
-    fn serialize_u8(self, value: u8) -> Result<Value> {
+    fn serialize_u8(self, value: u8) -> Result<GenericValue<K>> {
         self.serialize_u64(value as u64)
     }
 
     #[inline]
-    fn serialize_u16(self, value: u16) -> Result<Value> {
+    fn serialize_u16(self, value: u16) -> Result<GenericValue<K>> {
         self.serialize_u64(value as u64)
     }
 
     #[inline]
-    fn serialize_u32(self, value: u32) -> Result<Value> {
+    fn serialize_u32(self, value: u32) -> Result<GenericValue<K>> {
         self.serialize_u64(value as u64)
     }
 
     #[inline]
-    fn serialize_u64(self, value: u64) -> Result<Value> {
-        Ok(Value::Number(value.into()))
+    fn serialize_u64(self, value: u64) -> Result<GenericValue<K>> {
+        Ok(GenericValue::Number(value.into()))
     }
 
-    fn serialize_u128(self, value: u128) -> Result<Value> {
+    fn serialize_u128(self, value: u128) -> Result<GenericValue<K>> {
         if let Ok(value) = u64::try_from(value) {
-            Ok(Value::Number(value.into()))
+            Ok(GenericValue::Number(value.into()))
         } else {
             Err(<Error as serde::ser::Error>::custom("number out of range"))
         }
     }
 
     #[inline]
-    fn serialize_f32(self, value: f32) -> Result<Value> {
+    fn serialize_f32(self, value: f32) -> Result<GenericValue<K>> {
         self.serialize_f64(value as f64)
     }
 
     #[inline]
-    fn serialize_f64(self, value: f64) -> Result<Value> {
-        Ok(Number::from_f64(value).map_or(Value::Null, Value::Number))
+    fn serialize_f64(self, value: f64) -> Result<GenericValue<K>> {
+        Ok(Number::from_f64(value).map_or(GenericValue::Null, GenericValue::Number))
     }
 
     #[inline]
-    fn serialize_char(self, value: char) -> Result<Value> {
+    fn serialize_char(self, value: char) -> Result<GenericValue<K>> {
         let mut s = String::new();
         s.push(value);
-        Ok(Value::String(Arc::new(s)))
+        Ok(GenericValue::String(Arc::new(s)))
     }
 
     #[inline]
-    fn serialize_str(self, value: &str) -> Result<Value> {
-        Ok(Value::String(Arc::new(value.to_owned())))
+    fn serialize_str(self, value: &str) -> Result<GenericValue<K>> {
+        Ok(GenericValue::String(Arc::new(value.to_owned())))
     }
 
-    fn serialize_bytes(self, value: &[u8]) -> Result<Value> {
-        let vec = value.iter().map(|&b| Value::Number(b.into())).collect();
-        Ok(Value::Array(vec))
+    fn serialize_bytes(self, value: &[u8]) -> Result<GenericValue<K>> {
+        let vec = value
+            .iter()
+            .map(|&b| GenericValue::Number(b.into()))
+            .collect();
+        Ok(GenericValue::Array(vec))
     }
 
     #[inline]
-    fn serialize_unit(self) -> Result<Value> {
-        Ok(Value::Null)
+    fn serialize_unit(self) -> Result<GenericValue<K>> {
+        Ok(GenericValue::Null)
     }
 
     #[inline]
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Value> {
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<GenericValue<K>> {
         self.serialize_unit()
     }
 
@@ -172,12 +188,12 @@ impl serde::Serializer for Serializer {
         _name: &'static str,
         _variant_index: u32,
         variant: &'static str,
-    ) -> Result<Value> {
+    ) -> Result<GenericValue<K>> {
         self.serialize_str(variant)
     }
 
     #[inline]
-    fn serialize_newtype_struct<T>(self, _name: &'static str, value: &T) -> Result<Value>
+    fn serialize_newtype_struct<T>(self, _name: &'static str, value: &T) -> Result<GenericValue<K>>
     where
         T: ?Sized + Serialize,
     {
@@ -190,25 +206,25 @@ impl serde::Serializer for Serializer {
         _variant_index: u32,
         variant: &'static str,
         value: &T,
-    ) -> Result<Value>
+    ) -> Result<GenericValue<K>>
     where
         T: ?Sized + Serialize,
     {
-        let mut values = Map::new();
+        let mut values = K::Map::default();
         values.insert(
             InternedString::intern(variant),
-            to_value(&value).map_err(|e| e.source)?,
+            value.serialize(Serializer::<K>::new())?,
         );
-        Ok(Value::Object(values))
+        Ok(GenericValue::Object(values))
     }
 
     #[inline]
-    fn serialize_none(self) -> Result<Value> {
+    fn serialize_none(self) -> Result<GenericValue<K>> {
         self.serialize_unit()
     }
 
     #[inline]
-    fn serialize_some<T>(self, value: &T) -> Result<Value>
+    fn serialize_some<T>(self, value: &T) -> Result<GenericValue<K>>
     where
         T: ?Sized + Serialize,
     {
@@ -246,7 +262,7 @@ impl serde::Serializer for Serializer {
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
         Ok(SerializeMap::Map {
-            map: Map::new(),
+            map: K::Map::default(),
             next_key: None,
         })
     }
@@ -266,58 +282,58 @@ impl serde::Serializer for Serializer {
     ) -> Result<Self::SerializeStructVariant> {
         Ok(SerializeStructVariant {
             name: InternedString::intern(variant),
-            map: Map::new(),
+            map: K::Map::default(),
         })
     }
 
-    fn collect_str<T>(self, value: &T) -> Result<Value>
+    fn collect_str<T>(self, value: &T) -> Result<GenericValue<K>>
     where
         T: ?Sized + Display,
     {
-        Ok(Value::String(Arc::new(value.to_string())))
+        Ok(GenericValue::String(Arc::new(value.to_string())))
     }
 }
 
-pub struct SerializeVec {
-    vec: Vector<Value>,
+pub struct SerializeVec<K: ObjectKind> {
+    vec: Vector<GenericValue<K>>,
 }
 
-pub struct SerializeTupleVariant {
+pub struct SerializeTupleVariant<K: ObjectKind> {
     name: InternedString,
-    vec: Vector<Value>,
+    vec: Vector<GenericValue<K>>,
 }
 
-pub enum SerializeMap {
+pub enum SerializeMap<K: ObjectKind> {
     Map {
-        map: Map<InternedString, Value>,
+        map: K::Map,
         next_key: Option<InternedString>,
     },
 }
 
-pub struct SerializeStructVariant {
+pub struct SerializeStructVariant<K: ObjectKind> {
     name: InternedString,
-    map: Map<InternedString, Value>,
+    map: K::Map,
 }
 
-impl serde::ser::SerializeSeq for SerializeVec {
-    type Ok = Value;
+impl<K: ObjectKind> serde::ser::SerializeSeq for SerializeVec<K> {
+    type Ok = GenericValue<K>;
     type Error = Error;
 
     fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
-        self.vec.push_back(to_value(&value).map_err(|e| e.source)?);
+        self.vec.push_back(value.serialize(Serializer::<K>::new())?);
         Ok(())
     }
 
-    fn end(self) -> Result<Value> {
-        Ok(Value::Array(self.vec))
+    fn end(self) -> Result<GenericValue<K>> {
+        Ok(GenericValue::Array(self.vec))
     }
 }
 
-impl serde::ser::SerializeTuple for SerializeVec {
-    type Ok = Value;
+impl<K: ObjectKind> serde::ser::SerializeTuple for SerializeVec<K> {
+    type Ok = GenericValue<K>;
     type Error = Error;
 
     fn serialize_element<T>(&mut self, value: &T) -> Result<()>
@@ -327,13 +343,13 @@ impl serde::ser::SerializeTuple for SerializeVec {
         serde::ser::SerializeSeq::serialize_element(self, value)
     }
 
-    fn end(self) -> Result<Value> {
+    fn end(self) -> Result<GenericValue<K>> {
         serde::ser::SerializeSeq::end(self)
     }
 }
 
-impl serde::ser::SerializeTupleStruct for SerializeVec {
-    type Ok = Value;
+impl<K: ObjectKind> serde::ser::SerializeTupleStruct for SerializeVec<K> {
+    type Ok = GenericValue<K>;
     type Error = Error;
 
     fn serialize_field<T>(&mut self, value: &T) -> Result<()>
@@ -343,34 +359,34 @@ impl serde::ser::SerializeTupleStruct for SerializeVec {
         serde::ser::SerializeSeq::serialize_element(self, value)
     }
 
-    fn end(self) -> Result<Value> {
+    fn end(self) -> Result<GenericValue<K>> {
         serde::ser::SerializeSeq::end(self)
     }
 }
 
-impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
-    type Ok = Value;
+impl<K: ObjectKind> serde::ser::SerializeTupleVariant for SerializeTupleVariant<K> {
+    type Ok = GenericValue<K>;
     type Error = Error;
 
     fn serialize_field<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + Serialize,
     {
-        self.vec.push_back(to_value(&value).map_err(|e| e.source)?);
+        self.vec.push_back(value.serialize(Serializer::<K>::new())?);
         Ok(())
     }
 
-    fn end(self) -> Result<Value> {
-        let mut object = Map::new();
+    fn end(self) -> Result<GenericValue<K>> {
+        let mut object = K::Map::default();
 
-        object.insert(self.name, Value::Array(self.vec));
+        object.insert(self.name, GenericValue::Array(self.vec));
 
-        Ok(Value::Object(object))
+        Ok(GenericValue::Object(object))
     }
 }
 
-impl serde::ser::SerializeMap for SerializeMap {
-    type Ok = Value;
+impl<K: ObjectKind> serde::ser::SerializeMap for SerializeMap<K> {
+    type Ok = GenericValue<K>;
     type Error = Error;
 
     fn serialize_key<T>(&mut self, key: &T) -> Result<()>
@@ -395,15 +411,15 @@ impl serde::ser::SerializeMap for SerializeMap {
                 // Panic because this indicates a bug in the program rather than an
                 // expected failure.
                 let key = key.expect("serialize_value called before serialize_key");
-                map.insert(key, to_value(&value).map_err(|e| e.source)?);
+                map.insert(key, value.serialize(Serializer::<K>::new())?);
                 Ok(())
             }
         }
     }
 
-    fn end(self) -> Result<Value> {
+    fn end(self) -> Result<GenericValue<K>> {
         match self {
-            SerializeMap::Map { map, .. } => Ok(Value::Object(map)),
+            SerializeMap::Map { map, .. } => Ok(GenericValue::Object(map)),
         }
     }
 }
@@ -586,8 +602,8 @@ impl serde::Serializer for MapKeySerializer {
     }
 }
 
-impl serde::ser::SerializeStruct for SerializeMap {
-    type Ok = Value;
+impl<K: ObjectKind> serde::ser::SerializeStruct for SerializeMap<K> {
+    type Ok = GenericValue<K>;
     type Error = Error;
 
     fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<()>
@@ -599,15 +615,15 @@ impl serde::ser::SerializeStruct for SerializeMap {
         }
     }
 
-    fn end(self) -> Result<Value> {
+    fn end(self) -> Result<GenericValue<K>> {
         match self {
             SerializeMap::Map { .. } => serde::ser::SerializeMap::end(self),
         }
     }
 }
 
-impl serde::ser::SerializeStructVariant for SerializeStructVariant {
-    type Ok = Value;
+impl<K: ObjectKind> serde::ser::SerializeStructVariant for SerializeStructVariant<K> {
+    type Ok = GenericValue<K>;
     type Error = Error;
 
     fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<()>
@@ -616,16 +632,16 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
     {
         self.map.insert(
             InternedString::intern(key),
-            to_value(&value).map_err(|e| e.source)?,
+            value.serialize(Serializer::<K>::new())?,
         );
         Ok(())
     }
 
-    fn end(self) -> Result<Value> {
-        let mut object = Map::new();
+    fn end(self) -> Result<GenericValue<K>> {
+        let mut object = K::Map::default();
 
-        object.insert(self.name, Value::Object(self.map));
+        object.insert(self.name, GenericValue::Object(self.map));
 
-        Ok(Value::Object(object))
+        Ok(GenericValue::Object(object))
     }
 }

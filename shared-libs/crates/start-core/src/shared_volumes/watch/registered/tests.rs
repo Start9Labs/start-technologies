@@ -3,7 +3,7 @@ use crate::shared_volumes::{SharedVolume, SharedVolumeCredentials, SharedVolumeG
 
 fn database() -> (DatabaseModel, SharedVolumeId, BackupTargetId) {
     let mut db = DatabaseModel::from(
-        to_value(&serde_json::json!({
+        imbl_value::to_ord_value(&serde_json::json!({
             "public": {"sharedVolumes": {}, "backupTargets": {}},
             "private": {"sharedVolumeCredentials": {}, "backupTargetCredentials": {}}
         }))
@@ -216,7 +216,7 @@ async fn change_stream_ignores_unrelated_state_but_observes_private_credentials(
 
     let (mut db, volume_id, _) = database();
     let initial = db.as_value().clone();
-    db.as_value_mut()["public"]["ui"] = imbl_value::json!({ "snakeHighScore": 42 });
+    db.as_value_mut()["public"]["ui"] = imbl_value::ord_json!({ "snakeHighScore": 42 });
     let unrelated = db.as_value().clone();
     db.as_private_mut()
         .as_shared_volume_credentials_mut()

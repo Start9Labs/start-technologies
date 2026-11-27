@@ -341,8 +341,8 @@ fn reconcile(
             for legacy in ["catalog", "packages", "listings"] {
                 fields.remove(legacy);
             }
-            if !fields.get("selections").is_some_and(Value::is_object) {
-                fields.insert("selections".into(), Value::Object(Default::default()));
+            if !fields.get("selections").is_some_and(OrdValue::is_object) {
+                fields.insert("selections".into(), OrdValue::Object(Default::default()));
             }
         }
         if reset {
@@ -704,7 +704,7 @@ fn registry_cursors_mut(
     db: &mut DatabaseModel,
 ) -> Result<&mut Model<BTreeMap<Url, RegistryCursor>>, Error> {
     let cursors = db.as_private_mut().as_registry_cursors_mut();
-    if !matches!(cursors.as_value(), Value::Object(_)) {
+    if !matches!(cursors.as_value(), OrdValue::Object(_)) {
         cursors.ser(&BTreeMap::new())?;
     }
     Ok(cursors)
@@ -771,7 +771,7 @@ fn ingest_event(
     sync_os_default_locale(db)
 }
 
-fn save_index(db: &mut DatabaseModel, url: &Url, index: Value) -> Result<(), Error> {
+fn save_index(db: &mut DatabaseModel, url: &Url, index: OrdValue) -> Result<(), Error> {
     db.as_public_mut()
         .as_registry_indexes_mut()
         .insert_model(url, Model::from_value(index))?;
@@ -884,7 +884,7 @@ pub(crate) fn refresh_public(
 async fn publish(
     db: &TypedPatchDb<Database>,
     subscription: &Subscription,
-    value: &Value,
+    value: &OrdValue,
     device: &DeviceInfo,
 ) -> Result<(), Error> {
     db.mutate(|db| publish_snapshot(db, subscription, value, device))
@@ -895,7 +895,7 @@ async fn publish(
 fn publish_snapshot(
     db: &mut DatabaseModel,
     subscription: &Subscription,
-    value: &Value,
+    value: &OrdValue,
     device: &DeviceInfo,
 ) -> Result<(), Error> {
     if !subscription.selected(&db.as_public().as_server_info().de()?) {
@@ -904,7 +904,7 @@ fn publish_snapshot(
     match subscription {
         Subscription::Index(url) => {
             let index: FullIndex = from_value(value.clone())?;
-            save_index(db, url, to_value(&index)?)?;
+            save_index(db, url, to_ord_value(&index)?)?;
             forget_cursor(db, url)?;
             refresh_public(db, url, None, device)?;
         }

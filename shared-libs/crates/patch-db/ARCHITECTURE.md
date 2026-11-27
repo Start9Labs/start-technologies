@@ -54,8 +54,8 @@ The main database engine. Key types:
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PatchDb`            | Thread-safe async handle (clone to share). All reads/writes go through this.                                                                                                                                                                                                              |
 | `TypedPatchDb<T>`    | Generic wrapper that enforces a schema type `T` via `HasModel`.                                                                                                                                                                                                                           |
-| `Store`              | Internal state container. Holds the current `Value`, revision counter, `Broadcast`, and optional CBOR file storage.                                                                                                                                                                       |
-| `Dump`               | Snapshot: `{ id: u64, value: Value }`                                                                                                                                                                                                                                                     |
+| `Store`              | Internal state container. Holds the current `OrdValue`, revision counter, `Broadcast`, and optional CBOR file storage.                                                                                                                                                                    |
+| `Dump`               | Snapshot: `{ id: u64, value: OrdValue }`                                                                                                                                                                                                                                                  |
 | `Revision`           | Incremental change: `{ id: u64, patch: DiffPatch }`                                                                                                                                                                                                                                       |
 | `DiffPatch`          | Newtype over `json_patch::Patch` with scoping, rebasing, and key-tracking methods.                                                                                                                                                                                                        |
 | `DbWatch`            | Combines a `Dump` + `Subscriber` into a `Stream` of values.                                                                                                                                                                                                                               |
@@ -99,7 +99,7 @@ PatchDb::dump / get / exists / keys
   │
   ▼
 Store (RwLock read guard)
-  └─ Navigate Value via JsonPointer
+  └─ Navigate OrdValue via JsonPointer
 ```
 
 #### Subscription path
@@ -155,8 +155,8 @@ RFC 6902 JSON Patch implementation. Provides:
 
 - `Patch(Vec<PatchOperation>)` — the patch type
 - `PatchOperation` enum: `Add`, `Remove`, `Replace`, `Test`, `Move`, `Copy`
-- `patch()` — apply a patch to a `Value`, returns an `Undo` for rollback
-- `diff()` — compute the minimal patch between two `Value`s
+- `patch()` — apply a patch to an `OrdValue`, returns an `Undo` for rollback
+- `diff()` — compute the minimal patch between two `OrdValue`s; object diffs skip subtrees the two sides share
 
 ### `util`
 
@@ -192,7 +192,7 @@ watch$(...path) → BehaviorSubject per unique path → Observable to consumer
 
 - `watch$()` has overloads for 0–6 path segments, providing type-safe deep property access
 - Watched nodes are keyed by their JSON Pointer path string
-- A revision considers watchers whose path overlaps with any operation in the patch (prefix match in either direction)
+- A revision considers watchers whose path overlaps with any operation in the patch (prefix match in either direction), and watchers inside arrays it shifts
 - A dump reconciles equal subtrees and considers every watcher
 - Watches emit subsequent values only when `value !== previousValue`
 

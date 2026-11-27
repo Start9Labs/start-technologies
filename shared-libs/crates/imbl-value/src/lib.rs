@@ -14,6 +14,7 @@ mod from;
 pub mod in_order_map;
 pub mod index;
 pub mod macros;
+mod object;
 pub mod ser;
 
 #[cfg(feature = "arbitrary")]
@@ -21,10 +22,17 @@ mod arbitrary;
 
 pub use imbl;
 pub use in_order_map::InOMap;
+pub use object::{InOrder, ObjectKind, ObjectMap, Sorted};
 pub use serde_json::{Error as ErrorSource, Number};
 pub use yasi::InternedString;
 
-pub const NULL: Value = Value::Null;
+pub const NULL: Value = GenericValue::Null;
+
+/// A JSON value whose objects keep keys in insertion order.
+pub type Value = GenericValue<InOrder>;
+
+/// A JSON value whose objects keep keys sorted.
+pub type OrdValue = GenericValue<Sorted>;
 
 #[derive(Debug)]
 pub enum ErrorKind {
@@ -44,9 +52,8 @@ impl std::fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-/// See the [`serde_json::value` module documentation](self) for usage examples.
-#[derive(Clone)]
-pub enum Value {
+/// A JSON value whose objects are backed by the map `K` selects.
+pub enum GenericValue<K: ObjectKind> {
     /// Represents a JSON null value.
     ///
     /// ```
@@ -90,36 +97,43 @@ pub enum Value {
     ///
     /// let v = json!(["an", "array"]);
     /// ```
-    Array(Vector<Value>),
+    Array(Vector<GenericValue<K>>),
 
     /// Represents a JSON object.
-    ///
-    /// By default the map is backed by a BTreeMap. Enable the `preserve_order`
-    /// feature of serde_json to use IndexMap instead, which preserves
-    /// entries in the order they are inserted into the map. In particular, this
-    /// allows JSON data to be deserialized into a Value and serialized to a
-    /// string while retaining the order of map keys in the input.
     ///
     /// ```
     /// use imbl_value::json;
     ///
     /// let v = json!({ "an": "object" });
     /// ```
-    Object(InOMap<InternedString, Value>),
+    Object(K::Map),
 }
 
-impl Debug for Value {
+impl<K: ObjectKind> Clone for GenericValue<K> {
+    fn clone(&self) -> Self {
+        match self {
+            GenericValue::Null => GenericValue::Null,
+            GenericValue::Bool(b) => GenericValue::Bool(*b),
+            GenericValue::Number(n) => GenericValue::Number(n.clone()),
+            GenericValue::String(s) => GenericValue::String(s.clone()),
+            GenericValue::Array(a) => GenericValue::Array(a.clone()),
+            GenericValue::Object(o) => GenericValue::Object(o.clone()),
+        }
+    }
+}
+
+impl<K: ObjectKind> Debug for GenericValue<K> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Value::Null => formatter.write_str("Null"),
-            Value::Bool(boolean) => write!(formatter, "Bool({})", boolean),
-            Value::Number(number) => Debug::fmt(number, formatter),
-            Value::String(string) => write!(formatter, "String({:?})", string),
-            Value::Array(vec) => {
+            GenericValue::Null => formatter.write_str("Null"),
+            GenericValue::Bool(boolean) => write!(formatter, "Bool({})", boolean),
+            GenericValue::Number(number) => Debug::fmt(number, formatter),
+            GenericValue::String(string) => write!(formatter, "String({:?})", string),
+            GenericValue::Array(vec) => {
                 formatter.write_str("Array ")?;
                 Debug::fmt(vec, formatter)
             }
-            Value::Object(map) => {
+            GenericValue::Object(map) => {
                 formatter.write_str("Object ")?;
                 Debug::fmt(map, formatter)
             }
@@ -127,7 +141,7 @@ impl Debug for Value {
     }
 }
 
-impl Display for Value {
+impl<K: ObjectKind> Display for GenericValue<K> {
     /// Display a JSON value as a string.
     ///
     /// ```
@@ -196,7 +210,7 @@ fn parse_index(s: &str) -> Option<usize> {
     s.parse().ok()
 }
 
-impl Value {
+impl<K: ObjectKind> GenericValue<K> {
     /// Index into a JSON array or map. A string index can be used to access a
     /// value in a map, and a usize index can be used to access an element of an
     /// array.
@@ -235,7 +249,7 @@ impl Value {
     /// assert_eq!(object["D"], json!(null));
     /// assert_eq!(object[0]["x"]["y"]["z"], json!(null));
     /// ```
-    pub fn get<I: Index>(&self, index: I) -> Option<&Value> {
+    pub fn get<I: Index>(&self, index: I) -> Option<&Self> {
         index.index_into(self)
     }
 
@@ -257,7 +271,7 @@ impl Value {
     /// let mut array = json!([ "A", "B", "C" ]);
     /// *array.get_mut(2).unwrap() = json!("D");
     /// ```
-    pub fn get_mut<I: Index>(&mut self, index: I) -> Option<&mut Value> {
+    pub fn get_mut<I: Index>(&mut self, index: I) -> Option<&mut Self> {
         index.index_into_mut(self)
     }
 
@@ -296,9 +310,9 @@ impl Value {
     /// // The array `["an", "array"]` is not an object.
     /// assert_eq!(v["b"].as_object(), None);
     /// ```
-    pub fn as_object(&self) -> Option<&InOMap<InternedString, Value>> {
+    pub fn as_object(&self) -> Option<&K::Map> {
         match self {
-            Value::Object(map) => Some(map),
+            GenericValue::Object(map) => Some(map),
             _ => None,
         }
     }
@@ -314,9 +328,9 @@ impl Value {
     /// v["a"].as_object_mut().unwrap().clear();
     /// assert_eq!(v, json!({ "a": {} }));
     /// ```
-    pub fn as_object_mut(&mut self) -> Option<&mut InOMap<InternedString, Value>> {
+    pub fn as_object_mut(&mut self) -> Option<&mut K::Map> {
         match self {
-            Value::Object(map) => Some(map),
+            GenericValue::Object(map) => Some(map),
             _ => None,
         }
     }
@@ -355,9 +369,9 @@ impl Value {
     /// // The object `{"an": "object"}` is not an array.
     /// assert_eq!(v["b"].as_array(), None);
     /// ```
-    pub fn as_array(&self) -> Option<&Vector<Value>> {
+    pub fn as_array(&self) -> Option<&Vector<Self>> {
         match self {
-            Value::Array(array) => Some(array),
+            GenericValue::Array(array) => Some(array),
             _ => None,
         }
     }
@@ -373,9 +387,9 @@ impl Value {
     /// v["a"].as_array_mut().unwrap().clear();
     /// assert_eq!(v, json!({ "a": [] }));
     /// ```
-    pub fn as_array_mut(&mut self) -> Option<&mut Vector<Value>> {
+    pub fn as_array_mut(&mut self) -> Option<&mut Vector<Self>> {
         match self {
-            Value::Array(list) => Some(list),
+            GenericValue::Array(list) => Some(list),
             _ => None,
         }
     }
@@ -424,7 +438,7 @@ impl Value {
     /// ```
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Value::String(s) => Some(s),
+            GenericValue::String(s) => Some(s),
             _ => None,
         }
     }
@@ -443,7 +457,7 @@ impl Value {
     /// ```
     pub fn is_number(&self) -> bool {
         match *self {
-            Value::Number(_) => true,
+            GenericValue::Number(_) => true,
             _ => false,
         }
     }
@@ -470,7 +484,7 @@ impl Value {
     /// ```
     pub fn is_i64(&self) -> bool {
         match self {
-            Value::Number(n) => n.is_i64(),
+            GenericValue::Number(n) => n.is_i64(),
             _ => false,
         }
     }
@@ -495,7 +509,7 @@ impl Value {
     /// ```
     pub fn is_u64(&self) -> bool {
         match self {
-            Value::Number(n) => n.is_u64(),
+            GenericValue::Number(n) => n.is_u64(),
             _ => false,
         }
     }
@@ -521,7 +535,7 @@ impl Value {
     /// ```
     pub fn is_f64(&self) -> bool {
         match self {
-            Value::Number(n) => n.is_f64(),
+            GenericValue::Number(n) => n.is_f64(),
             _ => false,
         }
     }
@@ -541,7 +555,7 @@ impl Value {
     /// ```
     pub fn as_i64(&self) -> Option<i64> {
         match self {
-            Value::Number(n) => n.as_i64(),
+            GenericValue::Number(n) => n.as_i64(),
             _ => None,
         }
     }
@@ -560,7 +574,7 @@ impl Value {
     /// ```
     pub fn as_u64(&self) -> Option<u64> {
         match self {
-            Value::Number(n) => n.as_u64(),
+            GenericValue::Number(n) => n.as_u64(),
             _ => None,
         }
     }
@@ -579,7 +593,7 @@ impl Value {
     /// ```
     pub fn as_f64(&self) -> Option<f64> {
         match self {
-            Value::Number(n) => n.as_f64(),
+            GenericValue::Number(n) => n.as_f64(),
             _ => None,
         }
     }
@@ -618,7 +632,7 @@ impl Value {
     /// ```
     pub fn as_bool(&self) -> Option<bool> {
         match *self {
-            Value::Bool(b) => Some(b),
+            GenericValue::Bool(b) => Some(b),
             _ => None,
         }
     }
@@ -656,7 +670,7 @@ impl Value {
     /// ```
     pub fn as_null(&self) -> Option<()> {
         match *self {
-            Value::Null => Some(()),
+            GenericValue::Null => Some(()),
             _ => None,
         }
     }
@@ -687,7 +701,7 @@ impl Value {
     /// assert_eq!(data.pointer("/x/y/1").unwrap(), &json!("zz"));
     /// assert_eq!(data.pointer("/a/b/c"), None);
     /// ```
-    pub fn pointer(&self, pointer: &str) -> Option<&Value> {
+    pub fn pointer(&self, pointer: &str) -> Option<&Self> {
         if pointer.is_empty() {
             return Some(self);
         }
@@ -700,8 +714,8 @@ impl Value {
             .map(|x| x.replace("~1", "/").replace("~0", "~"))
             .map(Arc::new)
             .try_fold(self, |target, token| match target {
-                Value::Object(map) => map.get(&**token),
-                Value::Array(list) => parse_index(&token).and_then(|x| list.get(x)),
+                GenericValue::Object(map) => map.get(&**token),
+                GenericValue::Array(list) => parse_index(&token).and_then(|x| list.get(x)),
                 _ => None,
             })
     }
@@ -743,7 +757,7 @@ impl Value {
     ///     assert_eq!(value.pointer("/x").unwrap(), &Value::Null);
     /// }
     /// ```
-    pub fn pointer_mut(&mut self, pointer: &str) -> Option<&mut Value> {
+    pub fn pointer_mut(&mut self, pointer: &str) -> Option<&mut Self> {
         if pointer.is_empty() {
             return Some(self);
         }
@@ -756,8 +770,8 @@ impl Value {
             .map(|x| x.replace("~1", "/").replace("~0", "~"))
             .map(Arc::new)
             .try_fold(self, |target, token| match target {
-                Value::Object(map) => map.get_mut(&**token),
-                Value::Array(list) => parse_index(&token).and_then(move |x| list.get_mut(x)),
+                GenericValue::Object(map) => map.get_mut(&**token),
+                GenericValue::Array(list) => parse_index(&token).and_then(move |x| list.get_mut(x)),
                 _ => None,
             })
     }
@@ -771,18 +785,18 @@ impl Value {
     /// assert_eq!(v["x"].take(), json!("y"));
     /// assert_eq!(v, json!({ "x": null }));
     /// ```
-    pub fn take(&mut self) -> Value {
-        ::std::mem::replace(self, Value::Null)
+    pub fn take(&mut self) -> Self {
+        ::std::mem::replace(self, GenericValue::Null)
     }
 
     fn discriminant(&self) -> u8 {
         match self {
-            Value::Null => 0,
-            Value::Bool(_) => 1,
-            Value::Number(_) => 2,
-            Value::String(_) => 3,
-            Value::Array(_) => 4,
-            Value::Object(_) => 5,
+            GenericValue::Null => 0,
+            GenericValue::Bool(_) => 1,
+            GenericValue::Number(_) => 2,
+            GenericValue::String(_) => 3,
+            GenericValue::Array(_) => 4,
+            GenericValue::Object(_) => 5,
         }
     }
 
@@ -797,7 +811,7 @@ impl Value {
     /// assert!(a.ptr_eq(&b));
     /// assert!(!a.ptr_eq(&c));
     /// ```
-    pub fn ptr_eq(&self, other: &Value) -> bool {
+    pub fn ptr_eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Array(a), Self::Array(b)) => a.ptr_eq(b),
             (Self::Object(a), Self::Object(b)) => a.ptr_eq(b),
@@ -836,90 +850,90 @@ impl Value {
 /// #
 /// # try_main().unwrap()
 /// ```
-impl Default for Value {
-    fn default() -> Value {
-        Value::Null
+impl<K: ObjectKind> Default for GenericValue<K> {
+    fn default() -> Self {
+        GenericValue::Null
     }
 }
 
-impl PartialEq for Value {
+impl<K: ObjectKind> PartialEq for GenericValue<K> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Value::Array(a), Value::Array(b)) => a.ptr_eq(b) || a == b,
-            (Value::Bool(a), Value::Bool(b)) => a == b,
-            (Value::Null, Value::Null) => true,
-            (Value::Number(a), Value::Number(b)) => a == b,
+            (GenericValue::Array(a), GenericValue::Array(b)) => a.ptr_eq(b) || a == b,
+            (GenericValue::Bool(a), GenericValue::Bool(b)) => a == b,
+            (GenericValue::Null, GenericValue::Null) => true,
+            (GenericValue::Number(a), GenericValue::Number(b)) => a == b,
 
-            (Value::Object(a), Value::Object(b)) => a.ptr_eq(b) || a == b,
-            (Value::String(a), Value::String(b)) => Arc::ptr_eq(a, b) || a == b,
+            (GenericValue::Object(a), GenericValue::Object(b)) => a.ptr_eq(b) || a == b,
+            (GenericValue::String(a), GenericValue::String(b)) => Arc::ptr_eq(a, b) || a == b,
             _ => false,
         }
     }
 }
-impl Eq for Value {}
+impl<K: ObjectKind> Eq for GenericValue<K> {}
 
-impl PartialOrd for Value {
+impl<K: ObjectKind> PartialOrd for GenericValue<K> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Value {
+impl<K: ObjectKind> Ord for GenericValue<K> {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (Value::Null, Value::Null) => Ordering::Equal,
-            (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
-            (Value::Number(a), Value::Number(b)) => a.to_string().cmp(&b.to_string()),
-            (Value::String(a), Value::String(b)) => a.cmp(b),
-            (Value::Array(a), Value::Array(b)) => a.cmp(b),
-            (Value::Object(a), Value::Object(b)) => a.cmp(b),
+            (GenericValue::Null, GenericValue::Null) => Ordering::Equal,
+            (GenericValue::Bool(a), GenericValue::Bool(b)) => a.cmp(b),
+            (GenericValue::Number(a), GenericValue::Number(b)) => a.to_string().cmp(&b.to_string()),
+            (GenericValue::String(a), GenericValue::String(b)) => a.cmp(b),
+            (GenericValue::Array(a), GenericValue::Array(b)) => a.cmp(b),
+            (GenericValue::Object(a), GenericValue::Object(b)) => a.cmp(b),
             _ => self.discriminant().cmp(&other.discriminant()),
         }
     }
 }
 
-impl Hash for Value {
+impl<K: ObjectKind> Hash for GenericValue<K> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
-            Value::Null => {}
-            Value::Bool(b) => b.hash(state),
-            Value::Number(n) => n.to_string().hash(state),
-            Value::String(s) => s.hash(state),
-            Value::Array(a) => a.hash(state),
-            Value::Object(o) => o.hash(state),
+            GenericValue::Null => {}
+            GenericValue::Bool(b) => b.hash(state),
+            GenericValue::Number(n) => n.to_string().hash(state),
+            GenericValue::String(s) => s.hash(state),
+            GenericValue::Array(a) => a.hash(state),
+            GenericValue::Object(o) => o.hash(state),
         }
     }
 }
 
-impl PartialEq<f64> for Value {
+impl<K: ObjectKind> PartialEq<f64> for GenericValue<K> {
     fn eq(&self, other: &f64) -> bool {
         match self {
-            Value::Number(n) => n.as_f64() == Some(*other),
+            GenericValue::Number(n) => n.as_f64() == Some(*other),
             _ => false,
         }
     }
 }
-impl PartialEq<i64> for Value {
+impl<K: ObjectKind> PartialEq<i64> for GenericValue<K> {
     fn eq(&self, other: &i64) -> bool {
         match self {
-            Value::Number(n) => n.as_i64() == Some(*other),
+            GenericValue::Number(n) => n.as_i64() == Some(*other),
             _ => false,
         }
     }
 }
-impl PartialEq<u64> for Value {
+impl<K: ObjectKind> PartialEq<u64> for GenericValue<K> {
     fn eq(&self, other: &u64) -> bool {
         match self {
-            Value::Number(n) => n.as_u64() == Some(*other),
+            GenericValue::Number(n) => n.as_u64() == Some(*other),
             _ => false,
         }
     }
 }
-impl PartialEq<str> for Value {
+impl<K: ObjectKind> PartialEq<str> for GenericValue<K> {
     fn eq(&self, other: &str) -> bool {
         match self {
-            Value::String(s) => &**s == other,
+            GenericValue::String(s) => &**s == other,
             _ => false,
         }
     }
@@ -929,13 +943,24 @@ pub fn to_value<T>(value: &T) -> Result<Value, Error>
 where
     T: Serialize,
 {
-    value.serialize(ser::Serializer).map_err(|e| Error {
+    to_generic_value(value)
+}
+
+pub fn to_ord_value<T>(value: &T) -> Result<OrdValue, Error>
+where
+    T: Serialize,
+{
+    to_generic_value(value)
+}
+
+fn to_generic_value<K: ObjectKind, T: Serialize>(value: &T) -> Result<GenericValue<K>, Error> {
+    value.serialize(ser::Serializer::new()).map_err(|e| Error {
         kind: ErrorKind::Serialization,
         source: e,
     })
 }
 
-pub fn from_value<T>(value: Value) -> Result<T, Error>
+pub fn from_value<T>(value: GenericValue<impl ObjectKind>) -> Result<T, Error>
 where
     T: DeserializeOwned,
 {
@@ -966,4 +991,69 @@ fn test_serialize_loop() {
     );
 
     assert_eq!(value["f"]["h"].as_str().unwrap(), "i");
+}
+
+#[cfg(test)]
+mod ord_value_tests {
+    use serde::Deserialize;
+
+    use crate::{from_value, json, to_ord_value, OrdValue, Value};
+
+    #[test]
+    fn serializes_object_keys_sorted() {
+        let ord: OrdValue = serde_json::from_str(r#"{"b":1,"a":{"d":2,"c":3}}"#).unwrap();
+        assert_eq!(
+            serde_json::to_string(&ord).unwrap(),
+            r#"{"a":{"c":3,"d":2},"b":1}"#
+        );
+    }
+
+    #[test]
+    fn converts_from_value_and_back() {
+        let value = json!({ "b": [1, { "z": null, "y": true }], "a": "x" });
+        let ord = OrdValue::from(value.clone());
+        assert_eq!(
+            serde_json::to_string(&ord).unwrap(),
+            r#"{"a":"x","b":[1,{"y":true,"z":null}]}"#
+        );
+        assert_eq!(Value::from(ord), value);
+    }
+
+    #[test]
+    fn indexes_and_inserts() {
+        let mut ord = OrdValue::Null;
+        ord["b"]["c"] = 1.into();
+        ord["a"] = OrdValue::from(vec![true]);
+        assert_eq!(ord["b"]["c"], 1i64);
+        assert_eq!(ord.pointer("/a/0"), Some(&OrdValue::Bool(true)));
+        assert_eq!(
+            serde_json::to_string(&ord).unwrap(),
+            r#"{"a":[true],"b":{"c":1}}"#
+        );
+    }
+
+    #[test]
+    fn round_trips_through_serde_types() {
+        #[derive(serde::Serialize, Deserialize, Debug, PartialEq)]
+        enum Kind {
+            Unit,
+            Struct { y: u8, x: u8 },
+        }
+        #[derive(serde::Serialize, Deserialize, Debug, PartialEq)]
+        struct Config {
+            name: String,
+            kinds: Vec<Kind>,
+        }
+        let config = Config {
+            name: "start9".into(),
+            kinds: vec![Kind::Unit, Kind::Struct { y: 2, x: 1 }],
+        };
+        let ord = to_ord_value(&config).unwrap();
+        assert_eq!(
+            serde_json::to_string(&ord).unwrap(),
+            r#"{"kinds":["Unit",{"Struct":{"x":1,"y":2}}],"name":"start9"}"#
+        );
+        assert_eq!(Config::deserialize(&ord).unwrap(), config);
+        assert_eq!(from_value::<Config>(ord).unwrap(), config);
+    }
 }

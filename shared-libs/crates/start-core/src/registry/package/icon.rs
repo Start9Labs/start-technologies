@@ -361,7 +361,7 @@ mod tests {
         });
         private_version["s9pks"][0][1]["private"] = imbl_value::json!({"key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "iv": "AgICAgICAgICAgICAgICAg"});
         private_version["s9pks"][0][1]["readers"] = imbl_value::json!([reader_id]);
-        let index: Model<PackageIndex> = imbl_value::json!({"categories": {}, "packages": {
+        let index: Model<PackageIndex> = imbl_value::ord_json!({"categories": {}, "packages": {
             "public": {"authorized": {}, "versions": {"1.0.0:0": public_version}},
             "secret": {"authorized": {}, "versions": {"1.0.0:0": private_version}}
         }})

@@ -92,7 +92,7 @@ mod tests {
     fn start_records_running_intent_with_critical_tasks() {
         let id = "service".parse().unwrap();
         let mut db = DatabaseModel::from(
-            to_value(&serde_json::json!({
+            imbl_value::to_ord_value(&serde_json::json!({
                 "public": { "packageData": { "service": package_entry(true) } }
             }))
             .unwrap(),

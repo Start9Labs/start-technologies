@@ -30,11 +30,11 @@ async fn oversized_replay_retries_from_a_dump_without_discarding_cached_data() {
     };
     let current = source.dump(&ROOT).await;
     let responses = [
-        json!({"jsonrpc":"2.0", "id":1, "result":{
+        imbl_value::ord_json!({"jsonrpc":"2.0", "id":1, "result":{
             "epoch":epoch, "id":id, "value":null, "revisions":revisions,
         }})
         .to_string(),
-        json!({"jsonrpc":"2.0", "id":1, "result":{
+        imbl_value::ord_json!({"jsonrpc":"2.0", "id":1, "result":{
             "epoch":epoch, "id":current.id, "value":current.value, "revisions":null,
         }})
         .to_string(),
@@ -65,7 +65,7 @@ async fn oversized_replay_retries_from_a_dump_without_discarding_cached_data() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let expected = json!({"epoch":epoch, "id":initial.id});
+    let expected = imbl_value::ord_json!({"epoch":epoch, "id":initial.id});
     let server: NonDetachingJoinHandle<()> = tokio::spawn(async move {
         for (attempt, response) in responses.into_iter().enumerate() {
             let (stream, _) = listener.accept().await.unwrap();
@@ -74,7 +74,7 @@ async fn oversized_replay_retries_from_a_dump_without_discarding_cached_data() {
             let Message::Text(request) = socket.next().await.unwrap().unwrap() else {
                 panic!("expected a subscription request")
             };
-            let request: Value = serde_json::from_str(&request).unwrap();
+            let request: OrdValue = serde_json::from_str(&request).unwrap();
             if attempt == 0 {
                 assert_eq!(request["params"]["since"], expected);
             } else {

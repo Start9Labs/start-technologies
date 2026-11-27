@@ -563,7 +563,7 @@ mod test {
 
     #[test]
     fn dependency_titles_use_the_declaring_package_default_with_or_without_the_dependency() {
-        let db = Model::from_value(imbl_value::json!({
+        let db = Model::from_value(imbl_value::ord_json!({
             "public": { "packageData": {
                 "caller": {
                     "currentDependencies": {

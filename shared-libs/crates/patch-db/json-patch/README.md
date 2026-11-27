@@ -11,7 +11,7 @@ which computes a patch between two documents. See the crate-level rustdoc in `sr
 This crate is a fork of [idubrov/json-patch](https://github.com/idubrov/json-patch), originally written by
 Ivan Dubrov. It has diverged substantially: `serde_json` has been replaced throughout by the sibling
 [`imbl-value`](../../imbl-value) and [`json-ptr`](../json-ptr) crates, so patches apply to the persistent,
-cheaply-cloned `imbl_value::Value` that `patch-db` is built on. It is maintained here as part of the
+cheaply-cloned `imbl_value::OrdValue` that `patch-db` is built on. It is maintained here as part of the
 monorepo, not tracked against upstream.
 
 ## License
