@@ -108,6 +108,8 @@ mod tests {
             published_at: chrono::Utc::now(),
             urls: vec!["https://example.com/asset".parse().unwrap()],
             torrent: None,
+            private: None,
+            readers: Default::default(),
         };
         let mut response = json!({
             "signers": { "a": { "keys": [key.clone()] } },

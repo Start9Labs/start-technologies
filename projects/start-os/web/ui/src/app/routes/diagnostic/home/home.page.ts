@@ -14,6 +14,7 @@ import { TuiProgress } from '@taiga-ui/kit'
 import { filter } from 'rxjs'
 import { StartupApiService } from 'src/app/services/api/startup-api.service'
 import { ConfigService } from 'src/app/services/config.service'
+import { DiagnosticPassword } from './password'
 import { DiagnosticUpdate } from './update.service'
 
 @Component({
@@ -140,6 +141,7 @@ export default class HomePage {
   private readonly tasks = inject(TaskService)
   private readonly api = inject(StartupApiService)
   private readonly dialog = inject(DialogService)
+  private readonly password = inject(DiagnosticPassword)
   private readonly window = inject(WA_WINDOW)
 
   private readonly config = inject(ConfigService)
@@ -237,11 +239,11 @@ export default class HomePage {
   }
 
   forgetDrive() {
-    this.tasks.run(async () => {
-      await this.api.rpc.diagnostic.disk.forget({})
+    void this.password.run('Loading', async password => {
+      await this.api.rpc.diagnostic.disk.forget({ password })
       await this.api.rpc.diagnostic.restart({})
       this.restarted.set(true)
-    }, 'Loading')
+    })
   }
 
   async presentAlertRepairDisk() {
@@ -265,10 +267,10 @@ export default class HomePage {
   }
 
   private repairDisk() {
-    this.tasks.run(async () => {
-      await this.api.rpc.diagnostic.disk.repair({})
+    void this.password.run('Loading', async password => {
+      await this.api.rpc.diagnostic.disk.repair({ password })
       await this.api.rpc.diagnostic.restart({})
       this.restarted.set(true)
-    }, 'Loading')
+    })
   }
 }

@@ -1,4 +1,3 @@
-import { GetPackagesRes } from '@start9labs/marketplace'
 import { ISB, IST, T, utils } from '@start9labs/start-core'
 import type { BackupRun } from 'src/app/routes/portal/routes/system/routes/backups/backup.types'
 import {
@@ -558,7 +557,7 @@ export namespace Mock {
   }
 
   export const OtherPackageVersions: {
-    [id: T.PackageId]: GetPackagesRes
+    [id: T.PackageId]: Record<string, T.GetPackageResponse>
   } = {
     bitcoind: {
       '=26.1.0:0.1.0': {
@@ -903,7 +902,7 @@ export namespace Mock {
     },
   }
 
-  export const RegistryPackages: GetPackagesRes = {
+  export const RegistryPackages: Record<T.PackageId, T.GetPackageResponse> = {
     bitcoind: {
       best: {
         '27.0.0:1.0.0': {
@@ -1318,13 +1317,32 @@ Full changelog: https://github.com/Kixunil/btc-rpc-proxy/blob/master/CHANGELOG.m
     },
   ]
 
+  function sensor(
+    id: string,
+    kind: T.SensorKind,
+    temperature: string,
+    high: string,
+    critical: string,
+  ): T.TemperatureSensor {
+    return {
+      id,
+      kind,
+      temperature: { value: temperature, unit: '°C' },
+      high: { value: high, unit: '°C' },
+      critical: { value: critical, unit: '°C' },
+    }
+  }
+
   export function getMetrics(): T.Metrics {
     return {
       general: {
-        temperature: {
-          value: '66.8',
-          unit: '°C',
-        },
+        temperatures: [
+          sensor('coretemp-isa-0000', 'cpu', '58.0', '80.0', '100.0'),
+          sensor('spd5118-i2c-0-51', 'memory', '41.3', '55.0', '85.0'),
+          sensor('nvme-pci-0100', 'storage', '74.9', '69.8', '84.8'),
+          sensor('nvme-pci-0200', 'storage', '45.9', '81.8', '84.8'),
+          sensor('iwlwifi_1-virtual-0', 'network', '47.0', '85.0', '100.0'),
+        ],
       },
       memory: {
         percentageUsed: {

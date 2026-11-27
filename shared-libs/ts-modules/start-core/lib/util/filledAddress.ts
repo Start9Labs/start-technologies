@@ -39,7 +39,7 @@ export const getHostname = (url: string): Hostname | null => {
  * - `'ipv6'` — IPv6 addresses only
  * - `'localhost'` — loopback addresses (`localhost`, `127.0.0.1`, `::1`)
  * - `'link-local'` — IPv6 link-local addresses (fe80::/10)
- * - `'bridge'` — The LXC bridge interface
+ * - `'bridge'` — addresses and names served only on the LXC bridge
  * - `'plugin'` — hostnames provided by a plugin package
  */
 type FilterKinds =
@@ -215,7 +215,7 @@ export type Filled<F extends Filter = {}> = {
   nonLocal: Filled<typeof nonLocalFilter & Filter>
   /** Shorthand filter that keeps only publicly-reachable hostnames (those with `public: true`). */
   public: Filled<typeof publicFilter & Filter>
-  /** Shorthand filter that keeps only LXC bridge addresses (those on the `lxcbr0` gateway). */
+  /** Shorthand filter that keeps only LXC bridge addresses and names (those only on the `lxcbr0` gateway). */
   bridge: Filled<typeof bridgeFilter & Filter>
 }
 export type FilledAddressInfo = AddressInfo & Filled
@@ -271,6 +271,21 @@ export const addressHostToUrl = (
   }${host}${portStr}${suffix}`
 }
 
+function isBridge(h: HostnameInfo): boolean {
+  switch (h.metadata.kind) {
+    case 'ipv4':
+    case 'ipv6':
+      return h.metadata.gateway === 'lxcbr0'
+    case 'private-domain':
+      return (
+        h.metadata.gateways.length > 0 &&
+        h.metadata.gateways.every(g => g === 'lxcbr0')
+      )
+    default:
+      return false
+  }
+}
+
 function filterRec(
   hostnames: HostnameInfo[],
   filter: Filter,
@@ -306,9 +321,7 @@ function filterRec(
           (kind.has('link-local') &&
             h.metadata.kind === 'ipv6' &&
             IPV6_LINK_LOCAL.contains(IpAddress.parse(h.hostname))) ||
-          (kind.has('bridge') &&
-            (h.metadata.kind === 'ipv4' || h.metadata.kind === 'ipv6') &&
-            h.metadata.gateway === 'lxcbr0') ||
+          (kind.has('bridge') && isBridge(h)) ||
           (kind.has('plugin') && h.metadata.kind === 'plugin')),
     )
   }

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -21,7 +22,7 @@ const METADATA_EXTENSION: &str = "json";
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct TorrentSeedConfig {
-    /// Stores torrent descriptors, never artifact payloads.
+    /// Stores torrent descriptors and private keystreams, never artifact payloads.
     pub directory: PathBuf,
 }
 
@@ -47,6 +48,7 @@ pub(super) struct SeedCatalog {
 impl SeedCatalog {
     pub(super) async fn open(directory: PathBuf) -> Result<Self, Error> {
         tokio::fs::create_dir_all(&directory).await?;
+        tokio::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).await?;
         let lock = FileLock::new(directory.join("session.lock"), false).await?;
         Ok(Self {
             directory,
@@ -59,7 +61,7 @@ impl SeedCatalog {
         source: &Path,
         metadata: &SharingMetadata,
     ) -> Result<(), Error> {
-        let meta = validate_metadata(&metadata.torrent.0, &metadata.commitment)?;
+        let meta = validate_metadata(&metadata.torrent.0, &metadata.content.commitment)?;
         let path = self
             .directory
             .join(meta.info_hash.as_string())
@@ -77,6 +79,8 @@ impl SeedCatalog {
             Err(error) => return Err(error.into()),
         }
         let mut out = AtomicFile::new(&path, None::<&Path>).await?;
+        out.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .await?;
         out.write_all(&bytes).await?;
         out.sync_all().await?;
         out.save().await?;
@@ -171,14 +175,16 @@ impl SeedService {
                     continue;
                 }
             };
-            let meta =
-                match validate_metadata(&record.metadata.torrent.0, &record.metadata.commitment) {
-                    Ok(meta) => meta,
-                    Err(error) => {
-                        tracing::warn!(%error, "Invalid stored torrent metadata");
-                        continue;
-                    }
-                };
+            let meta = match validate_metadata(
+                &record.metadata.torrent.0,
+                &record.metadata.content.commitment,
+            ) {
+                Ok(meta) => meta,
+                Err(error) => {
+                    tracing::warn!(%error, "Invalid stored torrent metadata");
+                    continue;
+                }
+            };
             let key = meta.info_hash;
             let source = match StoredFile::open(&record.source).await {
                 Ok(source) => source,
@@ -236,7 +242,13 @@ impl SeedService {
     }
 
     async fn resume(&self, record: &StoredTorrent, source: StoredFile) -> Result<(), Error> {
-        record.metadata.commitment.verify_source(&source).await?;
+        record
+            .metadata
+            .content
+            .commitment
+            .verify_source(&source)
+            .await?;
+        let source = source.with_keystream(record.metadata.content.private.clone());
         let torrent = self
             .session
             .0
@@ -277,7 +289,9 @@ impl SeedService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::bittorrent::{ContentCommitment, file_name};
+    use crate::registry::bittorrent::{ContentCommitment, TorrentContent, file_name};
+    use crate::s9pk::merkle_archive::source::ArchiveSource;
+    use crate::s9pk::merkle_archive::source::encrypted::{KeyStreamInfo, KeyStreamSource};
     use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
     use crate::sign::commitment::Commitment;
     use crate::sign::commitment::blake3::Blake3Commitment;
@@ -296,7 +310,7 @@ mod tests {
         .map_err(torrent_error)?;
         Ok(SharingMetadata {
             torrent: Base64(bytes.to_vec()),
-            commitment: Blake3Commitment::create(&MultiCursorFile::from(open_file(path).await?))
+            content: Blake3Commitment::create(&MultiCursorFile::from(open_file(path).await?))
                 .await?
                 .into(),
         })
@@ -347,17 +361,80 @@ mod tests {
     #[tokio::test]
     async fn stored_artifact_resumes_without_payload_copy_and_follows_deletion() -> Result<(), Error>
     {
+        let plaintext = b"already installed".to_vec();
+        let commitment = Blake3Commitment::create(&Arc::<[u8]>::from(plaintext.clone())).await?;
+        check_retained_seed(plaintext.clone(), plaintext, commitment.into()).await
+    }
+
+    #[tokio::test]
+    async fn encrypted_seed_resumes_and_uploads_ciphertext_without_a_retained_ciphertext_copy()
+    -> Result<(), Error> {
+        let plaintext = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/s9pk-trailer/base.s9pk"
+        ))
+        .to_vec();
+        let package =
+            crate::s9pk::S9pk::deserialize_local(&Arc::<[u8]>::from(plaintext.clone()), None)
+                .await?;
+        let commitment = package.as_archive().commitment().await?;
+        let private = KeyStreamInfo {
+            key: Base64([23; 32]),
+            iv: Base64([19; 16]),
+        };
+        let mut ciphertext = Vec::new();
+        KeyStreamSource::new(Arc::<[u8]>::from(plaintext.clone()), Some(private.clone()))
+            .copy_all_to(&mut ciphertext)
+            .await?;
+        assert_ne!(ciphertext, plaintext);
+        check_retained_seed(
+            plaintext,
+            ciphertext,
+            TorrentContent::new(commitment.into(), Some(private)),
+        )
+        .await
+    }
+
+    async fn check_retained_seed(
+        plaintext: Vec<u8>,
+        ciphertext: Vec<u8>,
+        content: TorrentContent,
+    ) -> Result<(), Error> {
         let source = TmpDir::new().await?;
         let catalog_dir = TmpDir::new().await?;
         let path = source.join("installed.s9pk");
-        tokio::fs::write(&path, b"already installed").await?;
-        let metadata = advertisement(&path).await?;
+        tokio::fs::write(&path, &ciphertext).await?;
+        let mut metadata = advertisement(&path).await?;
+        metadata.content = content;
         let stored = source.join("retained.rootfs");
         tokio::fs::rename(&path, &stored).await?;
+        tokio::fs::write(&stored, &plaintext).await?;
         let path = stored;
-        let meta = validate_metadata(&metadata.torrent.0, &metadata.commitment)?;
+        let meta = validate_metadata(&metadata.torrent.0, &metadata.content.commitment)?;
         let catalog = Arc::new(SeedCatalog::open(catalog_dir.to_path_buf()).await?);
         catalog.register(&path, &metadata).await?;
+        let record_path = catalog_dir
+            .join(meta.info_hash.as_string())
+            .with_extension("json");
+        let record: StoredTorrent = serde_json::from_slice(&tokio::fs::read(&record_path).await?)
+            .with_kind(ErrorKind::Deserialization)?;
+        assert_eq!(record.metadata.content.private, metadata.content.private);
+        assert_eq!(
+            tokio::fs::metadata(&record_path)
+                .await?
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            tokio::fs::metadata(&*catalog_dir)
+                .await?
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
         let mut listen = Some("127.0.0.1:0".parse()?);
         for _ in 0..2 {
             let service = SeedService::start(
@@ -443,8 +520,9 @@ mod tests {
         .map_err(torrent_error)?;
         assert_eq!(
             tokio::fs::read(destination.join(file_name(&meta)?)).await?,
-            b"already installed"
+            ciphertext
         );
+        assert_eq!(tokio::fs::read(&path).await?, plaintext);
         receiver.0.stop().await;
         tokio::fs::remove_file(&path).await?;
         service.refresh().await?;
@@ -466,7 +544,7 @@ mod tests {
         let path = source.join("installed.s9pk");
         tokio::fs::write(&path, b"first bytes").await?;
         let metadata = advertisement(&path).await?;
-        let meta = validate_metadata(&metadata.torrent.0, &metadata.commitment)?;
+        let meta = validate_metadata(&metadata.torrent.0, &metadata.content.commitment)?;
         let catalog = Arc::new(SeedCatalog::open(catalog_dir.to_path_buf()).await?);
         catalog.register(&path, &metadata).await?;
         let service = SeedService::start(catalog, None, CancellationToken::new()).await?;
@@ -507,15 +585,15 @@ mod tests {
         .await?;
         let mut metadata = advertisement(&original).await?;
         let mut package = crate::s9pk::S9pk::open(&original, None).await?;
-        metadata.commitment = package.as_archive().commitment().await?.into();
+        metadata.content.commitment = package.as_archive().commitment().await?.into();
         let stored = source.join("installed.s9pk");
         let mut file = crate::util::io::create_file(&stored).await?;
         package.serialize(&mut file, true).await?;
         drop(file);
         let installed_bytes = tokio::fs::read(&stored).await?;
         assert_ne!(installed_bytes, tokio::fs::read(&original).await?);
-        metadata.commitment.verify(&stored).await?;
-        let meta = validate_metadata(&metadata.torrent.0, &metadata.commitment)?;
+        metadata.content.commitment.verify(&stored).await?;
+        let meta = validate_metadata(&metadata.torrent.0, &metadata.content.commitment)?;
         let catalog = Arc::new(SeedCatalog::open(catalog_dir.to_path_buf()).await?);
         catalog.register(&stored, &metadata).await?;
         let service = SeedService::start(catalog, None, CancellationToken::new()).await?;
@@ -534,10 +612,10 @@ mod tests {
         tokio::fs::write(&path, b"first bytes").await?;
         let mut metadata = advertisement(&path).await?;
         tokio::fs::write(&path, b"other bytes").await?;
-        metadata.commitment = ContentCommitment::from(
+        metadata.content.commitment = ContentCommitment::from(
             Blake3Commitment::create(&MultiCursorFile::from(open_file(&path).await?)).await?,
         );
-        let meta = validate_metadata(&metadata.torrent.0, &metadata.commitment)?;
+        let meta = validate_metadata(&metadata.torrent.0, &metadata.content.commitment)?;
         let catalog = Arc::new(SeedCatalog::open(catalog_dir.to_path_buf()).await?);
         catalog.register(&path, &metadata).await?;
         let service = SeedService::start(catalog, None, CancellationToken::new()).await?;

@@ -4,7 +4,7 @@ import { i18nPipe } from '@start9labs/shared'
 import { TuiTitle, TuiCell } from '@taiga-ui/core'
 import { TuiAvatar, TuiSkeleton } from '@taiga-ui/kit'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
-import { MarketplacePkg } from '../types'
+import { MarketplaceListing } from '../types'
 import { MarketplaceIconDirective } from './icon.directive'
 
 @Component({
@@ -46,5 +46,5 @@ import { MarketplaceIconDirective } from './icon.directive'
   ],
 })
 export class MarketplaceFlavorsComponent {
-  readonly pkgs = input.required<MarketplacePkg[]>()
+  readonly pkgs = input.required<MarketplaceListing[]>()
 }

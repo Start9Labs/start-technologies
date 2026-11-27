@@ -60,8 +60,8 @@ fn concrete_generic_reservations_are_pending_before_recursive_children() {
     visitor.declare::<Recursive<String>>("StringNode");
     visitor.declare::<Recursive<u32>>("NumberNode");
     let bindings = visitor.into_bindings(None, SCHEMAS).unwrap();
-    assert!(bindings.schemas.contains("get \"next\"(): z.ZodCodec<z.ZodOptional<z.ZodNullable<typeof StringNode>>, z.ZodNullable<typeof StringNode>> { return wire(StringNode.nullable().optional(), StringNode.nullable()); }"));
-    assert!(bindings.schemas.contains("get \"next\"(): z.ZodCodec<z.ZodOptional<z.ZodNullable<typeof NumberNode>>, z.ZodNullable<typeof NumberNode>> { return wire(NumberNode.nullable().optional(), NumberNode.nullable()); }"));
+    assert!(bindings.schemas.contains("get \"next\"(): z.ZodDefault<z.ZodNullable<typeof StringNode>> { return StringNode.nullable().default(() => (null)); }"));
+    assert!(bindings.schemas.contains("get \"next\"(): z.ZodDefault<z.ZodNullable<typeof NumberNode>> { return NumberNode.nullable().default(() => (null)); }"));
     assert_eq!(bindings.schemas.matches("export const ").count(), 2);
     common::typecheck(
         &bindings,

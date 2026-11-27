@@ -16,6 +16,7 @@ use tracing::instrument;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
 use crate::db::model::public::{NetworkInterfaceType, WifiInfo};
+use crate::mcp::{EFFECT, Effect};
 use crate::net::{AUTO_DEFAULT_RULE_PRIORITY, AUTO_MAIN_RULE_PRIORITY};
 use crate::prelude::*;
 use crate::util::Invoke;
@@ -112,6 +113,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-enabled",
             from_fn_async(set_enabled)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.enable-disable-wifi")
                 .with_call_remote::<CliContext>(),
@@ -119,6 +121,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.add-wifi-ssid-password")
                 .with_call_remote::<CliContext>(),
@@ -126,6 +129,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "connect",
             from_fn_async(connect)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .no_display()
                 .with_about("about.connect-wifi-network")
                 .with_call_remote::<CliContext>(),
@@ -133,6 +137,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-wifi-network")
                 .with_call_remote::<CliContext>(),
@@ -140,6 +145,7 @@ pub fn wifi<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "get",
             from_fn_async(get)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| display_wifi_info(handle.params, result))
                 .with_about("about.list-wifi-info")
@@ -202,6 +208,7 @@ pub fn available<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "get",
         from_fn_async(get_available)
+            .with_metadata(EFFECT, Effect::Read.into())
             .with_display_serializable()
             .with_custom_display_fn(|handle, result| display_wifi_list(handle.params, result))
             .with_about("about.list-available-wifi-networks")
@@ -213,6 +220,7 @@ pub fn country<C: Context>() -> ParentHandler<C> {
     ParentHandler::new().subcommand(
         "set",
         from_fn_async(set_country)
+            .with_metadata(EFFECT, Effect::Destructive.into())
             .no_display()
             .with_about("about.set-country")
             .with_call_remote::<CliContext>(),
@@ -602,13 +610,7 @@ pub async fn set_country(
         ));
     }
     let mut wpa_supplicant = ctx.write_wifi_manager().await?;
-    wpa_supplicant.set_country_low(country.alpha2()).await?;
-    for (network_id, _wifi_info) in wpa_supplicant.list_networks_low().await? {
-        wpa_supplicant.remove_network_low(network_id).await?;
-    }
-    wpa_supplicant.remove_all_connections().await?;
-
-    wpa_supplicant.save_config(ctx.db.clone()).await?;
+    wpa_supplicant.set_country(ctx.db.clone(), country).await?;
 
     Ok(())
 }
@@ -888,18 +890,6 @@ impl WpaCli {
             .await?;
         Ok(())
     }
-    pub async fn remove_all_connections(&mut self) -> Result<(), Error> {
-        let location_connections = Path::new(SAVED_PROFILE_DIRECTORY);
-        let mut connections = tokio::fs::read_dir(&location_connections).await?;
-        while let Some(connection) = connections.next_entry().await? {
-            let path = connection.path();
-            if path.is_file() {
-                let _ = tokio::fs::remove_file(&path).await?;
-            }
-        }
-
-        Ok(())
-    }
     pub async fn save_config(&mut self, db: TypedPatchDb<Database>) -> Result<(), Error> {
         let new_country = self.get_country_low().await?;
         db.mutate(|d| {
@@ -1033,6 +1023,31 @@ impl WpaCli {
     ) -> Result<(), Error> {
         self.add_network_low(ssid, psk).await?;
         self.save_config(db).await?;
+        Ok(())
+    }
+    #[instrument(skip_all)]
+    pub async fn set_country(
+        &mut self,
+        db: TypedPatchDb<Database>,
+        country: CountryCode,
+    ) -> Result<(), Error> {
+        self.set_country_low(country.alpha2()).await?;
+        for network_id in self.list_networks_low().await?.into_keys() {
+            self.remove_network_low(network_id).await?;
+        }
+        let new_country = self.get_country_low().await?;
+        db.mutate(|d| {
+            let wifi = d
+                .as_public_mut()
+                .as_server_info_mut()
+                .as_network_mut()
+                .as_wifi_mut();
+            wifi.as_ssids_mut().ser(&BTreeSet::new())?;
+            wifi.as_selected_mut().ser(&None)?;
+            wifi.as_last_region_mut().ser(&new_country)
+        })
+        .await
+        .result?;
         Ok(())
     }
 }

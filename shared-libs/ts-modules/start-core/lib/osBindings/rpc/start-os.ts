@@ -162,7 +162,6 @@ export type DataUrl = z.output<typeof schemas.DataUrl>
 export type DbCursorInput = z.input<typeof schemas.DbCursor>
 export type DnsSource = z.output<typeof schemas.DnsSource>
 export type Dump = z.output<typeof schemas.Dump>
-export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type EchoParamsInput = z.input<typeof schemas.EchoParams>
 export type EncryptedWireInput = z.input<typeof schemas.EncryptedWire>
 export type EndpointParamsInput = z.input<typeof schemas.EndpointParams>
@@ -327,6 +326,12 @@ export type RequiresReboot = z.output<typeof schemas.RequiresReboot>
  * A protocol safe to expose on enabled public addresses.
  */
 export type Security = z.output<typeof schemas.Security>
+
+/**
+ * One subtree kept, with patterns and depth relative to the dumped or subscribed subtree.
+ */
+export type SelectorParamsInput = z.input<typeof schemas.SelectorParams>
+export type SensorKind = z.output<typeof schemas.SensorKind>
 export type ServerBackupReport = z.output<typeof schemas.ServerBackupReport>
 export type ServerHostname = z.output<typeof schemas.ServerHostname>
 export type ServiceInterfaceId = z.output<typeof schemas.ServiceInterfaceId>
@@ -353,6 +358,7 @@ export type SharedVolumeBackupInfo = z.output<
   typeof schemas.SharedVolumeBackupInfo
 >
 export type SharedVolumeDrive = z.output<typeof schemas.SharedVolumeDrive>
+export type SharedVolumeGrant = z.output<typeof schemas.SharedVolumeGrant>
 export type SharedVolumeGrantInput = z.input<typeof schemas.SharedVolumeGrant>
 
 /**
@@ -520,7 +526,6 @@ export type LoginParamsInput = z.input<typeof schemas.LoginParams>
 export type LshwDevice = z.output<typeof schemas.LshwDevice>
 export type MetricsCpu = z.output<typeof schemas.MetricsCpu>
 export type MetricsDisk = z.output<typeof schemas.MetricsDisk>
-export type MetricsGeneral = z.output<typeof schemas.MetricsGeneral>
 export type MetricsMemory = z.output<typeof schemas.MetricsMemory>
 export type MountParamsInput = z.input<typeof schemas.MountParams>
 export type Notification = z.output<typeof schemas.Notification>
@@ -539,6 +544,11 @@ export type PasswordTypeInput = z.input<typeof schemas.PasswordType>
  * JSON Patch single patch operation
  */
 export type PatchOperation = z.output<typeof schemas.PatchOperation>
+
+/**
+ * Narrows a dumped or subscribed subtree; omitted fields narrow nothing.
+ */
+export type ProjectionParamsInput = z.input<typeof schemas.ProjectionParams>
 
 /**
  * Auth gate enforced by the OS reverse proxy on incoming requests.
@@ -613,9 +623,13 @@ export type SshAddParamsInput = z.input<typeof schemas.SshAddParams>
  * [`BackupUnencryptedMetadata`]'s key material.
  */
 export type StartOsRecoveryInfo = z.output<typeof schemas.StartOsRecoveryInfo>
-export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type TargetParamsInput = z.input<typeof schemas.TargetParams>
+
+/**
+ * One part's representative reading, with the limits it is judged against.
+ */
+export type TemperatureSensor = z.output<typeof schemas.TemperatureSensor>
 export type TestSmtpParamsInput = z.input<typeof schemas.TestSmtpParams>
 export type TransportWire = z.output<typeof schemas.TransportWire>
 export type UmountParamsInput = z.input<typeof schemas.UmountParams>
@@ -653,6 +667,7 @@ export type ConvertParamsInput = z.input<typeof schemas.ConvertParams>
 export type CreateSharedVolumeParamsInput = z.input<
   typeof schemas.CreateSharedVolumeParams
 >
+export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type HardwareInfo = z.output<typeof schemas.HardwareInfo>
 export type HostAddress = z.output<typeof schemas.HostAddress>
 export type HostnameInfo = z.output<typeof schemas.HostnameInfo>
@@ -663,7 +678,7 @@ export type InstallParamsInput = z.input<typeof schemas.InstallParams>
  * Enrolled keys, including ephemeral ones, and the caller's own.
  */
 export type KeyList = z.output<typeof schemas.KeyList>
-export type Metrics = z.output<typeof schemas.Metrics>
+export type MetricsGeneral = z.output<typeof schemas.MetricsGeneral>
 export type NetworkInterfaceInfo = z.output<typeof schemas.NetworkInterfaceInfo>
 export type NotificationWithId = z.output<typeof schemas.NotificationWithId>
 
@@ -682,7 +697,9 @@ export type ResetPasswordParamsInput = z.input<
   typeof schemas.ResetPasswordParams
 >
 export type ServiceInterface = z.output<typeof schemas.ServiceInterface>
+export type SharedVolume = z.output<typeof schemas.SharedVolume>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
+export type SubscribeParamsInput = z.input<typeof schemas.SubscribeParams>
 
 /**
  * Non-empty selected transports, serialized as a sorted, deduplicated array.
@@ -694,6 +711,9 @@ export type Transport = z.output<typeof schemas.Transport>
  * Signing-key material and independent package and OS-update trust.
  */
 export type TrustedKey = z.output<typeof schemas.TrustedKey>
+export type UpdateSubscriptionParamsInput = z.input<
+  typeof schemas.UpdateSubscriptionParams
+>
 export type UpdateSystemParamsInput = z.input<typeof schemas.UpdateSystemParams>
 export type WifiListInfo = z.output<typeof schemas.WifiListInfo>
 export type ActionResult = z.output<typeof schemas.ActionResult>
@@ -716,9 +736,7 @@ export type DeviceInfo = z.output<typeof schemas.DeviceInfo>
  * Database-generated patches contain only add, remove and replace operations.
  */
 export type DiffPatch = z.output<typeof schemas.DiffPatch>
-export type MetricsFollowResponse = z.output<
-  typeof schemas.MetricsFollowResponse
->
+export type Metrics = z.output<typeof schemas.Metrics>
 export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type SelectAddressParamsInput = z.input<
   typeof schemas.SelectAddressParams
@@ -738,7 +756,16 @@ export type DnsStatus = z.output<typeof schemas.DnsStatus>
 export type LegacyProxySslOptions = z.output<
   typeof schemas.LegacyProxySslOptions
 >
+export type MetricsFollowResponse = z.output<
+  typeof schemas.MetricsFollowResponse
+>
 export type Revision = z.output<typeof schemas.Revision>
+
+/**
+ * A projected revision; with `extend`, what the latest `db.subscription.update` added,
+ * current as of `id`, sent once per update before any later revision.
+ */
+export type SubscriptionUpdate = z.output<typeof schemas.SubscriptionUpdate>
 export type CompatibleBindOptions = z.output<
   typeof schemas.CompatibleBindOptions
 >

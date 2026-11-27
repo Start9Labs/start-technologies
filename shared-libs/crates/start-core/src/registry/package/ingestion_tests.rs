@@ -191,6 +191,8 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
         vec![host.join("base").unwrap()],
         Some(torrent.clone()),
         false,
+        None,
+        Vec::new(),
     )
     .await
     .unwrap();
@@ -265,7 +267,9 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
             local_package().await,
             vec![host.join("base").unwrap()],
             None,
-            true
+            true,
+            None,
+            Vec::new(),
         )
         .await
         .is_err()
@@ -277,6 +281,448 @@ async fn registry_cli_filters_signatures_on_upload_mirror_and_promotion() {
     host_task.abort();
     registry_task.abort();
     destination_task.abort();
+}
+
+#[tokio::test]
+async fn private_s9pks_reach_only_their_readers_and_a_source_publisher_promotes_them() {
+    use crate::context::config::{ClientConfig, Profiles};
+    use crate::developer::write_signing_key;
+    use crate::registry::package::add::{cli_add_package_impl, derive_keystream};
+    use crate::registry::package::promote::{CliPromoteParams, cli_promote};
+    use crate::registry::reader::ReaderKey;
+    use crate::registry::tests::rpc;
+    use crate::s9pk::merkle_archive::source::encrypted::KeyStreamInfo;
+    use crate::sign::{AnySigningKey, Signer};
+
+    let identity =
+        |seed: u8| Signer::Key(AnySigningKey::Ed25519(SigningKey::from_bytes(&[seed; 32])));
+    let uploader_key = SigningKey::from_bytes(&[13; 32]);
+    let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
+    let publisher = identity(13);
+    let (reader, stranger, source_admin) = (identity(14), identity(15), identity(20));
+    let reader_key = reader.verifying_key().await.unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let source = context(
+        temp.path().join("source"),
+        source_admin.verifying_key().await.unwrap(),
+    )
+    .await;
+    let target = context(temp.path().join("target"), uploader.clone()).await;
+    source
+        .db
+        .mutate(|db| {
+            db.as_index_mut().as_readers_mut().add_reader(&ReaderKey {
+                label: "Reader".into(),
+                key: reader_key.clone(),
+            })?;
+            let signer = db.as_index_mut().as_signers_mut().add_signer(&SignerInfo {
+                name: "Publisher".into(),
+                contact: vec![],
+                keys: [uploader.clone()].into(),
+                gpg_exports: Default::default(),
+            })?;
+            db.as_index_mut().as_package_mut().as_packages_mut().insert(
+                &"trust-fixture".parse().unwrap(),
+                &crate::registry::package::index::PackageInfo {
+                    authorized: [(signer, exver::VersionRange::any())].into(),
+                    ..Default::default()
+                },
+            )
+        })
+        .await
+        .result
+        .unwrap();
+
+    let key_path = temp.path().join("identity.pem");
+    write_signing_key(&uploader_key, &key_path).await.unwrap();
+    let (source_url, source_task) = registry_server(source.clone()).await;
+    let (target_url, target_task) = registry_server(target.clone()).await;
+    let cli = CliContext::init(ClientConfig {
+        id_key_path: Some(key_path),
+        registry: Some(Profiles(BTreeMap::from([
+            ("default".into(), source_url.to_string()),
+            ("destination".into(), target_url.to_string()),
+        ]))),
+        ..Default::default()
+    })
+    .unwrap();
+    let key = derive_keystream(&cli, &local_package().await)
+        .await
+        .unwrap();
+    assert_eq!(
+        key,
+        KeyStreamInfo::derive(
+            &Signer::Key(AnySigningKey::Ed25519(uploader_key.clone())),
+            &local_package()
+                .await
+                .as_archive()
+                .commitment()
+                .await
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    );
+    let plaintext = temp.path().join("base.s9pk");
+    tokio::fs::write(&plaintext, fixture("endorsed.s9pk"))
+        .await
+        .unwrap();
+    let mut encrypted = Vec::new();
+    crate::s9pk::merkle_archive::source::encrypted::KeyStreamSource::new(
+        crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile::from(
+            crate::util::io::open_file(&plaintext).await.unwrap(),
+        ),
+        Some(key.clone()),
+    )
+    .copy_all_to(&mut encrypted)
+    .await
+    .unwrap();
+    assert_ne!(encrypted, fixture("endorsed.s9pk"));
+    let (host, _, host_task) = server(
+        [
+            ("private".into(), encrypted.clone()),
+            ("private-mirror".into(), encrypted),
+        ]
+        .into(),
+    )
+    .await;
+    let hosted = vec![host.join("private").unwrap()];
+    let torrent = host.join("private.torrent").unwrap();
+
+    assert!(
+        cli_add_package_impl(
+            cli.clone(),
+            local_package().await,
+            hosted.clone(),
+            None,
+            true,
+            None,
+            Vec::new()
+        )
+        .await
+        .is_err()
+    );
+    cli_add_package_impl(
+        cli.clone(),
+        local_package().await,
+        hosted.clone(),
+        Some(torrent.clone()),
+        false,
+        Some(key.clone()),
+        vec![reader_key.clone()],
+    )
+    .await
+    .unwrap();
+
+    let version = "1.0.0:0";
+    let assert_visibility = |url: Url, identities: Vec<(Option<Signer>, bool, bool)>| {
+        let (key, reader_key, torrent) = (key.clone(), reader_key.clone(), torrent.clone());
+        async move {
+            for (identity, visible, sees_readers) in identities {
+                let identity = identity.as_ref();
+                let package = rpc(
+                    &url,
+                    "package.get",
+                    imbl_value::json!({"id": "trust-fixture"}),
+                    identity,
+                )
+                .await;
+                let best = &package["result"]["best"];
+                assert_eq!(!best[version].is_null(), visible, "{package}");
+                if visible {
+                    let asset = &best[version]["s9pks"][0][1];
+                    assert_eq!(asset["private"], to_value(&key).unwrap());
+                    assert_eq!(asset["torrent"], to_value(&torrent).unwrap());
+                    assert_eq!(asset.get("readers").is_some(), sees_readers, "{asset}");
+                }
+                let index = rpc(&url, "package.index", imbl_value::json!({}), identity).await;
+                let indexed = &index["result"]["packages"]["trust-fixture"];
+                assert_eq!(!indexed.is_null(), visible, "{index}");
+                if visible {
+                    assert_eq!(
+                        indexed["versions"][version]["s9pks"][0][1]
+                            .get("readers")
+                            .is_some(),
+                        sees_readers,
+                        "{index}"
+                    );
+                }
+                let export = rpc(
+                    &url,
+                    "package.version.export",
+                    imbl_value::json!({"id": "trust-fixture", "version": version}),
+                    identity,
+                )
+                .await;
+                if sees_readers {
+                    let exported = &export["result"];
+                    let asset = &exported["info"]["s9pks"][0][1];
+                    assert_eq!(asset["private"], to_value(&key).unwrap(), "{export}");
+                    let reader_id = asset["readers"][0].clone();
+                    assert_eq!(
+                        from_value::<AnyVerifyingKey>(
+                            exported["readers"][reader_id.as_str().unwrap()]["key"].clone()
+                        )
+                        .unwrap(),
+                        reader_key,
+                        "{export}"
+                    );
+                    let missing = rpc(
+                        &url,
+                        "package.version.export",
+                        imbl_value::json!({"id": "trust-fixture", "version": "9.9.9:0"}),
+                        identity,
+                    )
+                    .await;
+                    assert_eq!(
+                        missing["error"]["code"],
+                        imbl_value::json!(ErrorKind::NotFound as i32),
+                        "{missing}"
+                    );
+                } else if visible {
+                    let exported = &export["result"];
+                    let asset = &exported["info"]["s9pks"][0][1];
+                    assert_eq!(asset["private"], to_value(&key).unwrap(), "{export}");
+                    assert!(asset.get("readers").is_none(), "{export}");
+                    assert!(exported["readers"].is_null(), "{export}");
+                } else {
+                    assert_eq!(
+                        export["error"]["code"],
+                        imbl_value::json!(ErrorKind::NotFound as i32),
+                        "{export}"
+                    );
+                }
+            }
+        }
+    };
+    assert_visibility(
+        source_url.clone(),
+        vec![
+            (None, false, false),
+            (Some(stranger.clone()), false, false),
+            (Some(reader.clone()), true, false),
+            (Some(publisher.clone()), true, true),
+            (Some(source_admin.clone()), true, true),
+        ],
+    )
+    .await;
+    let stored = source.db.peek().await.as_index().de().unwrap();
+    let asset =
+        &stored.package.packages["trust-fixture"].versions[&version.parse().unwrap()].s9pks[0].1;
+    assert_eq!(asset.private.as_ref(), Some(&key));
+    assert_eq!(asset.readers, stored.readers.keys().cloned().collect());
+
+    cli_promote(
+        cli.clone(),
+        CliPromoteParams {
+            from: None,
+            to: Some("destination".into()),
+            id: "trust-fixture".parse().unwrap(),
+            version: version.parse().unwrap(),
+        },
+    )
+    .await
+    .unwrap();
+    let promoted = target.db.peek().await.as_index().de().unwrap();
+    let asset =
+        &promoted.package.packages["trust-fixture"].versions[&version.parse().unwrap()].s9pks[0].1;
+    assert_eq!(asset.private.as_ref(), Some(&key));
+    assert_eq!(asset.urls, hosted);
+    assert_eq!(
+        promoted.readers.values().cloned().collect::<Vec<_>>(),
+        [ReaderKey {
+            label: "Reader".into(),
+            key: reader_key.clone(),
+        }]
+    );
+    assert_eq!(asset.readers, promoted.readers.keys().cloned().collect());
+    assert_visibility(
+        target_url.clone(),
+        vec![
+            (None, false, false),
+            (Some(stranger.clone()), false, false),
+            (Some(reader.clone()), true, false),
+            (Some(publisher.clone()), true, true),
+        ],
+    )
+    .await;
+
+    cli_promote(
+        cli.clone(),
+        CliPromoteParams {
+            from: None,
+            to: Some("destination".into()),
+            id: "trust-fixture".parse().unwrap(),
+            version: version.parse().unwrap(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        target
+            .db
+            .peek()
+            .await
+            .as_index()
+            .as_readers()
+            .de()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let second_key = SigningKey::from_bytes(&[16; 32]);
+    let second_signer = AnyVerifyingKey::Ed25519(second_key.verifying_key());
+    let package_id: crate::PackageId = "trust-fixture".parse().unwrap();
+    target
+        .db
+        .mutate(|db| {
+            let signer = db.as_index_mut().as_signers_mut().add_signer(&SignerInfo {
+                name: "Second publisher".into(),
+                contact: vec![],
+                keys: [second_signer.clone()].into(),
+                gpg_exports: Default::default(),
+            })?;
+            db.as_index_mut()
+                .as_package_mut()
+                .as_packages_mut()
+                .as_idx_mut(&package_id)
+                .unwrap()
+                .as_authorized_mut()
+                .insert(&signer, &exver::VersionRange::Any)
+        })
+        .await
+        .result
+        .unwrap();
+    let second_key_path = temp.path().join("second.pem");
+    write_signing_key(&second_key, &second_key_path)
+        .await
+        .unwrap();
+    let second_cli = CliContext::init(ClientConfig {
+        id_key_path: Some(second_key_path),
+        registry: Some(Profiles(BTreeMap::from([(
+            "default".into(),
+            target_url.to_string(),
+        )]))),
+        ..Default::default()
+    })
+    .unwrap();
+    let download = temp.path().join("downloaded.s9pk");
+    crate::registry::package::get::cli_download(
+        second_cli.clone(),
+        crate::registry::package::get::CliDownloadParams {
+            id: package_id.clone(),
+            target_version: Some(version.parse().unwrap()),
+            dest: Some(download.clone()),
+            arch: None,
+        },
+    )
+    .await
+    .unwrap();
+    S9pk::open(&download, None).await.unwrap();
+    let mirror = host.join("private-mirror").unwrap();
+    let cli_server = rpc_toolkit::Server::new(
+        move || {
+            let cli = second_cli.clone();
+            async move { Ok(cli) }
+        },
+        crate::registry::registry_api(),
+    );
+    cli_server
+        .handle_command(
+            "package.add-mirror",
+            imbl_value::json!({
+                "file": &plaintext,
+                "url": &mirror,
+                "private": true,
+                "noVerify": false,
+            }),
+        )
+        .await
+        .unwrap();
+    let after_mirror = target.db.peek().await.as_index().de().unwrap();
+    let mirrored =
+        &after_mirror.package.packages[&package_id].versions[&version.parse().unwrap()].s9pks[0].1;
+    assert_eq!(mirrored.private.as_ref(), Some(&key));
+    assert_eq!(mirrored.urls, [hosted[0].clone(), mirror]);
+    assert_eq!(mirrored.readers, asset.readers);
+
+    host_task.abort();
+    source_task.abort();
+    target_task.abort();
+}
+
+#[tokio::test]
+async fn registry_rejects_readers_of_public_or_unknown_keys_before_fetching() {
+    use crate::registry::reader::ReaderKey;
+    use crate::s9pk::merkle_archive::source::encrypted::KeyStreamInfo;
+
+    let uploader_key = SigningKey::from_bytes(&[12; 32]);
+    let uploader = AnyVerifyingKey::Ed25519(uploader_key.verifying_key());
+    let known = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[16; 32]).verifying_key());
+    let unknown = AnyVerifyingKey::Ed25519(SigningKey::from_bytes(&[17; 32]).verifying_key());
+    let temp = tempfile::tempdir().unwrap();
+    let ctx = context(temp.path().into(), uploader.clone()).await;
+    ctx.db
+        .mutate(|db| {
+            db.as_index_mut().as_readers_mut().add_reader(&ReaderKey {
+                label: "Known".into(),
+                key: known.clone(),
+            })
+        })
+        .await
+        .result
+        .unwrap();
+    let commitment = local_package()
+        .await
+        .as_archive()
+        .commitment()
+        .await
+        .unwrap();
+    let signature = AnySignature::Ed25519ph(
+        Ed25519ph
+            .sign_commitment(&uploader_key, &commitment, "s9pk")
+            .unwrap(),
+    );
+    let (url, requests, task) = server([("base".into(), fixture("base.s9pk"))].into()).await;
+    let keystream = KeyStreamInfo {
+        key: crate::util::serde::Base64([5; 32]),
+        iv: crate::util::serde::Base64([6; 16]),
+    };
+    for (private, readers, kind) in [
+        (None, vec![known.clone()], ErrorKind::InvalidRequest),
+        (Some(keystream), vec![known, unknown], ErrorKind::NotFound),
+    ] {
+        let error = add_package(
+            ctx.clone(),
+            AddPackageParams {
+                urls: vec![url.join("base").unwrap()],
+                torrent: None,
+                uploader: uploader.clone(),
+                commitment,
+                signature: signature.clone(),
+                signatures: Default::default(),
+                private,
+                readers,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind, kind, "{error}");
+    }
+    assert!(requests.lock().unwrap().is_empty());
+    assert!(
+        ctx.db
+            .peek()
+            .await
+            .as_index()
+            .de()
+            .unwrap()
+            .package
+            .packages
+            .is_empty()
+    );
+    task.abort();
 }
 
 #[tokio::test]
@@ -371,7 +817,9 @@ async fn registry_rejects_endorsements_signed_for_a_different_actual_bound() {
                     uploader: uploader.clone(),
                     commitment,
                     signature: signature.clone(),
-                    signatures: local_package().await.signatures().await.unwrap()
+                    signatures: local_package().await.signatures().await.unwrap(),
+                    private: None,
+                    readers: Vec::new(),
                 }
             )
             .await
@@ -432,6 +880,8 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
                     commitment,
                     signature: signature.clone(),
                     signatures: Default::default(),
+                    private: None,
+                    readers: Vec::new(),
                 }
             )
             .await
@@ -460,6 +910,8 @@ async fn registry_validates_every_package_url_without_importing_remote_endorseme
             commitment,
             signature,
             signatures: Default::default(),
+            private: None,
+            readers: Vec::new(),
         },
     )
     .await

@@ -30,7 +30,18 @@ async fn server(
     )
     .await;
     let mut packages = index().package;
-    packages.packages.get_mut("test").unwrap().access.private = true;
+    let (_, info) = crate::registry::package::index::tests::version_info_signed_by(1);
+    let (hardware, mut asset) = info.s9pks.into_iter().next().unwrap();
+    asset.private = Some(crate::registry::tests::secret_keystream());
+    for version in packages
+        .packages
+        .get_mut("test")
+        .unwrap()
+        .versions
+        .values_mut()
+    {
+        version.s9pks = vec![(hardware.clone(), asset.clone())];
+    }
     ctx.db
         .put(&"/index/package".parse().unwrap(), &packages)
         .await
@@ -150,7 +161,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
         .unwrap();
     assert_eq!(cache.status, RegistryStatus::Connected);
     assert_eq!(cache.info.name.as_deref(), Some("Legacy Registry"));
-    assert!(cache.catalog.contains_key("test"));
+    assert!(cache.selections.contains_key("test"));
     assert_eq!(
         snapshot
             .as_public()
@@ -171,7 +182,7 @@ async fn unsupported_ws_discovery_and_polling_use_signed_http_and_preserve_selec
     assert!(selection["best"].get("2.0.0:0").is_none());
     assert_eq!(
         snapshot
-            .as_private()
+            .as_public()
             .as_registry_indexes()
             .as_idx(&registry)
             .unwrap()

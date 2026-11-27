@@ -176,6 +176,8 @@ mod tests {
                 size: 1024,
             },
             signatures: Default::default(),
+            private: None,
+            readers: Default::default(),
         };
         let mut version = OsVersionInfo::default();
         version.iso.insert("x86_64".into(), asset.clone());

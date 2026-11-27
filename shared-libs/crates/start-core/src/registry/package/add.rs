@@ -12,14 +12,17 @@ use url::Url;
 use crate::PackageId;
 use crate::context::CliContext;
 use crate::prelude::*;
-use crate::progress::FullProgressTracker;
+use crate::progress::{FullProgressTracker, PhaseProgressTrackerHandle};
 use crate::registry::RegistryDatabase;
 use crate::registry::asset::BufferedHttpSource;
 use crate::registry::context::RegistryContext;
+use crate::registry::package::get::GetPackageResponse;
 use crate::registry::package::icon::icons_dir;
 use crate::registry::package::index::PackageVersionInfo;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::S9pk;
+use crate::s9pk::merkle_archive::source::Section;
+use crate::s9pk::merkle_archive::source::encrypted::{KeyStreamInfo, KeyStreamSource};
 use crate::s9pk::merkle_archive::source::http::HttpSource;
 use crate::s9pk::v2::SIG_CONTEXT;
 use crate::sign::commitment::merkle_archive::MerkleArchiveCommitment;
@@ -41,6 +44,12 @@ pub struct AddPackageParams {
     pub signature: AnySignature,
     #[serde(default)]
     pub signatures: SignatureMap,
+    /// Keystream the hosted bytes are encrypted with. Omitted for a public s9pk.
+    #[serde(default)]
+    pub private: Option<KeyStreamInfo>,
+    /// Keys in the registry's reader directory allowed to see this private s9pk.
+    #[serde(default)]
+    pub readers: Vec<AnyVerifyingKey>,
 }
 
 rpc_toolkit::reflect_ts!(AddPackageParams);
@@ -55,6 +64,8 @@ pub async fn add_package(
         commitment,
         signature,
         signatures,
+        private,
+        readers,
     }: AddPackageParams,
 ) -> Result<(), Error> {
     if let Some(torrent) = &torrent {
@@ -62,25 +73,21 @@ pub async fn add_package(
     }
     let signature =
         crate::sign::compat::verify_commitment(&uploader, &commitment, SIG_CONTEXT, &signature)?;
+    ensure_code!(
+        private.is_some() || readers.is_empty(),
+        ErrorKind::InvalidRequest,
+        "{}",
+        t!("registry.package.add.readers-require-private")
+    );
     let peek = ctx.db.peek().await;
     let uploader_guid = peek.as_index().as_signers().get_signer(&uploader)?;
+    peek.as_index().as_readers().resolve_keys(&readers)?;
 
     let (url, rest) = crate::registry::asset::require_http_mirrors(&urls)?;
 
-    let s9pk = S9pk::deserialize(
-        &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
-        Some(&commitment),
-    )
-    .instrument(tracing::info_span!("registry-package-source", %url))
-    .await?;
-
+    let s9pk = fetch_s9pk(&ctx, url, &commitment, private.clone()).await?;
     for url in rest {
-        S9pk::deserialize(
-            &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
-            Some(&commitment),
-        )
-        .instrument(tracing::info_span!("registry-package-source", %url))
-        .await?;
+        fetch_s9pk(&ctx, url, &commitment, private.clone()).await?;
     }
 
     let manifest = s9pk.as_manifest();
@@ -94,6 +101,11 @@ pub async fn add_package(
     ctx.db
         .mutate(|db| {
             info.retain_registered_signatures(&db.as_index().as_signers().de()?);
+            let reader_ids = db.as_index().as_readers().resolve_keys(&readers)?;
+            for (_, asset) in &mut info.s9pks {
+                asset.private = private.clone();
+                asset.readers = reader_ids.clone();
+            }
             if can_publish(db, &uploader_guid, &manifest.id, &manifest.version)? {
                 let package = db
                     .as_index_mut()
@@ -117,6 +129,23 @@ pub async fn add_package(
         })
         .await
         .result
+}
+
+async fn fetch_s9pk(
+    ctx: &RegistryContext,
+    url: &Url,
+    commitment: &MerkleArchiveCommitment,
+    private: Option<KeyStreamInfo>,
+) -> Result<S9pk<Section<Arc<KeyStreamSource<HttpSource>>>>, Error> {
+    S9pk::deserialize(
+        &Arc::new(KeyStreamSource::new(
+            HttpSource::new(ctx.client.clone(), url.clone()).await?,
+            private,
+        )),
+        Some(commitment),
+    )
+    .instrument(tracing::info_span!("registry-package-source", %url))
+    .await
 }
 
 fn merge_submitted_signatures(
@@ -171,6 +200,17 @@ pub struct CliAddPackageParams {
     pub torrent: Option<Url>,
     #[arg(long, help = "help.arg.no-verify")]
     pub no_verify: bool,
+    #[arg(long, help = "help.arg.private-s9pk")]
+    #[serde(default)]
+    pub private: bool,
+    #[arg(
+        long = "reader",
+        requires = "private",
+        help = "help.arg.s9pk-reader-key",
+        allow_hyphen_values = true
+    )]
+    #[serde(default)]
+    pub readers: Vec<AnyVerifyingKey>,
 }
 
 pub async fn cli_add_package(
@@ -180,18 +220,49 @@ pub async fn cli_add_package(
         url,
         torrent,
         no_verify,
+        private,
+        readers,
     }: CliAddPackageParams,
 ) -> Result<(), Error> {
     let s9pk = S9pk::open(&file, None).await?;
-    cli_add_package_impl(ctx, s9pk, url, torrent, no_verify).await
+    let private = if private {
+        Some(derive_keystream(&ctx, &s9pk).await?)
+    } else {
+        None
+    };
+    cli_add_package_impl(ctx, s9pk, url, torrent, no_verify, private, readers).await
 }
 
+/// The keystream the CLI identity encrypts a private s9pk with.
+pub async fn derive_keystream(ctx: &CliContext, s9pk: &S9pk) -> Result<KeyStreamInfo, Error> {
+    KeyStreamInfo::derive(ctx.id_key()?, &s9pk.as_archive().commitment().await?).await
+}
+
+/// The `package.add` request body. Public s9pks keep the request shape older registries accept.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AddPackageRequest<'a> {
+    pub urls: &'a [Url],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub torrent: Option<&'a Url>,
+    pub signature: AnySignature,
+    pub signatures: &'a SignatureMap,
+    pub commitment: &'a MerkleArchiveCommitment,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub private: Option<&'a KeyStreamInfo>,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub readers: &'a [AnyVerifyingKey],
+}
+
+/// Hosted bytes are the s9pk encrypted with the keystream when one is given.
 pub async fn cli_add_package_impl(
     ctx: CliContext,
     s9pk: S9pk,
     url: Vec<Url>,
     torrent: Option<Url>,
     no_verify: bool,
+    private: Option<KeyStreamInfo>,
+    readers: Vec<AnyVerifyingKey>,
 ) -> Result<(), Error> {
     let manifest = s9pk.as_manifest();
 
@@ -236,22 +307,21 @@ pub async fn cli_add_package_impl(
 
     for (url, mut phase) in verify {
         phase.start();
-        let source = BufferedHttpSource::new(ctx.client.clone(), url, phase).await?;
-        let mut src = S9pk::deserialize(&Arc::new(source), Some(&commitment)).await?;
-        src.serialize(&mut TrackingIO::new(0, &mut tokio::io::sink()), true)
-            .await?;
+        verify_hosted(&ctx, url, &commitment, private.clone(), phase).await?;
     }
 
     index_phase.start();
     ctx.call_remote::<RegistryContext>(
         "package.add",
-        imbl_value::json!({
-            "urls": &url,
-            "torrent": torrent,
-            "signature": signature,
-            "signatures": s9pk.signatures().await?,
-            "commitment": commitment,
-        }),
+        to_value(&AddPackageRequest {
+            urls: &url,
+            torrent: torrent.as_ref(),
+            signature,
+            signatures: &s9pk.signatures().await?,
+            commitment: &commitment,
+            private: private.as_ref(),
+            readers: &readers,
+        })?,
     )
     .await?;
     index_phase.complete();
@@ -261,6 +331,23 @@ pub async fn cli_add_package_impl(
     progress_task.await.with_kind(ErrorKind::Unknown)?;
 
     Ok(())
+}
+
+async fn verify_hosted(
+    ctx: &CliContext,
+    url: Url,
+    commitment: &MerkleArchiveCommitment,
+    private: Option<KeyStreamInfo>,
+    phase: PhaseProgressTrackerHandle,
+) -> Result<(), Error> {
+    let source = BufferedHttpSource::new(ctx.client.clone(), url, phase).await?;
+    let mut src = S9pk::deserialize(
+        &Arc::new(KeyStreamSource::new(source, private)),
+        Some(commitment),
+    )
+    .await?;
+    src.serialize(&mut TrackingIO::new(0, &mut tokio::io::sink()), true)
+        .await
 }
 
 #[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
@@ -413,13 +500,14 @@ pub async fn add_mirror(
         crate::sign::compat::verify_commitment(&uploader, &commitment, SIG_CONTEXT, &signature)?;
     let peek = ctx.db.peek().await;
     let uploader_guid = peek.as_index().as_signers().get_signer(&uploader)?;
+    let private = peek
+        .as_index()
+        .as_package()
+        .s9pks_with(&commitment)?
+        .into_iter()
+        .find_map(|asset| asset.private);
 
-    let s9pk = S9pk::deserialize(
-        &Arc::new(HttpSource::new(ctx.client.clone(), url.clone()).await?),
-        Some(&commitment),
-    )
-    .instrument(tracing::info_span!("registry-package-source", %url))
-    .await?;
+    let s9pk = fetch_s9pk(&ctx, &url, &commitment, private).await?;
 
     let manifest = s9pk.as_manifest();
 
@@ -463,8 +551,12 @@ pub struct CliAddMirrorParams {
     pub url: Url,
     #[arg(long, help = "help.arg.no-verify")]
     pub no_verify: bool,
+    #[arg(long, help = "help.arg.private-s9pk-mirror")]
+    #[serde(default)]
+    pub private: bool,
 }
 
+/// Mirror verification uses the stored keystream, independent of the caller's identity.
 pub async fn cli_add_mirror(
     HandlerArgs {
         context: ctx,
@@ -475,6 +567,7 @@ pub async fn cli_add_mirror(
                 file,
                 url,
                 no_verify,
+                private,
             },
         ..
     }: HandlerArgs<CliContext, CliAddMirrorParams>,
@@ -509,14 +602,35 @@ pub async fn cli_add_mirror(
         .id_key()?
         .sign_commitment(&commitment, SIG_CONTEXT)
         .await?;
+    let private = if private {
+        let manifest = s9pk.as_manifest();
+        let registered: GetPackageResponse = from_value(
+            ctx.call_remote::<RegistryContext>(
+                "package.get",
+                imbl_value::json!({
+                    "id": &manifest.id,
+                    "targetVersion": &manifest.version,
+                    "allRevisions": true,
+                }),
+            )
+            .await?,
+        )?;
+        registered
+            .best
+            .into_values()
+            .flat_map(|info| info.s9pks)
+            .map(|(_, asset)| asset)
+            .find(|asset| asset.commitment == commitment)
+            .or_not_found(&commitment.root_sighash)?
+            .private
+    } else {
+        None
+    };
     sign_phase.complete();
 
     for (url, mut phase) in verify {
         phase.start();
-        let source = BufferedHttpSource::new(ctx.client.clone(), url, phase).await?;
-        let mut src = S9pk::deserialize(&Arc::new(source), Some(&commitment)).await?;
-        src.serialize(&mut TrackingIO::new(0, &mut tokio::io::sink()), true)
-            .await?;
+        verify_hosted(&ctx, url, &commitment, private.clone(), phase).await?;
     }
 
     index_phase.start();

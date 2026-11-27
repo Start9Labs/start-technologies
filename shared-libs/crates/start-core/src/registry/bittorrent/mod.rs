@@ -20,6 +20,7 @@ use crate::prelude::*;
 use crate::progress::{PhaseProgressTrackerHandle, ProgressUnits};
 use crate::s9pk::S9pk;
 use crate::s9pk::merkle_archive::source::ArchiveSource;
+use crate::s9pk::merkle_archive::source::encrypted::{KeyStreamInfo, KeyStreamSource};
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::sign::commitment::Commitment;
 use crate::sign::commitment::blake3::Blake3Commitment;
@@ -85,6 +86,7 @@ impl From<MerkleArchiveCommitment> for ContentCommitment {
     }
 }
 impl ContentCommitment {
+    #[cfg(test)]
     async fn verify(&self, path: &Path) -> Result<(), Error> {
         self.verify_source(&MultiCursorFile::from(open_file(path).await?))
             .await
@@ -108,10 +110,54 @@ impl ContentCommitment {
     }
 }
 
+/// Private swarms hash and serve ciphertext; commitments verify plaintext.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct TorrentContent {
+    pub(crate) commitment: ContentCommitment,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) private: Option<KeyStreamInfo>,
+}
+
+impl TorrentContent {
+    pub(crate) fn new(commitment: ContentCommitment, private: Option<KeyStreamInfo>) -> Self {
+        Self {
+            commitment,
+            private,
+        }
+    }
+
+    async fn verify(&self, path: &Path) -> Result<(), Error> {
+        let source = Arc::new(KeyStreamSource::new(
+            MultiCursorFile::from(open_file(path).await?),
+            self.private.clone(),
+        ));
+        self.commitment.verify_source(&source).await
+    }
+}
+
+impl From<ContentCommitment> for TorrentContent {
+    fn from(commitment: ContentCommitment) -> Self {
+        Self::new(commitment, None)
+    }
+}
+
+impl From<Blake3Commitment> for TorrentContent {
+    fn from(commitment: Blake3Commitment) -> Self {
+        ContentCommitment::from(commitment).into()
+    }
+}
+
+impl From<MerkleArchiveCommitment> for TorrentContent {
+    fn from(commitment: MerkleArchiveCommitment) -> Self {
+        ContentCommitment::from(commitment).into()
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct SharingMetadata {
     pub(crate) torrent: crate::util::serde::Base64<Vec<u8>>,
-    pub(crate) commitment: ContentCommitment,
+    #[serde(flatten)]
+    pub(crate) content: TorrentContent,
 }
 
 pub(crate) struct TorrentAttempt<T = (Arc<TmpDir>, PathBuf)> {
@@ -125,7 +171,7 @@ pub(crate) struct TorrentTransfer {
     torrent: Arc<librqbit::ManagedTorrent>,
     path: PathBuf,
     length: u64,
-    commitment: ContentCommitment,
+    content: TorrentContent,
 }
 
 impl TorrentAttempt<Arc<TorrentTransfer>> {
@@ -199,7 +245,7 @@ impl TorrentTransfer {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
         self.workspace.session.0.stop().await;
-        self.commitment.verify(&self.path).await?;
+        self.content.verify(&self.path).await?;
         progress.complete();
         Ok((self.workspace.directory.clone(), self.path.clone()))
     }
@@ -248,10 +294,10 @@ struct ResolvedTorrent {
 }
 
 impl ResolvedTorrent {
-    fn sharing_metadata(&self, commitment: ContentCommitment) -> SharingMetadata {
+    fn sharing_metadata(&self, content: TorrentContent) -> SharingMetadata {
         SharingMetadata {
             torrent: crate::util::serde::Base64(self.bytes.to_vec()),
-            commitment,
+            content,
         }
     }
 }
@@ -578,23 +624,23 @@ impl TorrentClient {
     pub(crate) async fn metadata_for(
         &self,
         url: &Url,
-        commitment: ContentCommitment,
+        content: TorrentContent,
         client: Client,
     ) -> Result<Option<SharingMetadata>, Error> {
         Ok(self
-            .resolve(url, &commitment, client, None)
+            .resolve(url, &content.commitment, client, None)
             .await?
-            .map(|resolved| resolved.sharing_metadata(commitment)))
+            .map(|resolved| resolved.sharing_metadata(content)))
     }
 
     pub(crate) async fn download(
         &self,
         url: &Url,
-        commitment: ContentCommitment,
+        content: TorrentContent,
         client: Client,
         progress: &mut PhaseProgressTrackerHandle,
     ) -> Result<Option<TorrentAttempt>, Error> {
-        let Some(pending) = self.begin(url, commitment, client).await? else {
+        let Some(pending) = self.begin(url, content, client).await? else {
             return Ok(None);
         };
         Ok(Some(pending.complete(progress).await))
@@ -603,20 +649,20 @@ impl TorrentClient {
     pub(crate) async fn begin(
         &self,
         url: &Url,
-        commitment: ContentCommitment,
+        content: TorrentContent,
         client: Client,
     ) -> Result<Option<TorrentAttempt<Arc<TorrentTransfer>>>, Error> {
         let Some(token) = self.download_token() else {
             return Ok(None);
         };
         let Some(resolved) = self
-            .resolve(url, &commitment, client, Some(token.clone()))
+            .resolve(url, &content.commitment, client, Some(token.clone()))
             .await?
         else {
             return Ok(None);
         };
-        let metadata = resolved.sharing_metadata(commitment.clone());
-        let source = match self.start_transfer(resolved, commitment, token).await {
+        let metadata = resolved.sharing_metadata(content.clone());
+        let source = match self.start_transfer(resolved, content, token).await {
             Ok(transfer) => Some(Arc::new(transfer)),
             Err(error) => {
                 tracing::warn!(%error, "Cannot start BitTorrent payload; falling back to HTTP mirrors");
@@ -661,7 +707,7 @@ impl TorrentClient {
     async fn start_transfer(
         &self,
         mut resolved: ResolvedTorrent,
-        commitment: ContentCommitment,
+        content: TorrentContent,
         cancellation: CancellationToken,
     ) -> Result<TorrentTransfer, Error> {
         let workspace = match resolved.workspace.take() {
@@ -683,7 +729,7 @@ impl TorrentClient {
             torrent,
             path,
             length,
-            commitment,
+            content,
         })
     }
 }

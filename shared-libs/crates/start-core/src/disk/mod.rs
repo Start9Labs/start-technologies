@@ -7,6 +7,7 @@ use tokio::process::Command;
 
 use crate::context::{CliContext, RpcContext};
 use crate::disk::util::get_mount_source;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::util::Invoke;
 use crate::util::serde::HandlerExtSerde;
@@ -206,7 +207,12 @@ async fn resolve_fstab_source(source: &str) -> Result<PathBuf, Error> {
 
 pub fn disk<C: Context>() -> ParentHandler<C> {
     ParentHandler::new()
-        .subcommand("repair", from_fn_async(|_: C| repair()).no_cli())
+        .subcommand(
+            "repair",
+            from_fn_async(|_: RpcContext| repair())
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_cli(),
+        )
         .subcommand(
             "repair",
             CallRemoteHandler::<CliContext, _, _>::new(
@@ -218,6 +224,7 @@ pub fn disk<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "format",
             from_fn_async(format::format)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, partition| {
                     format::display_formatted(handle.params, partition)

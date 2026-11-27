@@ -76,6 +76,8 @@ async fn squashfs_signing_requires_version_authorization_or_admin() {
                     torrent: None,
                     commitment: commitment.clone(),
                     signatures: Default::default(),
+                    private: None,
+                    readers: Default::default(),
                 },
             );
             db.as_index_mut()

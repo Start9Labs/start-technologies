@@ -35,6 +35,8 @@ async fn asset(urls: Vec<reqwest::Url>) -> RegistryAsset<Blake3Commitment> {
         signatures: SignatureMap::from([(key, signature)]),
         urls,
         torrent: None,
+        private: None,
+        readers: Default::default(),
     }
 }
 

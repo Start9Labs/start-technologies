@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::{Arc, Weak};
 
@@ -24,6 +24,7 @@ pub struct IndexView {
     pub wire: WireCompatibility,
     /// Unset keeps every translation.
     language: Option<ViewLanguage>,
+    locales: BTreeSet<InternedString>,
 }
 
 /// Translation each `LocaleString` in a view resolves to.
@@ -45,14 +46,34 @@ impl IndexView {
     ) -> Result<Self, Error> {
         let reader = Reader::resolve(db, key)?;
         let visible = locales.visible_to(db, reader.as_ref())?;
-        let language = match crate::best_locale(language, visible) {
+        let language = match crate::best_locale(language, visible.iter().copied()) {
             Some(locale) => ViewLanguage::Locale(InternedString::intern(locale)),
             None => ViewLanguage::Default,
         };
         Ok(Self {
             wire,
             language: Some(language),
+            locales: visible.into_iter().map(InternedString::intern).collect(),
         })
+    }
+
+    fn has_current_locales(
+        &self,
+        root: &Value,
+        key: Option<&AnyVerifyingKey>,
+    ) -> Result<bool, Error> {
+        if self.language.is_none() {
+            return Ok(true);
+        }
+        let db: Model<RegistryDatabase> = root.clone().into();
+        let reader = Reader::resolve(&db, key)?;
+        let locales = IndexLocales::of(db.as_index())?;
+        let visible = locales
+            .visible_to(&db, reader.as_ref())?
+            .into_iter()
+            .map(InternedString::intern)
+            .collect::<BTreeSet<_>>();
+        Ok(visible == self.locales)
     }
 }
 
@@ -61,10 +82,12 @@ impl From<WireCompatibility> for IndexView {
         Self {
             wire,
             language: None,
+            locales: BTreeSet::new(),
         }
     }
 }
 
+/// Localized mirrors retire when their visible locale inventory changes.
 pub struct IndexMirror {
     pub db: PatchDb,
     completion: watch::Receiver<Option<Arc<Error>>>,
@@ -80,6 +103,12 @@ impl IndexMirror {
     ) -> Result<Arc<Self>, Error> {
         let (dump, mut sub) = main.dump_and_sub(JsonPointer::default()).await;
         let mut root = dump.value;
+        ensure_code!(
+            view.has_current_locales(&root, key.as_ref())?,
+            ErrorKind::Cancelled,
+            "{}",
+            rust_i18n::t!("error.cancelled")
+        );
         let icons = icons_dir(datadir);
         let visible = projected_root(&root, key.as_ref(), &view, &icons).await?;
         let db = PatchDb::in_memory();
@@ -91,16 +120,23 @@ impl IndexMirror {
                 let res = async {
                     patch_db::json_patch::patch(&mut root, &rev.patch)
                         .map_err(|e| Error::new(eyre!("{e}"), ErrorKind::Database))?;
+                    if !view.has_current_locales(&root, key.as_ref())? {
+                        return Ok(false);
+                    }
                     let next = projected_root(&root, key.as_ref(), &view, &icons).await?;
                     mirror.put(&JsonPointer::<&str>::default(), &next).await?;
-                    Ok::<_, Error>(())
+                    Ok::<_, Error>(true)
                 }
                 .await;
-                if let Err(e) = res {
-                    tracing::error!("Error mirroring registry index: {e}");
-                    tracing::debug!("{e:?}");
-                    completed.send_replace(Some(Arc::new(e)));
-                    break;
+                match res {
+                    Ok(true) => (),
+                    Ok(false) => break,
+                    Err(e) => {
+                        tracing::error!("Error mirroring registry index: {e}");
+                        tracing::debug!("{e:?}");
+                        completed.send_replace(Some(Arc::new(e)));
+                        break;
+                    }
                 }
             }
         });
@@ -187,7 +223,7 @@ fn visible_index(
 ) -> Result<Model<FullIndex>, Error> {
     let reader = Reader::resolve(&db, key)?;
     let mut index = db.into_index();
-    index.as_package_mut().retain_visible(reader.as_ref())?;
+    index.retain_visible(reader.as_ref())?;
     Ok(index)
 }
 
@@ -206,15 +242,21 @@ mod tests {
     }
 
     fn package(private: bool, reader: &Guid) -> Value {
+        let mut asset = json!({ "readers": [reader] });
+        if private {
+            asset["private"] = json!({
+                "key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+                "iv": "AgICAgICAgICAgICAgICAg",
+            });
+        }
         json!({
             "authorized": {},
             "categories": [],
-            "versions": { "1.0.0:0": { "releaseNotes": "notes" } },
-            "private": private,
-            "readers": [reader],
+            "versions": { "1.0.0:0": { "releaseNotes": "notes", "s9pks": [[{}, asset]] } },
         })
     }
 
+    /// The reader key is both a registered signer and a reader-directory entry.
     fn root(private: bool, reader: &Guid, admins: &[&Guid]) -> Value {
         json!({
             "migrations": [],
@@ -227,6 +269,9 @@ mod tests {
                 "signers": {
                     reader.as_ref(): { "name": "reader", "contact": [], "keys": [key()] },
                 },
+                "readers": {
+                    reader.as_ref(): { "label": "reader", "key": key() },
+                },
                 "package": {
                     "categories": {},
                     "packages": {
@@ -236,6 +281,10 @@ mod tests {
                 },
             },
         })
+    }
+
+    fn secret_s9pk(root: &mut Value) -> &mut Value {
+        &mut root["index"]["package"]["packages"]["secret"]["versions"]["1.0.0:0"]["s9pks"][0][1]
     }
 
     fn packages(root: &Value) -> Vec<String> {
@@ -306,11 +355,11 @@ mod tests {
         let reader = Guid::new();
         let permitted = root(true, &reader, &[]);
         let mut denied = permitted.clone();
-        denied["index"]["package"]["packages"]["secret"]["readers"] = json!([]);
+        secret_s9pk(&mut denied)["readers"] = json!([]);
         let mut admin = denied.clone();
         admin["admins"] = json!([reader]);
         let mut revoked = permitted.clone();
-        revoked["index"]["signers"][reader.as_ref()]["keys"] = json!([]);
+        revoked["index"]["readers"] = json!({});
 
         let main = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::in_memory());
         main.put(&JsonPointer::<&str>::default(), &denied)
@@ -354,6 +403,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn localized_mirrors_retire_when_language_matching_changes() {
+        for (language, before, after, expected) in [
+            (
+                "de_DE",
+                json!({ "en_US": "English" }),
+                json!({ "en_US": "English", "de_DE": "Deutsch" }),
+                "Deutsch",
+            ),
+            (
+                "en_GB",
+                json!({ "en_US": "US English" }),
+                json!({ "en_US": "US English", "en_GB": "GB English" }),
+                "GB English",
+            ),
+            (
+                "de_DE",
+                json!({ "en_US": "English", "de_DE": "Deutsch" }),
+                json!({ "en_US": "English" }),
+                "English",
+            ),
+        ] {
+            let main = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::in_memory());
+            main.put(
+                &JsonPointer::<&str>::default(),
+                &json!({
+                    "admins": [],
+                    "index": {
+                        "description": before,
+                        "defaultLocale": "en_US",
+                        "package": { "categories": {}, "packages": {} },
+                        "os": { "versions": {} },
+                    },
+                }),
+            )
+            .await
+            .unwrap();
+            let snapshot = main.peek().await;
+            let view = IndexView::localized(
+                &snapshot,
+                &IndexLocales::of(snapshot.as_index()).unwrap(),
+                None,
+                WireCompatibility::default(),
+                language,
+            )
+            .unwrap();
+            let mirrors = IndexMirrors::default();
+            let localized = index_mirror(&mirrors, &main, None, view.clone(), Path::new(""))
+                .await
+                .unwrap();
+            let canonical =
+                index_mirror(&mirrors, &main, None, IndexView::default(), Path::new(""))
+                    .await
+                    .unwrap();
+            let (_, mut canonical_sub) = canonical.db.dump_and_sub("/index".parse().unwrap()).await;
+            main.put(
+                &"/index/description".parse::<JsonPointer>().unwrap(),
+                &after,
+            )
+            .await
+            .unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(5), localized.closed())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(!localized.is_running());
+            tokio::time::timeout(std::time::Duration::from_secs(5), canonical_sub.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(canonical.is_running());
+
+            let stale = IndexMirror::spawn(&main, None, view, Path::new("")).await;
+            assert!(matches!(stale, Err(error) if error.kind == ErrorKind::Cancelled));
+            let snapshot = main.peek().await;
+            let view = IndexView::localized(
+                &snapshot,
+                &IndexLocales::of(snapshot.as_index()).unwrap(),
+                None,
+                WireCompatibility::default(),
+                language,
+            )
+            .unwrap();
+            let fresh = index_mirror(&mirrors, &main, None, view, Path::new(""))
+                .await
+                .unwrap();
+            assert!(!Arc::ptr_eq(&localized, &fresh));
+            assert_eq!(
+                fresh
+                    .db
+                    .dump(&"/index/description".parse::<JsonPointer>().unwrap())
+                    .await
+                    .value,
+                json!(expected)
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn mirror_follows_visibility_changes() {
         let reader = Guid::new();
         let main = TypedPatchDb::<RegistryDatabase>::load_unchecked(PatchDb::in_memory());
@@ -384,19 +531,14 @@ mod tests {
             ["public", "secret"]
         );
 
-        main.mutate(|db| {
-            db.as_index_mut()
-                .as_package_mut()
-                .as_packages_mut()
-                .as_idx_mut(&"secret".parse().unwrap())
-                .unwrap()
-                .as_access_mut()
-                .as_private_mut()
-                .ser(&false)
-        })
-        .await
-        .result
-        .unwrap();
+        let mut published = root(true, &reader, &[]);
+        secret_s9pk(&mut published)
+            .as_object_mut()
+            .unwrap()
+            .remove("private");
+        main.put(&JsonPointer::<&str>::default(), &published)
+            .await
+            .unwrap();
         sub.recv().await.unwrap();
         assert_eq!(
             packages(&public.db.dump(&JsonPointer::<&str>::default()).await.value),

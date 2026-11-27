@@ -97,13 +97,12 @@ reflect_ts!(Node);
 #[test]
 fn standalone_declarations_do_not_require_an_rpc_tree() {
     let bindings = declarations::<Node>();
-    assert!(bindings.schemas.contains("export const Node: z.ZodObject<{ \"value\": z.ZodString; \"next\": z.ZodCodec<z.ZodOptional<z.ZodNullable<typeof Node>>, z.ZodNullable<typeof Node>> }> = /* @__PURE__ */ object({ \"value\": z.string(), get \"next\"()"));
+    assert!(bindings.schemas.contains("export const Node: z.ZodObject<{ \"value\": z.ZodString; \"next\": z.ZodDefault<z.ZodNullable<typeof Node>> }> = /* @__PURE__ */ object({ \"value\": z.string(), get \"next\"()"));
     assert!(bindings.schemas.contains(
-        "get \"next\"(): z.ZodCodec<z.ZodOptional<z.ZodNullable<typeof Node>>, z.ZodNullable<typeof Node>> { return wire(Node.nullable().optional(), Node.nullable()); }"
+        "get \"next\"(): z.ZodDefault<z.ZodNullable<typeof Node>> { return Node.nullable().default(() => (null)); }"
     ));
-    assert!(bindings
-        .schemas
-        .starts_with("import { z } from 'zod'\nconst wire ="));
+    assert!(bindings.schemas.starts_with("import { z } from 'zod'\n"));
+    assert!(!bindings.schemas.contains("const wire ="));
     assert!(bindings
         .types
         .contains("export type Node = z.output<typeof schemas.Node>;"));
@@ -119,7 +118,7 @@ fn derives_share_directional_shapes_and_explicit_overrides() {
     let bindings = export_namespace("ts", "derived", SCHEMAS).unwrap();
     assert!(bindings
         .schemas
-        .contains("\"count\": wire(z.int().optional(), z.int())"));
+        .contains("\"count\": z.int().default(() => (0))"));
     assert!(bindings.schemas.contains("\"custom\": z.string()"));
     assert!(!bindings.schemas.contains("skipped"));
     assert!(bindings.types.contains("export type Derived ="));
@@ -155,8 +154,10 @@ fn annotated_concrete_exports_support_generic_recursion() {
     let bindings = export_namespace("ts", "generic", SCHEMAS).unwrap();
     assert!(bindings
         .schemas
-        .contains("export const Generic: z.ZodObject<{ \"value\": z.ZodString; \"next\": z.ZodCodec<z.ZodOptional<z.ZodNullable<typeof Generic>>, z.ZodNullable<typeof Generic>> }> = /* @__PURE__ */ object("));
-    assert!(bindings.schemas.contains("get \"next\"(): z.ZodCodec<z.ZodOptional<z.ZodNullable<typeof Generic>>, z.ZodNullable<typeof Generic>>"));
+        .contains("export const Generic: z.ZodObject<{ \"value\": z.ZodString; \"next\": z.ZodDefault<z.ZodNullable<typeof Generic>> }> = /* @__PURE__ */ object("));
+    assert!(bindings
+        .schemas
+        .contains("get \"next\"(): z.ZodDefault<z.ZodNullable<typeof Generic>>"));
     assert!(bindings
         .types
         .contains("export type Generic = z.output<typeof schemas.Generic>;"));

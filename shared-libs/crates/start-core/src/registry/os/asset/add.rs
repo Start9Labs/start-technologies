@@ -155,6 +155,8 @@ async fn add_asset(
                         torrent: None,
                         commitment: commitment.clone(),
                         signatures: SignatureMap::new(),
+                        private: None,
+                        readers: Default::default(),
                     })
                 })?
                 .mutate(|s| {

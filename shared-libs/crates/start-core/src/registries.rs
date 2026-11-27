@@ -1,6 +1,7 @@
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 
 use crate::context::CliContext;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::trusted_keys::connection::{connect, list, refresh, remove, set_os_registry};
 use crate::util::serde::HandlerExtSerde;
@@ -10,6 +11,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-registries")
                 .with_call_remote::<CliContext>(),
@@ -17,15 +19,24 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(connect)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.add-registry")
                 .with_call_remote::<CliContext>(),
         )
-        .subcommand("refresh", from_fn_async(refresh).no_cli())
+        .subcommand(
+            "refresh",
+            from_fn_async(refresh)
+                .with_metadata(EFFECT, Effect::Destructive.into())
+                .no_display()
+                .with_about("about.refresh-registry")
+                .with_call_remote::<CliContext>(),
+        )
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.remove-registry")
@@ -34,6 +45,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-os",
             from_fn_async(set_os_registry)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.set-os-registry")

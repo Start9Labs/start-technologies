@@ -4,13 +4,18 @@ use crate::service::effects::prelude::*;
 use crate::service::rpc::CallbackId;
 use crate::{HostId, PackageId};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, visit_rs::VisitFields, Parser)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
+#[command(rename_all = "kebab-case")]
 pub struct GetHostInfoParams {
+    #[arg(help = "help.arg.host-id")]
     host_id: HostId,
 
+    #[arg(long, help = "help.arg.package-id")]
     package_id: Option<PackageId>,
 
+    #[arg(skip)]
     callback: Option<CallbackId>,
 }
 

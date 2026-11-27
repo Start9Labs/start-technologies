@@ -228,6 +228,8 @@ impl Swarm {
                 size: self.content.len() as u64,
             },
             signatures: SignatureMap::new(),
+            private: None,
+            readers: Default::default(),
         }
     }
 
@@ -264,7 +266,135 @@ async fn package_asset(swarm: &Swarm) -> Result<RegistryAsset<MerkleArchiveCommi
         torrent: Some(swarm.url.join("metadata.torrent")?),
         commitment: package_bytes().await?.1,
         signatures: Default::default(),
+        private: None,
+        readers: Default::default(),
     })
+}
+
+async fn encrypted_package()
+-> Result<(Swarm, RegistryAsset<MerkleArchiveCommitment>, Vec<u8>), Error> {
+    let (plaintext, commitment) = package_bytes().await?;
+    let private = KeyStreamInfo::derive(
+        &crate::sign::Signer::Key(crate::sign::AnySigningKey::Ed25519(
+            ed25519_dalek::SigningKey::from_bytes(&[42; 32]),
+        )),
+        &commitment,
+    )
+    .await?;
+    let mut ciphertext = Vec::new();
+    KeyStreamSource::new(Arc::<[u8]>::from(plaintext.clone()), Some(private.clone()))
+        .copy_all_to(&mut ciphertext)
+        .await?;
+    assert_eq!(ciphertext.len(), plaintext.len());
+    assert_ne!(ciphertext, plaintext);
+    let swarm = Swarm::with_content(ciphertext).await?;
+    let mut asset = package_asset(&swarm).await?;
+    asset.commitment = commitment;
+    asset.private = Some(private);
+    Ok((swarm, asset, plaintext))
+}
+
+#[tokio::test]
+async fn encrypted_peer_install_verifies_ciphertext_and_exposes_plaintext() -> Result<(), Error> {
+    let (swarm, mut asset, plaintext) = encrypted_package().await?;
+    asset.urls = vec![swarm.url.join("head-only")?];
+    let phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+    let prepared = timeout(
+        Duration::from_secs(20),
+        asset.prepare_install(Client::new(), Some(Arc::new(cli_client())), phase),
+    )
+    .await
+    .with_kind(ErrorKind::Timeout)??;
+    assert_eq!(
+        prepared.metadata.as_manifest().id.to_string(),
+        "torrent-test"
+    );
+    let loaded = timeout(Duration::from_secs(20), prepared.download)
+        .await
+        .with_kind(ErrorKind::Timeout)?
+        .map_err(|error| error.clone_output())?;
+    let mut bytes = Vec::new();
+    loaded.source.copy_all_to(&mut bytes).await?;
+    assert_eq!(bytes, plaintext);
+    assert_eq!(
+        loaded.package.readme().await?.as_deref(),
+        Some("Test package")
+    );
+    let metadata = loaded.source.sharing.as_ref().unwrap();
+    assert_eq!(metadata.torrent.0, swarm.torrent);
+    assert_eq!(metadata.content.private, asset.private);
+    assert_eq!(swarm.http_hits.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn encrypted_http_fallback_restarts_at_ordered_mirror_and_decrypts() -> Result<(), Error> {
+    let (swarm, mut asset, plaintext) = encrypted_package().await?;
+    asset.torrent = Some(swarm.url.join("invalid.torrent")?);
+    asset.urls.insert(0, swarm.url.join("head-only")?);
+    let phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+    let prepared = asset
+        .prepare_install(Client::new(), Some(Arc::new(cli_client())), phase)
+        .await?;
+    let loaded = prepared
+        .download
+        .await
+        .map_err(|error| error.clone_output())?;
+    let mut bytes = Vec::new();
+    loaded.source.copy_all_to(&mut bytes).await?;
+    assert_eq!(bytes, plaintext);
+    assert_eq!(
+        loaded.package.as_archive().commitment().await?,
+        asset.commitment
+    );
+    assert!(swarm.http_hits.load(Ordering::SeqCst) > 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn encrypted_download_to_preserves_the_cli_ciphertext_and_plaintext_views()
+-> Result<(), Error> {
+    let (swarm, asset, plaintext) = encrypted_package().await?;
+    let directory = TmpDir::new().await?;
+    let path = directory.join("private.s9pk");
+    let phase = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
+    let (package, source) = asset
+        .download_to(&path, Client::new(), Some(&cli_client()), phase)
+        .await?;
+    source.wait_for_buffered().await?;
+    assert!(source.is_encrypted());
+    assert_eq!(tokio::fs::read(&path).await?, swarm.content);
+    let mut bytes = Vec::new();
+    source.copy_all_to(&mut bytes).await?;
+    assert_eq!(bytes, plaintext);
+    assert_eq!(package.as_archive().commitment().await?, asset.commitment);
+    assert_eq!(package.readme().await?.as_deref(), Some("Test package"));
+    assert_eq!(swarm.http_hits.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn encrypted_peer_commitment_requires_the_correct_keystream() -> Result<(), Error> {
+    let (swarm, asset, _) = encrypted_package().await?;
+    let path = swarm._tmp.join("payload.bin");
+    TorrentContent::new(asset.commitment.into(), asset.private.clone())
+        .verify(&path)
+        .await?;
+    assert!(
+        TorrentContent::from(asset.commitment)
+            .verify(&path)
+            .await
+            .is_err()
+    );
+    let mut wrong = asset.private.clone().unwrap();
+    wrong.key.0[0] ^= 1;
+    assert!(
+        TorrentContent::new(asset.commitment.into(), Some(wrong))
+            .verify(&path)
+            .await
+            .is_err()
+    );
+    Ok(())
 }
 
 #[tokio::test]
@@ -880,6 +1010,8 @@ async fn package_download_parses_and_verifies_the_committed_torrent_archive() ->
         torrent: Some(swarm.url.join("metadata.torrent")?),
         commitment,
         signatures: SignatureMap::new(),
+        private: None,
+        readers: Default::default(),
     };
     let dest = TmpDir::new().await?;
     let progress = FullProgressTracker::new().add_phase("Downloading".into(), Some(100));
@@ -1074,7 +1206,7 @@ async fn registration_while_disabled_does_not_revive_a_stopped_service() -> Resu
     client.stop_seeding().await;
     let metadata = SharingMetadata {
         torrent: Base64(swarm.torrent.to_vec()),
-        commitment: swarm.asset(swarm.magnet.clone()).commitment.into(),
+        content: swarm.asset(swarm.magnet.clone()).commitment.into(),
     };
     client
         .register_stored(&swarm._tmp.join("payload.bin"), &metadata)

@@ -9,6 +9,7 @@ use librqbit::{ManagedTorrentShared, TorrentMetadata};
 use tokio::io::AsyncRead;
 
 use crate::prelude::t;
+use crate::s9pk::merkle_archive::source::encrypted::KeyStreamInfo;
 use crate::s9pk::merkle_archive::source::{ArchiveSource, checked_end};
 use crate::util::io::maybe_open_file;
 
@@ -37,6 +38,7 @@ impl FileIdentity {
 pub(super) struct StoredFile {
     path: PathBuf,
     identity: FileIdentity,
+    keystream: Option<KeyStreamInfo>,
 }
 
 impl StoredFile {
@@ -48,7 +50,13 @@ impl StoredFile {
         Ok(Self {
             path: path.to_owned(),
             identity: FileIdentity::read(file.metadata().await?)?,
+            keystream: None,
         })
+    }
+
+    pub(super) fn with_keystream(mut self, keystream: Option<KeyStreamInfo>) -> Self {
+        self.keystream = keystream;
+        self
     }
 
     fn reader(&self) -> Result<File> {
@@ -132,6 +140,11 @@ impl TorrentStorage for StoredFile {
 
     fn pread_exact(&self, _: usize, offset: u64, buf: &mut [u8]) -> Result<()> {
         self.reader()?.read_exact_at(buf, offset)?;
+        if let Some(keystream) = &self.keystream {
+            keystream
+                .apply_keystream_at(offset, buf)
+                .map_err(|error| anyhow::anyhow!("{error:#}"))?;
+        }
         Ok(())
     }
 
@@ -208,6 +221,57 @@ mod tests {
             bytes[VERIFY_CHUNK_SIZE as usize - 5..VERIFY_CHUNK_SIZE as usize + 14]
         );
         assert!(source.fetch(bytes.len() as u64, 1).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn encrypted_storage_reads_preserve_offsets_and_the_plaintext_file() {
+        use std::sync::Arc;
+
+        use crate::s9pk::merkle_archive::source::encrypted::KeyStreamSource;
+        use crate::util::serde::Base64;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("installed.s9pk");
+        let plaintext: Vec<u8> = (0..VERIFY_CHUNK_SIZE as usize * 2 + 31)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let key = KeyStreamInfo {
+            key: Base64([11; 32]),
+            iv: Base64([37; 16]),
+        };
+        let mut ciphertext = Vec::new();
+        KeyStreamSource::new(Arc::<[u8]>::from(plaintext.clone()), Some(key.clone()))
+            .copy_all_to(&mut ciphertext)
+            .await
+            .unwrap();
+        std::fs::write(&path, &plaintext).unwrap();
+        let source = StoredFile::open(&path)
+            .await
+            .unwrap()
+            .with_keystream(Some(key));
+        for (offset, length) in [
+            (0, 1),
+            (1, 31),
+            (15, 17),
+            (16, 16),
+            (17, 100),
+            (VERIFY_CHUNK_SIZE - 5, 19),
+            (VERIFY_CHUNK_SIZE + 7, VERIFY_CHUNK_SIZE),
+        ] {
+            let mut bytes = vec![0; length as usize];
+            source.pread_exact(0, offset, &mut bytes).unwrap();
+            assert_eq!(
+                bytes,
+                ciphertext[offset as usize..(offset + length) as usize]
+            );
+        }
+        let mut bytes = Vec::new();
+        source.copy_all_to(&mut bytes).await.unwrap();
+        assert_eq!(bytes, ciphertext);
+        assert!(source.pwrite_all(0, 0, b"repair").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), plaintext);
+        std::fs::remove_file(&path).unwrap();
+        assert!(source.pread_exact(0, 0, &mut [0; 1]).is_err());
     }
 
     #[tokio::test]

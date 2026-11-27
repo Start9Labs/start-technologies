@@ -7,6 +7,7 @@ Agent/dev instructions for `shared-libs/ts-modules` — the directory of shared 
 - **The workspace root is the repo root.** `angular.json`, `package.json`, `tsconfig.json` all live at the repo root. The Angular libs `shared/` and `marketplace/` live here, alongside the non-Angular `start-core/` (`@start9labs/start-core`), which has its own `Makefile`/`package.json` and is built separately (not part of the Angular workspace).
 - **Apps live elsewhere.** `ui` → `../../projects/start-os/web/ui`, `setup-wizard` → `../../projects/start-os/web/setup-wizard`, `start-tunnel` → `../../projects/start-tunnel/web`, `start-wrt` → `../../projects/start-wrt/web`, `brochure-marketplace` → `../../projects/brochure-marketplace`. Editing app code means editing those dirs even though `ng`/`tsc` are run from the repo root.
 - i18n dictionaries: `shared/src/i18n/dictionaries/`.
+- The catalog of what `shared`, `marketplace` and `start-core` offer apps is in the repo-root [`FRONTEND.md`](../../FRONTEND.md); update it when a library's exports change.
 
 ## Build & test (run from the repo root)
 

@@ -1,14 +1,16 @@
 use clap::Parser;
+use clap::builder::TypedValueParser;
 use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::Database;
+use crate::mcp::{EFFECT, Effect};
 use crate::net::host::binding::BindingPreview;
 use crate::net::service_interface::{HostnameInfo, ServiceInterface};
 use crate::prelude::*;
 use crate::registry::bittorrent::{TorrentClient, TorrentPreferences};
-use crate::util::serde::HandlerExtSerde;
+use crate::util::serde::{CliFromJsonString, HandlerExtSerde};
 
 mod incoming;
 pub(crate) use incoming::{configure_incoming, retained_bindings};
@@ -20,6 +22,7 @@ pub(crate) fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "config",
             from_fn_async(config)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.system.bittorrent-config")
                 .with_call_remote::<CliContext>(),
@@ -27,6 +30,7 @@ pub(crate) fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-preferences",
             from_fn_async(set_preferences)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.system.set-bittorrent-preferences")
@@ -35,14 +39,20 @@ pub(crate) fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "set-address-enabled",
             from_fn_async(set_address_enabled)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .with_display_serializable()
+                .with_about("about.set-address-enabled-for-binding")
+                .with_call_remote::<CliContext>(),
         )
         .subcommand(
             "set-gua-wan",
             from_fn_async(set_gua_wan)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
-                .no_cli(),
+                .no_display()
+                .with_about("about.set-gua-wan-for-binding")
+                .with_call_remote::<CliContext>(),
         )
 }
 
@@ -66,10 +76,17 @@ async fn config(ctx: RpcContext) -> Result<BitTorrentConfig, Error> {
     })
 }
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+fn hostname_info_parser() -> impl TypedValueParser<Value = HostnameInfo> {
+    clap::value_parser!(CliFromJsonString<HostnameInfo>).map(|address| address.0)
+}
+
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 struct SelectAddressParams {
+    #[arg(long, value_parser = hostname_info_parser(), help = "help.arg.hostname-info")]
     address: HostnameInfo,
+    #[arg(long, action = clap::ArgAction::Set, required = true, help = "help.arg.binding-enabled")]
     enabled: bool,
 }
 rpc_toolkit::reflect_ts!(SelectAddressParams);
@@ -85,10 +102,13 @@ async fn set_address_enabled(
         .result
 }
 
-#[derive(Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Debug, Deserialize, Serialize, Parser, VisitFields)]
+#[group(skip)]
 #[serde(rename_all = "camelCase")]
 struct SelectGuaParams {
+    #[arg(long, value_parser = hostname_info_parser(), help = "help.arg.hostname-info")]
     address: HostnameInfo,
+    #[arg(long, action = clap::ArgAction::Set, required = true, help = "help.arg.gua-wan")]
     wan: bool,
 }
 rpc_toolkit::reflect_ts!(SelectGuaParams);

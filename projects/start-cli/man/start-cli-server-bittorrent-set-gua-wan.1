@@ -1,0 +1,29 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH start-cli-server-bittorrent-set-gua-wan 1  "set-gua-wan "
+.SH NAME
+start\-cli\-server\-bittorrent\-set\-gua\-wan \- Expose an IPv6 global\-unicast address to the WAN (or revert it to LAN\-only) for a binding
+.SH SYNOPSIS
+\fBstart\-cli server bittorrent set\-gua\-wan\fR <\fB\-\-address\fR> <\fB\-\-wan\fR> [\fB\-h\fR|\fB\-\-help\fR]
+.SH DESCRIPTION
+Expose an IPv6 global\-unicast address to the WAN (or revert it to LAN\-only) for a binding
+.SH OPTIONS
+.TP
+\fB\-\-address\fR \fI<ADDRESS>\fR
+Address details as a JSON HostnameInfo object
+.TP
+\fB\-\-wan\fR \fI<WAN>\fR
+Expose the IPv6 GUA to the WAN (false = LAN\-only)
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+true
+.IP \(bu 2
+false
+.RE
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

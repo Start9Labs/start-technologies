@@ -83,7 +83,7 @@ nothing may import it. When in doubt: the official MCP
   line-shaped placeholders, since on a block it paints the whole box; `tuiFade` /
   `tui-line-clamp` for truncation, and `tuiFade="vertical"` on a scroll container fades the
   edges its content overflows; `<tui-scrollbar>` for themed scrollbars
-  (`provideTaiga({ scrollbars: 'native' })` opts out — the fleet's embedded UIs do).
+  (`provideTaiga({ scrollbars: 'native' })` opts out).
 
 ### Overlay facts
 
@@ -93,7 +93,7 @@ nothing may import it. When in doubt: the official MCP
 - Declarative twins exist for all three: `[(tuiDialog)]`, `[(tuiNotification)]`, `[(tuiToast)]`
   on `ng-template`, each with an `[…Options]` input — pair with a `signal(false)`.
 - `TuiConfirmService.withConfirm(options)` + `markAsDirty()/markAsPristine()` is the
-  unsaved-changes guard behind `FormDialogService`.
+  unsaved-changes guard for a form dialog.
 - Dropdown flavors: `tuiDropdownHover`, `tuiDropdownContext` (right-click), `tuiDropdownManual`,
   `[(tuiDropdownOpen)]`, `tuiDropdownAuto`; nested menus via kit's `TuiDataListDropdownManager`.
 - Hints: `tuiHintDescribe` (a11y, keyboard-triggered), `tuiHintManual`, `tuiHintPointer`,
@@ -149,10 +149,9 @@ Handles paste/drop/autofill/predictive keyboards; SSR-safe. Never keydown-regex 
 `WA_SESSION_STORAGE`, `WA_USER_AGENT`, `WA_ANIMATION_FRAME`, `WA_PAGE_VISIBILITY`,
 `WA_PERFORMANCE`, `WA_CRYPTO`, `WA_MEDIA_DEVICES`, `WA_SCREEN`. `platform`: `WA_IS_MOBILE`,
 `WA_IS_IOS`, `WA_IS_ANDROID`, `WA_IS_WEBKIT`, `WA_REDUCED_MOTION`. `universal`:
-`provideUniversal()` — server-safe mocks for SSR (what start9-store uses; never hand-roll
-`matchMedia` stubs). Plus observer packages (`intersection-observer`, `resize-observer`,
-`mutation-observer` — `WaIntersectionObserver`, `WaMutationObserver` directives as used in
-`LogsWindowComponent`), `storage`, `geolocation`, `speech`, `view-transition`, `workers`.
+`provideUniversal()` — server-safe mocks for SSR (never hand-roll `matchMedia` stubs). Plus
+observer packages (`intersection-observer`, `resize-observer`, `mutation-observer` —
+`WaIntersectionObserver`, `WaMutationObserver` directives), `storage`, `geolocation`, `speech`, `view-transition`, `workers`.
 
 ### Need → wrong instinct → right primitive
 

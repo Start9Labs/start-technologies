@@ -129,6 +129,11 @@ impl Current {
     }
 }
 
+/// Whether this build can migrate a database last written by StartOS `version`.
+pub fn can_migrate_from(version: exver::Version) -> bool {
+    Version::from_exver_version(version).as_version_t().is_ok()
+}
+
 pub async fn post_init(
     ctx: &RpcContext,
     mut progress: PhaseProgressTrackerHandle,
@@ -166,6 +171,7 @@ pub async fn post_init(
         }
         release_notes::welcome(ctx).await?;
     }
+    crate::firmware::report_flash(ctx).await.log_err();
     progress.complete();
     Ok(())
 }
@@ -860,6 +866,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn migrates_only_from_versions_this_build_knows() {
+        assert!(can_migrate_from(Current::default().semver()));
+        assert!(can_migrate_from(v0_4_1_2::Version.semver()));
+        assert!(can_migrate_from(v0_3_5_1::Version.semver()));
+        assert!(!can_migrate_from("99.0.0".parse().unwrap()));
+        assert!(!can_migrate_from("0.3.4".parse().unwrap()));
+    }
+
+    #[test]
     fn current_matches_manifest() {
         assert_eq!(
             Current::default().semver().to_string(),
@@ -907,7 +922,7 @@ mod tests {
             ("0.4.1.3", "0.4.2", 0),
             ("0.4.2", "0.4.2.1", 2),
             ("0.4.2.1", "0.4.2.2", 0),
-            ("0.4.2.2", "0.4.3", 3),
+            ("0.4.2.2", "0.4.3", 4),
         ] {
             let previous = from_value::<Version>(json!(from))
                 .unwrap()

@@ -63,11 +63,16 @@ impl HostnameInfo {
         self.hostname.clone()
     }
 
-    /// True for loopback and the bridge's own addresses.
+    /// True for loopback, the bridge's own addresses, and a name served only on the bridge.
     pub fn is_internal(&self) -> bool {
-        self.hostname
-            .parse::<IpAddr>()
-            .is_ok_and(crate::net::utils::is_internal_ip)
+        match self.hostname.parse::<IpAddr>() {
+            Ok(ip) => crate::net::utils::is_internal_ip(ip),
+            Err(_) => {
+                let mut gateways = self.metadata.gateways().peekable();
+                gateways.peek().is_some()
+                    && gateways.all(|g| g.as_str() == crate::net::forward::START9_BRIDGE_IFACE)
+            }
+        }
     }
 
     /// Global-unicast IPv6 address, independent of port assignment.

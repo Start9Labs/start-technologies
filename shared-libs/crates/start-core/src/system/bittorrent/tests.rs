@@ -86,6 +86,53 @@ fn assert_unallocated(db: &DatabaseModel) {
 }
 
 #[test]
+fn sharing_cli_preserves_native_address_json_and_explicit_boolean_values() {
+    let db = database(enabled());
+    for value in [false, true] {
+        let address = candidate(&db, "192.168.1.2");
+        let json = serde_json::to_string(&address).unwrap();
+        let selected = SelectAddressParams::try_parse_from([
+            "set-address-enabled",
+            "--address",
+            &json,
+            "--enabled",
+            &value.to_string(),
+        ])
+        .unwrap();
+        assert_eq!(selected.address, address);
+        assert_eq!(selected.enabled, value);
+
+        let address = candidate(&db, "2001:db8::1234");
+        let json = serde_json::to_string(&address).unwrap();
+        let selected = SelectGuaParams::try_parse_from([
+            "set-gua-wan",
+            "--address",
+            &json,
+            "--wan",
+            &value.to_string(),
+        ])
+        .unwrap();
+        assert_eq!(selected.address, address);
+        assert_eq!(selected.wan, value);
+    }
+    assert!(
+        SelectAddressParams::try_parse_from([
+            "set-address-enabled",
+            "--address",
+            "not json",
+            "--enabled",
+            "true",
+        ])
+        .is_err()
+    );
+    let json = serde_json::to_string(&candidate(&db, "192.168.1.2")).unwrap();
+    assert!(
+        SelectAddressParams::try_parse_from(["set-address-enabled", "--address", &json,]).is_err()
+    );
+    assert!(SelectGuaParams::try_parse_from(["set-gua-wan", "--address", &json,]).is_err());
+}
+
+#[test]
 fn disabled_and_outgoing_only_have_no_resources_or_reconciliation_writes() {
     for preferences in [
         TorrentPreferences::default(),

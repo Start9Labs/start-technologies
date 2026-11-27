@@ -640,6 +640,8 @@ mod tests {
                         size: 1,
                     },
                     signatures: Default::default(),
+                    private: None,
+                    readers: Default::default(),
                 },
             )]
             .into(),

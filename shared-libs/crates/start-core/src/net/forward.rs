@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 use crate::GatewayId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::public::NetworkInterfaceInfo;
+use crate::mcp::{EFFECT, Effect};
 pub use crate::net::bridge::START9_BRIDGE_IFACE;
 pub(crate) use crate::net::bridge::START9_BRIDGE_V6_ADDR;
 use crate::net::port_map::{PortMapController, candidate_gateways};
@@ -26,6 +27,9 @@ use crate::util::Invoke;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::serde::{HandlerExtSerde, display_serializable};
 use crate::util::sync::Watch;
+
+/// The name containers reach the server by on the bridge.
+pub const START9_BRIDGE_HOSTNAME: &str = "startos.internal";
 /// The host's `ip_local_port_range` ends below this; see `projects/start-os/debian/postinst`.
 const DYNAMIC_PORT_START: u16 = 49152;
 // Reserved by/for host daemons (mDNS 5353, LLMNR 5355, postgres 5432, X11
@@ -185,6 +189,7 @@ pub fn forward_api<C: Context>() -> ParentHandler<C> {
         from_fn_async(
             |ctx: RpcContext| async move { ctx.net_controller.forward.dump_table().await },
         )
+        .with_metadata(EFFECT, Effect::Read.into())
         .with_display_serializable()
         .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
             use prettytable::*;
@@ -681,6 +686,15 @@ impl PortForwardController {
         Self {
             req: req_send,
             _thread: thread,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn failing_for_test() -> Self {
+        let (req, _) = mpsc::unbounded_channel();
+        Self {
+            req,
+            _thread: NonDetachingJoinHandle::from(tokio::spawn(async {})),
         }
     }
 

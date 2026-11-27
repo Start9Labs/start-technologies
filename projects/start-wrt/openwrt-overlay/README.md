@@ -20,11 +20,13 @@ Most of it comes from SpaceMiT's OpenWrt BSP and from OpenWrt itself:
 | `target/linux/spacemit/patches-6.18/*`                                                                                | SpaceMiT Ltd. and the respective Linux kernel contributors |
 | `package/kernel/mac80211/patches/`, `package/boot/uboot-spacemit/patches/`                                            | The respective OpenWrt and U-Boot contributors             |
 | `package/firmware/wireless-regdb/patches/`                                                                            | The wireless-regdb contributors (ISC)                      |
+| `package/kernel/mt76/patches/`                                                                                        | The mt76 contributors (ISC)                                |
 | `package/system/ca-certificates/patches/`                                                                             | The Debian ca-certificates contributors                    |
+| `package/network/services/hostapd/patches/`                                                                           | The hostapd contributors (BSD-3-Clause)                    |
 
 Sixteen files carry an explicit `SPDX-License-Identifier: GPL-2.0-only` header,
 most of them naming a copyright holder. The `.patch` files are diffs against
-GPL- or ISC-licensed sources, so each patched result carries its own source's
+GPL-, ISC- or BSD-licensed sources, so each patched result carries its own source's
 terms. The remaining unheadered files are vendor BSP and OpenWrt copies, plus a few
 Start9-authored additions and the SpaceMiT opkg signing keys under
 `base-files/etc/opkg/keys/` (key material, not licensed works — see the root NOTICE.md).

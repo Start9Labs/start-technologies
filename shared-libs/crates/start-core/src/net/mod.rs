@@ -256,6 +256,7 @@ mod tests {
             )
             .env("AUTO_MAIN", AUTO_MAIN_RULE_PRIORITY.to_string())
             .env("AUTO_DEFAULT", AUTO_DEFAULT_RULE_PRIORITY.to_string())
+            .env("NON_PUBLIC_V4", gateway::NON_PUBLIC_V4.join(" "))
             .output()
             .unwrap();
         assert!(
