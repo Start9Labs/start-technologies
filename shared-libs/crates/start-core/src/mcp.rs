@@ -242,6 +242,7 @@ mod test {
             ("package.list", Some(true), None),
             ("volumes.inspect", Some(false), Some(false)),
             ("package.stop", Some(false), Some(false)),
+            ("package.force-stop", Some(false), Some(true)),
             ("server.restart", Some(false), Some(false)),
             ("backup.target.info", Some(false), Some(true)),
             ("notification.remove", Some(false), Some(true)),
@@ -254,7 +255,12 @@ mod test {
             assert_eq!(annotations.read_only_hint, read_only, "{name}");
             assert_eq!(annotations.destructive_hint, destructive, "{name}");
         }
-        for name in ["package.list", "package.start", "server.shutdown"] {
+        for name in [
+            "package.list",
+            "package.start",
+            "package.force-stop",
+            "server.shutdown",
+        ] {
             assert!(
                 server.get_tool(name).unwrap().description.is_some(),
                 "{name}"

@@ -1558,6 +1558,31 @@ test('StartOS force-stop mock checks its live episode independently of seed and 
   subscription.unsubscribe()
 })
 
+test('Force stop decoders default legacy deadlines and preserve the issued episode', () => {
+  const { load } = harness()
+  const status = {
+    desired: { main: 'stopped' },
+    started: null,
+    error: null,
+    health: {},
+  }
+  const deadline = '2026-10-10T12:00:30.123456Z'
+  for (const file of ['types.schemas.ts', 'rpc/effects.schemas.ts']) {
+    const { StatusInfo } = load(
+      `shared-libs/ts-modules/start-core/lib/osBindings/${file}`,
+    )
+    assert.equal(StatusInfo.parse(status).forceStopAt, null)
+    assert.equal(
+      StatusInfo.parse({ ...status, forceStopAt: null }).forceStopAt,
+      null,
+    )
+    assert.equal(
+      StatusInfo.parse({ ...status, forceStopAt: deadline }).forceStopAt,
+      deadline,
+    )
+  }
+})
+
 test('StartOS generated UPS contracts preserve the selected USB location', () => {
   const { load } = harness()
   const device = {
