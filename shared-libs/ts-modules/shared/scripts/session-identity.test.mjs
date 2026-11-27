@@ -6,7 +6,8 @@ import { x25519 } from '@noble/curves/ed25519'
 import { decodeFirst, encode } from '@start9labs/start-core/auth/cbor'
 import './typescript-loader.mjs'
 
-const { prepareSession } = await import('../src/services/session-identity.ts')
+const { prepareSession, retryTime } =
+  await import('../src/services/session-identity.ts')
 const fixture = JSON.parse(
   readFileSync(
     new URL(
@@ -109,6 +110,33 @@ test('a hello proof carries the requested signing time', async () => {
       prepared.message.subarray(0, body.length),
     ),
     auth.normalizeDer64(key.pubkeyPem),
+  )
+})
+
+test('a native retry answer yields the server clock and nothing else does', async () => {
+  const retry = Uint8Array.from(
+    Buffer.from(
+      'a36870726f746f636f6c7153746172742d5250432d53657373696f6e' +
+        '6776657273696f6e016568656c6c6fa264726f6c6565726574727969' +
+        '74696d657374616d701a713fb300',
+      'hex',
+    ),
+  )
+  assert.equal(await retryTime(retry), 1_900_000_000_000)
+  assert.equal(
+    await retryTime(concatenate(retry, new Uint8Array([0]))),
+    undefined,
+  )
+  assert.equal(await retryTime(server), undefined)
+  assert.equal(await retryTime(client), undefined)
+  const body = { ...(await decodeFirst(retry)).value }
+  assert.equal(
+    await retryTime(encode({ ...body, hello: { ...body.hello, extra: 1 } })),
+    undefined,
+  )
+  assert.equal(
+    await retryTime(encode({ ...body, protocol: 'Other' })),
+    undefined,
   )
 })
 

@@ -84,6 +84,27 @@ export interface SessionCipher {
   read(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>>
 }
 
+/** The server's clock in epoch milliseconds from an unsigned retry answer, else undefined. */
+export async function retryTime(
+  response: Uint8Array,
+): Promise<number | undefined> {
+  if (response.length > maximum) return undefined
+  try {
+    const captured = await decodeFirst(response)
+    if (captured.length !== response.length) return undefined
+    const message = parseHandshake(MessageSchema, captured.value)
+    if (
+      message.protocol !== profile.protocol ||
+      message.version !== profile.version ||
+      message.hello.role !== 'retry'
+    )
+      return undefined
+    return Number(message.hello.timestamp) * 1000
+  } catch {
+    return undefined
+  }
+}
+
 /** Single-use initiation supports LAN HTTP without crypto.subtle; signing precedes network deadlines. */
 export async function prepareSession(
   signer: auth.RequestSigner,

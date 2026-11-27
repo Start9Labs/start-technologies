@@ -3,12 +3,7 @@ import test from 'node:test'
 import { registerHooks } from 'node:module'
 import { auth } from '@start9labs/start-core'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
-import { SIGNATURE_PROFILE } from '@start9labs/start-core/osBindings/signature-profile'
 import './typescript-loader.mjs'
-
-globalThis.fetch = async () => {
-  throw new TypeError('Transport tests have no network')
-}
 
 // Framing/lifecycle tests replace crypto; real signed-DH interoperability has separate coverage.
 registerHooks({
@@ -18,6 +13,9 @@ registerHooks({
       format: 'module',
       shortCircuit: true,
       source: `
+      export async function retryTime(response) {
+        return response[0] === 3 ? globalThis.serverTime : undefined
+      }
       export async function prepareSession(...args) {
         globalThis.preparedSessions?.push(args)
         return { message: new Uint8Array([1]), async finish(response) {
@@ -32,7 +30,7 @@ registerHooks({
 })
 const { SessionWebSocketStream } =
   await import('../src/services/session-stream.ts')
-const { sessionWebSocketConstructor } =
+const { DeviceClockError, sessionWebSocketConstructor } =
   await import('../src/services/session-websocket.ts')
 const profile = SESSION_PROFILE.transport
 for (const name of ['CloseEvent', 'ErrorEvent'])
@@ -181,400 +179,6 @@ test('plaintext downgrade never opens admission or exposes RPC data', async () =
   assert.equal(url.searchParams.has('secure'), false)
   assert.equal(url.searchParams.has('context'), false)
   assert.equal(url.searchParams.get('existing'), 'kept')
-})
-
-function admissionServer(answers) {
-  return class extends Socket {
-    constructor(url) {
-      super(url)
-      queueMicrotask(() => this.dispatchEvent(new Event('open')))
-    }
-    send(data) {
-      super.send(data)
-      if (this.writes.length !== 1) return
-      const answer = answers.shift()
-      queueMicrotask(() =>
-        answer === undefined ? this.close() : this.receive(record(answer)),
-      )
-    }
-  }
-}
-function singleUseServer(serverSkewMs = 0) {
-  let available = true
-  return class extends Socket {
-    constructor(url) {
-      super(url)
-      const found = available
-      available = false
-      queueMicrotask(() =>
-        found ? this.dispatchEvent(new Event('open')) : this.close(),
-      )
-    }
-    send(data) {
-      super.send(data)
-      if (this.writes.length !== 1) return
-      const timely =
-        Math.abs(
-          globalThis.preparedSessions.at(-1)[3] - Date.now() - serverSkewMs,
-        ) <=
-        SIGNATURE_PROFILE.timestampToleranceSecs * 1000
-      queueMicrotask(() => (timely ? this.receive(record([1])) : this.close()))
-    }
-  }
-}
-/** A null skew makes the server's clock unreadable. */
-async function withServerClock(skewMs, run) {
-  const fetch = globalThis.fetch
-  const requests = []
-  globalThis.preparedSessions = []
-  globalThis.fetch = async (url, init) => {
-    requests.push({ url: String(url), method: init.method })
-    if (skewMs === null) throw new TypeError('Failed to fetch')
-    return new Response(null, {
-      headers: { date: new Date(Date.now() + skewMs).toUTCString() },
-    })
-  }
-  try {
-    await run(requests, globalThis.preparedSessions)
-  } finally {
-    globalThis.fetch = fetch
-    delete globalThis.preparedSessions
-  }
-}
-async function withDeviceClock(skewMs, run) {
-  const now = Date.now
-  let skew = skewMs
-  Date.now = () => now() + skew
-  try {
-    await run(value => (skew = value))
-  } finally {
-    Date.now = now
-  }
-}
-async function rememberOffset(host, serverSkewMs) {
-  await withServerClock(serverSkewMs, async () => {
-    const result = await connect(host, admissionServer([undefined, [1]]))
-    assert.equal(result.opened, true)
-    result.socket.close()
-  })
-}
-function connect(host, Server) {
-  const Constructor = sessionWebSocketConstructor(
-    async () => identity(),
-    'server.test',
-    'rpc',
-    Server,
-  )
-  return connectionResult(new Constructor(`wss://${host}/rpc/v2`))
-}
-function redeem(host, Server, guid = 'A'.repeat(32)) {
-  const Constructor = sessionWebSocketConstructor(
-    async () => identity(),
-    'server.test',
-    { continuation: guid },
-    Server,
-  )
-  return connectionResult(new Constructor(`wss://${host}/rpc/v2/${guid}`))
-}
-function connectionResult(socket) {
-  return new Promise(resolve => {
-    socket.addEventListener('open', () => resolve({ socket, opened: true }), {
-      once: true,
-    })
-    socket.addEventListener(
-      'close',
-      event => resolve({ socket, opened: false, event }),
-      { once: true },
-    )
-  })
-}
-
-test('an unanswered admission is re-signed once with the server clock and remembered', async () => {
-  await withServerClock(120_000, async (requests, prepared) => {
-    Socket.instances = []
-    const first = await connect(
-      'skewed.test',
-      admissionServer([undefined, [1]]),
-    )
-    assert.equal(first.opened, true)
-    assert.equal(Socket.instances.length, 2)
-    assert.deepEqual(requests, [
-      { url: 'https://skewed.test/', method: 'HEAD' },
-    ])
-    const [initial, retried] = prepared.map(args => args[3] - Date.now())
-    assert.ok(Math.abs(initial) < 1_000)
-    assert.ok(Math.abs(retried - 120_000) < 2_000)
-    first.socket.close()
-
-    const second = await connect('skewed.test', admissionServer([[1]]))
-    assert.equal(second.opened, true)
-    assert.equal(requests.length, 1)
-    assert.ok(Math.abs(prepared.at(-1)[3] - Date.now() - 120_000) < 2_000)
-    second.socket.close()
-  })
-})
-
-test('an unanswered admission within the signing tolerance is not retried', async () => {
-  await withServerClock(5_000, async (requests, prepared) => {
-    Socket.instances = []
-    const result = await connect(
-      'synced.test',
-      admissionServer([undefined, [1]]),
-    )
-    assert.equal(result.opened, false)
-    assert.equal(result.event.code, profile.abnormalCloseCode)
-    assert.equal(Socket.instances.length, 1)
-    assert.equal(requests.length, 1)
-    assert.equal(prepared.length, 1)
-  })
-})
-
-test('a socket that never opens never consults the server clock', async () => {
-  class Unreachable extends Socket {
-    constructor(url) {
-      super(url)
-      queueMicrotask(() => this.close())
-    }
-  }
-  await withServerClock(120_000, async (requests, prepared) => {
-    Socket.instances = []
-    const result = await connect('unreachable.test', Unreachable)
-    assert.equal(result.opened, false)
-    assert.equal(Socket.instances.length, 1)
-    assert.equal(requests.length, 0)
-    assert.equal(prepared.length, 1)
-  })
-})
-
-test('an answered admission failure never consults the server clock', async () => {
-  await withServerClock(120_000, async (requests, prepared) => {
-    Socket.instances = []
-    const result = await connect('answered.test', admissionServer([[2], [1]]))
-    assert.equal(result.opened, false)
-    assert.equal(Socket.instances.length, 1)
-    assert.equal(requests.length, 0)
-    assert.equal(prepared.length, 1)
-  })
-})
-
-test('a re-signed admission the server still drops is not remembered', async () => {
-  await withServerClock(120_000, async (requests, prepared) => {
-    Socket.instances = []
-    const first = await connect(
-      'disputed.test',
-      admissionServer([undefined, undefined]),
-    )
-    assert.equal(first.opened, false)
-    assert.equal(Socket.instances.length, 2)
-    assert.equal(requests.length, 1)
-
-    const second = await connect('disputed.test', admissionServer([[1]]))
-    assert.equal(second.opened, true)
-    assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
-    second.socket.close()
-  })
-})
-
-test('a remembered offset follows a corrected server clock', async () => {
-  await rememberOffset('corrected.test', 120_000)
-  await withServerClock(0, async (requests, prepared) => {
-    Socket.instances = []
-    const corrected = await connect(
-      'corrected.test',
-      admissionServer([undefined, [1]]),
-    )
-    assert.equal(corrected.opened, true)
-    assert.equal(Socket.instances.length, 2)
-    assert.equal(requests.length, 1)
-    const [stale, fresh] = prepared.map(args => args[3] - Date.now())
-    assert.ok(Math.abs(stale - 120_000) < 2_000)
-    assert.ok(Math.abs(fresh) < 1_000)
-    corrected.socket.close()
-
-    const next = await connect('corrected.test', admissionServer([[1]]))
-    assert.equal(next.opened, true)
-    assert.equal(requests.length, 1)
-    assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
-    next.socket.close()
-  })
-})
-
-for (const skew of [-120_000, 120_000])
-  test(`correcting a ${skew} ms device clock refreshes before single-use admission`, async () => {
-    const host = `corrected-device-${skew}.test`
-    await withDeviceClock(skew, async setDeviceSkew => {
-      await rememberOffset(host, -skew)
-      setDeviceSkew(0)
-      await withServerClock(0, async (requests, prepared) => {
-        Socket.instances = []
-        const result = await redeem(host, singleUseServer())
-        assert.equal(result.opened, true)
-        assert.equal(Socket.instances.length, 1)
-        assert.equal(prepared.length, 1)
-        assert.deepEqual(requests, [
-          { url: `https://${host}/`, method: 'HEAD' },
-        ])
-        result.socket.close()
-
-        const next = await connect(host, admissionServer([[1]]))
-        assert.equal(next.opened, true)
-        assert.equal(requests.length, 1)
-        assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
-        next.socket.close()
-      })
-    })
-  })
-
-test('an unreadable server clock leaves a continuation with a remembered offset unspent', async () => {
-  const host = 'unreadable.test'
-  const Server = singleUseServer(120_000)
-  await rememberOffset(host, 120_000)
-  await withServerClock(null, async (requests, prepared) => {
-    Socket.instances = []
-    const refused = await redeem(host, Server)
-    assert.equal(refused.opened, false)
-    assert.equal(Socket.instances.length, 0)
-    assert.equal(prepared.length, 0)
-    assert.equal(requests.length, 1)
-  })
-  await withServerClock(120_000, async () => {
-    const redeemed = await redeem(host, Server)
-    assert.equal(redeemed.opened, true)
-    redeemed.socket.close()
-  })
-})
-
-test('a continuation measures the server clock before signing with a remembered offset', async () => {
-  const host = 'server-corrected.test'
-  await rememberOffset(host, 120_000)
-  await withServerClock(0, async (requests, prepared) => {
-    Socket.instances = []
-    const result = await redeem(host, singleUseServer())
-    assert.equal(result.opened, true)
-    assert.equal(Socket.instances.length, 1)
-    assert.equal(prepared.length, 1)
-    assert.equal(requests.length, 1)
-    assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
-    result.socket.close()
-  })
-})
-
-test('a slewed device-clock correction does not spend a continuation', async () => {
-  const host = 'slewed-device.test'
-  const monotonic = performance.now
-  let slew = 0
-  performance.now = () => monotonic.call(performance) + slew
-  try {
-    await withDeviceClock(120_000, async setDeviceSkew => {
-      await rememberOffset(host, -120_000)
-      setDeviceSkew(0)
-      slew = -120_000
-      await withServerClock(0, async (requests, prepared) => {
-        Socket.instances = []
-        const result = await redeem(host, singleUseServer())
-        assert.equal(result.opened, true)
-        assert.equal(Socket.instances.length, 1)
-        assert.equal(requests.length, 1)
-        assert.ok(Math.abs(prepared.at(-1)[3] - Date.now()) < 1_000)
-        result.socket.close()
-      })
-    })
-  } finally {
-    performance.now = monotonic
-  }
-})
-
-test('an unanswered continuation is never re-signed on a second connection', async () => {
-  await withServerClock(120_000, async (requests, prepared) => {
-    Socket.instances = []
-    const result = await redeem('unanswered.test', singleUseServer(120_000))
-    assert.equal(result.opened, false)
-    assert.equal(Socket.instances.length, 1)
-    assert.equal(prepared.length, 1)
-    assert.equal(requests.length, 1)
-  })
-})
-
-test('a failed connection keeps the offset another connection just remembered', async () => {
-  const host = 'concurrent.test'
-  const settled = async (count, pending) => {
-    while (pending.length < count) await new Promise(r => setTimeout(r, 1))
-  }
-  await withDeviceClock(-120_000, async () => {
-    await rememberOffset(host, 180_000)
-    const fetch = globalThis.fetch
-    const pending = []
-    globalThis.preparedSessions = []
-    globalThis.fetch = () =>
-      new Promise(resolve =>
-        pending.push(() =>
-          resolve(
-            new Response(null, {
-              headers: { date: new Date(Date.now() + 120_000).toUTCString() },
-            }),
-          ),
-        ),
-      )
-    try {
-      const first = connect(host, admissionServer([undefined, [1]]))
-      await settled(1, pending)
-      const second = connect(host, admissionServer([undefined, undefined]))
-      await settled(2, pending)
-      pending[0]()
-      const remembered = await first
-      assert.equal(remembered.opened, true)
-      pending[1]()
-      assert.equal((await second).opened, false)
-
-      const next = await connect(host, admissionServer([[1]]))
-      assert.equal(next.opened, true)
-      assert.equal(pending.length, 2)
-      const signed = globalThis.preparedSessions.at(-1)[3] - Date.now()
-      assert.ok(Math.abs(signed - 120_000) < 2_000)
-      remembered.socket.close()
-      next.socket.close()
-    } finally {
-      globalThis.fetch = fetch
-      delete globalThis.preparedSessions
-    }
-  })
-})
-
-test('closing while the server clock is read opens no second connection', async () => {
-  const fetch = globalThis.fetch
-  globalThis.preparedSessions = []
-  let reading
-  const started = new Promise(resolve => (reading = resolve))
-  globalThis.fetch = (_url, init) =>
-    new Promise((_, reject) => {
-      reading()
-      init.signal.addEventListener('abort', () => reject(init.signal.reason), {
-        once: true,
-      })
-    })
-  try {
-    Socket.instances = []
-    const Constructor = sessionWebSocketConstructor(
-      async () => identity(),
-      'server.test',
-      'rpc',
-      admissionServer([undefined, [1]]),
-    )
-    const socket = new Constructor('wss://closing.test/rpc/v2')
-    const events = []
-    for (const type of ['open', 'error', 'close'])
-      socket.addEventListener(type, () => events.push(type))
-    await started
-    socket.close()
-    await new Promise(resolve => setTimeout(resolve, 10))
-    assert.deepEqual(events, ['close'])
-    assert.equal(socket.readyState, socket.CLOSED)
-    assert.equal(Socket.instances.length, 1)
-    assert.equal(globalThis.preparedSessions.length, 1)
-  } finally {
-    globalThis.fetch = fetch
-    delete globalThis.preparedSessions
-  }
 })
 
 for (const [name, bytes] of [
@@ -753,4 +357,91 @@ test('raw writes wait for bufferedAmount and abort without a retained drain task
   abort.abort()
   await assert.rejects(write)
   raw.abort(Error('test complete'))
+})
+
+function retryingServer(answers) {
+  return class extends Socket {
+    constructor(url) {
+      super(url)
+      queueMicrotask(() => this.dispatchEvent(new Event('open')))
+    }
+    send(data) {
+      super.send(data)
+      const answer = answers[this.writes.length - 1]
+      if (this.writes.length > answers.length) return
+      queueMicrotask(() =>
+        answer === undefined ? this.close() : this.receive(record(answer)),
+      )
+    }
+  }
+}
+async function admitted(target, url, Server) {
+  globalThis.preparedSessions = []
+  globalThis.serverTime = Date.UTC(2031, 0, 1)
+  Socket.instances = []
+  try {
+    const Constructor = sessionWebSocketConstructor(
+      async () => identity(),
+      'server.test',
+      target,
+      Server,
+    )
+    const socket = new Constructor(url)
+    let error
+    socket.addEventListener('error', event => (error = event.error))
+    const opened = await new Promise(resolve => {
+      socket.addEventListener('open', () => resolve(true), { once: true })
+      socket.addEventListener('close', () => resolve(false), { once: true })
+    })
+    socket.close()
+    return {
+      opened,
+      error,
+      signedAt: globalThis.preparedSessions.map(args => args[3]),
+      sockets: Socket.instances.length,
+      writes: Socket.instances[0]?.writes.length,
+    }
+  } finally {
+    delete globalThis.preparedSessions
+    delete globalThis.serverTime
+  }
+}
+
+for (const [name, target, url] of [
+  ['RPC', 'rpc', 'wss://server.test/rpc/v2'],
+  [
+    'a GUID continuation',
+    { continuation: 'A'.repeat(32) },
+    `wss://server.test/rpc/v2/${'A'.repeat(32)}`,
+  ],
+])
+  test(`a retry answer re-signs ${name} once at the server clock on the same socket`, async () => {
+    const result = await admitted(target, url, retryingServer([[3], [1]]))
+    assert.equal(result.opened, true)
+    assert.deepEqual(result.signedAt, [undefined, Date.UTC(2031, 0, 1)])
+    assert.equal(result.sockets, 1)
+    assert.equal(result.writes, 2)
+  })
+
+test('a rejected retried hello reports the device clock without a third hello', async () => {
+  const result = await admitted(
+    'rpc',
+    'wss://server.test/rpc/v2',
+    retryingServer([[3], undefined]),
+  )
+  assert.equal(result.opened, false)
+  assert.ok(result.error instanceof DeviceClockError)
+  assert.equal(result.signedAt.length, 2)
+  assert.equal(result.writes, 2)
+})
+
+test('a dropped first hello is not re-signed', async () => {
+  const result = await admitted(
+    'rpc',
+    'wss://server.test/rpc/v2',
+    retryingServer([undefined]),
+  )
+  assert.equal(result.opened, false)
+  assert.ok(!(result.error instanceof DeviceClockError))
+  assert.equal(result.signedAt.length, 1)
 })

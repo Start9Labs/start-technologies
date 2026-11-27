@@ -1,7 +1,6 @@
 import { auth } from '@start9labs/start-core'
 import type { Target } from '@start9labs/start-core/osBindings/session'
 import { SESSION_PROFILE } from '@start9labs/start-core/osBindings/session-profile'
-import { SIGNATURE_PROFILE } from '@start9labs/start-core/osBindings/signature-profile'
 import { pEvent } from 'p-event'
 
 import type { SessionCipher } from './session-identity'
@@ -10,40 +9,14 @@ import { SessionWebSocketStream } from './session-stream'
 const profile = SESSION_PROFILE.transport
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
-const RETRYABLE_SKEW_MS = (SIGNATURE_PROFILE.timestampToleranceSecs * 1000) / 2
 
-interface ServerClockOffset {
-  offset: number
-  localTime: number
-  monotonicTime: number
-}
-
-const serverClockOffsets = new Map<string, ServerClockOffset>()
-
-async function measureServerClockOffset(
-  url: string,
-  signal: AbortSignal,
-): Promise<ServerClockOffset | undefined> {
-  const origin = new URL('/', url)
-  origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:'
-  const sent = performance.now()
-  const response = await fetch(origin, {
-    method: 'HEAD',
-    cache: 'no-store',
-    signal: AbortSignal.any([
-      signal,
-      AbortSignal.timeout(profile.handshakeTimeoutMs),
-    ]),
-  }).catch(() => undefined)
-  const date = Date.parse(response?.headers.get('date') ?? '')
-  if (Number.isNaN(date)) return undefined
-  const monotonicTime = performance.now()
-  const localTime = Date.now()
-  // Date truncates to the second.
-  return {
-    offset: date + 500 + (monotonicTime - sent) / 2 - localTime,
-    localTime,
-    monotonicTime,
+/** A server rejected a hello signed at its own clock. */
+export class DeviceClockError extends Error {
+  constructor(options?: ErrorOptions) {
+    super(
+      "The server rejected this device's clock; check this device's date, time and time zone",
+      options,
+    )
   }
 }
 
@@ -137,7 +110,6 @@ export function sessionWebSocketConstructor(
     private offset = 0
     private writer = Promise.resolve()
     private queuedBytes = 0
-    private handshake: 'connecting' | 'open' | 'answered' = 'connecting'
 
     constructor(url: string | URL, protocols?: string | string[]) {
       super()
@@ -172,46 +144,55 @@ export function sessionWebSocketConstructor(
         () => this.fail(identity.signal.reason),
         { once: true, signal: this.lifetime.signal },
       )
-      // The server spends a continuation GUID on its first upgrade.
-      const reusable = target === SESSION_PROFILE.identity.rpcTarget
-      const host = new URL(this.url).host
-      const cached = serverClockOffsets.get(host)
-      const signal = AbortSignal.any([identity.signal, this.lifetime.signal])
-      let measured: ServerClockOffset | undefined
-      if (
-        cached &&
-        (!reusable ||
-          Math.abs(
-            Date.now() -
-              cached.localTime -
-              (performance.now() - cached.monotonicTime),
-          ) > RETRYABLE_SKEW_MS)
-      ) {
-        measured = await measureServerClockOffset(this.url, signal)
-        if (measured === undefined)
-          throw new Error('Server clock is unavailable')
-      }
-      const offset = measured?.offset ?? cached?.offset ?? 0
-      const admitted = await this.admit(identity, protocols, offset).catch(
-        async (error: unknown) => {
-          if (this.handshake !== 'open' || this.readyState !== this.CONNECTING)
-            throw error
-          measured = await measureServerClockOffset(this.url, signal)
-          if (
-            measured === undefined ||
-            Math.abs(measured.offset - offset) <= RETRYABLE_SKEW_MS
-          )
-            throw error
-          if (serverClockOffsets.get(host) === cached)
-            serverClockOffsets.delete(host)
-          if (!reusable) throw error
-          return this.admit(identity, protocols, measured.offset)
-        },
-      )
-      if (!admitted) return
-      if (measured) serverClockOffsets.set(host, measured)
-      const { opened, raw } = admitted
+      const { prepareSession, retryTime } = await import('./session-identity')
+      let prepared = await prepareSession(identity.signer, context, target)
+      if (this.readyState !== this.CONNECTING) return
+      identity.signal.throwIfAborted()
+      const signal = AbortSignal.any([
+        identity.signal,
+        this.lifetime.signal,
+        AbortSignal.timeout(profile.handshakeTimeoutMs),
+      ])
+      const socket = (this.socket = new Socket(this.url, protocols))
+      const raw = (this.raw = new SessionWebSocketStream(socket))
       const abort = () => raw.abort(new Error('Encrypted WebSocket aborted'))
+      signal.addEventListener('abort', abort, { once: true })
+      let opened: SessionOpenEvent
+      try {
+        await pEvent(socket, 'open', {
+          signal,
+          rejectionEvents: ['error', 'close'],
+        })
+        await raw.writeRecord(prepared.message, signal)
+        let response = await raw.readRecord(
+          profile.maxHandshakeRecordBytes,
+          signal,
+        )
+        const time = await retryTime(response)
+        if (time !== undefined) {
+          prepared = await prepareSession(
+            identity.signer,
+            context,
+            target,
+            time,
+          )
+          signal.throwIfAborted()
+          await raw.writeRecord(prepared.message, signal)
+          response = await raw
+            .readRecord(profile.maxHandshakeRecordBytes, signal)
+            .catch((cause: unknown) => {
+              signal.throwIfAborted()
+              throw new DeviceClockError({ cause })
+            })
+        }
+        const secured = await prepared.finish(response)
+        signal.throwIfAborted()
+        assertServerIdentity(secured, allowTemporaryIdentity)
+        opened = new SessionOpenEvent(secured.peer, secured.temporary)
+        this.cipher = secured.cipher
+      } finally {
+        signal.removeEventListener('abort', abort)
+      }
       this.lifetime.signal.addEventListener('abort', abort, { once: true })
       this.readyState = this.OPEN
       this.dispatchEvent(opened)
@@ -248,56 +229,6 @@ export function sessionWebSocketConstructor(
               : new Uint8Array(payload).buffer
         else throw new Error('Invalid encrypted WebSocket message kind')
         this.dispatchEvent(new MessageEvent('message', { data }))
-      }
-    }
-
-    private async admit(
-      identity: SessionSocketIdentity,
-      protocols: string | string[] | undefined,
-      offset: number,
-    ) {
-      this.handshake = 'connecting'
-      const { prepareSession } = await import('./session-identity')
-      const prepared = await prepareSession(
-        identity.signer,
-        context,
-        target,
-        Date.now() + offset,
-      )
-      if (this.readyState !== this.CONNECTING) return
-      identity.signal.throwIfAborted()
-      const signal = AbortSignal.any([
-        identity.signal,
-        this.lifetime.signal,
-        AbortSignal.timeout(profile.handshakeTimeoutMs),
-      ])
-      this.raw?.abort(new Error('Encrypted WebSocket retried'))
-      const socket = (this.socket = new Socket(this.url, protocols))
-      const raw = (this.raw = new SessionWebSocketStream(socket))
-      const abort = () => raw.abort(new Error('Encrypted WebSocket aborted'))
-      signal.addEventListener('abort', abort, { once: true })
-      try {
-        await pEvent(socket, 'open', {
-          signal,
-          rejectionEvents: ['error', 'close'],
-        })
-        this.handshake = 'open'
-        await raw.writeRecord(prepared.message, signal)
-        const response = await raw.readRecord(
-          profile.maxHandshakeRecordBytes,
-          signal,
-        )
-        this.handshake = 'answered'
-        const secured = await prepared.finish(response)
-        signal.throwIfAborted()
-        assertServerIdentity(secured, allowTemporaryIdentity)
-        this.cipher = secured.cipher
-        return {
-          opened: new SessionOpenEvent(secured.peer, secured.temporary),
-          raw,
-        }
-      } finally {
-        signal.removeEventListener('abort', abort)
       }
     }
 
