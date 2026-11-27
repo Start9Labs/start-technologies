@@ -1,11 +1,11 @@
 import { CommonModule } from '@angular/common'
 import { Component, computed, inject } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { ActivatedRoute } from '@angular/router'
 import { isEmptyObject } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
-import { map, of } from 'rxjs'
+import { map, of, switchMap } from 'rxjs'
 import { ConnectionService } from 'src/app/services/connection.service'
 import { DepErrorService } from 'src/app/services/dep-error.service'
 import {
@@ -39,14 +39,13 @@ import { getManifest } from 'src/app/utils/get-package-data'
           }
         </service-status>
 
-        @if (vulnerabilities() | async; as found) {
-          @if (found.length) {
-            <service-vulnerabilities
-              [pkg]="pkg"
-              [status]="status()"
-              [vulnerabilities]="found"
-            />
-          }
+        @let found = vulnerabilities();
+        @if (found.length) {
+          <service-vulnerabilities
+            [pkg]="pkg"
+            [status]="status()"
+            [vulnerabilities]="found"
+          />
         }
 
         @if (status() !== 'backing-up') {
@@ -133,14 +132,18 @@ export class ServiceRoute {
 
   private readonly marketplace = inject(MarketplaceService)
 
-  protected readonly vulnerabilities = computed((pkg = this.pkg()) =>
-    pkg?.registry && pkg.stateInfo.state === 'installed'
-      ? this.marketplace.vulnerabilities$(
-          pkg.registry,
-          getManifest(pkg).id,
-          getManifest(pkg).version,
-        )
-      : of([]),
+  protected readonly vulnerabilities = toSignal(
+    toObservable(this.pkg).pipe(
+      switchMap(pkg =>
+        pkg?.stateInfo.state === 'installed'
+          ? this.marketplace.packageVulnerabilities$(
+              getManifest(pkg).id,
+              getManifest(pkg).version,
+            )
+          : of([]),
+      ),
+    ),
+    { initialValue: [] },
   )
 
   protected readonly health = computed((pkg = this.pkg()) =>

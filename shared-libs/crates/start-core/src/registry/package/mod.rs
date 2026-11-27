@@ -114,9 +114,14 @@ pub fn package_api<C: Context>() -> ParentHandler<C> {
                     from_fn_async(crate::registry::vulnerability::remove_package_vulnerability)
                         .with_metadata(WRITES_INDEX, Value::Bool(true))
                         .with_metadata("get_signer", Value::Bool(true))
+                        .no_cli(),
+                )
+                .subcommand(
+                    "remove",
+                    from_fn_async(crate::registry::vulnerability::cli_remove_package_vulnerability)
+                        .no_ts()
                         .no_display()
-                        .with_about("about.remove-package-vulnerability")
-                        .with_call_remote::<CliContext>(),
+                        .with_about("about.remove-package-vulnerability"),
                 )
                 .with_about("about.commands-package-vulnerabilities"),
         )

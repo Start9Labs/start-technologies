@@ -5,13 +5,13 @@ import { ControlsService } from 'src/app/services/controls.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
 import { PrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
 import { getManifest } from 'src/app/utils/get-package-data'
-import { FoundVulnerability } from 'src/app/utils/vulnerabilities'
+import { RegistryVulnerability } from 'src/app/utils/vulnerabilities'
 
 @Component({
   selector: 'service-vulnerabilities',
   template: `
     <header>{{ 'Vulnerabilities' | i18n }}</header>
-    @for (vulnerability of vulnerabilities(); track vulnerability.id) {
+    @for (vulnerability of vulnerabilities(); track vulnerability.key) {
       <div tuiNotification appearance="negative">
         <span tuiTitle>
           {{ vulnerability.id }}
@@ -62,9 +62,9 @@ import { FoundVulnerability } from 'src/app/utils/vulnerabilities'
 export class ServiceVulnerabilitiesComponent {
   protected readonly controls = inject(ControlsService)
 
-  readonly pkg = input.required<PackageDataEntry>()
-  readonly status = input<PrimaryStatus | string>()
-  readonly vulnerabilities = input.required<FoundVulnerability[]>()
+  public readonly pkg = input.required<PackageDataEntry>()
+  public readonly status = input<PrimaryStatus | string>()
+  public readonly vulnerabilities = input.required<RegistryVulnerability[]>()
 
   protected readonly manifest = computed(() => getManifest(this.pkg()))
   protected readonly stopRecommended = computed(() =>

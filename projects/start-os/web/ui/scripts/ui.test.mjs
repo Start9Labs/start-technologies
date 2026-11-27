@@ -4594,6 +4594,7 @@ test('a same-version candidate from another OS registry cannot replace an update
 })
 
 const { Exver } = await import('@start9labs/shared')
+const { ExtendedVersion, VersionRange } = await import('@start9labs/start-core')
 const { StorageService } = await import('src/app/services/storage.service')
 const { PackageIconService } =
   await import('src/app/services/package-icon.service')
@@ -4678,6 +4679,8 @@ function marketplaceFixture(t, entries = {}, index = registryIndex()) {
         getFlavor: () => null,
         compareExver: (a, b) =>
           Math.sign(a.localeCompare(b, undefined, { numeric: true })),
+        satisfies: (version, range) =>
+          ExtendedVersion.parse(version).satisfies(VersionRange.parse(range)),
       },
     },
     {
@@ -4796,6 +4799,48 @@ function marketplaceFixture(t, entries = {}, index = registryIndex()) {
     },
   }
 }
+
+test('installed-service advisories span connected registries without waiting for every source', t => {
+  const primary = 'https://registry.test/'
+  const secondary = 'https://other.test/'
+  const entry = registryEntry()
+  const advisoryEntry = registryEntry()
+  advisoryEntry.selections.example = {
+    best: [],
+    versions: {},
+    vulnerabilities: ['CVE-1'],
+  }
+  const index = registryIndex()
+  index.package.packages.example.vulnerabilities = {
+    'CVE-1': {
+      affected: '<2.0.0:0',
+      circumstances: 'A peer can reach the service.',
+      impact: 'Crash',
+      stopRecommended: true,
+    },
+  }
+  const f = marketplaceFixture(t, {
+    [primary]: entry,
+    [secondary]: advisoryEntry,
+    'https://pending.test/': {
+      ...registryEntry('1.0.0:0', 'connecting'),
+      selections: {},
+    },
+  })
+  f.replace('/registryIndexes', {
+    [primary]: registryIndex(),
+    [secondary]: index,
+  })
+  const found = f.watch(f.service.packageVulnerabilities$('example', '1.0.0:0'))
+  const patched = f.watch(f.service.packageVulnerabilities$('example', '2.0.0:0'))
+  assert.equal(found.at(-1).length, 1)
+  assert.equal(found.at(-1)[0].id, 'CVE-1')
+  assert.equal(found.at(-1)[0].stopRecommended, true)
+  assert.deepEqual(patched.at(-1), [])
+  f.replace('/registryCache', { [primary]: entry })
+  assert.deepEqual(found.at(-1), [])
+  assert.deepEqual(f.queries, [])
+})
 
 test('registry availability distinguishes first sync, empty success and cached reconnect/error', async t => {
   const { isRegistryLoading } = await import('@start9labs/marketplace')

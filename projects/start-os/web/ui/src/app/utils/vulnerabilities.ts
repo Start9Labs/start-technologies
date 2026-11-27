@@ -1,6 +1,7 @@
 import { T } from '@start9labs/start-core'
 
 export type FoundVulnerability = T.Vulnerability & { id: string }
+export type RegistryVulnerability = FoundVulnerability & { key: string }
 
 /** Trusted vulnerabilities whose affected range the version satisfies. */
 export function affecting(

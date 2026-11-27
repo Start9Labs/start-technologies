@@ -392,8 +392,8 @@ fn first_published_at(
         .process_results(|times| times.min())
 }
 
-/// A package's releases this server can run, by version; release data stays in the saved index.
-#[derive(Debug, Deserialize, Serialize, VisitFields, HasModel)]
+/// Runnable releases and trusted advisories; advisories survive an empty release selection.
+#[derive(Debug, Default, Deserialize, Serialize, VisitFields, HasModel)]
 #[serde(rename_all = "camelCase")]
 #[model = "Model<Self>"]
 pub struct PackageSelection {

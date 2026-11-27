@@ -146,7 +146,8 @@ pub async fn cli_sign_package(
             .id_key()?
             .sign_commitment(&commitment, SIG_CONTEXT)
             .await?;
-        ctx.call_remote::<RegistryContext>(
+        crate::registry::context::call_as_identity(
+            &ctx,
             &method,
             imbl_value::json!({
                 "id": id,

@@ -40,7 +40,11 @@ import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { PackageIconService } from 'src/app/services/package-icon.service'
 import { DataModel } from 'src/app/services/patch-db/data-model'
 import { StorageService } from 'src/app/services/storage.service'
-import { affecting, FoundVulnerability } from 'src/app/utils/vulnerabilities'
+import {
+  affecting,
+  FoundVulnerability,
+  RegistryVulnerability,
+} from 'src/app/utils/vulnerabilities'
 
 @Injectable({
   providedIn: 'root',
@@ -121,6 +125,34 @@ export class MarketplaceService extends AbstractMarketplaceService {
                 ),
               ),
             )
+          : of([]),
+      ),
+    )
+  }
+
+  /** Installed-service advisories span connected registries, independently of installation provenance. */
+  packageVulnerabilities$(
+    id: string,
+    version: string,
+  ): Observable<RegistryVulnerability[]> {
+    return this.registryCache$.pipe(
+      map(cache => Object.keys(cache)),
+      distinctUntilChanged((a, b) => a.join('\n') === b.join('\n')),
+      switchMap(registries =>
+        registries.length
+          ? combineLatest(
+              registries.map(registry =>
+                this.vulnerabilities$(registry, id, version).pipe(
+                  map(found =>
+                    found.map(v => ({
+                      ...v,
+                      key: pathFromArray([registry, v.id]),
+                    })),
+                  ),
+                  startWith([]),
+                ),
+              ),
+            ).pipe(map(found => found.flat()))
           : of([]),
       ),
     )

@@ -115,7 +115,7 @@ The second form refuses to run if the package has versions, unless you pass `--f
 
 ### Vulnerabilities
 
-Publish a vulnerability when versions of a package are exploitable. Anyone who may publish those versions can publish it; the registry rejects a vulnerability whose affected range lies outside the signer's authorized range.
+Publish a vulnerability when versions of a package are exploitable. An authorized signer can publish it when the affected range intersects their authorized range; admins can publish any range.
 
 ```sh
 start-cli registry package vulnerability add <PACKAGE_ID> <VULNERABILITY_ID> \

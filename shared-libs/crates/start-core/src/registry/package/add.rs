@@ -301,7 +301,8 @@ pub async fn cli_add_package_impl(
     }
 
     index_phase.start();
-    ctx.call_remote::<RegistryContext>(
+    crate::registry::context::call_as_identity(
+        &ctx,
         "package.add",
         to_value(&AddPackageRequest {
             urls: &url,
@@ -623,7 +624,8 @@ pub async fn cli_add_mirror(
     }
 
     index_phase.start();
-    ctx.call_remote::<RegistryContext>(
+    crate::registry::context::call_as_identity(
+        &ctx,
         &parent_method.into_iter().chain(method).join("."),
         imbl_value::json!({
             "url": &url,

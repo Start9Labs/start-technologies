@@ -618,10 +618,6 @@ fn refresh_selections(
     let mut found = Vec::new();
     let packages = cache_entry_mut(db, url)?.as_selections_mut();
     for (mut selected, id) in selections {
-        let Some(selected) = &mut selected else {
-            packages.remove(&id)?;
-            continue;
-        };
         let published: Vulnerabilities = index
             .as_packages()
             .as_idx(&id)
@@ -629,6 +625,13 @@ fn refresh_selections(
             .transpose()?
             .unwrap_or_default();
         let trusted = crate::registry::vulnerability::trusted(&id, &published, &keys);
+        if selected.is_none() && !trusted.is_empty() {
+            selected = Some(PackageSelection::default());
+        }
+        let Some(selected) = &mut selected else {
+            packages.remove(&id)?;
+            continue;
+        };
         selected.vulnerabilities = trusted.keys().cloned().collect();
         let previous: BTreeSet<InternedString> = packages
             .as_idx(&id)
@@ -722,12 +725,21 @@ fn refresh_trusted_vulnerabilities(
     for url in db.as_public().as_registry_indexes().keys()? {
         let ids = db
             .as_public()
-            .as_registry_cache()
+            .as_registry_indexes()
             .as_idx(&url)
-            .map(|cache| cache.as_selections().keys())
-            .transpose()?
-            .unwrap_or_default()
+            .unwrap()
+            .as_package()
+            .as_packages()
+            .keys()?
             .into_iter()
+            .chain(
+                db.as_public()
+                    .as_registry_cache()
+                    .as_idx(&url)
+                    .map(|cache| cache.as_selections().keys())
+                    .transpose()?
+                    .unwrap_or_default(),
+            )
             .collect();
         refresh_selections(db, &url, ids, device)?;
     }

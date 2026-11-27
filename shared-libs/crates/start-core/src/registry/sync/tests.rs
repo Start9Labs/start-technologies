@@ -1282,6 +1282,56 @@ mod vulnerabilities {
     }
 
     #[tokio::test]
+    async fn trusted_advisories_survive_an_empty_release_selection() {
+        let mut db = database();
+        let mut index = index();
+        let id: crate::PackageId = "test".parse().unwrap();
+        let package = index.package.packages.get_mut(&id).unwrap();
+        package.versions.clear();
+        package
+            .vulnerabilities
+            .insert("CVE-1".into(), signed(7, "test", "CVE-1", "<2.0.0:0").await);
+        publish_snapshot(
+            &mut db,
+            &Subscription::Index(url()),
+            &to_value(&index).unwrap(),
+            &device(),
+        )
+        .unwrap();
+        install(&mut db, "1.0.0:0");
+        trust(&mut db, 7, true, false);
+        refresh_trusted_vulnerabilities(&mut db, &device()).unwrap();
+        assert_eq!(trusted_ids(&db), ["CVE-1"]);
+        let selection = db
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .as_selections()
+            .as_idx(&id)
+            .unwrap()
+            .de()
+            .unwrap();
+        assert!(selection.best.is_empty());
+        assert!(selection.versions.is_empty());
+        assert_eq!(found(&db).len(), 1);
+        refresh_update_targets(&mut db, &device()).unwrap();
+        assert_eq!(trusted_ids(&db), ["CVE-1"]);
+        assert_eq!(found(&db).len(), 1);
+        trust(&mut db, 7, false, true);
+        refresh_trusted_vulnerabilities(&mut db, &device()).unwrap();
+        assert!(
+            db.as_public()
+                .as_registry_cache()
+                .as_idx(&url())
+                .unwrap()
+                .as_selections()
+                .as_idx(&id)
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn os_vulnerabilities_need_os_trust_and_announce_for_the_running_version() {
         let mut db = database();
         let mut index = OsIndex::default();
