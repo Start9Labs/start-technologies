@@ -175,7 +175,10 @@ const ICONS: Record<string, string> = {
             </header>
             <section>
               @if (!loading()) {
-                @for ($implicit of packages(); track $index) {
+                @for (
+                  $implicit of packages();
+                  track $implicit.id + '#' + ($implicit.flavor ?? '')
+                ) {
                   <ng-container
                     *ngTemplateOutlet="template(); context: { $implicit }"
                   />

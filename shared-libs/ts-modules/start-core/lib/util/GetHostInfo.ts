@@ -89,7 +89,7 @@ export function getHost<Mapped>(
 }
 
 /**
- * Reactive reader for the bridge address (`10.0.3.1:<port>`) a dependency's
+ * Reactive reader for the bridge address (`startos.internal:<port>`) a dependency's
  * binding is reachable at from another container.
  *
  * Resolves the binding's own derived address rather than `net.assignedPort` /
@@ -146,7 +146,7 @@ export class GetBridgeAddress<
         sslScheme: null,
         suffix: '',
       }).bridge.filter({
-        kind: 'ipv4',
+        kind: 'domain',
         predicate: a => ssl === undefined || a.ssl === ssl,
       }).hostnames[0]
     if (addr?.port != null) return `${addr.hostname}:${addr.port}` as A

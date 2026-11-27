@@ -48,7 +48,7 @@ fn volumes_dir() -> PathBuf {
     Path::new(DATA_DIR).join(PKG_VOLUME_DIR)
 }
 
-fn pkg_volume_dir(pkg_id: &PackageId) -> PathBuf {
+pub(crate) fn pkg_volume_dir(pkg_id: &PackageId) -> PathBuf {
     volumes_dir().join(pkg_id)
 }
 
@@ -363,21 +363,13 @@ async fn recover_and_sweep(
     Ok(())
 }
 
-async fn needs_subvolume_conversion(path: &Path) -> bool {
+pub(crate) async fn needs_subvolume_conversion(path: &Path) -> bool {
     tokio::fs::metadata(path)
         .await
         .map(|m| m.is_dir())
         .unwrap_or(false)
         && !btrfs::is_subvolume(path).await
         && btrfs::is_btrfs(path).await
-}
-
-pub(crate) async fn convert_package_to_subvolume(id: &PackageId) -> Result<(), Error> {
-    let src = pkg_volume_dir(id);
-    if needs_subvolume_conversion(&src).await {
-        convert_directory_to_subvolume(&src, None).await?;
-    }
-    Ok(())
 }
 
 async fn convert_to_subvolumes(

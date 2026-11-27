@@ -1,8 +1,12 @@
+use std::collections::BTreeMap;
+
 use exver::VersionRange;
+use serde::{Deserialize, Serialize};
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_0_2};
 use crate::prelude::*;
+use crate::trusted_keys::initial_signer_certificates;
 
 lazy_static::lazy_static! {
     static ref V0_4_0_3: exver::Version = exver::Version::new([0, 4, 0, 3], []);
@@ -39,6 +43,29 @@ impl VersionT for Version {
     }
 }
 
+pub(super) type TrustedOsUpdateSigners = BTreeMap<InternedString, TrustedOsUpdateSigner>;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct TrustedOsUpdateSigner {
+    pub label: String,
+}
+
+pub(super) fn initial_signers() -> TrustedOsUpdateSigners {
+    initial_signer_certificates()
+        .flat_map(|(label, imported)| {
+            imported.keys.into_iter().map(move |key| {
+                (
+                    key.interned_der64(),
+                    TrustedOsUpdateSigner {
+                        label: label.to_owned(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
 fn seed_update_signers(db: &mut Value) -> Result<(), Error> {
     if let Some(server) = db
         .get_mut("public")
@@ -48,7 +75,7 @@ fn seed_update_signers(db: &mut Value) -> Result<(), Error> {
         if !server.contains_key("trustedOsUpdateSigners") {
             server.insert(
                 "trustedOsUpdateSigners".into(),
-                to_value(&crate::update::signers::initial_signers())?,
+                to_value(&initial_signers())?,
             );
         }
     }
@@ -164,13 +191,13 @@ mod test {
         seed_update_signers(&mut db).unwrap();
         assert_eq!(
             db["public"]["serverInfo"]["trustedOsUpdateSigners"],
-            to_value(&crate::update::signers::initial_signers()).unwrap()
+            to_value(&initial_signers()).unwrap()
         );
         let once = db.clone();
         seed_update_signers(&mut db).unwrap();
         assert_eq!(db, once);
 
-        let mut saved = crate::update::signers::initial_signers();
+        let mut saved = initial_signers();
         saved.pop_first();
         saved.values_mut().next().unwrap().label = "Owner-managed".to_owned();
         db["public"]["serverInfo"]["trustedOsUpdateSigners"] = to_value(&saved).unwrap();
@@ -184,6 +211,45 @@ mod test {
             json!({})
         );
         assert_eq!(Version.migration_revision(), 3);
+    }
+
+    #[test]
+    fn initial_trust_contains_only_the_three_approved_keys() {
+        use crate::sign::AnyVerifyingKey;
+
+        let signers = initial_signers();
+        assert_eq!(signers.len(), 3);
+        let get_signer = |key: &AnyVerifyingKey| signers.get(&key.interned_der64()).cloned();
+        for (label, body) in [
+            (
+                "drbonez",
+                "MCowBQYDK2VwAyEAgpcI3hOExv1njCt+zJoYBartdyk4SKiqSIy3+9tcpOI=",
+            ),
+            (
+                "matthill",
+                "MCowBQYDK2VwAyEAfeubYt/ozIfZspUZdmu2Fa6sK2psMnHVGxuVolo8u40=",
+            ),
+            (
+                "Start9",
+                "MCowBQYDK2VwAyEAJdDg62o3oHIh4lXECn9gqORe+cCBbH/67MWjMxIMzDg=",
+            ),
+        ] {
+            let key: AnyVerifyingKey =
+                format!("-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----\n")
+                    .parse()
+                    .unwrap();
+            assert_eq!(get_signer(&key).unwrap().label, label);
+        }
+        for body in [
+            "MCowBQYDK2VwAyEAqPjOeMD2CB3UEASoICgfJlfrO5ygjOSBCCNRyDBs75A=",
+            "MCowBQYDK2VwAyEASv7fB+rs6FRL+pk7KXaoXONNn26dRkwMB9LXUqmXXLM=",
+        ] {
+            let key: AnyVerifyingKey =
+                format!("-----BEGIN PUBLIC KEY-----\n{body}\n-----END PUBLIC KEY-----\n")
+                    .parse()
+                    .unwrap();
+            assert!(get_signer(&key).is_none());
+        }
     }
 
     #[test]

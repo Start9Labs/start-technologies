@@ -13,6 +13,7 @@ import {
   getValueByPointer,
   pathFromArray,
 } from './json-patch-lib'
+import { reconcile, shiftedArrays } from './projection'
 
 /**
  * Observable database client backed by RFC 6902 JSON Patches.
@@ -65,9 +66,6 @@ export class PatchDB<T extends { [key: string]: any }> {
   start() {
     if (this.sub) return
 
-    // Simplified from `source$.pipe(withLatestFrom(cache$))`. Both are
-    // equivalent since cache$ is a BehaviorSubject and processUpdates
-    // mutates/re-emits synchronously, but `.value` is more direct.
     this.sub = this.source$.subscribe(updates => {
       this.processUpdates(updates, this.cache$.value)
     })
@@ -90,9 +88,9 @@ export class PatchDB<T extends { [key: string]: any }> {
   /**
    * Returns an observable of the value at the given path within the document.
    *
-   * Overloaded for 0–6 path segments with full type safety. The returned
-   * observable emits whenever a patch touches the watched path (or any
-   * ancestor/descendant of it).
+   * Overloaded for 0–6 path segments with full type safety.
+   * After the initial value, emits only when `value !== previousValue`.
+   * Positional watches follow their index through array insertions and removals.
    *
    * The observable waits for the first non-zero revision (i.e. a real dump)
    * before emitting, so subscribers won't see the empty initial state.
@@ -106,10 +104,6 @@ export class PatchDB<T extends { [key: string]: any }> {
    * db.watch$('users', 'abc123', 'name').subscribe(name => ...)
    * ```
    */
-  // @claude fix #13: Removed outer NonNullable wrapper from the 1-level
-  // overload return type. Runtime values can be null/undefined (e.g. after a
-  // remove operation), so the previous NonNullable<T[P1]> was unsound — callers
-  // skipped null checks based on the type, leading to runtime crashes.
   watch$(): Observable<T>
   watch$<P1 extends keyof T>(p1: P1): Observable<T[P1]>
   watch$<P1 extends keyof T, P2 extends keyof NonNullable<T[P1]>>(
@@ -229,28 +223,34 @@ export class PatchDB<T extends { [key: string]: any }> {
 
   /** Watchers observe complete revisions; callers must apply every operation first. */
   protected publishRevision(revision: Revision, cache: Dump<T>): void {
-    const patchArrs = revision.patch.map(op => ({
-      path: op.path,
-      arr: arrayFromPath(op.path),
-    }))
+    const paths = revision.patch.map(op => arrayFromPath(op.path))
+    const shifted = shiftedArrays(revision.patch, cache.value).map(
+      arrayFromPath,
+    )
     Object.entries(this.watchedNodes).forEach(([watchedPath, { pathArr }]) => {
-      const match = patchArrs.find(
-        ({ arr }) => startsWith(pathArr, arr) || startsWith(arr, pathArr),
+      if (
+        paths.some(
+          path => startsWith(pathArr, path) || startsWith(path, pathArr),
+        ) ||
+        shifted.some(path => startsWith(pathArr, path))
       )
-      if (match) this.updateWatchedNode(watchedPath, cache.value)
+        this.updateWatchedNode(watchedPath, cache.value)
     })
   }
 
+  /** Keeps the identity of every subtree the dump leaves unchanged. */
   protected handleDump(dump: Dump<T>, cache: Dump<T>): void {
-    cache.value = { ...dump.value }
+    cache.value = reconcile(cache.value, dump.value ?? {}) as T
     Object.keys(this.watchedNodes).forEach(watchedPath => {
       this.updateWatchedNode(watchedPath, cache.value)
     })
   }
 
+  /** Notifies the watch only when its value is a different object. */
   protected updateWatchedNode(path: string, data: T): void {
+    const node = this.watchedNodes[path]
     const value = getValueByPointer(data, path)
-    this.watchedNodes[path]?.subject.next(value)
+    if (node && node.subject.value !== value) node.subject.next(value)
   }
 
   private isRevision(update: Update<T>): update is Revision {

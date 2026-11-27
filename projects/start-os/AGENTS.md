@@ -11,7 +11,8 @@ monorepo-wide rules and [ARCHITECTURE.md](ARCHITECTURE.md) for how this product 
   `../../shared-libs/crates/start-core` (crate `start-core`, lib `start_core`).
 - `web/ui`, `web/setup-wizard` — Angular apps in the root Angular workspace
   (`angular.json` at the repo root). Run web commands (`npm run check:ui`, `npm run start:ui`, …)
-  from the repo root, not from here.
+  from the repo root, not from here. Each app's `FRONTEND.md` records its facts for the
+  `start9-frontend` skill.
 - `container-runtime/` — Node.js LXC runtime with its **own** AGENTS/CLAUDE;
   read `container-runtime/AGENTS.md` before touching it.
 - `docs/` — the end-user mdbook (book "StartOS"), served at `/start-os/`.

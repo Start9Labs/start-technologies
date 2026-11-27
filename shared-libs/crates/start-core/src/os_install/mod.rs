@@ -324,6 +324,65 @@ async fn previous_os_root(disk_path: &Path) -> Option<PathBuf> {
     None
 }
 
+/// The configured image's version, when it belongs to the preserved pool.
+async fn previous_os_version(root: PathBuf, guid: &str) -> Option<exver::Version> {
+    let guard = TmpMountGuard::mount(&BlockDev::new(root), MountType::ReadOnly)
+        .await
+        .log_err()?;
+    let config = guard.path().join("config");
+    let version = async {
+        let image = preserved_os_image(&config, guid).await?;
+        let version = Command::new("unsquashfs")
+            .arg("-cat")
+            .arg(image)
+            .arg("usr/lib/startos/VERSION.txt")
+            .invoke(ErrorKind::ParseSysInfo)
+            .await
+            .log_err()?;
+        String::from_utf8(version).ok()?.trim().parse().ok()
+    }
+    .await;
+    guard.unmount().await.log_err();
+    version
+}
+
+// The image's version applies to the pool recorded in `disk.guid`.
+async fn preserved_os_image(config: &Path, guid: &str) -> Option<PathBuf> {
+    let previous_guid = tokio::fs::read_to_string(config.join("disk.guid"))
+        .await
+        .ok()?;
+    if previous_guid.trim() != guid {
+        return None;
+    }
+    let image = tokio::fs::read_link(config.join("current.rootfs"))
+        .await
+        .ok()?;
+    Some(config.join(image))
+}
+
+/// Rejects an unmigratable version before installation writes the target.
+/// Missing image metadata allows preservation, keeping legacy directory-root installs eligible.
+async fn check_preserved_version(disk_path: &Path, guid: &str) -> Result<(), Error> {
+    let Some(root) = previous_os_root(disk_path).await else {
+        return Ok(());
+    };
+    match previous_os_version(root, guid).await {
+        Some(version) if !crate::version::can_migrate_from(version.clone()) => Err(Error::new(
+            eyre!(
+                "{}",
+                t!(
+                    "os-install.preserved-data-from-newer-version",
+                    disk = disk_path.display(),
+                    version = version,
+                    current = crate::bins::startos_version(),
+                )
+            ),
+            ErrorKind::InvalidRequest,
+        )),
+        _ => Ok(()),
+    }
+}
+
 const CONFIG_BAK: &str = "/tmp/config.bak";
 const CONFIG_BAK_STAGED: &str = "/tmp/config.bak.staged";
 /// Records which disk CONFIG_BAK was preserved from: /tmp survives a failed install
@@ -742,6 +801,10 @@ async fn install_os_inner(
             }
         }
 
+        if let Some(DataDrivePlan::Attach(guid)) = &data_plan {
+            check_preserved_version(&disk.stable_path, guid).await?;
+        }
+
         let protect: Option<PathBuf> = data_drive.as_ref().and_then(|dd| {
             if dd.wipe {
                 return None;
@@ -889,6 +952,37 @@ mod tests {
 
     use super::*;
     use crate::disk::util::PartitionInfo;
+
+    #[tokio::test]
+    async fn preserved_image_belongs_to_the_selected_pool() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config");
+        std::fs::create_dir(&config).unwrap();
+        std::fs::write(config.join("disk.guid"), "EMBASSY_AAAA\n").unwrap();
+        std::os::unix::fs::symlink("../images/previous.rootfs", config.join("current.rootfs"))
+            .unwrap();
+
+        assert_eq!(
+            preserved_os_image(&config, "EMBASSY_AAAA").await,
+            Some(config.join("../images/previous.rootfs"))
+        );
+        assert_eq!(preserved_os_image(&config, "EMBASSY_BBBB").await, None);
+
+        std::fs::remove_file(config.join("disk.guid")).unwrap();
+        assert_eq!(preserved_os_image(&config, "EMBASSY_AAAA").await, None);
+    }
+
+    #[tokio::test]
+    async fn legacy_directory_root_remains_eligible_for_preservation() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config");
+        std::fs::create_dir(&config).unwrap();
+        std::fs::create_dir(root.path().join("current")).unwrap();
+        std::fs::create_dir(root.path().join("next")).unwrap();
+        std::fs::write(config.join("disk.guid"), "EMBASSY_AAAA").unwrap();
+
+        assert_eq!(preserved_os_image(&config, "EMBASSY_AAAA").await, None);
+    }
 
     #[tokio::test]
     async fn containing_disk_resolves_partitions_to_their_disk() {

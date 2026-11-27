@@ -3,12 +3,12 @@ use openssl::pkey::{PKey, Private};
 use tokio::process::Command;
 
 use super::v0_3_5::V0_3_0_COMPAT;
+use super::v0_4_0_3::TrustedOsUpdateSigners;
 use super::{VersionT, v0_4_0_4};
 use crate::auth::AuthKeys;
 use crate::context::RpcContext;
 use crate::prelude::*;
 use crate::sign::{AnyVerifyingKey, canonicalize_verifying_keys};
-use crate::update::signers::TrustedOsUpdateSigners;
 use crate::util::Invoke;
 use crate::util::serde::{Der64, DerEncoding, Pem, PemEncoding};
 
@@ -165,7 +165,8 @@ mod tests {
     async fn prior_revisions_upgrade_to_keyrings_once() {
         use patch_db::json_ptr::ROOT;
 
-        use crate::trusted_keys::{TrustedKeys, os_signers};
+        use crate::trusted_keys::TrustedKeys;
+        use crate::version::v0_4_1::trusted_key_os_signers;
         let key = AnyVerifyingKey::Ed25519(
             ed25519_dalek::SigningKey::from_bytes(&[43; 32]).verifying_key(),
         );
@@ -232,7 +233,10 @@ mod tests {
             );
             let keys: TrustedKeys =
                 from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
-            assert_eq!(os_signers(&keys)[&canonical].label, "retained signer");
+            assert_eq!(
+                trusted_key_os_signers(&keys)[&canonical].label,
+                "retained signer"
+            );
             assert!(
                 migrated["public"]["serverInfo"]
                     .get("trustedOsUpdateSigners")

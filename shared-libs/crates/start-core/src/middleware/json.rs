@@ -1,6 +1,7 @@
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
-use http::header::{CONTENT_TYPE, ORIGIN};
+use http::header::CONTENT_TYPE;
+use http::uri::Scheme;
 use http::{HeaderMap, StatusCode};
 use rpc_toolkit::{Empty, Middleware};
 
@@ -35,27 +36,16 @@ impl<Context: Send + Sync + 'static> Middleware<Context> for RequireJson {
 }
 
 fn same_origin(request: &Request) -> bool {
-    let Some(origin) = request.headers().get(ORIGIN) else {
-        return true;
-    };
-    let Some(authority) = crate::net::http::request_authority(request) else {
-        return false;
-    };
     let scheme = if request
         .extensions()
         .get::<crate::net::tls::TlsHandshakeInfo>()
         .is_some()
     {
-        "https"
+        Scheme::HTTPS
     } else {
-        request.uri().scheme_str().unwrap_or("http")
+        request.uri().scheme().cloned().unwrap_or(Scheme::HTTP)
     };
-    let expected = url::Url::parse(&format!("{scheme}://{authority}"));
-    let supplied = origin
-        .to_str()
-        .ok()
-        .and_then(|value| url::Url::parse(value).ok());
-    matches!((expected, supplied), (Ok(expected), Some(supplied)) if expected.origin() == supplied.origin())
+    crate::net::http::origin_matches_authority(request, &scheme)
 }
 
 fn is_json(headers: &HeaderMap) -> bool {
@@ -69,6 +59,7 @@ fn is_json(headers: &HeaderMap) -> bool {
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
+    use http::header::ORIGIN;
     use http_body_util::BodyExt;
     use rpc_toolkit::{Context, HandlerExt, HttpServer, ParentHandler, Server, from_fn_async};
 

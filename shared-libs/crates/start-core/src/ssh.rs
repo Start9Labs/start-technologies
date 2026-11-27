@@ -12,6 +12,7 @@ use tracing::instrument;
 
 use crate::context::{CliContext, RpcContext};
 use crate::hostname::ServerHostname;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::util::io::create_file;
 use crate::util::serde::{HandlerExtSerde, Pem, WithIoFormat, display_serializable};
@@ -124,6 +125,7 @@ pub fn ssh<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.add-ssh-key")
                 .with_call_remote::<CliContext>(),
@@ -131,6 +133,7 @@ pub fn ssh<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.remove-ssh-key")
                 .with_call_remote::<CliContext>(),
@@ -138,6 +141,7 @@ pub fn ssh<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|handle, result| {
                     display_all_ssh_keys(handle.params, result)
@@ -323,6 +327,7 @@ pub async fn sync_keys<P: AsRef<Path>>(
     Ok(())
 }
 
+/// Completes the authorized-key file write before returning.
 #[instrument(skip_all)]
 pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Result<(), Error> {
     use tokio::io::AsyncWriteExt;
@@ -337,6 +342,7 @@ pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Resu
         f.write_all(key.0.to_key_format().as_bytes()).await?;
         f.write_all(b"\n").await?;
     }
+    f.flush().await?;
 
     Ok(())
 }

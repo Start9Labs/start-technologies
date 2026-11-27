@@ -1,4 +1,4 @@
-import { Component, computed, inject } from '@angular/core'
+import { Component, inject } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { TitleDirective } from 'src/app/services/title.service'
 import { CpuComponent } from './cpu.component'
@@ -25,7 +25,7 @@ import { i18nPipe } from '@start9labs/shared'
       </section>
       <section class="g-card">
         <header>{{ 'Temperature' | i18n }}</header>
-        <metrics-temperature [value]="temperature()" />
+        <metrics-temperature [value]="metrics()?.general?.temperatures" />
       </section>
       <section class="g-card">
         <header>CPU</header>
@@ -57,25 +57,8 @@ import { i18nPipe } from '@start9labs/shared'
       }
     }
 
-    :host-context(tui-root._mobile) {
-      .g-card {
-        grid-column: span 3;
-
-        &:nth-child(1),
-        &:nth-child(2) {
-          grid-column: span 2;
-        }
-
-        &:nth-child(3) {
-          grid-column: span 1;
-          grid-row: span 2;
-          padding-top: 0;
-
-          header {
-            display: none;
-          }
-        }
-      }
+    :host-context(tui-root._mobile) .g-card {
+      grid-column: span 3;
     }
   `,
   host: { class: 'g-page' },
@@ -92,8 +75,4 @@ import { i18nPipe } from '@start9labs/shared'
 })
 export default class SystemMetricsComponent {
   readonly metrics = toSignal(inject(MetricsService))
-
-  readonly temperature = computed(() =>
-    Number(this.metrics()?.general.temperature?.value || 0),
-  )
 }

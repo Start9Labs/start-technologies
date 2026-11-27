@@ -16,6 +16,8 @@ Two consequences worth internalizing before you write any interface code:
 > [!WARNING]
 > Never state — in `README.md`, `instructions.md`, a comment, or a plan — that a service "is exposed on Tor" or "is published to the internet." Your package cannot know: no binding type, and no value of `type`, causes an onion or a clearnet address to exist. Describe what the interface serves and let the user decide how to reach it.
 
+**Services opened at the same shared hostname share browser cookies.** Every service is reachable at the server's shared addresses — its `.local` address and its IP addresses, each with the service's own port — and browsers keep cookies per host, not per port. At the same hostname, a service's cookies are sent to other services, and a page from one can read or set another's cookies unless they are HttpOnly. With the same scheme, these addresses also count as same-site, so `SameSite` cookies alone do not protect against CSRF from another service. Keep the application's own CSRF and `Origin` checks on, and keep its session cookies HttpOnly. Do not add another service's origin to trusted-origin or CSRF-exemption lists merely because it runs on the same server. What users can do about cookie sharing is in [Interfaces](/start-os/interfaces.html#shared-addresses-and-browser-cookies).
+
 ## Single Interface
 
 For a service with one web interface:
@@ -234,7 +236,7 @@ HTTP proxying and TLS termination are separate: `proxy` describes HTTP handling,
 
 Both HTTP-proxied legs connect to the container from StartOS, rather than preserving the client's TCP source address. With forwarded-header generation enabled, applications identify the client through `X-Forwarded-For`.
 
-The HTTP proxy strips client-supplied `X-Forwarded-*` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
+The HTTP proxy strips client-supplied `X-Forwarded-*`, `Forwarded`, `X-Real-IP`, `True-Client-IP` and `CF-Connecting-IP` values even when header generation is disabled. TLS legs generate `X-Forwarded-Proto: https`; plaintext legs strip that header and generate no replacement. Treat a missing header as plaintext rather than trusting a client-provided scheme.
 
 An `addSsl` binding on any port can carry a Let's Encrypt certificate — issuance is per name, not per port. The user's side of that is one extra requirement: Let's Encrypt validates on port `443` whatever port you bind, so StartOS asks their gateway to route `443` for the domain as well. On a gateway that cannot do it automatically they forward `443` by hand. Worth a line in your instructions for an interface on a non-standard port that users will reach from software validating against public roots — an Electrum client, say.
 
@@ -429,7 +431,7 @@ Each internal port a host currently binds belongs to one claim. A `bindPortRange
 
 `setupInterfaces()` ends every pass by **disabling** each binding it did not just declare — it does not delete it. Disabling is the right default: it keeps the row, the external port number, and the user's per-address choices, so a binding your package declares conditionally comes back at the same address they already bookmarked.
 
-The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `10.0.3.1:<port>` that nothing listens on. Retire it explicitly:
+The cost is that a binding you stop declaring **for good** stays behind. It keeps its external port claimed for as long as your service is installed, it keeps recomputing its addresses, and a dependency resolving it through `getBridgeAddress` still gets a `startos.internal:<port>` that nothing listens on. Retire it explicitly:
 
 ```typescript
 await sdk.MultiHost.of(effects, 'ui-multi').retire() // the whole host
@@ -556,7 +558,7 @@ const origin = await multi.bindPort(10009, {
 
 StartOS still fronts the port with one of its TLS listeners, but that listener pipes the raw TLS stream through instead of terminating it, so nothing about the handshake is rewritten. The container sees the client's real source address when StartOS routes its replies. The listener routes on the client's TLS ClientHello, so the first bytes a client sends must be one: a protocol that opens in plaintext and upgrades in-band is dropped here, and its port is `ssl: false`.
 
-The listener routes by the name the client asks for (its TLS SNI). It answers for the names enabled on the binding — its domains and the server's `.local` — and for a client that asks for no name or an IP address. It refuses every other name before the connection reaches your container. A daemon whose certificate carries a fixed name that its clients ask for binds the port `secure: { ssl: false }` instead: StartOS forwards the TCP stream untouched, whatever the name, and the daemon's TLS still runs end to end.
+The listener routes by the name the client asks for (its TLS SNI). It answers for the names enabled on the binding — its domains, the server's `.local` and `startos.internal` — and for a client that asks for no name or an IP address. It refuses every other name before the connection reaches your container. A daemon whose certificate carries a fixed name that its clients ask for binds the port `secure: { ssl: false }` instead: StartOS forwards the TCP stream untouched, whatever the name, and the daemon's TLS still runs end to end.
 
 ### When to use it
 
@@ -585,12 +587,12 @@ For unproxied service TLS, StartOS preserves the client source IP when it routes
 
 **The SANs are the whole contract.** Nothing rewrites the handshake, so the certificate must be valid for every address a client actually dials — there is no proxy to paper over a mismatch:
 
-- `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
+- `startos.internal` and `sdk.getOsIp` (`10.0.3.1`) — the bridge, where other services reach you
 - `127.0.0.1` — your own subcontainers, which share the service's network namespace
 - `sdk.getContainerIp` — the container itself
 - **every address the interface is published at** — LAN IPs, the server's `.local` name, private and public domains, and any onion a plugin has exported
 
-Those three constants are the internal half, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
+Those internal names are half the set, and naming only them is the mistake to avoid: an off-box client dialing the LAN address or the `.local` name gets a certificate matching none of them. Take the external half from the **binding**, so it follows the addresses the operator adds and removes:
 
 ```typescript
 export const setupCerts = sdk.setupOnInit(async effects => {
@@ -608,7 +610,7 @@ export const setupCerts = sdk.setupOnInit(async effects => {
     )
     .const()
 
-  const hostnames = [await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
+  const hostnames = ['startos.internal', await sdk.getContainerIp(effects).const(), '127.0.0.1', await sdk.getOsIp(effects), ...served]
   const cert = (await sdk.getSslCertificate(effects, hostnames).const()).join('')
   const key = await sdk.getSslKey(effects, { hostnames })
   await writeFile('/media/startos/volumes/main/tls.cert', cert)
@@ -691,7 +693,7 @@ const apiOrigin = await apiMulti.bindPort(apiPort, {
 | `tokens` (bearer)     | `Array<string>`                 | Accepted bearer tokens. Any match passes.                                                                                                                            |
 | `realm`               | `string` \| `null`              | Realm advertised in the 401 `WWW-Authenticate` challenge. Defaults to `"StartOS"`. Use a stable realm across bindings that share credentials so browsers reuse them. |
 
-The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled.
+The gate applies to every HTTP request on both the original and TLS-wrapper legs, including bridge and other enabled plaintext addresses, whenever HTTP proxying is enabled. With Basic authentication, a WebSocket or other upgrade request, or one using any method other than `GET`, `HEAD`, `OPTIONS` or `TRACE`, gets `403 Forbidden` when its `Origin` differs from the connection's scheme, host or effective port, or its `Sec-Fetch-Site` is anything but `same-origin` or `none`, so a page on another site cannot reuse the browser's cached credentials. A request carrying neither header passes, as does `Origin: null` alongside `Sec-Fetch-Site: same-origin`. Bearer gates admit valid tokens regardless of `Origin` or `Sec-Fetch-Site`. Omitted ports mean `80` for plaintext connections and `443` for TLS connections, independently of forwarded-header generation.
 
 **The gate covers every address the binding publishes, including its plaintext [bridge address](./service-to-service.md#the-host-bridge).** A service that depends on you is challenged like any other client, so if one must reach a gated binding, give it a credential — see [Admitting dependent services](#admitting-dependent-services).
 

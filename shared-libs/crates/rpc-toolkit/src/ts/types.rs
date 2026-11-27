@@ -53,6 +53,13 @@ impl Expr {
             format!("z.ZodOptional<{}>", self.ty),
         )
     }
+    /// Optional on input; a missing value decodes as the literal.
+    pub fn defaulted(self, literal: &str) -> Self {
+        Self::new(
+            format!("{}.default(() => ({literal}))", self.value),
+            format!("z.ZodDefault<{}>", self.ty),
+        )
+    }
     pub fn array(self) -> Self {
         Self::new(
             format!("z.array({})", self.value),
@@ -199,6 +206,8 @@ pub trait TS {
     const DOCS: &'static [&'static str] = &[];
     /// Marks nullable options whose named input fields may be omitted or flattened.
     const IS_OPTION: bool = false;
+    /// JSON literal of `Default::default()`, for types whose default is fixed.
+    const DEFAULT: Option<&'static str> = None;
     /// Returns the schema name, including consumer metadata overrides.
     fn define_name() -> Option<String> {
         Self::DEFINE.map(str::to_owned)
@@ -221,6 +230,7 @@ where
     fn visit(&self, visitor: &mut TSVisitor) -> <TSVisitor as Visitor>::Result {
         visitor.append_type::<T>();
         visitor.type_optional = T::IS_OPTION;
+        visitor.type_default = T::DEFAULT;
     }
 }
 
@@ -233,6 +243,7 @@ pub struct TSVisitor {
     pub ty: String,
     active: Vec<&'static str>,
     type_optional: bool,
+    type_default: Option<&'static str>,
     suppress_types: bool,
     pending_reference: bool,
     pub(super) errors: Vec<String>,
@@ -304,6 +315,7 @@ impl TSVisitor {
             ty: String::new(),
             active: Vec::new(),
             type_optional: false,
+            type_default: None,
             suppress_types: false,
             pending_reference: false,
             errors: Vec::new(),
@@ -638,32 +650,36 @@ impl TSVisitor {
         let value = self.ts.len();
         let ty = self.ty.len();
         let optional = std::mem::replace(&mut self.type_optional, false);
+        let default = self.type_default.take();
         visit(self);
         let expression = Expr {
             value: self.ts.split_off(value),
             ty: self.ty.split_off(ty),
         };
         self.type_optional = optional;
+        self.type_default = default;
         expression
     }
 
-    /// Renders a member type, reporting typed optionality, whether it refers to
-    /// a declaration still being rendered, and the references it made, which
-    /// the caller commits once it knows whether a getter defers them.
+    /// Renders a member type, reporting typed optionality and default, whether
+    /// it refers to a declaration still being rendered, and the references it
+    /// made, which the caller commits once it knows whether a getter defers them.
     pub(super) fn capture_field(
         &mut self,
         visit: impl FnOnce(&mut Self),
-    ) -> (Expr, bool, bool, Vec<Edge>) {
+    ) -> (Expr, bool, Option<&'static str>, bool, Vec<Edge>) {
         let pending = std::mem::replace(&mut self.pending_reference, false);
         self.frames.push(Vec::new());
         let mut optional = false;
+        let mut default = None;
         let expression = self.capture(|visitor| {
             visit(visitor);
             optional = visitor.type_optional;
+            default = visitor.type_default;
         });
         let edges = self.frames.pop().unwrap();
         let recursive = std::mem::replace(&mut self.pending_reference, pending);
-        (expression, optional, recursive, edges)
+        (expression, optional, default, recursive, edges)
     }
 
     /// Records a member's references in the enclosing declaration.
@@ -1095,6 +1111,7 @@ impl Visit<TSVisitor> for LiteralTS {
         let literal = visitor.literal(&self.0);
         visitor.push(literal);
         visitor.type_optional = false;
+        visitor.type_default = None;
     }
 }
 
@@ -1124,11 +1141,18 @@ macro_rules! impl_ts {
             fn visit_ts(visitor: &mut $crate::ts::TSVisitor) { visitor.leaf($value, $schema); }
         }
     )+ };
+    ($($ty:ty),+ => $value:expr, $schema:expr, default $default:expr) => { $(
+        impl $crate::ts::TS for $ty {
+            const DEFAULT: Option<&'static str> = Some($default);
+            fn visit_ts(visitor: &mut $crate::ts::TSVisitor) { visitor.leaf($value, $schema); }
+        }
+    )+ };
 }
 
-impl_ts!(bool => "z.boolean()", "z.ZodBoolean");
-impl_ts!(String, str, char => "z.string()", "z.ZodString");
-impl_ts!(usize,u8,u16,u32,u64,u128,isize,i8,i16,i32,i64,i128 => "z.int()", "z.ZodInt");
+impl_ts!(bool => "z.boolean()", "z.ZodBoolean", default "false");
+impl_ts!(String => "z.string()", "z.ZodString", default "\"\"");
+impl_ts!(str, char => "z.string()", "z.ZodString");
+impl_ts!(usize,u8,u16,u32,u64,u128,isize,i8,i16,i32,i64,i128 => "z.int()", "z.ZodInt", default "0");
 macro_rules! float {
     ($($ty:ty),*) => { $(impl TS for $ty {
         fn visit_ts(v: &mut TSVisitor) {
@@ -1315,6 +1339,7 @@ macro_rules! impl_ts_map {
     ($($ty:ty $(where [$($bounds:tt)*])?),+ $(,)?) => { $(
         impl<K, V> $crate::ts::TS for $ty
         where V: $crate::ts::TS, $($($bounds)*,)? {
+            const DEFAULT: Option<&'static str> = Some("{}");
             fn visit_ts(visitor: &mut $crate::ts::TSVisitor) {
                 let value = visitor.capture(|visitor| visitor.append_type::<V>());
                 visitor.push(value.record());
@@ -1329,6 +1354,7 @@ macro_rules! impl_ts_array {
     ($($ty:ty $(where [$($bounds:tt)*])?),+ $(,)?) => { $(
         impl<T> $crate::ts::TS for $ty
         where T: $crate::ts::TS, $($($bounds)*,)? {
+            const DEFAULT: Option<&'static str> = Some("[]");
             fn visit_ts(visitor: &mut $crate::ts::TSVisitor) {
                 let element = visitor.capture(|visitor| visitor.append_type::<T>());
                 visitor.push(element.array());
@@ -1384,6 +1410,7 @@ macro_rules! pointer {
     ($($ty:ident),*) => { $(
         impl<T: TS + ?Sized> TS for $ty<T> {
             const IS_OPTION: bool = T::IS_OPTION;
+            const DEFAULT: Option<&'static str> = T::DEFAULT;
             fn visit_ts(visitor: &mut TSVisitor) { visitor.append_type::<T>(); }
         }
     )* };
@@ -1397,6 +1424,7 @@ impl<T: TS + ?Sized> TS for &T {
 }
 impl<T: TS + std::borrow::ToOwned + ?Sized> TS for std::borrow::Cow<'_, T> {
     const IS_OPTION: bool = T::IS_OPTION;
+    const DEFAULT: Option<&'static str> = T::DEFAULT;
     fn visit_ts(v: &mut TSVisitor) {
         v.append_type::<T>();
     }
@@ -1404,6 +1432,7 @@ impl<T: TS + std::borrow::ToOwned + ?Sized> TS for std::borrow::Cow<'_, T> {
 
 impl<T: TS> TS for Option<T> {
     const IS_OPTION: bool = true;
+    const DEFAULT: Option<&'static str> = Some("null");
     fn visit_ts(visitor: &mut TSVisitor) {
         let inner = visitor.capture(|visitor| visitor.append_type::<T>());
         visitor.push(inner.nullable());
