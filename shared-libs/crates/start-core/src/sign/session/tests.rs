@@ -770,3 +770,16 @@ async fn a_retried_initiation_is_fresh_and_signed_at_the_given_time() {
     assert_eq!(peer, signer(1).verifying_key().await.unwrap());
     retried.finish(&response).await.unwrap();
 }
+
+#[test]
+fn a_retry_answer_matches_the_browser_golden() {
+    assert_eq!(
+        retry(1_900_000_000).unwrap(),
+        hex::decode(concat!(
+            "a36870726f746f636f6c7153746172742d5250432d53657373696f6e",
+            "6776657273696f6e016568656c6c6fa264726f6c6565726574727969",
+            "74696d657374616d701a713fb300",
+        ))
+        .unwrap()
+    );
+}
