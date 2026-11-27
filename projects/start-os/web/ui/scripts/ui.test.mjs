@@ -4832,7 +4832,9 @@ test('installed-service advisories span connected registries without waiting for
     [secondary]: index,
   })
   const found = f.watch(f.service.packageVulnerabilities$('example', '1.0.0:0'))
-  const patched = f.watch(f.service.packageVulnerabilities$('example', '2.0.0:0'))
+  const patched = f.watch(
+    f.service.packageVulnerabilities$('example', '2.0.0:0'),
+  )
   assert.equal(found.at(-1).length, 1)
   assert.equal(found.at(-1)[0].id, 'CVE-1')
   assert.equal(found.at(-1)[0].stopRecommended, true)

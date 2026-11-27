@@ -722,12 +722,9 @@ fn refresh_trusted_vulnerabilities(
     db: &mut DatabaseModel,
     device: &DeviceInfo,
 ) -> Result<(), Error> {
-    for url in db.as_public().as_registry_indexes().keys()? {
-        let ids = db
-            .as_public()
-            .as_registry_indexes()
-            .as_idx(&url)
-            .unwrap()
+    let mut registries = Vec::new();
+    for (url, index) in db.as_public().as_registry_indexes().as_entries()? {
+        let ids: BTreeSet<PackageId> = index
             .as_package()
             .as_packages()
             .keys()?
@@ -741,6 +738,9 @@ fn refresh_trusted_vulnerabilities(
                     .unwrap_or_default(),
             )
             .collect();
+        registries.push((url, ids));
+    }
+    for (url, ids) in registries {
         refresh_selections(db, &url, ids, device)?;
     }
     let previous = db

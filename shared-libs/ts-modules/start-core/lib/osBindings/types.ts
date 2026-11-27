@@ -1036,12 +1036,12 @@ export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
 
 /**
- * A package's releases this server can run, by version; release data stays in the saved index.
+ * Runnable releases and trusted advisories; advisories survive an empty release selection.
  */
 export type PackageSelection = z.output<typeof schemas.PackageSelection>
 
 /**
- * A package's releases this server can run, by version; release data stays in the saved index.
+ * Runnable releases and trusted advisories; advisories survive an empty release selection.
  */
 export type PackageSelectionInput = z.input<typeof schemas.PackageSelection>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>

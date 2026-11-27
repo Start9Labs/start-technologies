@@ -3962,7 +3962,7 @@ export const PackageInfoShort: z.ZodObject<{
 })
 
 /**
- * A package's releases this server can run, by version; release data stays in the saved index.
+ * Runnable releases and trusted advisories; advisories survive an empty release selection.
  */
 export const PackageSelection: z.ZodObject<{
   /**
@@ -4026,7 +4026,7 @@ export const PackageSelection: z.ZodObject<{
 }).meta({
   id: 'PackageSelection',
   description:
-    "A package's releases this server can run, by version; release data stays in the saved index.",
+    'Runnable releases and trusted advisories; advisories survive an empty release selection.',
 })
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString

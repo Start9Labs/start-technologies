@@ -411,15 +411,7 @@ impl CallRemote<RegistryContext> for CliContext {
         if let Some(auth) = target.local_auth {
             headers.insert(AUTHORIZATION, auth);
         }
-        call_cli(
-            self,
-            &target.url,
-            headers,
-            &target.address,
-            method,
-            params,
-        )
-        .await
+        call_cli(self, &target.url, headers, &target.address, method, params).await
     }
 }
 
