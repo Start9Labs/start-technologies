@@ -14,7 +14,7 @@ use crate::util::io::Counter;
 /// `ctr` in bytes, ticking per 1 GiB chunk within large files. Not atomic
 /// against concurrent writers: a file written mid-clone may be captured torn,
 /// and one truncated mid-clone fails the clone (callers degrade to
-/// no-backup) — same exposure as the `cp --reflink` this replaces.
+/// no-backup).
 #[cfg(target_os = "linux")]
 pub async fn clone_tree(
     src: impl AsRef<Path>,
@@ -23,7 +23,7 @@ pub async fn clone_tree(
 ) -> Result<(), Error> {
     let src = src.as_ref().to_owned();
     let dst = dst.as_ref().to_owned();
-    tokio::task::spawn_blocking(move || {
+    crate::util::cleanup::run_filesystem_blocking(move || {
         linux::Cloner {
             ctr,
             hardlinks: std::collections::HashMap::new(),

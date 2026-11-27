@@ -16,6 +16,7 @@ pub type SingleOrBatchRpcRequest = yajrc::SingleOrBatchRpcRequest<GenericRpcMeth
 pub mod http;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod requests;
 mod response;
 mod rpcstream;
 pub mod socket;

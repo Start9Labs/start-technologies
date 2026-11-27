@@ -6,8 +6,7 @@ use clap::Parser;
 use patch_db::HasModel;
 use rpc_toolkit::HandlerArgs;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, watch};
-use tokio::task;
+use tokio::sync::{oneshot, watch};
 use tracing::instrument;
 use zeroize::Zeroizing;
 
@@ -19,9 +18,7 @@ use crate::disk::mount::filesystem::{ReadWrite, backupfs};
 use crate::disk::mount::guard::GenericMountGuard;
 use crate::notifications::{NotificationLevel, notify};
 use crate::prelude::*;
-use crate::progress::FullProgress;
-use crate::shutdown::Shutdown;
-use crate::util::future::NonDetachingJoinHandle;
+use crate::progress::{FullProgress, run_with_progress_sync};
 
 /// Lifecycle of a daemon-owned conversion attempt.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, VisitVariants)]
@@ -162,72 +159,90 @@ pub async fn start(
         password,
     }: ConvertParams,
 ) -> Result<(), Error> {
-    let shutdown = ctx.shutdown.subscribe();
     let password = Zeroizing::new(password.decrypt(&ctx)?);
-    let fs = target_id.clone().load(&ctx.db.peek().await)?;
-    let label = fs.name.clone();
-    let guard = fs.mount(ReadWrite).await?;
-    let _disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
-    let prepared =
-        BackupMountGuard::<TargetMount>::prepare_conversion(guard.path(), &server_id, &password)
-            .await;
-    let (data, key) = match prepared {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            guard.unmount().await.log_err();
-            return Err(error);
-        }
-    };
-    drop(password);
-    let progress = backupfs::ConversionProgressSink::new();
-    let initial = progress.tracker().snapshot();
-    let reservation = ctx
-        .db
-        .mutate(|db| {
-            let status = db.as_public().as_server_info().as_status_info();
-            if status.as_shutting_down().de()? || status.as_restarting().de()? {
-                return Err(Error::new(
-                    eyre!("{}", t!("backup.conversion.interrupted")),
-                    ErrorKind::InvalidRequest,
-                ));
-            }
-            let mut active = jobs(db)?;
-            reserve(
-                &mut active,
-                target_id.clone(),
-                server_id.clone(),
-                initial.clone(),
-            )?;
-            db.as_public_mut()
-                .as_server_info_mut()
-                .as_status_info_mut()
-                .as_backup_conversions_mut()
-                .ser(&active)?;
-            Ok(())
-        })
-        .await
-        .result;
-    if let Err(error) = reservation {
-        guard.unmount().await.log_err();
-        return Err(error);
-    }
-    let conversion = PreparedConversion {
-        target_id,
-        server_id,
-        label,
-        guard,
-        data,
-        key,
-    };
     let db = ctx.db.clone();
+    let shutdown = ctx.shutdown.clone();
     let disk_updates = ctx.disk_updates.clone();
-    task::spawn(async move {
-        conversion
-            .run(db, progress, shutdown, disk_updates)
-            .await
-            .log_err()
-    });
-    Ok(())
+    let (reply, result) = oneshot::channel();
+    ctx.spawn_background(async move {
+        let prepared = async {
+            let fs = target_id.clone().load(&db.peek().await)?;
+            let label = fs.name.clone();
+            let guard = fs.mount(ReadWrite).await?;
+            let _disk_refresh = target_id.refresh_disks_on_drop(disk_updates.clone());
+            let prepared = BackupMountGuard::<TargetMount>::prepare_conversion(
+                guard.path(),
+                &server_id,
+                &password,
+            )
+            .await;
+            let (data, key) = match prepared {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    guard.unmount().await.log_err();
+                    return Err(error);
+                }
+            };
+            drop(password);
+            let progress = backupfs::ConversionProgressSink::new();
+            let initial = progress.tracker().snapshot();
+            let reservation = db
+                .mutate(|db| {
+                    if shutdown.peek(|(sender, _)| sender.is_none()) {
+                        return Err(Error::new(
+                            eyre!(t!("backup.conversion.interrupted")),
+                            ErrorKind::InvalidRequest,
+                        ));
+                    }
+                    let mut active = jobs(db)?;
+                    reserve(
+                        &mut active,
+                        target_id.clone(),
+                        server_id.clone(),
+                        initial.clone(),
+                    )?;
+                    db.as_public_mut()
+                        .as_server_info_mut()
+                        .as_status_info_mut()
+                        .as_backup_conversions_mut()
+                        .ser(&active)?;
+                    Ok(())
+                })
+                .await
+                .result;
+            if let Err(error) = reservation {
+                guard.unmount().await.log_err();
+                return Err(error);
+            }
+            Ok((
+                PreparedConversion {
+                    target_id,
+                    server_id,
+                    label,
+                    guard,
+                    data,
+                    key,
+                },
+                progress,
+            ))
+        }
+        .await;
+        match prepared {
+            Ok((conversion, progress)) => {
+                let _ = reply.send(Ok(()));
+                conversion.run(db, progress, disk_updates).await.log_err();
+            }
+            Err(error) => {
+                let _ = reply.send(Err(error));
+            }
+        }
+    })?;
+    result.await.map_err(|_| {
+        Error::new(
+            eyre!(t!("backup.conversion.interrupted")),
+            ErrorKind::InvalidRequest,
+        )
+    })?
 }
 
 struct PreparedConversion<G> {
@@ -244,7 +259,6 @@ impl<G: GenericMountGuard> PreparedConversion<G> {
         self,
         db: TypedPatchDb<Database>,
         mut progress: backupfs::ConversionProgressSink,
-        mut shutdown: broadcast::Receiver<Option<Shutdown>>,
         disk_updates: watch::Sender<()>,
     ) -> Result<(), Error> {
         let Self {
@@ -258,28 +272,25 @@ impl<G: GenericMountGuard> PreparedConversion<G> {
         let _disk_refresh = target_id.refresh_disks_on_drop(disk_updates);
         let target_for_progress = target_id.to_string();
         let server_for_progress = server_id.clone();
-        let progress_sync =
-            NonDetachingJoinHandle::from(task::spawn(progress.tracker().sync_to_db(
-                db.clone(),
-                move |db| {
-                    Some(
-                        db.as_public_mut()
-                            .as_server_info_mut()
-                            .as_status_info_mut()
-                            .as_backup_conversions_mut()
-                            .as_idx_mut(&target_for_progress)?
-                            .as_idx_mut(&server_for_progress)?
-                            .as_progress_mut(),
-                    )
-                },
-                Some(Duration::from_millis(300)),
-            )));
-        let result = tokio::select! {
-            result = backupfs::convert(&data, &key, &mut progress) => result,
-            _ = shutdown.recv() => Err(Error::new(eyre!("{}", t!("backup.conversion.interrupted")), ErrorKind::Backup)),
-        };
+        let progress_sync = progress.tracker().sync_to_db(
+            db.clone(),
+            move |db| {
+                Some(
+                    db.as_public_mut()
+                        .as_server_info_mut()
+                        .as_status_info_mut()
+                        .as_backup_conversions_mut()
+                        .as_idx_mut(&target_for_progress)?
+                        .as_idx_mut(&server_for_progress)?
+                        .as_progress_mut(),
+                )
+            },
+            Some(Duration::from_millis(300)),
+        );
+        let result =
+            run_with_progress_sync(backupfs::convert(&data, &key, &mut progress), progress_sync)
+                .await;
         drop(key);
-        let _ = progress_sync.wait_for_abort().await;
         let result = match guard.unmount().await {
             Ok(()) => result,
             Err(error) => result.and(Err(error)),

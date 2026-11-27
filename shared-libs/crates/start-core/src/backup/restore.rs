@@ -111,7 +111,7 @@ pub async fn restore_packages_rpc(
 
     let tasks = restore_packages(&ctx, backup_guard, ids).await?;
 
-    tokio::spawn(async move {
+    ctx.spawn_background(async move {
         stream::iter(tasks)
             .for_each_concurrent(5, |(id, res)| async move {
                 match async { res.await?.await }.await {
@@ -126,7 +126,7 @@ pub async fn restore_packages_rpc(
                 }
             })
             .await;
-    });
+    })?;
 
     Ok(())
 }

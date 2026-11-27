@@ -8452,15 +8452,6 @@
     }
   },
   {
-    "name": "server.rebuild",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {},
-      "additionalProperties": true
-    }
-  },
-  {
     "name": "server.registries.add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8615,7 +8606,7 @@
           "properties": {
             "wait": {
               "default": false,
-              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+              "description": "Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.",
               "type": "boolean"
             }
           },
@@ -8626,7 +8617,7 @@
       "properties": {
         "wait": {
           "default": false,
-          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+          "description": "Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.",
           "type": "boolean"
         }
       },
@@ -9011,7 +9002,7 @@
           "properties": {
             "wait": {
               "default": false,
-              "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+              "description": "Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.",
               "type": "boolean"
             }
           },
@@ -9022,7 +9013,7 @@
       "properties": {
         "wait": {
           "default": false,
-          "description": "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+          "description": "Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.",
           "type": "boolean"
         }
       },

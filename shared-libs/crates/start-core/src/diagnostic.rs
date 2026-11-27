@@ -1,17 +1,14 @@
 use std::sync::Arc;
 
 use clap::Parser;
-use itertools::Itertools;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{
-    CallRemoteHandler, Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn,
-    from_fn_async,
+    CallRemoteHandler, Context, Empty, HandlerExt, ParentHandler, from_fn, from_fn_async,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, DiagnosticContext, RpcContext};
 use crate::disk::repair;
-use crate::init::SYSTEM_REBUILD_PATH;
 use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::shutdown::Shutdown;
@@ -103,18 +100,6 @@ pub fn diagnostic<C: Context>() -> ParentHandler<C> {
             disk::<C>().with_about("about.command-remove-disk-filesystem"),
         )
         .subcommand(
-            "rebuild",
-            from_fn_async(rebuild)
-                .with_metadata("authenticated", Value::Bool(true))
-                .no_cli(),
-        )
-        .subcommand(
-            "rebuild",
-            from_fn_async(cli_rebuild)
-                .no_display()
-                .with_about("about.teardown-rebuild-containers"),
-        )
-        .subcommand(
             "update",
             from_fn_async(update::update_system)
                 .with_metadata("authenticated", Value::Bool(true))
@@ -141,29 +126,6 @@ pub fn restart(ctx: DiagnosticContext) -> Result<(), Error> {
         })
         .map_err(|_| eyre!("receiver dropped"))
         .log_err();
-    Ok(())
-}
-pub async fn rebuild(ctx: DiagnosticContext, _: DiagnosticPasswordParams) -> Result<(), Error> {
-    tokio::fs::write(SYSTEM_REBUILD_PATH, b"").await?;
-    restart(ctx)
-}
-
-async fn cli_rebuild(
-    HandlerArgs {
-        context,
-        parent_method,
-        method,
-        raw_params,
-        ..
-    }: HandlerArgs<CliContext, DiagnosticPasswordParams>,
-) -> Result<(), Error> {
-    let method = parent_method.into_iter().chain(method).join(".");
-    call_with_password(raw_params, prompt_server_password, |params| async {
-        Ok(context
-            .call_remote::<DiagnosticContext>(&method, params)
-            .await?)
-    })
-    .await?;
     Ok(())
 }
 
@@ -316,12 +278,12 @@ mod tests {
     #[test]
     fn diagnostic_mode_authenticates_changes_and_keeps_reads_public() {
         let diagnostic = DiagnosticContext::api();
+        assert!(diagnostic.method_from_dots("diagnostic.rebuild").is_none());
         for (method, authenticated) in [
             ("diagnostic.error", false),
             ("diagnostic.logs", false),
             ("diagnostic.kernel-logs", false),
             ("diagnostic.restart", false),
-            ("diagnostic.rebuild", true),
             ("diagnostic.update", true),
             ("diagnostic.disk.forget", true),
             ("diagnostic.disk.repair", true),

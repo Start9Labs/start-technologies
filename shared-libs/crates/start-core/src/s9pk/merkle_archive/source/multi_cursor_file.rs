@@ -17,7 +17,7 @@ use crate::util::io::open_file;
 fn path_from_fd(fd: RawFd) -> Result<PathBuf, Error> {
     #[cfg(target_os = "linux")]
     let path = Path::new("/proc/self/fd").join(fd.to_string());
-    #[cfg(target_os = "macos")] // here be dragons
+    #[cfg(target_os = "macos")]
     let path = unsafe {
         let mut buf = [0u8; libc::PATH_MAX as usize];
         if libc::fcntl(fd, libc::F_GETPATH, buf.as_mut_ptr().cast::<libc::c_char>()) == -1 {
@@ -59,7 +59,9 @@ impl MultiCursorFile {
     }
     pub async fn blake3_mmap(&self) -> Result<blake3::Hash, Error> {
         let path = self.path()?;
-        tokio::task::spawn_blocking(move || {
+        let file = self.file.clone();
+        crate::util::cleanup::run_filesystem_blocking(move || {
+            let _file = file;
             let mut hasher = blake3::Hasher::new();
             hasher.update_mmap_rayon(path)?;
             Ok(hasher.finalize())

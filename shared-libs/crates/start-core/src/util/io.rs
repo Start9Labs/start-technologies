@@ -30,6 +30,7 @@ use tokio::time::{Instant, Sleep};
 
 use crate::prelude::*;
 use crate::util::FromStrParser;
+use crate::util::cleanup::spawn_filesystem_cleanup;
 use crate::util::future::NonDetachingJoinHandle;
 use crate::util::sync::SyncMutex;
 
@@ -739,6 +740,35 @@ pub(crate) fn dir_copy_excluding<'a, P0: AsRef<Path>, P1: AsRef<Path>>(
     )
 }
 
+async fn preserve_copy_metadata(
+    file: std::fs::File,
+    metadata: std::fs::Metadata,
+    path: PathBuf,
+) -> Result<(), crate::Error> {
+    crate::util::cleanup::run_filesystem_blocking(move || {
+        nix::unistd::fchown(
+            &file,
+            Some(Uid::from_raw(metadata.uid())),
+            Some(Gid::from_raw(metadata.gid())),
+        )
+        .with_ctx(|_| {
+            (
+                crate::ErrorKind::Filesystem,
+                format!("chown {}", path.display()),
+            )
+        })?;
+        // Ownership changes can clear set-ID bits.
+        file.set_permissions(metadata.permissions()).with_ctx(|_| {
+            (
+                crate::ErrorKind::Filesystem,
+                format!("chmod {}", path.display()),
+            )
+        })
+    })
+    .await
+    .with_kind(crate::ErrorKind::Unknown)?
+}
+
 fn dir_copy_inner<'a>(
     src: PathBuf,
     dst: PathBuf,
@@ -762,22 +792,8 @@ fn dir_copy_inner<'a>(
                     format!("chmod {}", dst_path.display()),
                 )
             })?;
-        let tmp_dst_path = dst_path.to_owned();
-        tokio::task::spawn_blocking(move || {
-            nix::unistd::chown(
-                &tmp_dst_path,
-                Some(Uid::from_raw(m.uid())),
-                Some(Gid::from_raw(m.gid())),
-            )
-        })
-        .await
-        .with_kind(crate::ErrorKind::Unknown)?
-        .with_ctx(|_| {
-            (
-                crate::ErrorKind::Filesystem,
-                format!("chown {}", dst_path.display()),
-            )
-        })?;
+        let directory = open_file(dst_path).await?.into_std().await;
+        preserve_copy_metadata(directory, m, dst_path.to_owned()).await?;
         tokio_stream::wrappers::ReadDirStream::new(tokio::fs::read_dir(&src).await?)
             .map_err(|e| crate::Error::new(e, crate::ErrorKind::Filesystem))
             .try_for_each(|e| async move {
@@ -816,33 +832,7 @@ fn dir_copy_inner<'a>(
                     dst_file.flush().await?;
                     dst_file.shutdown().await?;
                     dst_file.sync_all().await?;
-                    drop(dst_file);
-                    let permissions = m.permissions();
-                    let tmp_dst_path = dst_path.clone();
-                    tokio::task::spawn_blocking(move || {
-                        nix::unistd::chown(
-                            &tmp_dst_path,
-                            Some(Uid::from_raw(m.uid())),
-                            Some(Gid::from_raw(m.gid())),
-                        )
-                    })
-                    .await
-                    .with_kind(crate::ErrorKind::Unknown)?
-                    .with_ctx(|_| {
-                        (
-                            crate::ErrorKind::Filesystem,
-                            format!("chown {}", dst_path.display()),
-                        )
-                    })?;
-                    // Creation and chown can clear source mode bits.
-                    tokio::fs::set_permissions(&dst_path, permissions)
-                        .await
-                        .with_ctx(|_| {
-                            (
-                                crate::ErrorKind::Filesystem,
-                                format!("chmod {}", dst_path.display()),
-                            )
-                        })?;
+                    preserve_copy_metadata(dst_file.into_std().await, m, dst_path).await?;
                 } else if m.is_dir() {
                     dir_copy_inner(src_path, dst_path, excluded, ctr).await?;
                 } else if m.file_type().is_symlink() {
@@ -1038,7 +1028,7 @@ impl Drop for TmpDir {
     fn drop(&mut self) {
         if self.path != PathBuf::new() && self.path.exists() {
             let path = std::mem::take(&mut self.path);
-            tokio::spawn(async move {
+            spawn_filesystem_cleanup(async move {
                 tokio::fs::remove_dir_all(&path).await.log_err();
             });
         }
@@ -2027,7 +2017,9 @@ impl Drop for AtomicFile {
         if let Some(file) = self.file.take() {
             drop(file);
             let path = std::mem::take(&mut self.tmp_path);
-            tokio::spawn(async move { tokio::fs::remove_file(path).await.log_err() });
+            spawn_filesystem_cleanup(async move {
+                tokio::fs::remove_file(path).await.log_err();
+            });
         }
     }
 }
@@ -2308,7 +2300,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn dir_copy_preserves_file_modes() {
+    async fn dir_copy_preserves_file_and_directory_modes() {
         use std::os::unix::fs::PermissionsExt;
 
         let root = PathBuf::from(format!(
@@ -2334,7 +2326,28 @@ mod test {
                 .unwrap();
         }
 
+        let nested = src.join("nested");
+        tokio::fs::create_dir(&nested).await.unwrap();
+        tokio::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o2750))
+            .await
+            .unwrap();
+        tokio::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o3751))
+            .await
+            .unwrap();
+
         dir_copy(&src, &dst, None).await.unwrap();
+        assert_eq!(
+            tokio::fs::metadata(&dst).await.unwrap().mode() & 0o7777,
+            0o2750
+        );
+        assert_eq!(
+            tokio::fs::metadata(dst.join("nested"))
+                .await
+                .unwrap()
+                .mode()
+                & 0o7777,
+            0o3751
+        );
 
         for (name, mode) in modes {
             let copied = tokio::fs::metadata(dst.join(name)).await.unwrap();
@@ -2342,6 +2355,29 @@ mod test {
         }
 
         tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn copy_metadata_targets_the_retained_file_not_a_replacement_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        std::fs::write(&source, b"source").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let target = directory.path().join("target");
+        let file = std::fs::File::create(&target).unwrap();
+        let retained = directory.path().join("retained");
+        std::fs::rename(&target, &retained).unwrap();
+        std::fs::write(&target, b"replacement").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        preserve_copy_metadata(file, std::fs::metadata(source).unwrap(), target.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::metadata(retained).unwrap().mode() & 0o7777, 0o640);
+        assert_eq!(std::fs::metadata(target).unwrap().mode() & 0o7777, 0o600);
     }
 
     #[tokio::test]

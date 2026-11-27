@@ -656,13 +656,11 @@ pub async fn delete_legacy(
     }
     let db = ctx.db.clone();
     let disk_refresh = target_id.refresh_disks_on_drop(ctx.disk_updates.clone());
-    tokio::task::spawn(async move {
+    ctx.spawn_background(async move {
         let _disk_refresh = disk_refresh;
         let result = trash::sweep_until_clear(&guard).await;
         guard.unmount().await.log_err();
         catalog::refresh(&db, &target_id).await.log_err();
-        // `mutate` needs an unwind-safe closure, which eyre errors are not —
-        // render the notification before it, not inside
         let (level, title, message) = match &result {
             Ok(()) => (
                 NotificationLevel::Success,
@@ -684,7 +682,7 @@ pub async fn delete_legacy(
             .await
             .result
             .log_err();
-    });
+    })?;
     Ok(())
 }
 

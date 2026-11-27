@@ -272,7 +272,7 @@ async fn revocation_closes_legacy_update_progress_while_update_is_active() {
                     .get_ws_handler(&guid)
                     .await
                     .unwrap()
-                    .on_upgrade(upgrade, guid)
+                    .on_upgrade(upgrade, guid, None)
             }
         }),
     );

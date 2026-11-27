@@ -216,17 +216,8 @@ fn mount_failure(error: MountSourceError) -> Result<SharedVolumeMountResult, Err
     }
 }
 
-/// Owns authorization, placeholder installation and data attachment through cancellation.
+/// The effect server retains this call through peer disconnect and `uninit`.
 pub async fn mount_shared_volume(
-    context: EffectContext,
-    params: MountSharedVolumeParams,
-) -> Result<SharedVolumeMountResult, Error> {
-    tokio::spawn(mount_shared_volume_owned(context, params))
-        .await
-        .with_kind(ErrorKind::Cancelled)?
-}
-
-async fn mount_shared_volume_owned(
     context: EffectContext,
     MountSharedVolumeParams {
         id,

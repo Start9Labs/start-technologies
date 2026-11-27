@@ -274,14 +274,16 @@ pub trait HandlerFor<Context: crate::Context>: HandlerRequires {
     ) -> impl Future<Output = Result<Self::Ok, Self::Err>> + Send + 'a {
         async move {
             let s = self.clone();
-            if let Some(rt) = handle_args.context.runtime() {
-                rt.spawn_blocking(move || s.handle_sync(handle_args)).await
-            } else {
-                tokio::runtime::Handle::current()
-                    .spawn_blocking(move || s.handle_sync(handle_args))
-                    .await
-            }
-            .unwrap()
+            let runtime = handle_args.context.runtime();
+            let call =
+                crate::server::requests::retain_current_request(move || s.handle_sync(handle_args));
+            let handle = match runtime {
+                Some(rt) => rt.spawn_blocking(call),
+                None => tokio::runtime::Handle::current().spawn_blocking(call),
+            };
+            tokio_util::task::AbortOnDropHandle::new(handle)
+                .await
+                .unwrap()
         }
     }
     #[allow(unused_variables)]

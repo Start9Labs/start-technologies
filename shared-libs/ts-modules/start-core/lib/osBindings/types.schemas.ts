@@ -1776,25 +1776,21 @@ export const SharedVolumeUnavailableReason: z.ZodEnum<{
 })
 export const ShutdownParams: z.ZodObject<{
   /**
-   * Block until graceful teardown completes (default over the CLI; the
-   * frontend omits this and gets an immediate reply). Cleared with
-   * `--nowait`. The wait can't outlive the webserver teardown that follows
-   * container shutdown, so the connection drops once services are stopped.
+   * Waits for service teardown and owned cleanup, including logged service failures.
+   * Defaults to true over the CLI (`--nowait` disables it) and false over RPC.
    */
   wait: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   /**
-   * Block until graceful teardown completes (default over the CLI; the
-   * frontend omits this and gets an immediate reply). Cleared with
-   * `--nowait`. The wait can't outlive the webserver teardown that follows
-   * container shutdown, so the connection drops once services are stopped.
+   * Waits for service teardown and owned cleanup, including logged service failures.
+   * Defaults to true over the CLI (`--nowait` disables it) and false over RPC.
    */
   wait: z
     .boolean()
     .default(() => false)
     .meta({
       description:
-        "Block until graceful teardown completes (default over the CLI; the\nfrontend omits this and gets an immediate reply). Cleared with\n`--nowait`. The wait can't outlive the webserver teardown that follows\ncontainer shutdown, so the connection drops once services are stopped.",
+        'Waits for service teardown and owned cleanup, including logged service failures.\nDefaults to true over the CLI (`--nowait` disables it) and false over RPC.',
     }),
 }).meta({
   id: 'ShutdownParams',

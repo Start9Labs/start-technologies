@@ -463,14 +463,6 @@ pub fn server<C: Context>() -> ParentHandler<C> {
                 .with_call_remote::<CliContext>(),
         )
         .subcommand(
-            "rebuild",
-            from_fn_async(shutdown::rebuild)
-                .with_metadata(EFFECT, Effect::Write.into())
-                .no_display()
-                .with_about("about.teardown-rebuild-containers")
-                .with_call_remote::<CliContext>(),
-        )
-        .subcommand(
             "update",
             from_fn_async(update::update_system)
                 .with_metadata(EFFECT, Effect::Destructive.into())

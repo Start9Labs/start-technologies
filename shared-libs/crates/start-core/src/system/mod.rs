@@ -10,7 +10,6 @@ use imbl_value::InternedString;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::process::Command;
-use tokio::sync::broadcast::Receiver;
 use tracing::instrument;
 
 use crate::bins::set_locale;
@@ -23,7 +22,6 @@ use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::registry::device_info::DeviceInfo;
 use crate::rpc_continuations::{Guid, RpcContinuation, WebSocketPolicy};
-use crate::shutdown::Shutdown;
 use crate::util::Invoke;
 use crate::util::cpupower::{
     Epp, Governor, current_epp, get_available_epps, get_available_governors, set_epp, set_governor,
@@ -725,11 +723,8 @@ pub async fn metrics_follow(
     })
 }
 
-pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
-    cache: &Watch<Option<Metrics>>,
-    db: &TypedPatchDb<Database>,
-    mut mk_shutdown: F,
-) {
+/// The task owner must cancel and join before storage teardown.
+pub async fn launch_metrics_task(cache: &Watch<Option<Metrics>>, db: &TypedPatchDb<Database>) {
     let init_temp = match temperature::read().await {
         Ok(a) => Some(a),
         Err(e) => {
@@ -832,20 +827,16 @@ pub async fn launch_metrics_task<F: FnMut() -> Receiver<Option<Shutdown>>>(
 
     let mut task_vec = Vec::new();
     if should_launch_temp_task {
-        task_vec.push(launch_temp_task(cache, db, mk_shutdown()).boxed());
+        task_vec.push(launch_temp_task(cache, db).boxed());
     }
-    task_vec.push(launch_cpu_task(cache, proc_stat, mk_shutdown()).boxed());
-    task_vec.push(launch_mem_task(cache, mk_shutdown()).boxed());
-    task_vec.push(launch_disk_task(cache, db, mk_shutdown()).boxed());
+    task_vec.push(launch_cpu_task(cache, proc_stat).boxed());
+    task_vec.push(launch_mem_task(cache).boxed());
+    task_vec.push(launch_disk_task(cache, db).boxed());
 
     futures::future::join_all(task_vec).await;
 }
 
-async fn launch_temp_task(
-    cache: &Watch<Option<Metrics>>,
-    db: &TypedPatchDb<Database>,
-    mut shutdown: Receiver<Option<Shutdown>>,
-) {
+async fn launch_temp_task(cache: &Watch<Option<Metrics>>, db: &TypedPatchDb<Database>) {
     let mut thermal_watch = temperature::ThermalWatch::default();
     loop {
         let temperatures = match temperature::read().await {
@@ -872,20 +863,12 @@ async fn launch_temp_task(
                 false
             }
         });
-        tokio::select! {
-            _ = shutdown.recv() => return,
-            _ = tokio::time::sleep(tokio::time::Duration::from_secs(4)) => (),
-        }
+        tokio::time::sleep(Duration::from_secs(4)).await;
     }
 }
 
-async fn launch_cpu_task(
-    cache: &Watch<Option<Metrics>>,
-    mut init: ProcStat,
-    mut shutdown: Receiver<Option<Shutdown>>,
-) {
+async fn launch_cpu_task(cache: &Watch<Option<Metrics>>, mut init: ProcStat) {
     loop {
-        // read /proc/stat, diff against previous metrics, compute cpu load
         match get_cpu_info(&mut init).await {
             Ok(info) => {
                 cache.send_modify(|c| c.as_mut().unwrap().cpu = info);
@@ -901,16 +884,12 @@ async fn launch_cpu_task(
                 tracing::debug!("{:?}", e);
             }
         }
-        tokio::select! {
-            _ = shutdown.recv() => return,
-            _ = tokio::time::sleep(tokio::time::Duration::from_secs(4)) => (),
-        }
+        tokio::time::sleep(Duration::from_secs(4)).await;
     }
 }
 
-async fn launch_mem_task(cache: &Watch<Option<Metrics>>, mut shutdown: Receiver<Option<Shutdown>>) {
+async fn launch_mem_task(cache: &Watch<Option<Metrics>>) {
     loop {
-        // read /proc/meminfo
         match get_mem_info().await {
             Ok(a) => {
                 cache.send_modify(|c| c.as_mut().unwrap().memory = a);
@@ -926,17 +905,10 @@ async fn launch_mem_task(cache: &Watch<Option<Metrics>>, mut shutdown: Receiver<
                 tracing::debug!("{:?}", e);
             }
         }
-        tokio::select! {
-            _ = shutdown.recv() => return,
-            _ = tokio::time::sleep(tokio::time::Duration::from_secs(4)) => (),
-        }
+        tokio::time::sleep(Duration::from_secs(4)).await;
     }
 }
-async fn launch_disk_task(
-    cache: &Watch<Option<Metrics>>,
-    db: &TypedPatchDb<Database>,
-    mut shutdown: Receiver<Option<Shutdown>>,
-) {
+async fn launch_disk_task(cache: &Watch<Option<Metrics>>, db: &TypedPatchDb<Database>) {
     let mut disk_health = disk_health::DiskHealth::default();
     loop {
         match get_disk_info().await {
@@ -962,14 +934,8 @@ async fn launch_disk_task(
                 tracing::debug!("{:?}", e);
             }
         }
-        tokio::select! {
-            _ = shutdown.recv() => return,
-            _ = disk_health.check(db) => (),
-        }
-        tokio::select! {
-            _ = shutdown.recv() => return,
-            _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => (),
-        }
+        disk_health.check(db).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
     }
 }
 

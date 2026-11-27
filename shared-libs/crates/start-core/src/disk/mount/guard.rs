@@ -13,6 +13,7 @@ use tracing::instrument;
 use super::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
 use super::util::{is_mountpoint, unmount};
 use crate::prelude::{eyre, t};
+use crate::util::cleanup::spawn_filesystem_cleanup;
 use crate::util::sync::SyncMutex;
 use crate::util::{Invoke, Never};
 use crate::{Error, ErrorKind, ResultExt};
@@ -217,10 +218,10 @@ impl Drop for MountGuard {
         if self.is_mounted() {
             let mountpoint = std::mem::take(&mut self.mountpoint);
             let slot = self.slot.take();
-            tokio::spawn(async move {
+            spawn_filesystem_cleanup(async move {
                 unmount_slot(&slot, &mountpoint, true, false)
                     .await
-                    .log_err()
+                    .log_err();
             });
         }
     }
@@ -460,6 +461,7 @@ impl<G: GenericMountGuard> GenericMountGuard for SubPath<G> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::cleanup::{FILESYSTEM_CLEANUP_TEST_LOCK, wait_for_filesystem_cleanup};
 
     struct UnmountedFilesystem {
         id: String,
@@ -710,6 +712,34 @@ mod tests {
         let (retired, _) = TmpMountGuard::retire_changed_devices().await;
         assert!(!retired.contains(&node));
         current.guard.mounted.store(false, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn dropped_mount_cleanup_waits_for_slot_retirement() {
+        let _serial = FILESYSTEM_CLEANUP_TEST_LOCK.lock().await;
+        wait_for_filesystem_cleanup().await;
+        let replacement = Arc::new(MountGuard {
+            mountpoint: PathBuf::from("/unused-mount"),
+            mounted: AtomicBool::new(false),
+            device: None,
+            slot: None,
+        });
+        let slot = Arc::new(Mutex::new((ReadOnly, Arc::downgrade(&replacement))));
+        let occupancy = slot.lock().await;
+        drop(MountGuard {
+            mountpoint: replacement.mountpoint.clone(),
+            mounted: AtomicBool::new(true),
+            device: None,
+            slot: Some(slot.clone()),
+        });
+        let teardown = wait_for_filesystem_cleanup();
+        tokio::pin!(teardown);
+        assert!(futures::poll!(&mut teardown).is_pending());
+
+        drop(occupancy);
+        tokio::time::timeout(std::time::Duration::from_secs(1), teardown)
+            .await
+            .expect("teardown did not join mount cleanup");
     }
 
     #[tokio::test]

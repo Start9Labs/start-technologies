@@ -170,7 +170,7 @@ async fn password_is_checked_only_without_another_credential() {
             name: "password",
         }));
         let result = auth
-            .process_rpc_request(&TestContext, json!({}), &mut request("diagnostic.rebuild"))
+            .process_rpc_request(&TestContext, json!({}), &mut request("diagnostic.update"))
             .await;
         assert_eq!(result.is_ok(), local);
         assert_eq!(password_attempts.load(Ordering::SeqCst), password_calls);

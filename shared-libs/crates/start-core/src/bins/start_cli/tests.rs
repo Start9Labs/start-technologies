@@ -10,6 +10,23 @@ const CHILD_ARGS: &str = "START_CLI_OUTPUT_ARGS";
 const BROKEN_STREAM: &str = "START_CLI_BROKEN_STREAM";
 
 #[test]
+fn rebuild_is_available_for_packages_but_not_the_server() {
+    let command = super::app().into_command();
+    for scope in ["server", "diagnostic"] {
+        let commands = command.find_subcommand(scope).unwrap();
+        assert!(commands.find_subcommand("rebuild").is_none());
+        assert!(commands.find_subcommand("restart").is_some());
+    }
+    assert!(
+        command
+            .find_subcommand("package")
+            .unwrap()
+            .find_subcommand("rebuild")
+            .is_some()
+    );
+}
+
+#[test]
 fn binding_reassign_port_accepts_server_and_package_targets() {
     for prefix in [
         vec!["start-cli", "server", "host", "binding"],

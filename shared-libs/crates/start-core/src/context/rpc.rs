@@ -16,7 +16,7 @@ use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{CallRemote, Context, Empty};
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
+use tokio::sync::{RwLock, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -28,8 +28,8 @@ use super::setup::CURRENT_SECRET;
 use crate::account::AccountInfo;
 use crate::auth::AuthKeys;
 use crate::context::config::ServerConfig;
-use crate::db::model::Database;
 use crate::db::model::package::PackageStateMatchModelRef;
+use crate::db::model::{Database, DatabaseModel};
 use crate::disk::OsPartitionInfo;
 use crate::disk::mount::filesystem::bind::Bind;
 use crate::disk::mount::filesystem::block_dev::BlockDev;
@@ -52,13 +52,72 @@ use crate::s9pk::merkle_archive::source::DynFileSource;
 use crate::service::ServiceMap;
 use crate::service::effects::callbacks::ServiceCallbacks;
 use crate::service::effects::subcontainer::NVIDIA_OVERLAY_PATH;
-use crate::shutdown::Shutdown;
+use crate::shutdown::{Shutdown, ShutdownSender};
 use crate::util::Invoke;
-use crate::util::future::NonDetachingJoinHandle;
+#[cfg(test)]
+use crate::util::cleanup::spawn_cleanup;
+use crate::util::cleanup::{
+    CleanupTasks, TaskHandles, drain_cleanup, retain_owned_task, wait_for_filesystem_cleanup,
+};
 use crate::util::io::{TmpDir, delete_file};
 use crate::util::lshw::LshwDevice;
 use crate::util::sync::{SyncMutex, SyncRwLock, Watch};
 use crate::{DATA_DIR, PLATFORM, PackageId};
+
+/// Retains power observations and reboot-required state while clearing abandoned backup work.
+fn reset_backup_status(db: &mut DatabaseModel) -> Result<(), Error> {
+    let status = db.as_public_mut().as_server_info_mut().as_status_info_mut();
+    status.as_backup_progress_mut().ser(&None)?;
+    status.as_backup_conversions_mut().ser(&Default::default())
+}
+
+/// Shutdown closes admission and joins every accepted task before service unmounts.
+pub(crate) type BackgroundTasks = SyncMutex<Option<TaskHandles>>;
+
+pub(crate) fn spawn_background<F: Future<Output = ()> + Send + 'static>(
+    tasks: &BackgroundTasks,
+    future: F,
+) -> Result<(), Error> {
+    // Job destructors may re-enter task admission.
+    let mut future = Some(future);
+    tasks.mutate(|tasks| {
+        let tasks = tasks.as_mut().ok_or_else(|| {
+            Error::new(
+                eyre!(t!("shutdown.already-shutting-down")),
+                ErrorKind::InvalidRequest,
+            )
+        })?;
+        retain_owned_task(tasks, tokio::spawn(future.take().unwrap()).into());
+        Ok(())
+    })
+}
+
+/// Result observers cannot cancel accepted work; daemon shutdown joins its destruction.
+pub(crate) fn spawn_background_result<T: Send + 'static>(
+    tasks: &BackgroundTasks,
+    future: impl Future<Output = T> + Send + 'static,
+) -> Result<oneshot::Receiver<T>, Error> {
+    let (reply, result) = oneshot::channel();
+    spawn_background(tasks, async move {
+        let _ = reply.send(future.await);
+    })?;
+    Ok(result)
+}
+
+async fn stop_background_tasks(tasks: &BackgroundTasks, cleanup: &CleanupTasks) {
+    let tasks = tasks.replace(None).expect("RPC tasks already stopped");
+    for task in &tasks {
+        task.abort();
+    }
+    for task in tasks {
+        if let Err(error) = task.await {
+            if !error.is_cancelled() {
+                tracing::error!("{error}");
+            }
+        }
+    }
+    drain_cleanup(cleanup).await;
+}
 
 pub struct RpcContextSeed {
     is_closed: AtomicBool,
@@ -82,7 +141,9 @@ pub struct RpcContextSeed {
     pub cancellable_installs: SyncMutex<BTreeMap<PackageId, oneshot::Sender<()>>>,
     pub installing_s9pks: SyncMutex<BTreeMap<PackageId, S9pk<DynFileSource>>>,
     pub metrics_cache: Watch<Option<crate::system::Metrics>>,
-    pub shutdown: broadcast::Sender<Option<Shutdown>>,
+    pub shutdown: Arc<ShutdownSender>,
+    /// Taken once by startd after setup hands over the RPC context.
+    pub shutdown_recv: SyncMutex<Option<oneshot::Receiver<Option<Shutdown>>>>,
     pub lxc_manager: Arc<LxcManager>,
     pub open_authed_continuations: OpenAuthedContinuations<Option<InternedString>>,
     pub rpc_continuations: RpcContinuations,
@@ -91,7 +152,8 @@ pub struct RpcContextSeed {
     pub current_secret: Arc<Jwk>,
     pub client: ReloadableHttpClient,
     pub start_time: Instant,
-    pub crons: SyncMutex<BTreeMap<Guid, NonDetachingJoinHandle<()>>>,
+    pub background_tasks: Arc<BackgroundTasks>,
+    pub cleanup_tasks: Arc<CleanupTasks>,
 }
 impl Drop for RpcContextSeed {
     fn drop(&mut self) {
@@ -293,7 +355,8 @@ impl RpcContext {
         }: InitRpcContextPhases,
     ) -> Result<Self, Error> {
         let socks_proxy = config.socks_listen.unwrap_or(DEFAULT_SOCKS_LISTEN);
-        let (shutdown, _) = tokio::sync::broadcast::channel(1);
+        let (shutdown_send, shutdown_recv) = oneshot::channel();
+        let shutdown = Arc::new(SyncMutex::new((Some(shutdown_send), false)));
 
         load_db.start();
         let db = if let Some(InitResult { net_ctrl, .. }) = &init_result {
@@ -313,10 +376,11 @@ impl RpcContext {
                     Ok(())
                 })?;
             }
-            Ok(())
+            reset_backup_status(db)
         })
         .await
         .result?;
+        crate::shutdown::publish_shutdown_status(&db, &shutdown).await;
         let peek = db.peek().await;
         let account = AccountInfo::load(&peek)?;
         load_db.complete();
@@ -468,44 +532,7 @@ impl RpcContext {
         let metrics_cache = Watch::<Option<crate::system::Metrics>>::new(None);
         let socks_proxy_url = format!("socks5h://{socks_proxy}");
 
-        let crons = SyncMutex::new(BTreeMap::new());
-
-        if !db
-            .peek()
-            .await
-            .as_public()
-            .as_server_info()
-            .as_ntp_synced()
-            .de()?
-        {
-            let db = db.clone();
-            crons.mutate(|c| {
-                c.insert(
-                    Guid::new(),
-                    tokio::spawn(async move {
-                        // a failed query must not kill this task — the sync
-                        // warning would stick for the rest of the boot
-                        while !check_time_is_synchronized()
-                            .await
-                            .log_err()
-                            .unwrap_or(false)
-                        {
-                            tokio::time::sleep(Duration::from_secs(30)).await;
-                        }
-                        db.mutate(|v| {
-                            v.as_public_mut()
-                                .as_server_info_mut()
-                                .as_ntp_synced_mut()
-                                .ser(&true)
-                        })
-                        .await
-                        .result
-                        .log_err();
-                    })
-                    .into(),
-                )
-            });
-        }
+        let background_tasks = Arc::new(SyncMutex::new(Some(Vec::new())));
 
         let (registry_refresh, registry_refreshes) = mpsc::channel(8);
         let seed = Arc::new(RpcContextSeed {
@@ -536,6 +563,7 @@ impl RpcContext {
             metrics_cache,
             rpc_continuations: RpcContinuations::new(),
             shutdown,
+            shutdown_recv: SyncMutex::new(Some(shutdown_recv)),
             lxc_manager: Arc::new(LxcManager::new()),
             open_authed_continuations: OpenAuthedContinuations::new(),
             wifi_manager: RwLock::new(None),
@@ -551,50 +579,88 @@ impl RpcContext {
             ),
             client: ReloadableHttpClient::new(socks_proxy_url)?,
             start_time: Instant::now(),
-            crons,
+            background_tasks,
+            cleanup_tasks: Arc::new(SyncMutex::new(Vec::new())),
         });
 
         let res = Self(seed.clone(), None);
-        crate::update::signer_files::initialize(&res.db).await?;
-        res.cleanup_and_initialize(cleanup_init).await?;
-        #[cfg(target_os = "linux")]
-        {
-            let weak = Arc::downgrade(&seed);
-            res.add_cron(crate::shared_volumes::watch::run(move || {
-                weak.upgrade().map(|seed| Self(seed, None))
-            }));
-        }
-        tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
-
-        crate::version::post_init(&res, run_migrations).await?;
-        let weak = Arc::downgrade(&seed);
-        let db = res.db.clone();
-        res.add_cron(crate::registry::sync::watch_registries(
-            db,
-            registry_refreshes,
-            move || weak.upgrade().map(|seed| Self(seed, None)),
-        ));
-        tracing::info!("{}", t!("context.rpc.completed-migrations"));
-        let weak = Arc::downgrade(&res.0);
-        let db = res.db.clone();
-        res.add_cron(async move {
-            let mut watch = db.watch("/private/push".parse().unwrap()).await;
-            loop {
-                let Some(seed) = weak.upgrade() else { break };
-                let client = seed.client.get();
-                drop(seed);
-                if crate::notifications::push::drain(&db, &client)
+        let initialized = async {
+            if !res
+                .db
+                .peek()
+                .await
+                .as_public()
+                .as_server_info()
+                .as_ntp_synced()
+                .de()?
+            {
+                let db = res.db.clone();
+                res.spawn_background(async move {
+                    while !check_time_is_synchronized()
+                        .await
+                        .log_err()
+                        .unwrap_or(false)
+                    {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                    db.mutate(|v| {
+                        v.as_public_mut()
+                            .as_server_info_mut()
+                            .as_ntp_synced_mut()
+                            .ser(&true)
+                    })
                     .await
-                    .is_err()
-                {
-                    tracing::warn!("{}", t!("notifications.push.queue-failed"));
-                }
-                tokio::select! {
-                    result = watch.changed() => if result.is_err() { break },
-                    _ = tokio::time::sleep(Duration::from_secs(60)) => {}
-                }
+                    .result
+                    .log_err();
+                })?;
             }
-        });
+            crate::update::signer_files::initialize(&res.db).await?;
+            res.cleanup_and_initialize(cleanup_init).await?;
+            #[cfg(target_os = "linux")]
+            {
+                let weak = Arc::downgrade(&seed);
+                res.spawn_background(crate::shared_volumes::watch::run(move || {
+                    weak.upgrade().map(|seed| Self(seed, None))
+                }))?;
+            }
+            tracing::info!("{}", t!("context.rpc.cleaned-up-transient-states"));
+
+            crate::version::post_init(&res, run_migrations).await?;
+            let weak = Arc::downgrade(&seed);
+            let db = res.db.clone();
+            res.spawn_background(crate::registry::sync::watch_registries(
+                db,
+                registry_refreshes,
+                move || weak.upgrade().map(|seed| Self(seed, None)),
+            ))?;
+            tracing::info!("{}", t!("context.rpc.completed-migrations"));
+            let weak = Arc::downgrade(&res.0);
+            let db = res.db.clone();
+            res.spawn_background(async move {
+                let mut watch = db.watch("/private/push".parse().unwrap()).await;
+                loop {
+                    let Some(seed) = weak.upgrade() else { break };
+                    let client = seed.client.get();
+                    drop(seed);
+                    if crate::notifications::push::drain(&db, &client)
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!("{}", t!("notifications.push.queue-failed"));
+                    }
+                    tokio::select! {
+                        result = watch.changed() => if result.is_err() { break },
+                        _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                    }
+                }
+            })?;
+            Ok::<_, Error>(())
+        }
+        .await;
+        if let Err(error) = initialized {
+            res.shutdown().await;
+            return Err(error);
+        }
         Ok(res)
     }
 
@@ -609,9 +675,14 @@ impl RpcContext {
 
     #[instrument(skip_all)]
     pub async fn shutdown(self) {
-        self.crons.mutate(|c| std::mem::take(c));
+        stop_background_tasks(&self.background_tasks, &self.cleanup_tasks).await;
+        wait_for_filesystem_cleanup().await;
         close_after_teardown(
-            self.services.shutdown_all(),
+            async {
+                let services = self.services.shutdown_all().await;
+                wait_for_filesystem_cleanup().await;
+                services
+            },
             &self.0.is_closed,
             &self.0.closed,
         )
@@ -619,17 +690,27 @@ impl RpcContext {
         tracing::info!("{}", t!("context.rpc.rpc-context-shutdown"));
     }
 
-    /// Resolves once service teardown has finished, failed or not.
-    pub async fn wait_closed(&self) {
+    /// Resolves after owned work and cleanup finish, even when service teardown fails.
+    pub fn wait_closed(&self) -> impl Future<Output = ()> + Send + 'static + use<> {
         let mut rx = self.0.closed.subscribe();
-        let _ = rx.wait_for(|closed| *closed).await;
+        async move {
+            let _ = rx.wait_for(|closed| *closed).await;
+        }
     }
 
-    pub fn add_cron<F: Future<Output = ()> + Send + 'static>(&self, fut: F) -> Guid {
-        let guid = Guid::new();
-        self.crons
-            .mutate(|c| c.insert(guid.clone(), tokio::spawn(fut).into()));
-        guid
+    /// Runs daemon-owned work; rejects registration after task teardown starts.
+    pub fn spawn_background<F: Future<Output = ()> + Send + 'static>(
+        &self,
+        fut: F,
+    ) -> Result<(), Error> {
+        spawn_background(&self.background_tasks, fut)
+    }
+
+    pub(crate) fn spawn_background_result<T: Send + 'static>(
+        &self,
+        future: impl Future<Output = T> + Send + 'static,
+    ) -> Result<oneshot::Receiver<T>, Error> {
+        spawn_background_result(&self.background_tasks, future)
     }
 
     #[instrument(skip_all)]
@@ -649,9 +730,9 @@ impl RpcContext {
             .mutate(|db| reap_idle_sessions(continuations, ephemeral, db))
             .await
             .result?;
-        // Weak, so the cron doesn't hold the context that owns it alive.
+        // Pending session cleanup must not keep its RPC context alive.
         let weak = Arc::downgrade(&self.0);
-        self.add_cron(async move {
+        self.spawn_background(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(86400)).await;
                 let Some(seed) = weak.upgrade() else { break };
@@ -670,7 +751,7 @@ impl RpcContext {
                     tracing::debug!("{e:?}");
                 }
             }
-        });
+        })?;
         cleanup_sessions.complete();
 
         // Conversion requires unmounted, quiescent roots before observers and services start.
@@ -815,10 +896,259 @@ impl Drop for RpcContext {
 
 #[cfg(test)]
 mod tests {
+    use futures::FutureExt;
     use http::{HeaderMap, HeaderValue};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
+
+    #[tokio::test]
+    async fn background_observations_reset_without_discarding_restart_intent() {
+        use crate::backup::target::conversion::{ConversionJob, ConversionState};
+        use crate::db::model::public::{RestartReason, ServerStatus};
+        use crate::progress::FullProgress;
+
+        let status = ServerStatus {
+            backup_progress: Some(FullProgress::new()),
+            backup_conversions: [(
+                "cifs-1".into(),
+                [(
+                    "server-a".into(),
+                    ConversionJob {
+                        state: ConversionState::Running,
+                        progress: FullProgress::new(),
+                        error: None,
+                    },
+                )]
+                .into(),
+            )]
+            .into(),
+            restart: Some(RestartReason::Update),
+            ..Default::default()
+        };
+        let db = TypedPatchDb::<Database>::load_unchecked(PatchDb::in_memory());
+        db.put(
+            &patch_db::json_ptr::ROOT,
+            &imbl_value::json!({
+                "public": {"serverInfo": {"statusInfo": status}}
+            }),
+        )
+        .await
+        .unwrap();
+
+        db.mutate(reset_backup_status).await.result.unwrap();
+
+        let status = db
+            .peek()
+            .await
+            .as_public()
+            .as_server_info()
+            .as_status_info()
+            .de()
+            .unwrap();
+        assert!(status.backup_progress.is_none());
+        assert!(status.backup_conversions.is_empty());
+        assert_eq!(status.restart, Some(RestartReason::Update));
+    }
+
+    #[tokio::test]
+    async fn background_teardown_joins_jobs_and_closes_admission() {
+        use crate::util::future::DropSignaling;
+
+        let tasks = SyncMutex::new(Some(Vec::new()));
+        let mut stopped = Vec::new();
+        for _ in 0..2 {
+            let job = DropSignaling::new(std::future::pending::<()>());
+            stopped.push(job.subscribe());
+            spawn_background(&tasks, job).unwrap();
+        }
+
+        stop_background_tasks(&tasks, &CleanupTasks::new(Vec::new())).await;
+
+        for mut stopped in stopped {
+            assert!(stopped.wait().now_or_never().is_some());
+        }
+        assert!(tasks.peek(Option::is_none));
+        assert!(spawn_background(&tasks, async { panic!("late job started") }).is_err());
+    }
+
+    #[tokio::test]
+    async fn background_teardown_finishes_rollback_created_by_cancellation() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let cleanup = Arc::new(CleanupTasks::new(Vec::new()));
+        let rollback = cleanup.clone();
+        let (completed, completion) = oneshot::channel();
+        let (rollback_started, rollback_running) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let guard = crate::util::GeneralBoxedGuard::new(move || {
+            let _ = spawn_cleanup(&rollback, async move {
+                let _ = rollback_started.send(());
+                released.await.unwrap();
+                let _ = completed.send(());
+            });
+        });
+        let observer = spawn_background_result(&tasks, async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        })
+        .unwrap();
+        drop(observer);
+
+        let teardown = stop_background_tasks(&tasks, &cleanup);
+        tokio::pin!(teardown);
+        assert!(futures::poll!(&mut teardown).is_pending());
+        rollback_running.await.unwrap();
+        assert!(futures::poll!(&mut teardown).is_pending());
+
+        release.send(()).unwrap();
+        teardown.await;
+
+        assert!(completion.now_or_never().unwrap().is_ok());
+        assert!(cleanup.peek(Vec::is_empty));
+    }
+
+    #[tokio::test]
+    async fn background_jobs_outlive_their_result_observers() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let (started, running) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let work = crate::util::future::DropSignaling::new(async move {
+            let _ = started.send(());
+            released.await.unwrap();
+        });
+        let mut resources_dropped = work.subscribe();
+        let completion = spawn_background_result(&tasks, work).unwrap();
+        running.await.unwrap();
+
+        drop(completion);
+        tokio::task::yield_now().await;
+        assert!(resources_dropped.wait().now_or_never().is_none());
+
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), resources_dropped.wait())
+            .await
+            .unwrap();
+        stop_background_tasks(&tasks, &CleanupTasks::new(Vec::new())).await;
+    }
+
+    #[tokio::test]
+    async fn background_result_delivery_shares_task_admission() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let result = spawn_background_result(&tasks, async { 42 }).unwrap();
+        assert_eq!(result.await.unwrap(), 42);
+        stop_background_tasks(&tasks, &CleanupTasks::new(Vec::new())).await;
+        assert!(spawn_background_result(&tasks, async { 99 }).is_err());
+    }
+
+    #[tokio::test]
+    async fn cleanup_completion_follows_resource_destruction() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let cleanup = CleanupTasks::new(Vec::new());
+        let (started, running) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let work = crate::util::future::DropSignaling::new(async move {
+            let _ = started.send(());
+            released.await.unwrap();
+        });
+        let mut resources_dropped = work.subscribe();
+        let mut completed = spawn_cleanup(&cleanup, work);
+        running.await.unwrap();
+        assert!(matches!(
+            completed.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+
+        release.send(()).unwrap();
+        completed.await.unwrap();
+
+        assert!(resources_dropped.wait().now_or_never().is_some());
+        stop_background_tasks(&tasks, &cleanup).await;
+    }
+
+    #[tokio::test]
+    async fn dropping_a_cleanup_observer_keeps_the_owned_job() {
+        let tasks = BackgroundTasks::new(Some(Vec::new()));
+        let cleanup = CleanupTasks::new(Vec::new());
+        let (release, released) = oneshot::channel();
+        let (finished, completed) = oneshot::channel();
+        let work = crate::util::future::DropSignaling::new(async move {
+            released.await.unwrap();
+            let _ = finished.send(());
+        });
+        let mut resources_dropped = work.subscribe();
+        drop(spawn_cleanup(&cleanup, work));
+        assert!(resources_dropped.wait().now_or_never().is_none());
+
+        release.send(()).unwrap();
+        stop_background_tasks(&tasks, &cleanup).await;
+
+        assert!(resources_dropped.wait().now_or_never().is_some());
+        assert!(completed.now_or_never().unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn cleanup_observer_preserves_error_wait_completion() {
+        let cleanup = CleanupTasks::new(Vec::new());
+        let (release, released) = oneshot::channel();
+        let work = crate::util::future::DropSignaling::new(async move {
+            released.await.unwrap();
+        });
+        let mut resources_dropped = work.subscribe();
+        let completed = spawn_cleanup(&cleanup, work);
+        let error = Error::new(eyre!("restore failed"), ErrorKind::Restore).with_task(
+            tokio::spawn(async move {
+                let _ = completed.await;
+            }),
+        );
+        let waiting = error.wait();
+        tokio::pin!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+
+        release.send(()).unwrap();
+        let error = waiting.await;
+
+        assert!(matches!(error.kind, ErrorKind::Restore));
+        assert!(resources_dropped.wait().now_or_never().is_some());
+        drain_cleanup(&cleanup).await;
+    }
+
+    #[test]
+    fn background_rejection_drops_jobs_outside_the_admission_lock() {
+        let (completed, completion) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let tasks = Arc::new(BackgroundTasks::new(None));
+            let cleanup_owner = tasks.clone();
+            let guard = crate::util::GeneralBoxedGuard::new(move || {
+                assert!(spawn_background(&cleanup_owner, async {}).is_err());
+            });
+            assert!(
+                spawn_background(&tasks, async move {
+                    std::future::pending::<()>().await;
+                    drop(guard);
+                })
+                .is_err()
+            );
+            completed.send(()).unwrap();
+        });
+        completion
+            .recv_timeout(Duration::from_secs(1))
+            .expect("job destructor re-entered a held admission lock");
+        worker.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn background_registration_releases_finished_handles() {
+        let tasks = SyncMutex::new(Some(Vec::new()));
+        let (finished, completed) = oneshot::channel();
+        spawn_background(&tasks, async move {
+            let _ = finished.send(());
+        })
+        .unwrap();
+        completed.await.unwrap();
+        spawn_background(&tasks, std::future::pending()).unwrap();
+        assert_eq!(tasks.peek(|tasks| tasks.as_ref().unwrap().len()), 1);
+        stop_background_tasks(&tasks, &CleanupTasks::new(Vec::new())).await;
+    }
 
     fn clients_with_generation(generation: &'static str) -> HttpClients {
         let mut headers = HeaderMap::new();

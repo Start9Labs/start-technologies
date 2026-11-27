@@ -297,12 +297,14 @@ pub fn rpc_router<C: Context + Clone + AsRef<RpcContinuations>>(
 ) -> Router {
     let continuation = any({
         let ctx = ctx.clone();
-        move |x::Path(guid): x::Path<Guid>, ws: axum::extract::ws::WebSocketUpgrade| async move {
+        move |x::Path(guid): x::Path<Guid>,
+              owner: Option<axum::Extension<rpc_toolkit::WebSocketTaskOwner>>,
+              ws: axum::extract::ws::WebSocketUpgrade| async move {
             match AsRef::<RpcContinuations>::as_ref(&ctx)
                 .get_ws_handler(&guid)
                 .await
             {
-                Some(cont) => cont.on_upgrade(ws, guid),
+                Some(cont) => cont.on_upgrade(ws, guid, owner.map(|owner| owner.0)),
                 _ => not_found(),
             }
         }

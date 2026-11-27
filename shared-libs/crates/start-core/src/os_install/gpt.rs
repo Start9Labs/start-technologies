@@ -228,7 +228,7 @@ pub async fn partition(
     let disk_path = disk_path.to_owned();
     let disk_path_clone = disk_path.clone();
     let protect = protect.map(|p| p.to_owned());
-    let (efi, data_part) = tokio::task::spawn_blocking(move || {
+    let (efi, data_part) = crate::util::cleanup::run_filesystem_blocking(move || {
         let disk_path = disk_path_clone;
 
         let protected_partition_info: Option<(u64, u64, PathBuf)> =
