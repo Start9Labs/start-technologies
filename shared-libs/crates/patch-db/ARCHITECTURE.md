@@ -179,7 +179,7 @@ source$ (Observable<Update<T>[]>)
   ▼
 PatchDB.processUpdates()
   ├─ Revision? → applyOperation() for each op, then update matching watchedNodes
-  └─ Dump?     → replace cache, update all watchedNodes
+  └─ Dump?     → reconcile cache, update changed watchedNodes
   │
   ▼
 cache$ (BehaviorSubject<Dump<T>>)
@@ -192,12 +192,13 @@ watch$(...path) → BehaviorSubject per unique path → Observable to consumer
 
 - `watch$()` has overloads for 0–6 path segments, providing type-safe deep property access
 - Watched nodes are keyed by their JSON Pointer path string
-- A revision triggers updates only for watchers whose path overlaps with any operation in the patch (prefix match in either direction)
-- A dump triggers updates for all watchers
+- A revision considers watchers whose path overlaps with any operation in the patch (prefix match in either direction)
+- A dump reconciles equal subtrees and considers every watcher
+- Watches emit subsequent values only when `value !== previousValue`
 
 ### `SubtreePatchDB<T>`
 
-One stream carries the union of reference-counted watches, with a five-second release delay and 250ms batching. Selection changes prune the browser replica immediately and request an ordered server extension. Until that extension arrives, revisions apply to a retained pre-change replica before projecting into the browser replica; selected array positions stay correct through in-flight insertions and removals. Watches acquired synchronously during a revision flush join the next serialized selection update. Confirmed coverage retains provable subsets of the previous selection; no coverage is `NOTHING`, while `[]` means the whole subtree. New watches wait for coverage confirmation. Failure resumes the confirmed selection from its single epoch/revision cursor rather than replaying discarded fields.
+One stream carries the union of reference-counted watches, with a five-second release delay and 250ms batching. Selection changes prune the browser replica immediately and request an ordered server extension. Until that extension arrives, revisions apply to a retained pre-change replica before projecting into the browser replica; selected array positions stay correct through in-flight insertions and removals. Watches acquired synchronously during a revision flush join the next serialized selection update. Confirmed coverage retains provable subsets of the previous selection; no coverage is `NOTHING`, while `[]` means the whole subtree. New watches wait for coverage confirmation. Failure resumes the confirmed selection from its single epoch/revision cursor rather than replaying discarded fields. Every update, dumps included, keeps the identity of each subtree it leaves unchanged in the replica and in projected watch values, and a watch emits only when its value is a new object.
 
 `Projection::extension` computes fields newly required by a selection against the current store value. `PatchDb::reproject` changes the listener and sends the extension under the store lock, before later revisions. The TypeScript projection module mirrors selector unions and extension semantics.
 

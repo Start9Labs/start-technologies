@@ -1,0 +1,21 @@
+Subject: hostapd: fix GTK rekey on dynamic VLANs
+
+Backport of openwrt/openwrt#26509 (85146d1d4c381a6495b0adca5419c1fa3277ad9a)
+for openwrt-25.12, with its package patch in
+openwrt-overlay/package/network/services/hostapd/patches/. Drop both once
+the pinned release carries that fix or hostapd 2.12.
+
+Start9 downstream patch (start-technologies projects/start-wrt).
+Applies to: openwrt v25.12.6
+
+--- a/package/network/services/hostapd/Makefile
++++ b/package/network/services/hostapd/Makefile
+@@ -5,7 +5,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=hostapd
+-PKG_RELEASE:=6
++PKG_RELEASE:=7
+ 
+ PKG_SOURCE_URL:=https://w1.fi/hostap.git
+ PKG_SOURCE_PROTO:=git

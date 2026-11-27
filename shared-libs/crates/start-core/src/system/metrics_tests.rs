@@ -5,7 +5,13 @@ use super::*;
 fn sample(temperature: f64) -> Metrics {
     Metrics {
         general: MetricsGeneral {
-            temperature: Some(Celsius(temperature)),
+            temperatures: vec![TemperatureSensor {
+                id: "coretemp-isa-0000".into(),
+                kind: SensorKind::Cpu,
+                temperature: Celsius(temperature),
+                high: Celsius(80.0),
+                critical: Celsius(100.0),
+            }],
         },
         memory: MetricsMemory {
             percentage_used: Percentage(0.0),
@@ -44,19 +50,13 @@ fn metrics_observation_requires_the_existing_cache_snapshot() {
 async fn metrics_observation_marks_initial_seen_and_coalesces_existing_watch_updates() {
     let cache = Watch::new(Some(sample(1.0)));
     let (initial, mut updates) = observe_metrics(cache.clone()).unwrap();
-    assert_eq!(initial.general.temperature.unwrap().0, 1.0);
+    assert_eq!(initial.general.temperatures[0].temperature.0, 1.0);
     assert!(updates.next().now_or_never().is_none());
     cache.send(Some(sample(2.0)));
     cache.send(Some(sample(3.0)));
     assert_eq!(
-        updates
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .general
+        updates.next().await.unwrap().unwrap().general.temperatures[0]
             .temperature
-            .unwrap()
             .0,
         3.0
     );
@@ -72,7 +72,10 @@ async fn metrics_observation_disposal_drops_its_clone_not_the_sensor_cache() {
     drop(updates);
     assert_eq!(cache.watcher_count(), 1);
     cache.send(Some(sample(4.0)));
-    assert_eq!(cache.read().unwrap().general.temperature.unwrap().0, 4.0);
+    assert_eq!(
+        cache.read().unwrap().general.temperatures[0].temperature.0,
+        4.0
+    );
 }
 
 #[test]
@@ -83,7 +86,10 @@ fn metrics_follow_typed_and_ordinary_initials_share_the_snapshot_contract() {
     })
     .unwrap();
     assert!(typed["guid"].is_null());
-    assert_eq!(typed["metrics"]["general"]["temperature"]["value"], "1.0");
+    assert_eq!(
+        typed["metrics"]["general"]["temperatures"][0]["temperature"]["value"],
+        "1.0"
+    );
     let guid = Guid::new();
     let ordinary = serde_json::to_value(MetricsFollowResponse {
         guid: Some(guid.clone()),

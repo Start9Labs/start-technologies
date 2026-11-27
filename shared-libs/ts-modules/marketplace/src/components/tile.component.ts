@@ -12,7 +12,6 @@ import { i18nPipe, LocalizePipe } from '@start9labs/shared'
 import { TuiButtonX, TuiCell, TuiPopup, TuiTitle } from '@taiga-ui/core'
 import { TuiAvatar, TuiDrawer, TuiSkeleton } from '@taiga-ui/kit'
 import { TuiCardLarge, tuiCardOptionsProvider } from '@taiga-ui/layout'
-import { debounceTime } from 'rxjs'
 
 import { MarketplaceListing, MarketplacePkg } from '../types'
 import { MarketplaceIconDirective } from './icon.directive'
@@ -38,7 +37,11 @@ import { MarketplacePreviewComponent } from './preview.component'
       [overlay]="true"
       (click.self)="toggle(false)"
     >
-      <marketplace-preview [pkgId]="pkg().id" [controls]="controls()">
+      <marketplace-preview
+        [pkgId]="pkg().id"
+        [listing]="pkg()"
+        [controls]="controls()"
+      >
         <button tuiButtonX [tuiAppearanceFocus]="false" (click)="toggle(false)">
           {{ 'Close' | i18n }}
         </button>
@@ -90,9 +93,7 @@ import { MarketplacePreviewComponent } from './preview.component'
 })
 export class MarketplaceTileComponent {
   private readonly router = inject(Router)
-  private readonly params = toSignal(
-    inject(ActivatedRoute).queryParamMap.pipe(debounceTime(100)),
-  )
+  private readonly params = toSignal(inject(ActivatedRoute).queryParamMap)
 
   readonly pkg = input.required<MarketplaceListing>({
     alias: 'marketplaceTile',

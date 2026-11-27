@@ -24,15 +24,12 @@ const serverUrls = {
   forgejo: 'https://git.start9labs.com',
 }
 
-function enabled(step, inputs, privateRepository, forge) {
+function enabled(step, env, privateRepository, forge) {
   return Boolean(
-    new Function('inputs', 'github', `return (${step.if.slice(3, -2)})`)(
-      inputs,
-      {
-        event: { repository: { private: privateRepository } },
-        server_url: serverUrls[forge],
-      },
-    ),
+    new Function('env', 'github', `return (${step.if.slice(3, -2)})`)(env, {
+      event: { repository: { private: privateRepository } },
+      server_url: serverUrls[forge],
+    }),
   )
 }
 
@@ -58,6 +55,28 @@ for (const forge of ['github', 'forgejo']) {
     )
   }
 
+  for (const name of ['tagAndRelease', 'release']) {
+    test(`${forge} ${name} reads caller variables in steps, not input defaults`, () => {
+      const workflow = document(name)
+      const steps = yaml.dump(
+        Object.values(workflow.jobs).flatMap(job => job.steps ?? []),
+      )
+      for (const [key, input] of Object.entries(
+        workflow.on.workflow_call.inputs,
+      )) {
+        assert.doesNotMatch(String(input.default ?? ''), /\$\{\{/, key)
+        if (!input.description.includes(`caller's ${key} variable`)) continue
+        assert.doesNotMatch(steps, new RegExp(`inputs\\.${key}\\b`), key)
+        if (new RegExp(`\\b${key}\\b`).test(steps))
+          assert.equal(
+            workflow.env[key],
+            `\${{ inputs.${key} || vars.${key} }}`,
+            key,
+          )
+      }
+    })
+  }
+
   test(`${forge} private versions remain protected by the permanent-version gate`, t => {
     const home = mkdtempSync(join(tmpdir(), 'private-package-gate-'))
     t.after(() => rmSync(home, { recursive: true, force: true }))
@@ -68,6 +87,7 @@ for (const forge of ['github', 'forgejo']) {
       PATH: `${home}:${process.env.PATH}`,
       DEV_KEY: 'fixture-developer-key',
       GITHUB_OUTPUT: output,
+      REFERENCE_REGISTRY: 'https://registry.example',
     }
     writeFileSync(
       join(home, 'start-cli'),
@@ -93,7 +113,6 @@ fi
     const values = {
       'steps.extract.outputs.package_id': 'private-fixture',
       'steps.extract.outputs.version': '1.0.0:0',
-      'inputs.REFERENCE_REGISTRY': 'https://registry.example',
     }
     const script = steps[check].run.replace(
       /\$\{\{\s*(.*?)\s*\}\}/g,
@@ -126,11 +145,11 @@ echo 'INFO Renamed legacy key file' >&2
         HOME: home,
         PATH: `${home}:${process.env.PATH}`,
         GITHUB_OUTPUT: output,
+        REFERENCE_REGISTRY: 'https://registry.example',
       },
       {
         'steps.extract.outputs.package_id': 'fixture',
         'steps.extract.outputs.version': '1.0.0:0',
-        'inputs.REFERENCE_REGISTRY': 'https://registry.example',
       },
     )
     assert.equal(result.status, 0, result.stderr)
@@ -148,21 +167,24 @@ echo 'INFO Renamed legacy key file' >&2
     const status = env =>
       runStep(validation, {
         PRIVATE_REPOSITORY: 'false',
-        READER_KEYS: '',
-        S3_BASE: '',
+        PACKAGE_READER_KEYS: '',
+        S3_S9PKS_BASE_URL: '',
         ON_GITHUB: String(forge === 'github'),
         HAS_PACKAGES_TOKEN: 'false',
         ...env,
       }).status
     assert.equal(status({}), 0)
-    assert.equal(status({ READER_KEYS: 'MCowBQYDK2VwAyEA' }), 1)
+    assert.equal(status({ PACKAGE_READER_KEYS: 'MCowBQYDK2VwAyEA' }), 1)
     assert.equal(status({ PRIVATE_REPOSITORY: 'true' }), 1)
     assert.equal(
       status({ PRIVATE_REPOSITORY: 'true', HAS_PACKAGES_TOKEN: 'true' }),
       forge === 'github' ? 1 : 0,
     )
     assert.equal(
-      status({ PRIVATE_REPOSITORY: 'true', S3_BASE: 'https://bucket.example' }),
+      status({
+        PRIVATE_REPOSITORY: 'true',
+        S3_S9PKS_BASE_URL: 'https://bucket.example',
+      }),
       0,
     )
   })
@@ -177,7 +199,7 @@ echo 'INFO Renamed legacy key file' >&2
     const args = env => {
       const result = runStep(
         resolve,
-        { CWD: cwd, READER_KEYS: '', ...env },
+        { CWD: cwd, PACKAGE_READER_KEYS: '', ...env },
         values,
       )
       assert.equal(result.status, 0, result.stderr)
@@ -187,7 +209,7 @@ echo 'INFO Renamed legacy key file' >&2
     assert.equal(
       args({
         PRIVATE_REPOSITORY: 'true',
-        READER_KEYS:
+        PACKAGE_READER_KEYS:
           'KEYA\r\n-----BEGIN PUBLIC KEY-----\nKEYB\n-----END PUBLIC KEY-----\n',
       }),
       '--private\n--reader\nKEYA\n--reader\nKEYB\n',
@@ -213,13 +235,12 @@ echo 'INFO Renamed legacy key file' >&2
       'github.server_url': serverUrls[forge],
       'github.repository_owner': 'owner',
       'steps.filter_s9pk.outputs.packages_base': base,
-      'inputs.S3_S9PKS_BASE_URL': '',
     }
     const env = {
       CWD: cwd,
       PATH: `${cwd}:${process.env.PATH}`,
       GITHUB_OUTPUT: join(cwd, 'output'),
-      S3_BASE: '',
+      S3_S9PKS_BASE_URL: '',
       PRIVATE_REPOSITORY: 'false',
       ON_GITHUB: String(forge === 'github'),
       HAS_PACKAGES_TOKEN: 'true',
@@ -280,13 +301,13 @@ echo 'INFO Renamed legacy key file' >&2
           step.name.startsWith('Publish to Registry') ||
           step.name === 'Add GitHub release mirrors',
       )
-      const inputs = {
+      const env = {
         RELEASE_REGISTRY: 'https://registry.example',
         S3_S9PKS_BASE_URL: s3,
       }
       assert.deepEqual(
         steps
-          .filter(step => enabled(step, inputs, privateRepository, forge))
+          .filter(step => enabled(step, env, privateRepository, forge))
           .map(step => step.name),
         expected,
       )

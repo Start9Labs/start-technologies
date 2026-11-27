@@ -114,18 +114,13 @@ impl HyperBody for RelayedBody {
     }
 }
 
-/// Pre-compiled view of a [`ProxyAuth`] used on the proxy hot-path.
-///
-/// We hash on the *full* `Authorization` header value (e.g.
-/// `"Basic dXNlcjpwYXNz"`), so each request is one hashmap lookup and one
-/// `HeaderMap::get` — no allocation, no base64, no per-credential loop.
+/// Compiled credentials and browser-origin policy for a proxied binding.
 #[derive(Clone)]
 pub struct AuthGate {
-    /// Map of valid `Authorization` header value → optional `X-Forwarded-User`.
-    /// `None` for Bearer (no user concept), `Some(username)` for Basic.
+    /// `None` for Bearer, `Some(username)` for Basic.
     valid: Arc<HashMap<HeaderValue, Option<HeaderValue>>>,
-    /// Pre-built `WWW-Authenticate` challenge sent on 401 responses.
     challenge: HeaderValue,
+    requires_same_origin: bool,
 }
 
 /// Sanitize a package-supplied realm into something that fits inside an
@@ -174,6 +169,7 @@ impl AuthGate {
         Ok(Self {
             valid: Arc::new(valid),
             challenge,
+            requires_same_origin: matches!(auth, ProxyAuth::Basic { .. }),
         })
     }
 
@@ -242,7 +238,7 @@ fn requests_upgrade<B>(req: &Request<B>) -> bool {
             })
 }
 
-/// Browser upgrades must match the connection's scheme, host and effective port.
+/// `Origin` must match the connection's scheme, host and effective port.
 /// The caller supplies the scheme from the accepted transport.
 /// A missing `Origin` passes; `null` and unparsable ones do not.
 pub(crate) fn origin_matches_authority<B>(req: &Request<B>, scheme: &Scheme) -> bool {
@@ -258,6 +254,22 @@ pub(crate) fn origin_matches_authority<B>(req: &Request<B>, scheme: &Scheme) -> 
         .ok()
         .and_then(|value| url::Url::parse(value).ok());
     matches!((expected, supplied), (Ok(expected), Some(supplied)) if expected.origin() == supplied.origin())
+}
+
+/// A request without `Origin` or `Sec-Fetch-Site` passes.
+/// `Origin: null` passes only with `Sec-Fetch-Site: same-origin`.
+fn is_same_origin<B>(req: &Request<B>, scheme: &Scheme) -> bool {
+    let headers = req.headers();
+    match headers.get("sec-fetch-site") {
+        Some(site) if site == "same-origin" => {
+            headers
+                .get(http::header::ORIGIN)
+                .is_some_and(|origin| origin == "null")
+                || origin_matches_authority(req, scheme)
+        }
+        Some(site) if site != "none" => false,
+        _ => origin_matches_authority(req, scheme),
+    }
 }
 
 fn apply_request_policy<B>(
@@ -283,7 +295,10 @@ fn apply_request_policy<B>(
     let user = match gate {
         Some(g) => {
             let user = g.check(req.headers())?;
-            if requests_upgrade(req) && !origin_matches_authority(req, scheme) {
+            if g.requires_same_origin
+                && (requests_upgrade(req) || !req.method().is_safe())
+                && !is_same_origin(req, scheme)
+            {
                 return Err(forbidden());
             }
             user
@@ -1638,6 +1653,14 @@ mod tests {
         .unwrap()
     }
 
+    fn bearer_gate() -> AuthGate {
+        AuthGate::from_auth(&ProxyAuth::Bearer {
+            tokens: vec!["secret".into()],
+            realm: None,
+        })
+        .unwrap()
+    }
+
     fn spoofed_request(auth: Option<&str>) -> Request<Full<Bytes>> {
         let mut req = req_with_auth(auth).map(|()| Full::new(Bytes::new()));
         *req.uri_mut() = "http://service.test/path?query=value".parse().unwrap();
@@ -1726,11 +1749,7 @@ mod tests {
     #[test]
     fn forwarded_headers_are_owned_with_or_without_authentication() {
         let basic = basic_gate();
-        let bearer = AuthGate::from_auth(&ProxyAuth::Bearer {
-            tokens: vec!["secret".into()],
-            realm: None,
-        })
-        .unwrap();
+        let bearer = bearer_gate();
         for forwarded_headers in [
             ForwardedHeaders::Disabled,
             ForwardedHeaders::Plaintext,
@@ -1775,8 +1794,9 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_upgrade_requires_a_same_origin_or_absent_origin() {
-        let gate = basic_gate();
+    fn origin_policy_for_basic_and_bearer_upgrades_and_unsafe_requests() {
+        let basic = basic_gate();
+        let bearer = bearer_gate();
         for (scheme, host, origin, allowed) in [
             (Scheme::HTTPS, "service.test", None, true),
             (Scheme::HTTP, "service.test", None, true),
@@ -1867,51 +1887,241 @@ mod tests {
                 false,
             ),
         ] {
-            for extended_connect in [false, true] {
+            for kind in ["upgrade", "extended-connect", "post"] {
                 for forwarded_headers in [
                     ForwardedHeaders::Disabled,
                     ForwardedHeaders::Plaintext,
                     ForwardedHeaders::Ssl,
                 ] {
-                    let mut req = upgrade_request(host, origin);
-                    if extended_connect {
-                        *req.method_mut() = http::Method::CONNECT;
-                        *req.version_mut() = http::Version::HTTP_2;
-                        *req.uri_mut() = format!("{scheme}://{host}/ws").parse().unwrap();
-                        req.headers_mut().remove("Connection");
-                        req.headers_mut().remove("Upgrade");
-                        req.headers_mut().remove("Host");
-                        req.extensions_mut()
-                            .insert(hyper::ext::Protocol::from_static("websocket"));
-                    }
-                    let result = apply_request_policy(
-                        &mut req,
-                        None,
-                        forwarded_headers,
-                        Some(&gate),
-                        &scheme,
-                    );
-                    assert_eq!(
-                        result.is_ok(),
-                        allowed,
-                        "{scheme} {host} {origin:?} h2={extended_connect}"
-                    );
-                    if let Err(response) = result {
-                        assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+                    for (gate, auth, expected) in [
+                        (&basic, BASIC_AUTH, allowed),
+                        (&bearer, "Bearer secret", true),
+                    ] {
+                        let mut req = upgrade_request(host, origin);
+                        req.headers_mut()
+                            .insert(http::header::AUTHORIZATION, HeaderValue::from_static(auth));
+                        match kind {
+                            "extended-connect" => {
+                                *req.method_mut() = http::Method::CONNECT;
+                                *req.version_mut() = http::Version::HTTP_2;
+                                *req.uri_mut() = format!("{scheme}://{host}/ws").parse().unwrap();
+                                req.headers_mut().remove("Connection");
+                                req.headers_mut().remove("Upgrade");
+                                req.headers_mut().remove("Host");
+                                req.extensions_mut()
+                                    .insert(hyper::ext::Protocol::from_static("websocket"));
+                            }
+                            "post" => {
+                                *req.method_mut() = http::Method::POST;
+                                req.headers_mut().remove("Connection");
+                                req.headers_mut().remove("Upgrade");
+                            }
+                            _ => {}
+                        }
+                        let result = apply_request_policy(
+                            &mut req,
+                            None,
+                            forwarded_headers,
+                            Some(gate),
+                            &scheme,
+                        );
+                        assert_eq!(
+                            result.is_ok(),
+                            expected,
+                            "{scheme} {host} {origin:?} {kind} {auth}"
+                        );
+                        if let Err(response) = result {
+                            assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+                        }
                     }
                 }
             }
         }
     }
 
+    fn plain_request(
+        method: http::Method,
+        origin: Option<&str>,
+        fetch_site: Option<&str>,
+    ) -> Request<Full<Bytes>> {
+        let mut req = upgrade_request("service.test", origin);
+        *req.method_mut() = method;
+        req.headers_mut().remove("Connection");
+        req.headers_mut().remove("Upgrade");
+        if let Some(fetch_site) = fetch_site {
+            req.headers_mut()
+                .insert("Sec-Fetch-Site", HeaderValue::from_str(fetch_site).unwrap());
+        }
+        req
+    }
+
     #[test]
-    fn origin_is_not_checked_without_a_gate_or_an_upgrade() {
+    fn fetch_site_policy_for_basic_and_bearer_requests() {
+        use http::Method;
+        let basic = basic_gate();
+        let bearer = bearer_gate();
+        for (method, origin, fetch_site, allowed) in [
+            (Method::POST, None, None, true),
+            (Method::POST, None, Some("same-origin"), true),
+            (Method::POST, None, Some("none"), true),
+            (
+                Method::POST,
+                Some("https://service.test"),
+                Some("same-origin"),
+                true,
+            ),
+            (
+                Method::POST,
+                Some("https://service.test"),
+                Some("none"),
+                true,
+            ),
+            (Method::POST, Some("null"), Some("same-origin"), true),
+            (Method::POST, None, Some("same-site"), false),
+            (Method::POST, None, Some("cross-site"), false),
+            (Method::POST, None, Some("Same-Origin"), false),
+            (
+                Method::POST,
+                Some("https://service.test"),
+                Some("same-site"),
+                false,
+            ),
+            (
+                Method::POST,
+                Some("https://service.test"),
+                Some("cross-site"),
+                false,
+            ),
+            (
+                Method::POST,
+                Some("https://attacker.test"),
+                Some("same-origin"),
+                false,
+            ),
+            (Method::POST, Some("null"), None, false),
+            (Method::POST, Some("null"), Some("none"), false),
+            (Method::POST, Some("null"), Some("cross-site"), false),
+            (Method::PUT, Some("https://attacker.test"), None, false),
+            (Method::PATCH, None, Some("cross-site"), false),
+            (Method::DELETE, Some("https://attacker.test"), None, false),
+            (
+                Method::GET,
+                Some("https://attacker.test"),
+                Some("cross-site"),
+                true,
+            ),
+            (Method::HEAD, Some("null"), Some("cross-site"), true),
+            (
+                Method::OPTIONS,
+                Some("https://attacker.test"),
+                Some("cross-site"),
+                true,
+            ),
+        ] {
+            for (gate, auth, expected) in [
+                (&basic, BASIC_AUTH, allowed),
+                (&bearer, "Bearer secret", true),
+            ] {
+                let mut req = plain_request(method.clone(), origin, fetch_site);
+                req.headers_mut()
+                    .insert(http::header::AUTHORIZATION, HeaderValue::from_static(auth));
+                let result = apply_request_policy(
+                    &mut req,
+                    None,
+                    ForwardedHeaders::Ssl,
+                    Some(gate),
+                    &Scheme::HTTPS,
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    expected,
+                    "{method} {origin:?} {fetch_site:?} {auth}"
+                );
+                if let Err(response) = result {
+                    assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fetch_site_policy_for_basic_and_bearer_upgrades() {
+        let basic = basic_gate();
+        let bearer = bearer_gate();
+        for (fetch_site, allowed) in [
+            ("same-origin", true),
+            ("none", true),
+            ("same-site", false),
+            ("cross-site", false),
+        ] {
+            for (gate, auth, expected) in [
+                (&basic, BASIC_AUTH, allowed),
+                (&bearer, "Bearer secret", true),
+            ] {
+                let mut req = upgrade_request("service.test", Some("https://service.test"));
+                req.headers_mut()
+                    .insert(http::header::AUTHORIZATION, HeaderValue::from_static(auth));
+                req.headers_mut()
+                    .insert("Sec-Fetch-Site", HeaderValue::from_static(fetch_site));
+                assert_eq!(
+                    apply_request_policy(
+                        &mut req,
+                        None,
+                        ForwardedHeaders::Ssl,
+                        Some(gate),
+                        &Scheme::HTTPS,
+                    )
+                    .is_ok(),
+                    expected,
+                    "{fetch_site} {auth}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bearer_origin_exemption_requires_valid_credentials() {
+        let gate = bearer_gate();
+        for auth in [None, Some("Bearer wrong"), Some(BASIC_AUTH)] {
+            let mut req = plain_request(
+                http::Method::POST,
+                Some("https://attacker.test"),
+                Some("cross-site"),
+            );
+            req.headers_mut().remove(http::header::AUTHORIZATION);
+            if let Some(auth) = auth {
+                req.headers_mut()
+                    .insert(http::header::AUTHORIZATION, HeaderValue::from_static(auth));
+            }
+            let response = apply_request_policy(
+                &mut req,
+                None,
+                ForwardedHeaders::Ssl,
+                Some(&gate),
+                &Scheme::HTTPS,
+            )
+            .unwrap_err();
+            assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    #[test]
+    fn origin_is_not_checked_without_a_gate_or_on_a_safe_request() {
         let mut req = upgrade_request("service.test", Some("https://attacker.test"));
         apply_request_policy(&mut req, None, ForwardedHeaders::Ssl, None, &Scheme::HTTPS).unwrap();
 
-        let mut req = upgrade_request("service.test", Some("https://attacker.test"));
-        req.headers_mut().remove("Connection");
-        req.headers_mut().remove("Upgrade");
+        let mut req = plain_request(
+            http::Method::POST,
+            Some("https://attacker.test"),
+            Some("cross-site"),
+        );
+        apply_request_policy(&mut req, None, ForwardedHeaders::Ssl, None, &Scheme::HTTPS).unwrap();
+
+        let mut req = plain_request(
+            http::Method::GET,
+            Some("https://attacker.test"),
+            Some("cross-site"),
+        );
         apply_request_policy(
             &mut req,
             None,
