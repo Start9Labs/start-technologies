@@ -530,7 +530,7 @@ class AddProfile {
 
   protected readonly outboundTypeOptions = ['direct', 'vpn'] as const
   protected readonly dnsModeOptions = ['system', 'custom'] as const
-  protected readonly lanAccessOptions = ['all', 'none', 'whitelist']
+  protected readonly lanAccessOptions = ['all', 'whitelist', 'none']
   protected readonly wanAccessOptions = [
     'all',
     'none',
@@ -645,7 +645,7 @@ class AddProfile {
   }
 
   private getLanAccessType(): string {
-    if (!this.existing) return 'all'
+    if (!this.existing) return 'none'
     const access = this.existing.lan_access
     if (access === 'ALL') return 'all'
     if (access === 'SAME_PROFILE') return 'none'

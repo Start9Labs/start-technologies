@@ -36,8 +36,8 @@ One SSID, multiple passwords. One router, multiple isolated networks. The profil
 
    - **Access** — Controls which other profiles this profile can communicate with on the local network:
      - **All** — Full access to devices on all profiles.
-     - **Same profile** — Only communicate with devices on this same profile. A [published port](published-ports.md#reaching-a-published-port-from-your-own-network) on another profile stays reachable at the router's public address if this profile has Internet access to that address.
      - **Whitelist** — Select specific profiles from a list.
+     - **Same profile** — Only communicate with devices on this same profile. A [published port](published-ports.md#reaching-a-published-port-from-your-own-network) on another profile stays reachable at the router's public address if this profile has Internet access to that address. This is the default for a new profile.
 
    - **Auto whitelist new profiles** — A checkbox shown in Whitelist mode. When checked, newly created profiles are automatically added to this profile's whitelist. Useful for admin profiles that should maintain access to all network segments.
 
