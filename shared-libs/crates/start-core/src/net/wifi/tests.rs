@@ -1,6 +1,9 @@
+use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
 
 use super::split_nmcli_terse_line;
+use crate::db::model::public::WifiInfo;
+use crate::prelude::Model;
 
 #[test]
 fn terse_line_unescapes_colon_and_backslash() {
@@ -22,6 +25,38 @@ fn terse_line_plain_fields() {
         split_nmcli_terse_line("café:90:WPA2 WPA3"),
         vec!["café".to_owned(), "90".to_owned(), "WPA2 WPA3".to_owned()],
     );
+}
+
+#[test]
+fn removing_selected_ssid_clears_selected() {
+    let mut wifi = Model::new(&WifiInfo {
+        ssids: BTreeSet::from(["home".to_owned(), "guest".to_owned()]),
+        selected: Some("home".to_owned()),
+        ..Default::default()
+    })
+    .unwrap();
+
+    super::remove_saved_ssid(&mut wifi, "home").unwrap();
+
+    let updated = wifi.de().unwrap();
+    assert_eq!(updated.ssids, BTreeSet::from(["guest".to_owned()]));
+    assert_eq!(updated.selected, None);
+}
+
+#[test]
+fn removing_other_ssid_keeps_selected() {
+    let mut wifi = Model::new(&WifiInfo {
+        ssids: BTreeSet::from(["home".to_owned(), "guest".to_owned()]),
+        selected: Some("home".to_owned()),
+        ..Default::default()
+    })
+    .unwrap();
+
+    super::remove_saved_ssid(&mut wifi, "guest").unwrap();
+
+    let updated = wifi.de().unwrap();
+    assert_eq!(updated.ssids, BTreeSet::from(["home".to_owned()]));
+    assert_eq!(updated.selected, Some("home".to_owned()));
 }
 
 const WIRED_UUID: &str = "11111111-2222-3333-4444-555555555555";

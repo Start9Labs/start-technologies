@@ -361,6 +361,16 @@ pub async fn connect(
     Ok(())
 }
 
+fn remove_saved_ssid(wifi: &mut Model<WifiInfo>, ssid: &str) -> Result<(), Error> {
+    wifi.as_ssids_mut().mutate(|s| {
+        s.remove(ssid);
+        Ok(())
+    })?;
+    wifi.as_selected_mut()
+        .map_mutate(|s| Ok(s.filter(|selected| selected != ssid)))?;
+    Ok(())
+}
+
 #[instrument(skip_all)]
 pub async fn remove(ctx: RpcContext, WifiSsidParams { ssid }: WifiSsidParams) -> Result<(), Error> {
     let mut wpa_supplicant = ctx.write_wifi_manager().await?;
@@ -380,17 +390,13 @@ pub async fn remove(ctx: RpcContext, WifiSsidParams { ssid }: WifiSsidParams) ->
 
     ctx.db
         .mutate(|db| {
-            let wifi = db
-                .as_public_mut()
-                .as_server_info_mut()
-                .as_network_mut()
-                .as_wifi_mut();
-            wifi.as_ssids_mut().mutate(|s| {
-                s.remove(&ssid.0);
-                Ok(())
-            })?;
-            wifi.as_selected_mut()
-                .map_mutate(|s| Ok(s.filter(|s| s == &ssid.0)))
+            remove_saved_ssid(
+                db.as_public_mut()
+                    .as_server_info_mut()
+                    .as_network_mut()
+                    .as_wifi_mut(),
+                &ssid.0,
+            )
         })
         .await
         .result?;
