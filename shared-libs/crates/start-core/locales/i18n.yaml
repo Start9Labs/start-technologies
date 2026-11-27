@@ -1169,6 +1169,20 @@ system.governor-not-available:
   fr_FR: "Le gouverneur %{governor} n'est pas disponible"
   pl_PL: "Governor %{governor} nie jest dostępny"
 
+system.invalid-keyboard-setting:
+  en_US: "Invalid keyboard setting"
+  de_DE: "Ungültige Tastatureinstellung"
+  es_ES: "Configuración de teclado no válida"
+  fr_FR: "Paramètre de clavier non valide"
+  pl_PL: "Nieprawidłowe ustawienie klawiatury"
+
+system.unsupported-language:
+  en_US: "Unsupported language %{language}"
+  de_DE: "Nicht unterstützte Sprache %{language}"
+  es_ES: "Idioma no compatible: %{language}"
+  fr_FR: "Langue non prise en charge : %{language}"
+  pl_PL: "Nieobsługiwany język %{language}"
+
 system.could-not-get-initial-temperature:
   en_US: "Could not get initial temperature: %{error}"
   de_DE: "Anfangstemperatur konnte nicht abgerufen werden: %{error}"

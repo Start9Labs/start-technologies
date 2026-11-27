@@ -41,6 +41,8 @@ pub(crate) mod trust_ca;
 pub use temperature::{SensorKind, TemperatureSensor};
 
 #[cfg(test)]
+mod input_tests;
+#[cfg(test)]
 mod metrics_tests;
 #[cfg(test)]
 mod smtp_tests;
@@ -1377,6 +1379,32 @@ pub struct KeyboardOptions {
 
 rpc_toolkit::reflect_ts!(KeyboardOptions);
 impl KeyboardOptions {
+    /// Values are written into quoted config files.
+    pub fn validate(&self) -> Result<(), Error> {
+        let valid = |v: &str| {
+            v.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_-+:,()".contains(c))
+        };
+        if self.layout.is_empty()
+            || ![
+                Some(&self.layout),
+                self.keymap.as_ref(),
+                self.model.as_ref(),
+                self.variant.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .chain(&self.options)
+            .all(|v| valid(&**v))
+        {
+            return Err(Error::new(
+                eyre!("{}", t!("system.invalid-keyboard-setting")),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(())
+    }
+
     /// NOTE: will error if kiosk inactive
     pub async fn apply_to_session(&self) -> Result<(), Error> {
         let mut cmd = Command::new("setxkbmap");
@@ -1421,6 +1449,7 @@ impl KeyboardOptions {
 }
 
 pub async fn set_keyboard(ctx: RpcContext, options: KeyboardOptions) -> Result<(), Error> {
+    options.validate()?;
     options.apply_to_session().await.log_err();
     options.save().await?;
     ctx.db
@@ -1445,6 +1474,24 @@ pub struct SetLanguageParams {
 
 rpc_toolkit::reflect_ts!(SetLanguageParams);
 rpc_toolkit::ts_export!(SetLanguageParams, namespaces = [""]);
+
+impl SetLanguageParams {
+    pub fn validate(&self) -> Result<(), Error> {
+        if !rust_i18n::available_locales!()
+            .iter()
+            .any(|l| *l == &*self.language)
+        {
+            return Err(Error::new(
+                eyre!(
+                    "{}",
+                    t!("system.unsupported-language", language = &*self.language)
+                ),
+                ErrorKind::InvalidRequest,
+            ));
+        }
+        Ok(())
+    }
+}
 
 pub async fn save_language(language: &str) -> Result<(), Error> {
     write_file_atomic(
@@ -1474,10 +1521,9 @@ pub async fn save_language(language: &str) -> Result<(), Error> {
     Ok(())
 }
 
-pub async fn set_language(
-    ctx: RpcContext,
-    SetLanguageParams { language }: SetLanguageParams,
-) -> Result<(), Error> {
+pub async fn set_language(ctx: RpcContext, params: SetLanguageParams) -> Result<(), Error> {
+    params.validate()?;
+    let SetLanguageParams { language } = params;
     set_locale(&*language);
     save_language(&*language).await?;
     ctx.db
