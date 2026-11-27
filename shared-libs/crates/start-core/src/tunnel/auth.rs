@@ -134,6 +134,7 @@ impl SignatureAuthorizationContext for TunnelContext {
 impl LocalAuthContext for TunnelContext {
     const LOCAL_AUTH_COOKIE_PATH: &str = "/run/startos/tunnel.authcookie";
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
+    const LOCAL_SERVICE: Option<&str> = Some("start-tunneld");
 }
 impl LoginContext for TunnelContext {
     fn auth_key_is_enrolled(

@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use clap::Parser;
-use http::HeaderMap;
 use http::header::AUTHORIZATION;
+use http::{HeaderMap, HeaderValue};
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use include_dir::Dir;
@@ -25,7 +25,10 @@ use crate::context::CliContext;
 use crate::context::config::ContextConfig;
 use crate::db::model::public::{NetworkInterfaceInfo, NetworkInterfaceType};
 use crate::middleware::auth::Auth;
-use crate::middleware::auth::local::{LocalAuthContext, dial_addr, local_auth_header};
+use crate::middleware::auth::local::{
+    LocalAuthContext, LocalAuthMissing, dial_addr, installed_local_service,
+    local_auth_header_status, missing_local_auth_error,
+};
 use crate::middleware::auth::signature::{NonceCache, url_host_str};
 use crate::middleware::db::SyncDb;
 use crate::net::dns_update::rfc2136::{DnsInjector, InjectedRecord, UpdateAuth};
@@ -942,6 +945,45 @@ pub struct TunnelAddrParams {
     pub tunnel: IpAddr,
 }
 
+fn tunnel_dial_target(
+    tunnel_addr: Option<SocketAddr>,
+    tunnel_listen: Option<SocketAddr>,
+) -> (SocketAddr, bool) {
+    if let Some(addr) = tunnel_addr {
+        (addr, true)
+    } else if let Some(addr) = tunnel_listen {
+        let dialed = dial_addr(addr);
+        (dialed, !dialed.ip().is_loopback())
+    } else {
+        (TUNNEL_DEFAULT_LISTEN, false)
+    }
+}
+
+fn resolve_tunnel_target(
+    addr: SocketAddr,
+    use_https_fallback: bool,
+    local_auth: Option<Result<HeaderValue, LocalAuthMissing>>,
+    stopped_service: impl FnOnce() -> Option<&'static str>,
+) -> Result<(SocketAddr, Option<HeaderValue>), Error> {
+    let remote_required = || {
+        Error::new(
+            eyre!("{}", t!("tunnel.context.tunnel-required")),
+            ErrorKind::InvalidRequest,
+        )
+    };
+    match local_auth {
+        Some(Ok(auth)) if addr.ip().is_loopback() => Ok((addr, Some(auth))),
+        _ if use_https_fallback => Ok((addr, None)),
+        Some(Err(missing)) => Err(missing_local_auth_error(
+            missing,
+            TunnelContext::LOCAL_AUTH_COOKIE_PATH,
+            stopped_service,
+            remote_required(),
+        )),
+        None | Some(Ok(_)) => Err(remote_required()),
+    }
+}
+
 impl CallRemote<TunnelContext> for CliContext {
     async fn call_remote(
         &self,
@@ -951,28 +993,25 @@ impl CallRemote<TunnelContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        let (tunnel_addr, addr_from_config) = if let Some(addr) = self.tunnel_addr {
-            (addr, true)
-        } else if let Some(addr) = self.tunnel_listen {
-            (dial_addr(addr), true)
-        } else {
-            (TUNNEL_DEFAULT_LISTEN, false)
-        };
-
-        let local_auth = if tunnel_addr.ip().is_loopback() {
-            local_auth_header::<TunnelContext>().await
+        let (addr, use_https_fallback) = tunnel_dial_target(self.tunnel_addr, self.tunnel_listen);
+        let local_auth = if addr.ip().is_loopback() {
+            Some(local_auth_header_status::<TunnelContext>().await)
         } else {
             None
         };
+        let (tunnel_addr, auth) = resolve_tunnel_target(
+            addr,
+            use_https_fallback,
+            local_auth,
+            installed_local_service::<TunnelContext>,
+        )?;
 
         let mut headers = HeaderMap::new();
-        let (scheme, sig_ctx) = if let Some(auth) = local_auth {
+        let (scheme, sig_ctx) = if let Some(auth) = auth {
             headers.insert(AUTHORIZATION, auth);
             ("http", None)
-        } else if addr_from_config {
-            ("https", Some(url_host_str(tunnel_addr.ip())))
         } else {
-            return Err(Error::new(eyre!("`--tunnel` required"), ErrorKind::InvalidRequest).into());
+            ("https", Some(url_host_str(tunnel_addr.ip())))
         };
 
         let base: url::Url = format!("{scheme}://{tunnel_addr}").parse()?;
@@ -1138,5 +1177,158 @@ mod tests {
         reconcile_sni_demux(&sni, &forwards, &forwards);
         assert_eq!(sni.snapshot().len(), 1);
         assert_eq!(sni.snapshot()[0].hostname, hostname);
+    }
+
+    #[test]
+    fn resolve_tunnel_target_handles_local_auth_and_remote_fallbacks() {
+        fn resolve(
+            tunnel_addr: Option<SocketAddr>,
+            tunnel_listen: Option<SocketAddr>,
+            local_auth: Option<Result<HeaderValue, LocalAuthMissing>>,
+            stopped_service: impl FnOnce() -> Option<&'static str>,
+        ) -> Result<(SocketAddr, Option<HeaderValue>), Error> {
+            let (addr, use_https_fallback) = tunnel_dial_target(tunnel_addr, tunnel_listen);
+            resolve_tunnel_target(addr, use_https_fallback, local_auth, stopped_service)
+        }
+
+        let token = || HeaderValue::from_static("Bearer tunnel-token");
+        let no_service_check = || panic!("stopped_service should not be queried");
+
+        let (addr, auth) = resolve(None, None, Some(Ok(token())), no_service_check).unwrap();
+        assert_eq!(addr, TUNNEL_DEFAULT_LISTEN);
+        assert_eq!(auth, Some(token()));
+
+        let err = resolve(
+            None,
+            None,
+            Some(Err(LocalAuthMissing::PermissionDenied)),
+            no_service_check,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Filesystem);
+        let msg = err.source.to_string();
+        assert!(msg.contains(TunnelContext::LOCAL_AUTH_COOKIE_PATH), "{msg}");
+        assert!(!msg.contains("--tunnel"), "{msg}");
+
+        let stopped = resolve(None, None, Some(Err(LocalAuthMissing::NotFound)), || {
+            Some("start-tunneld")
+        })
+        .unwrap_err();
+        assert_eq!(stopped.kind, ErrorKind::Systemd);
+        let msg = stopped.source.to_string();
+        assert!(msg.contains("start-tunneld"), "{msg}");
+        assert!(!msg.contains("--tunnel"), "{msg}");
+
+        let missing =
+            resolve(None, None, Some(Err(LocalAuthMissing::NotFound)), || None).unwrap_err();
+        assert_eq!(missing.kind, ErrorKind::InvalidRequest);
+        assert!(missing.source.to_string().contains("--tunnel"));
+
+        let invalid = resolve(
+            None,
+            None,
+            Some(Err(LocalAuthMissing::Invalid(Error::new(
+                eyre!("bad token"),
+                ErrorKind::Filesystem,
+            )))),
+            no_service_check,
+        )
+        .unwrap_err();
+        assert_eq!(invalid.kind, ErrorKind::Filesystem);
+        assert!(invalid.source.to_string().contains("bad token"));
+
+        let none_auth = resolve(None, None, None, no_service_check).unwrap_err();
+        assert_eq!(none_auth.kind, ErrorKind::InvalidRequest);
+        assert!(none_auth.source.to_string().contains("--tunnel"));
+
+        let explicit_loopback: SocketAddr = "127.0.0.1:8443".parse().unwrap();
+        let (addr, auth) = resolve(
+            Some(explicit_loopback),
+            None,
+            Some(Ok(token())),
+            no_service_check,
+        )
+        .unwrap();
+        assert_eq!(addr, explicit_loopback);
+        assert_eq!(auth, Some(token()));
+
+        for status in [
+            Some(Err(LocalAuthMissing::PermissionDenied)),
+            Some(Err(LocalAuthMissing::NotFound)),
+            Some(Err(LocalAuthMissing::Invalid(Error::new(
+                eyre!("bad token"),
+                ErrorKind::Filesystem,
+            )))),
+            None,
+        ] {
+            let (addr, auth) =
+                resolve(Some(explicit_loopback), None, status, no_service_check).unwrap();
+            assert_eq!(addr, explicit_loopback);
+            assert_eq!(auth, None);
+        }
+
+        let explicit_remote: SocketAddr = "203.0.113.10:8443".parse().unwrap();
+        for status in [None, Some(Ok(token()))] {
+            let (addr, auth) =
+                resolve(Some(explicit_remote), None, status, no_service_check).unwrap();
+            assert_eq!(addr, explicit_remote);
+            assert_eq!(auth, None);
+        }
+
+        let wildcard_listen: SocketAddr = "0.0.0.0:5960".parse().unwrap();
+        let (addr, auth) = resolve(
+            None,
+            Some(wildcard_listen),
+            Some(Ok(token())),
+            no_service_check,
+        )
+        .unwrap();
+        assert_eq!(addr, "127.0.0.1:5960".parse::<SocketAddr>().unwrap());
+        assert_eq!(auth, Some(token()));
+
+        let err = resolve(
+            None,
+            Some(wildcard_listen),
+            Some(Err(LocalAuthMissing::PermissionDenied)),
+            no_service_check,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Filesystem);
+
+        let err = resolve(
+            None,
+            Some(wildcard_listen),
+            Some(Err(LocalAuthMissing::NotFound)),
+            || Some("start-tunneld"),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Systemd);
+
+        let err = resolve(
+            None,
+            Some(wildcard_listen),
+            Some(Err(LocalAuthMissing::NotFound)),
+            || None,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+
+        let loopback_listen: SocketAddr = "127.0.59.61:5960".parse().unwrap();
+        let err = resolve(
+            None,
+            Some(loopback_listen),
+            Some(Err(LocalAuthMissing::PermissionDenied)),
+            no_service_check,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Filesystem);
+
+        let remote_listen: SocketAddr = "192.168.1.5:5960".parse().unwrap();
+        for status in [None, Some(Err(LocalAuthMissing::PermissionDenied))] {
+            let (addr, auth) =
+                resolve(None, Some(remote_listen), status, no_service_check).unwrap();
+            assert_eq!(addr, remote_listen);
+            assert_eq!(auth, None);
+        }
     }
 }

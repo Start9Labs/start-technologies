@@ -182,7 +182,7 @@ Enter the password when prompted.
 {{#endtabs }}
 
 > [!IMPORTANT]
-> Run the commands on your VPS as `root`. If your provider logs you in as a regular user, switch to root first with `sudo -i`. `start-tunnel` authenticates to the StartTunnel service with a token only root can read, so as any other user it fails with `` `--tunnel` required ``.
+> Run the commands on your VPS as `root`. If your provider logs you in as a regular user, switch to root first with `sudo -i`. `start-tunnel` authenticates to the StartTunnel service with a token only root can read.
 
 ## Run the installer
 

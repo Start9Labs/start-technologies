@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use clap::Parser;
-use http::HeaderMap;
 use http::header::AUTHORIZATION;
+use http::{HeaderMap, HeaderValue};
 use imbl::OrdMap;
 use imbl_value::InternedString;
 use patch_db::PatchDb;
@@ -24,7 +24,10 @@ use url::Url;
 use crate::context::CliContext;
 use crate::context::config::{CONFIG_PATH, ContextConfig};
 use crate::middleware::auth::DbContext;
-use crate::middleware::auth::local::{LocalAuthContext, dial_addr, is_loopback, local_auth_header};
+use crate::middleware::auth::local::{
+    LocalAuthContext, LocalAuthMissing, dial_addr, installed_local_service, is_loopback,
+    local_auth_header_status, missing_local_auth_error,
+};
 use crate::middleware::auth::session::RpcSessionUpgrader;
 use crate::middleware::auth::signature::{
     NonceCache, SignatureAuthContext, SignatureAuthMetadata, SignatureAuthorizationContext,
@@ -331,6 +334,46 @@ pub(crate) async fn call_cli(
     }
 }
 
+fn resolve_registry_target(
+    registry_url: Option<Url>,
+    registry_listen: Option<SocketAddr>,
+    has_registry_hostname: bool,
+    local_auth: Option<Result<HeaderValue, LocalAuthMissing>>,
+    stopped_service: impl FnOnce() -> Option<&'static str>,
+) -> Result<(Url, Option<HeaderValue>), Error> {
+    if let Some(url) = registry_url {
+        let auth = is_loopback(&url)
+            .then(|| local_auth.and_then(Result::ok))
+            .flatten();
+        return Ok((url, auth));
+    }
+    let listen_url = || -> Result<Url, Error> {
+        format!(
+            "http://{}",
+            dial_addr(registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN))
+        )
+        .parse()
+        .map_err(Error::from)
+    };
+    let remote_required = || {
+        Error::new(
+            eyre!("{}", t!("registry.context.registry-required")),
+            ErrorKind::InvalidRequest,
+        )
+    };
+    match local_auth {
+        Some(Ok(auth)) => Ok((listen_url()?, Some(auth))),
+        _ if has_registry_hostname => Ok((listen_url()?, None)),
+        Some(Err(missing)) => Err(missing_local_auth_error(
+            missing,
+            RegistryContext::LOCAL_AUTH_COOKIE_PATH,
+            stopped_service,
+            remote_required(),
+        )),
+        None => Err(remote_required()),
+    }
+}
+
 impl CallRemote<RegistryContext> for CliContext {
     async fn call_remote(
         &self,
@@ -339,34 +382,27 @@ impl CallRemote<RegistryContext> for CliContext {
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        let local_auth = local_auth_header::<RegistryContext>().await;
-
-        let (url, is_local) = if let Some(url) = &self.registry_url {
-            let url = url.get()?.clone();
-            let is_local = is_loopback(&url);
-            (url, is_local)
-        } else if local_auth.is_some() || !self.registry_hostname.is_empty() {
-            let url: Url = format!(
-                "http://{}",
-                dial_addr(self.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN))
-            )
-            .parse()
-            .map_err(Error::from)?;
-            // The listen address identifies this machine, including non-loopback binds.
-            (url, true)
+        let registry_url = self
+            .registry_url
+            .as_ref()
+            .map(|url| url.get().cloned())
+            .transpose()?;
+        let local_auth = if registry_url.as_ref().is_none_or(is_loopback) {
+            Some(local_auth_header_status::<RegistryContext>().await)
         } else {
-            return Err(Error::new(
-                eyre!("{}", t!("registry.context.registry-required")),
-                ErrorKind::InvalidRequest,
-            )
-            .into());
+            None
         };
+        let (url, auth) = resolve_registry_target(
+            registry_url,
+            self.registry_listen,
+            !self.registry_hostname.is_empty(),
+            local_auth,
+            installed_local_service::<RegistryContext>,
+        )?;
 
         let mut headers = HeaderMap::new();
-        if is_local {
-            if let Some(auth) = local_auth {
-                headers.insert(AUTHORIZATION, auth);
-            }
+        if let Some(auth) = auth {
+            headers.insert(AUTHORIZATION, auth);
         }
 
         method = method.strip_prefix("registry.").unwrap_or(method);
@@ -481,6 +517,7 @@ impl DbContext for RegistryContext {
 impl LocalAuthContext for RegistryContext {
     const LOCAL_AUTH_COOKIE_PATH: &str = "/run/startos/registry.authcookie";
     const LOCAL_AUTH_COOKIE_OWNERSHIP: &str = "root:root";
+    const LOCAL_SERVICE: Option<&str> = Some("start-registryd");
 }
 impl SignatureAuthContext for RegistryContext {
     fn server_identity(&self) -> Result<crate::sign::session::ServerIdentity, Error> {
@@ -665,6 +702,173 @@ mod tests {
             vec![InternedString::from("registry.test")]
         );
         assert!(RegistryConfig::try_parse_from(["registry", "--security-notifications"]).is_err());
+    }
+
+    #[test]
+    fn resolve_registry_target_handles_local_auth_and_remote_fallbacks() {
+        let token = || HeaderValue::from_static("Bearer registry-token");
+        let no_service_check = || panic!("stopped_service should not be queried");
+        let base_url = |base: &str| base.parse::<Url>().unwrap();
+
+        let explicit_loopback = base_url("http://127.0.0.1:5959");
+        let (url, auth) = resolve_registry_target(
+            Some(explicit_loopback.clone()),
+            None,
+            false,
+            Some(Ok(token())),
+            no_service_check,
+        )
+        .unwrap();
+        assert_eq!(url, explicit_loopback);
+        assert_eq!(auth, Some(token()));
+
+        for status in [
+            Some(Err(LocalAuthMissing::PermissionDenied)),
+            Some(Err(LocalAuthMissing::NotFound)),
+            Some(Err(LocalAuthMissing::Invalid(Error::new(
+                eyre!("bad token"),
+                ErrorKind::Filesystem,
+            )))),
+            None,
+        ] {
+            let (url, auth) = resolve_registry_target(
+                Some(explicit_loopback.clone()),
+                None,
+                false,
+                status,
+                no_service_check,
+            )
+            .unwrap();
+            assert_eq!(url, explicit_loopback);
+            assert_eq!(auth, None);
+        }
+
+        let explicit_remote = base_url("https://registry.example.com");
+        for status in [
+            None,
+            Some(Ok(token())),
+            Some(Err(LocalAuthMissing::PermissionDenied)),
+            Some(Err(LocalAuthMissing::NotFound)),
+        ] {
+            let (url, auth) = resolve_registry_target(
+                Some(explicit_remote.clone()),
+                None,
+                false,
+                status,
+                no_service_check,
+            )
+            .unwrap();
+            assert_eq!(url, explicit_remote);
+            assert_eq!(auth, None);
+        }
+
+        let (url, auth) =
+            resolve_registry_target(None, None, false, Some(Ok(token())), no_service_check)
+                .unwrap();
+        assert_eq!(url, base_url("http://127.0.0.1:5959"));
+        assert_eq!(auth, Some(token()));
+
+        let (url, auth) = resolve_registry_target(
+            None,
+            Some("0.0.0.0:6060".parse().unwrap()),
+            false,
+            Some(Ok(token())),
+            no_service_check,
+        )
+        .unwrap();
+        assert_eq!(url, base_url("http://127.0.0.1:6060"));
+        assert_eq!(auth, Some(token()));
+
+        let (url, auth) = resolve_registry_target(
+            None,
+            Some("192.168.1.5:6060".parse().unwrap()),
+            false,
+            Some(Ok(token())),
+            no_service_check,
+        )
+        .unwrap();
+        assert_eq!(url, base_url("http://192.168.1.5:6060"));
+        assert_eq!(auth, Some(token()));
+
+        for status in [
+            Some(Err(LocalAuthMissing::PermissionDenied)),
+            Some(Err(LocalAuthMissing::NotFound)),
+            Some(Err(LocalAuthMissing::Invalid(Error::new(
+                eyre!("bad token"),
+                ErrorKind::Filesystem,
+            )))),
+            None,
+        ] {
+            let (url, auth) = resolve_registry_target(
+                None,
+                Some("0.0.0.0:6060".parse().unwrap()),
+                true,
+                status,
+                no_service_check,
+            )
+            .unwrap();
+            assert_eq!(url, base_url("http://127.0.0.1:6060"));
+            assert_eq!(auth, None);
+        }
+
+        let err = resolve_registry_target(
+            None,
+            None,
+            false,
+            Some(Err(LocalAuthMissing::PermissionDenied)),
+            no_service_check,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Filesystem);
+        let msg = err.source.to_string();
+        assert!(
+            msg.contains(RegistryContext::LOCAL_AUTH_COOKIE_PATH),
+            "{msg}"
+        );
+        assert!(!msg.contains("--registry"), "{msg}");
+
+        let stopped = resolve_registry_target(
+            None,
+            None,
+            false,
+            Some(Err(LocalAuthMissing::NotFound)),
+            || Some("start-registryd"),
+        )
+        .unwrap_err();
+        assert_eq!(stopped.kind, ErrorKind::Systemd);
+        let msg = stopped.source.to_string();
+        assert!(msg.contains("start-registryd"), "{msg}");
+        assert!(!msg.contains("--registry"), "{msg}");
+
+        let missing = resolve_registry_target(
+            None,
+            None,
+            false,
+            Some(Err(LocalAuthMissing::NotFound)),
+            || None,
+        )
+        .unwrap_err();
+        assert_eq!(missing.kind, ErrorKind::InvalidRequest);
+        assert!(missing.source.to_string().contains("--registry"));
+
+        let invalid = resolve_registry_target(
+            None,
+            None,
+            false,
+            Some(Err(LocalAuthMissing::Invalid(Error::new(
+                eyre!("bad token"),
+                ErrorKind::Filesystem,
+            )))),
+            no_service_check,
+        )
+        .unwrap_err();
+        assert_eq!(invalid.kind, ErrorKind::Filesystem);
+        assert!(invalid.source.to_string().contains("bad token"));
+
+        let none_auth =
+            resolve_registry_target(None, None, false, None, no_service_check).unwrap_err();
+        assert_eq!(none_auth.kind, ErrorKind::InvalidRequest);
+        assert!(none_auth.source.to_string().contains("--registry"));
     }
 }
 
