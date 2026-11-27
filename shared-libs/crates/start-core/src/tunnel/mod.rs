@@ -12,6 +12,8 @@ pub mod context;
 pub mod db;
 pub mod dns;
 pub mod forward;
+#[cfg(target_os = "linux")]
+mod legacy_iptables;
 pub(crate) mod migrations;
 pub mod redirect;
 pub mod update;
