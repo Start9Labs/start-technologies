@@ -9,6 +9,8 @@
 //! protected EFI activation and an available runtime view. Backings are data placement,
 //! not active-protection evidence. The generation/activation owner prunes abandoned
 //! candidates only after their references retire and reclaims obsolete public extents.
+//! Backing reclamation must preserve live service and network availability.
+//! Its online ownership contract lives in `projects/start-os/FDE.md`.
 
 #[cfg(test)]
 #[path = "private_config_tests.rs"]
