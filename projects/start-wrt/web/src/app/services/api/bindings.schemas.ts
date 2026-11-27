@@ -1922,9 +1922,12 @@ export const Device: z.ZodObject<{
   allow_router_advertisements: z.ZodBoolean
   security_profile: z.ZodDefault<z.ZodNullable<z.ZodString>>
   speed: z.ZodDefault<z.ZodNullable<typeof SpeedData>>
-  data_usage: z.ZodDefault<
-    z.ZodNullable<z.ZodCodec<z.ZodNumber, z.ZodNullable<z.ZodNumber>>>
-  >
+  /**
+   * Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon
+   * period (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;
+   * `None` when no record exists.
+   */
+  data_usage: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   mac: z
     .string()
@@ -2049,9 +2052,19 @@ export const Device: z.ZodObject<{
     .nullable()
     .default(() => null),
   speed: SpeedData.nullable().default(() => null),
-  data_usage: wire(z.number(), z.number().nullable())
+  /**
+   * Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon
+   * period (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;
+   * `None` when no record exists.
+   */
+  data_usage: z
+    .int()
     .nullable()
-    .default(() => null),
+    .default(() => null)
+    .meta({
+      description:
+        'Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon\nperiod (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;\n`None` when no record exists.',
+    }),
 }).meta({
   id: 'Device',
 })

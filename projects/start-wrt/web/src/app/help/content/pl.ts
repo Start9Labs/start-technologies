@@ -23,7 +23,9 @@ Przypisane urządzeniu adresy IPv4 i IPv6.
 
 ### Dane i prędkość
 
-Wykorzystanie przepustowości i bieżące prędkości transferu. Przydatne do identyfikacji intensywnych użytkowników sieci.`,
+**Dane** to suma pobranych i wysłanych danych od ostatniego dziennego resetu licznika o 00:00 UTC (19:00 w Nowym Jorku zimą, 20:00 latem). Domyślne liczniki obejmują ruch IPv4 między urządzeniem a internetem. Ruch pozostający w sieci lokalnej nie jest zliczany: komunikacja jednego urządzenia z drugim w domu nic tu nie dodaje, nawet jeśli należą do różnych profili bezpieczeństwa. Kreska oznacza, że dziś nie zliczono żadnego ruchu internetowego dla tego urządzenia. W przypadku klienta VPN Dane obejmują cały jego ruch w tunelu od ostatniego uruchomienia VPN.
+
+**Prędkość** to bieżąca szybkość transferu urządzenia.`,
   '/devices/device': `## Urządzenia
 
 Wyświetl informacje o urządzeniu i skonfiguruj ustawienia.
@@ -34,7 +36,7 @@ Wyświetla bieżący stan urządzenia, typ połączenia, profil bezpieczeństwa 
 
 ### Wykorzystanie danych
 
-Pokazuje historyczne wykorzystanie sieci przez to urządzenie. Użyj listy rozwijanej, aby wyświetlić różne okresy czasu. Pobieranie pokazane jest na niebiesko, wysyłanie na zielono.
+Pokazuje historyczny ruch internetowy tego urządzenia, zliczany według dni UTC (reset o 00:00 UTC). Domyślne liczniki obejmują ruch IPv4 między urządzeniem a internetem; ruch w sieci lokalnej nie jest zliczany, nawet między różnymi profilami bezpieczeństwa. Użyj listy rozwijanej, aby wyświetlić różne okresy czasu. Pobieranie pokazane jest na niebiesko, wysyłanie na zielono.
 
 ### Nazwa
 

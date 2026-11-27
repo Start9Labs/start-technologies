@@ -23,7 +23,9 @@ Die dem Gerät zugewiesenen IPv4- und IPv6-Adressen.
 
 ### Daten & Geschwindigkeit
 
-Bandbreitennutzung und aktuelle Übertragungsgeschwindigkeiten. Nützlich, um Geräte mit hohem Netzwerkverbrauch zu identifizieren.`,
+**Daten** ist die Summe aus herunter- und hochgeladenen Daten seit dem letzten täglichen Zurücksetzen um 00:00 UTC (19:00 Uhr in New York im Winter, 20:00 Uhr im Sommer). Die Standardzähler erfassen den IPv4-Datenverkehr zwischen dem Gerät und dem Internet. Datenverkehr innerhalb Ihres Heimnetzwerks wird nicht gezählt: Wenn ein Gerät mit einem anderen Gerät in Ihrem Zuhause kommuniziert, wird hier nichts hinzugefügt, selbst wenn beide in unterschiedlichen Sicherheitsprofilen sind. Ein Strich bedeutet, dass heute kein Internetverkehr für dieses Gerät gezählt wurde. Bei einem VPN-Client umfasst Daten den gesamten Tunnelverkehr seit dem letzten Start des VPN.
+
+**Geschwindigkeit** ist die aktuelle Übertragungsrate des Geräts.`,
   '/devices/device': `## Geräte
 
 Geräteinformationen anzeigen und Einstellungen konfigurieren.
@@ -34,7 +36,7 @@ Zeigt den aktuellen Status des Geräts, den Verbindungstyp, das Sicherheitsprofi
 
 ### Datennutzung
 
-Zeigt die bisherige Netzwerknutzung dieses Geräts an. Verwenden Sie das Dropdown-Menü, um verschiedene Zeiträume anzuzeigen. Der Download wird in Blau, der Upload in Grün dargestellt.
+Zeigt den bisherigen Internetverkehr dieses Geräts pro UTC-Tag (Zurücksetzung um 00:00 UTC). Die Standardzähler erfassen den IPv4-Datenverkehr zwischen dem Gerät und dem Internet; Verkehr innerhalb Ihres Heimnetzwerks wird nicht gezählt, selbst zwischen verschiedenen Sicherheitsprofilen. Verwenden Sie das Dropdown-Menü, um verschiedene Zeiträume anzuzeigen. Der Download wird in Blau, der Upload in Grün dargestellt.
 
 ### Name
 

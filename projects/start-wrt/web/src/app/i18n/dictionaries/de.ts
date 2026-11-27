@@ -127,7 +127,6 @@ export default {
   128: 'Das Ändern der Router-IP macht alle vorhandenen VPN-Client-Konfigurationen ungültig. Der eingehende VPN-Server und seine Peers werden entfernt und müssen neu erstellt werden.',
   129: 'Verbindung',
   130: 'Anmeldedaten',
-  131: 'Daten',
   132: 'Datennutzung',
   133: ' (Standard)',
   134: 'Standard',
@@ -605,4 +604,5 @@ export default {
   653: '{port} sendet jedes Sicherheitsprofil mit seiner VLAN-ID getaggt an den Switch. Richten Sie die VLANs des Switches mit diesen IDs ein.',
   654: '{profile} überschneidet sich mit dem vorgelagerten Netzwerk {network}',
   655: 'Der Router kann den Zugang zum vorgelagerten Netzwerk oder zum Internet verlieren. Ein spezifischeres WAN-Netzwerk kann auch Geräten den Zugriff auf dieses Dashboard verwehren. Ändern Sie sein Subnetz in eines außerhalb dieses Netzwerks.',
+  656: 'Daten (MB)',
 } satisfies i18n

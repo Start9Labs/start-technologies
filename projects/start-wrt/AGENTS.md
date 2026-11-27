@@ -272,7 +272,7 @@ npm run build:deps      # build the file: deps (@start9labs/start-core, patch-db
 cp projects/start-wrt/web/config-sample.json projects/start-wrt/web/config.json  # once; config.json is gitignored
 npm run start:wrt       # dev server (mock API while config.json has useMocks: true) — stamps config.json first
 npm run build:wrt       # production build → projects/start-wrt/web/dist/startwrt/browser/
-npm run check:wrt       # type-check
+npm run check:wrt       # type-check and logic tests
 npm run check:i18n:wrt  # i18n dictionary check
 ```
 

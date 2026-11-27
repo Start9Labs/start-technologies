@@ -34,7 +34,7 @@ npm ci                                # Install the whole workspace
 npm run build:deps                    # Build the file: deps — once after install
 npm run start:wrt                     # Dev server with mock API
 npm run build:wrt                     # Production build
-npm run check:wrt                     # Type-check without emitting
+npm run check:wrt                     # Type-check and logic tests
 ```
 
 ### Configuring config.json

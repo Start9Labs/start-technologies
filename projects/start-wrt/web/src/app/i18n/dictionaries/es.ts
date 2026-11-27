@@ -127,7 +127,6 @@ export default {
   128: 'Cambiar la IP del router invalidará todas las configuraciones existentes de clientes VPN. El servidor VPN entrante y sus pares se eliminarán y deberán volver a crearse.',
   129: 'Conexión',
   130: 'Credenciales',
-  131: 'Datos',
   132: 'Uso de datos',
   133: ' (predeterminado)',
   134: 'Predeterminado',
@@ -605,4 +604,5 @@ export default {
   653: '{port} envía cada perfil de seguridad al switch etiquetado con su ID de VLAN. Configura las VLAN del switch con estos IDs.',
   654: '{profile} se superpone con la red superior {network}',
   655: 'El router puede perder el acceso a la red superior o a Internet. Una red WAN más específica también puede impedir que los dispositivos accedan a este panel. Cambie su subred a una fuera de esa red.',
+  656: 'Datos (MB)',
 } satisfies i18n

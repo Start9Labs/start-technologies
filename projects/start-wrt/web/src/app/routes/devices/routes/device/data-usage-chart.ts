@@ -20,6 +20,7 @@ import {
 } from '@taiga-ui/core'
 import type { TuiPoint } from '@taiga-ui/core'
 import { TuiChevron, TuiSkeleton, TuiStatus } from '@taiga-ui/kit'
+import { buildChartLines, computeChartYAxis } from '../../data-usage'
 import {
   DATA_USAGE_PERIOD_LABELS,
   DataUsagePeriod,
@@ -27,6 +28,7 @@ import {
 } from '../../utils'
 import { DevicesService } from '../../service'
 import { i18nPipe } from 'src/app/i18n/i18n.pipe'
+import { i18nService } from 'src/app/i18n/i18n.service'
 
 @Component({
   selector: 'app-data-usage-chart',
@@ -81,7 +83,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
       </div>
       <tui-axes
         [axisXLabels]="xLabels()"
-        [axisYSecondaryLabels]="yLabels()"
+        [axisYSecondaryLabels]="yAxis().labels"
         [horizontalLines]="3"
         [horizontalLinesHandler]="lines"
       >
@@ -167,6 +169,7 @@ import { i18nPipe } from 'src/app/i18n/i18n.pipe'
 })
 export class DataUsageChart {
   private readonly i18n = inject(i18nPipe)
+  private readonly i18nService = inject(i18nService)
 
   readonly mac = input.required<string>()
   readonly service = input.required<DevicesService>()
@@ -187,64 +190,13 @@ export class DataUsageChart {
     this.dataPoints().every(p => p.download === 0 && p.upload === 0),
   )
 
-  // Convert data to a line chart format using absolute coordinates.
-  // A single point is drawn as a flat segment.
-  protected readonly chartLines = computed((): TuiPoint[][] => {
-    const points = this.dataPoints()
-    if (points.length === 0) return []
+  protected readonly yAxis = computed(() =>
+    computeChartYAxis(this.dataPoints(), this.i18nService.locale()),
+  )
 
-    const width = 400
-    const height = 160
-    const maxBytes = Math.max(
-      ...points.map(p => Math.max(p.download, p.upload)),
-    )
-    const scale = maxBytes > 0 ? height / maxBytes : 1
-
-    if (points.length === 1) {
-      const [p] = points
-      return [
-        [
-          [0, p.download * scale],
-          [width, p.download * scale],
-        ],
-        [
-          [0, p.upload * scale],
-          [width, p.upload * scale],
-        ],
-      ]
-    }
-
-    const len = points.length - 1
-    const downloadLine: TuiPoint[] = points.map(
-      (p, i): TuiPoint => [(i / len) * width, p.download * scale],
-    )
-    const uploadLine: TuiPoint[] = points.map(
-      (p, i): TuiPoint => [(i / len) * width, p.upload * scale],
-    )
-    return [downloadLine, uploadLine]
-  })
-
-  protected readonly yMax = computed((): number => {
-    const points = this.dataPoints()
-    if (points.length === 0) return 1
-
-    const maxBytes = Math.max(
-      ...points.map(p => Math.max(p.download, p.upload)),
-    )
-    const maxGb = maxBytes / (1024 * 1024 * 1024)
-    return Math.max(0.5, Math.ceil(maxGb * 2) / 2)
-  })
-
-  protected readonly yLabels = computed(() => {
-    const max = this.yMax()
-    const step = max / 3
-    return [
-      '0',
-      `${step.toFixed(1)}GB`,
-      `${(step * 2).toFixed(1)}GB`,
-      `${max.toFixed(1)}GB`,
-    ]
-  })
+  protected readonly chartLines = computed((): TuiPoint[][] =>
+    buildChartLines(this.dataPoints(), this.yAxis().maxBytes, 400, 160),
+  )
 
   protected readonly xLabels = computed(() => {
     const period = this.selectedPeriod()

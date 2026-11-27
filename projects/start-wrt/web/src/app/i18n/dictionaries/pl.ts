@@ -127,7 +127,6 @@ export default {
   128: 'Zmiana adresu IP routera unieważni wszystkie istniejące konfiguracje klientów VPN. Przychodzący serwer VPN i jego węzły zostaną usunięte i muszą zostać utworzone ponownie.',
   129: 'Połączenie',
   130: 'Dane logowania',
-  131: 'Dane',
   132: 'Zużycie danych',
   133: ' (domyślnie)',
   134: 'Domyślnie',
@@ -605,4 +604,5 @@ export default {
   653: '{port} wysyła każdy profil bezpieczeństwa do przełącznika oznaczony jego identyfikatorem VLAN. Skonfiguruj sieci VLAN przełącznika z użyciem tych identyfikatorów.',
   654: '{profile} nakłada się na sieć nadrzędną {network}',
   655: 'Router może stracić dostęp do sieci nadrzędnej lub Internetu. Bardziej szczegółowa sieć WAN może też uniemożliwić urządzeniom dostęp do tego panelu. Zmień jego podsieć na leżącą poza tą siecią.',
+  656: 'Dane (MB)',
 } satisfies i18n

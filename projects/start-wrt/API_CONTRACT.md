@@ -962,9 +962,10 @@ struct Device {
     /// between polls (`wg show` byte deltas for a VPN peer). Only set for online
     /// devices with a previous sample.
     speed: Option<SpeedData>,
-    /// Total data used in the current nlbwmon period (GB, 1 decimal, rx+tx); for
-    /// a VPN peer, its cumulative `wg show` rx+tx since the interface came up
-    data_usage: Option<f64>,
+    /// Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon
+    /// period (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;
+    /// `None` when no record exists.
+    data_usage: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -993,6 +994,12 @@ struct SpeedData {
 // backend resolves the full name fallback chain server-side and returns a
 // single `name`.
 ```
+
+LAN data totals and `devices.data-usage` history follow nlbwmon's `local_network`
+configuration. The factory configuration covers private IPv4 ranges. A flow
+contributes when one endpoint is local and the other is not; local-to-local flows
+contribute nothing. VPN peer totals use WireGuard counters independently of that
+configuration.
 
 ### `devices.update`
 

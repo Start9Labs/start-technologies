@@ -98,7 +98,10 @@ pub struct Device {
     pub allow_router_advertisements: bool,
     pub security_profile: Option<String>,
     pub speed: Option<SpeedData>,
-    pub data_usage: Option<f64>,
+    /// Total bytes (`rx + tx`, capped at `2^53 - 1`) in the current nlbwmon
+    /// period (since 00:00 UTC), or cumulative `wg show` bytes for a VPN peer;
+    /// `None` when no record exists.
+    pub data_usage: Option<u64>,
 }
 rpc_toolkit::reflect_ts!(Device);
 
@@ -658,6 +661,8 @@ fn conntrack_bytes_by_mac(
     result
 }
 
+const MAX_JS_SAFE_INT: u64 = (1 << 53) - 1;
+
 /// Parse nlbw JSON output. Returns Vec<(mac, rx_bytes, tx_bytes)>.
 fn parse_nlbw_json(output: &str) -> Vec<(String, u64, u64)> {
     let parsed: serde_json::Value = match serde_json::from_str(output) {
@@ -699,6 +704,17 @@ fn parse_nlbw_json(output: &str) -> Vec<(String, u64, u64)> {
         }
     }
     results
+}
+
+fn nlbw_bytes_by_mac(output: &str) -> HashMap<String, u64> {
+    let mut totals: HashMap<String, u64> = HashMap::new();
+    for (mac, rx, tx) in parse_nlbw_json(output) {
+        let total = totals.entry(mac).or_default();
+        *total = total
+            .saturating_add(rx.saturating_add(tx))
+            .min(MAX_JS_SAFE_INT);
+    }
+    totals
 }
 
 /// Discover hostapd interfaces and their connected client MACs,
@@ -1678,14 +1694,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
     let arp_entries = initial_arp;
     let dhcp_leases = parse_dhcp_leases(&leases_output);
 
-    // Parse nlbw data for cumulative data usage totals
-    let nlbw_data = parse_nlbw_json(&nlbw_output);
-    let mut nlbw_by_mac: HashMap<String, (u64, u64)> = HashMap::new();
-    for (mac, rx, tx) in &nlbw_data {
-        let entry = nlbw_by_mac.entry(mac.clone()).or_insert((0, 0));
-        entry.0 += rx;
-        entry.1 += tx;
-    }
+    let nlbw_by_mac = nlbw_bytes_by_mac(&nlbw_output);
 
     // Build IP → MAC map from ARP entries for conntrack lookup
     let ip_to_mac: HashMap<String, String> = arp_entries
@@ -2007,10 +2016,7 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             None
         };
 
-        // Data usage (GB)
-        let data_usage = nlbw_by_mac
-            .get(mac)
-            .map(|(rx, tx)| ((rx + tx) as f64 / 1_073_741_824.0 * 10.0).round() / 10.0);
+        let data_usage = nlbw_by_mac.get(mac).copied();
 
         let allow_dns_injection = host.is_some_and(|h| h._allow_dns_inject.as_deref() == Some("1"));
         let dns_injection_requested = !allow_dns_injection
@@ -2132,10 +2138,12 @@ pub async fn list(_ctx: ServerContext) -> Result<Vec<Device>, Error> {
             };
 
             // Data usage from cumulative wg show bytes (resets on interface restart)
-            let data_usage = {
-                let total = (active.rx_bytes + active.tx_bytes) as f64 / 1_073_741_824.0;
-                Some((total * 10.0).round() / 10.0)
-            };
+            let data_usage = Some(
+                active
+                    .rx_bytes
+                    .saturating_add(active.tx_bytes)
+                    .min(MAX_JS_SAFE_INT),
+            );
 
             devices.push(Device {
                 mac: None,
@@ -3990,5 +3998,48 @@ aa:bb:cc:dd:ee:03 dev phy0-ap0-x vlan 30 master br-lan
         assert_eq!((two.port.as_str(), two.vlan), ("phy0-ap0", None));
         let three = &fdb["AA:BB:CC:DD:EE:03"];
         assert_eq!((three.port.as_str(), three.vlan), ("eth0", None));
+    }
+
+    #[test]
+    fn nlbw_bytes_by_mac_preserves_sub_50mb_and_zero_records() {
+        let output = r#"{
+            "columns": ["mac", "rx_bytes", "tx_bytes"],
+            "data": [
+                ["aa:bb:cc:dd:ee:01", 30000000000, 9522992128],
+                ["aa:bb:cc:dd:ee:02", 30000000, 12257613],
+                ["aa:bb:cc:dd:ee:03", 200000, 219430],
+                ["aa:bb:cc:dd:ee:04", 512, 0],
+                ["aa:bb:cc:dd:ee:05", 0, 0],
+                ["AA:BB:CC:DD:EE:03", 1000, 500]
+            ]
+        }"#;
+        let by_mac = nlbw_bytes_by_mac(output);
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:01"), Some(&39_522_992_128));
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:02"), Some(&42_257_613));
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:03"), Some(&420_930));
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:04"), Some(&512));
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:05"), Some(&0));
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:99"), None);
+    }
+
+    #[test]
+    fn nlbw_bytes_by_mac_keeps_partial_rows_and_caps_js_safe_int() {
+        let output = format!(
+            r#"{{
+                "columns": ["mac", "rx_bytes", "tx_bytes"],
+                "data": [
+                    ["aa:bb:cc:dd:ee:01", 1048576, null],
+                    ["aa:bb:cc:dd:ee:02", null, "bad"],
+                    ["aa:bb:cc:dd:ee:03", {}, 10]
+                ]
+            }}"#,
+            MAX_JS_SAFE_INT
+        );
+        let by_mac = nlbw_bytes_by_mac(&output);
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:01"), Some(&1_048_576));
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:02"), Some(&0));
+        assert_eq!(by_mac.get("AA:BB:CC:DD:EE:03"), Some(&MAX_JS_SAFE_INT));
+        assert!(nlbw_bytes_by_mac("").is_empty());
+        assert!(nlbw_bytes_by_mac("not json").is_empty());
     }
 }
