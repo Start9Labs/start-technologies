@@ -5,14 +5,14 @@ use rpc_toolkit::{Context, HandlerExt, ParentHandler, from_fn_async};
 use serde::{Deserialize, Serialize};
 
 use crate::context::{CliContext, RpcContext};
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::registry::signer::{AcceptSigners, ContactInfo};
 use crate::sign::AnyVerifyingKey;
 use crate::sign::gpg::{GpgPublicKeyExport, ImportedPublicKeys, parse_public_keys};
-use crate::update::signers::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
 use crate::util::serde::HandlerExtSerde;
 pub(crate) mod connection;
-pub(crate) use connection::{ensure_builtin_registries, ui_registries};
+pub(crate) use connection::ensure_builtin_registries;
 pub use connection::{initial_os_registry, initial_registries};
 pub(crate) mod legacy;
 
@@ -60,7 +60,7 @@ pub struct TrustedKey {
     pub os: bool,
 }
 
-fn manual_origin() -> String {
+pub(crate) fn manual_origin() -> String {
     MANUAL.into()
 }
 
@@ -156,17 +156,14 @@ pub(crate) fn initial_signer_certificates()
     .map(|(label, armored)| (label, parse_public_keys(&[armored.into()]).unwrap()))
 }
 
-pub fn initial_signers() -> TrustedOsUpdateSigners {
+#[cfg(test)]
+pub(crate) fn initial_signer_labels() -> BTreeMap<InternedString, &'static str> {
     initial_signer_certificates()
         .flat_map(|(label, imported)| {
-            imported.keys.into_iter().map(move |key| {
-                (
-                    key.interned_der64(),
-                    TrustedOsUpdateSigner {
-                        label: label.to_owned(),
-                    },
-                )
-            })
+            imported
+                .keys
+                .into_iter()
+                .map(move |key| (key.interned_der64(), label))
         })
         .collect()
 }
@@ -175,20 +172,6 @@ pub fn initial_trusted_keys() -> TrustedKeys {
     let mut keys = legacy::individual_keys(&legacy::initial_keyrings(), Utc::now()).unwrap();
     protect_registry_keys(&mut keys, &BTreeMap::new(), &Registries::new());
     keys
-}
-
-pub fn os_signers(keys: &TrustedKeys) -> TrustedOsUpdateSigners {
-    keys.values()
-        .filter(|key| key.os)
-        .map(|key| {
-            (
-                key.public_key.interned_der64(),
-                TrustedOsUpdateSigner {
-                    label: key.name.clone(),
-                },
-            )
-        })
-        .collect()
 }
 
 fn split_import(
@@ -343,6 +326,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "list",
             from_fn_async(list)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_display_serializable()
                 .with_about("about.list-trusted-keys")
                 .with_call_remote::<CliContext>(),
@@ -350,6 +334,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "add",
             from_fn_async(add)
+                .with_metadata(EFFECT, Effect::Write.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_display_serializable()
                 .with_about("about.add-trusted-key")
@@ -358,6 +343,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "update",
             from_fn_async(update)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.update-trusted-key")
@@ -366,6 +352,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove",
             from_fn_async(remove)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_display()
                 .with_about("about.remove-trusted-key")
@@ -374,6 +361,7 @@ pub fn api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "remove-many",
             from_fn_async(remove_many)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .no_cli(),
         )
@@ -575,7 +563,11 @@ mod tests {
     #[test]
     fn cli_parses_trusted_key_commands() {
         use clap::Parser;
-        let key = initial_signers().into_keys().next().unwrap().to_string();
+        let key = initial_signer_labels()
+            .into_keys()
+            .next()
+            .unwrap()
+            .to_string();
         let add = AddTrustedKeyParams::try_parse_from([
             "add",
             key.as_str(),
@@ -623,7 +615,7 @@ mod tests {
     #[test]
     fn cli_imports_armored_keys_after_the_option_delimiter() {
         use clap::Parser;
-        let key = initial_signers().into_keys().next().unwrap();
+        let key = initial_signer_labels().into_keys().next().unwrap();
         let pem = format!("-----BEGIN PUBLIC KEY-----\n{key}\n-----END PUBLIC KEY-----");
         let gpg = include_str!("sign/fixtures/ed25519-signers.asc");
         let add = AddTrustedKeyParams::try_parse_from([
@@ -652,8 +644,11 @@ mod tests {
         assert_eq!(enabled_keys(&keys, TrustContext::Marketplace).len(), 3);
         assert_eq!(enabled_keys(&keys, TrustContext::Os).len(), 3);
         assert_eq!(
-            os_signers(&keys).into_keys().collect::<BTreeSet<_>>(),
-            initial_signers().into_keys().collect()
+            keys.values()
+                .filter(|key| key.os)
+                .map(|key| key.public_key.interned_der64())
+                .collect::<BTreeSet<_>>(),
+            initial_signer_labels().into_keys().collect()
         );
         for (id, key) in &keys {
             assert_eq!(*id, key.public_key.interned_der64());
@@ -833,8 +828,7 @@ mod tests {
             key.os = true;
         }
         remove_key(&mut keys, &removed.interned_der64()).unwrap();
-        let wire = to_value(&keys).unwrap();
-        let restored: TrustedKeys = from_value(wire.clone()).unwrap();
+        let restored: TrustedKeys = from_value(to_value(&keys).unwrap()).unwrap();
         assert_eq!(restored.len(), 1);
         for context in [TrustContext::Marketplace, TrustContext::Os] {
             assert!(!enabled_keys(&restored, context).contains(&removed));
@@ -850,21 +844,50 @@ mod tests {
                 .armored,
             source
         );
-        assert_eq!(legacy::decode_keys(wire, Utc::now()).unwrap(), restored);
     }
 
     #[test]
-    fn current_decoder_requires_a_singular_key_and_migration_accepts_historical_groups() {
-        let key = initial_signers().into_keys().next().unwrap();
-        let historical = imbl_value::json!({ "name": "Publisher", "publicKeys": [key], "removable": true, "marketplace": true, "os": false });
-        assert!(from_value::<TrustedKey>(historical.clone()).is_err());
-        let migrated =
-            legacy::decode_keys(imbl_value::json!({ "legacy": historical }), Utc::now()).unwrap();
-        assert_eq!(migrated.len(), 1);
-        let current = &migrated[&key];
-        assert_eq!(current.public_key.interned_der64(), key);
-        assert_eq!(current.origin, "manual");
-        assert!(current.origin_registry.is_none());
+    fn initial_start9_key_matches_repository_openpgp_primary_key() {
+        let home = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new("gpg")
+            .arg("--homedir")
+            .arg(home.path())
+            .args([
+                "--batch",
+                "--no-options",
+                "--with-colons",
+                "--with-key-data",
+                "--show-keys",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../../apt/start9.gpg"),
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let records = String::from_utf8(output.stdout).unwrap();
+        let primary = records
+            .lines()
+            .find(|line| line.starts_with("pub:"))
+            .unwrap();
+        assert_eq!(primary.split(':').nth(3), Some("22"));
+        let point = records
+            .lines()
+            .find(|line| line.starts_with("pkd:1:"))
+            .unwrap()
+            .split(':')
+            .nth(3)
+            .unwrap();
+        let bytes = hex::decode(point.strip_prefix("40").unwrap()).unwrap();
+        let key = AnyVerifyingKey::Ed25519(
+            ed25519_dalek::VerifyingKey::from_bytes(&bytes.try_into().unwrap()).unwrap(),
+        );
+        assert_eq!(
+            initial_signer_labels().get(&key.interned_der64()).copied(),
+            Some("Start9")
+        );
     }
 
     #[test]

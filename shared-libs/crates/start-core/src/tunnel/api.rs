@@ -1359,13 +1359,7 @@ pub async fn add_forward(
             ));
         }
         ctx.persist_sni_forward(source.address, target, &sni, None, false, label)
-            .await
-            .map_err(|code| {
-                Error::new(
-                    eyre!("SNI registration failed (code {code})"),
-                    ErrorKind::InvalidRequest,
-                )
-            })?;
+            .await?;
         return Ok(());
     }
 
@@ -1578,6 +1572,7 @@ async fn update_forward_label_at(
     label: Option<String>,
     hostname: Option<String>,
 ) -> Result<(), Error> {
+    let _guard = ctx.forward_write_lock.lock().await;
     ctx.db
         .mutate(|db| {
             db.as_port_forwards_mut().mutate(|pf| {
@@ -1723,6 +1718,59 @@ async fn set_forward_enabled_at(
     hostname: Option<String>,
 ) -> Result<(), Error> {
     let _guard = ctx.forward_write_lock.lock().await;
+    if enabled {
+        let sni_target = match ctx.db.peek().await.as_port_forwards().de()?.0.get(&source) {
+            Some(PortForward::Sni { routes, .. }) => {
+                let hostname = hostname.as_deref().ok_or_else(|| {
+                    Error::new(
+                        eyre!("--hostname is required to toggle an SNI route"),
+                        ErrorKind::InvalidRequest,
+                    )
+                })?;
+                let route = routes.get(hostname).ok_or_else(|| {
+                    Error::new(
+                        eyre!("No SNI route for {hostname} on {source}"),
+                        ErrorKind::NotFound,
+                    )
+                })?;
+                Some((hostname.to_owned(), route.target))
+            }
+            _ => None,
+        };
+        if let Some((hostname, target)) = sni_target {
+            ctx.sni
+                .prepare()
+                .await
+                .map_err(crate::tunnel::forward::pcp::sni_prepare_error)?;
+            let reg = ctx
+                .sni
+                .register_transaction(
+                    *source.ip(),
+                    source.port(),
+                    &[hostname.clone()],
+                    target,
+                    None,
+                )
+                .map_err(|code| {
+                    crate::tunnel::forward::pcp::sni_demux_error(
+                        source.address,
+                        Some(&hostname),
+                        code,
+                    )
+                })?;
+            if let Err(err) = ctx
+                .db
+                .mutate(|db| update_forward_enabled(db, source.clone(), true, Some(&hostname)))
+                .await
+                .result
+            {
+                ctx.sni.rollback(reg);
+                return Err(err);
+            }
+            return Ok(());
+        }
+    }
+
     let toggle = ctx
         .db
         .mutate(|db| update_forward_enabled(db, source.clone(), enabled, hostname.as_deref()))
@@ -1753,22 +1801,7 @@ async fn set_forward_enabled_at(
             }
         }
         ForwardToggle::Sni { hostname, target } => {
-            if enabled {
-                ctx.sni.prepare().await.map_err(|code| {
-                    Error::new(
-                        eyre!("SNI diversion setup failed (code {code})"),
-                        ErrorKind::Network,
-                    )
-                })?;
-                ctx.sni
-                    .register(*source.ip(), source.port(), &[hostname], target, None)
-                    .map_err(|code| {
-                        Error::new(
-                            eyre!("SNI registration failed (code {code})"),
-                            ErrorKind::InvalidRequest,
-                        )
-                    })?;
-            } else {
+            if !enabled {
                 ctx.sni
                     .unregister(*source.ip(), source.port(), &[hostname], target);
             }
@@ -2382,5 +2415,241 @@ mod tests {
         assert!(parse_dns_server("not-an-ip").is_err());
         assert!(parse_dns_server("1.1.1.1:99999").is_err());
         assert!(parse_dns_server("").is_err());
+    }
+
+    #[tokio::test]
+    async fn add_forward_sni_surfaces_actual_conflict_errors() {
+        let mut db = TunnelDatabase::default();
+        let mut subnet = WgSubnetConfig::default();
+        subnet.wan_ip = Some(Ipv4Addr::LOCALHOST);
+        subnet.clients.0.insert(
+            "10.59.0.2".parse().unwrap(),
+            WgConfig::generate("Server A".into(), WgClientKind::Server),
+        );
+        subnet.clients.0.insert(
+            "10.59.0.3".parse().unwrap(),
+            WgConfig::generate("Server B".into(), WgClientKind::Server),
+        );
+        db.wg
+            .subnets
+            .0
+            .insert("10.59.0.1/24".parse().unwrap(), subnet);
+        let auto_src: SocketAddrV4 = "127.0.0.1:443".parse().unwrap();
+        db.port_forwards.0.insert(
+            ForwardAddress::new(auto_src, Transport::tcp()),
+            PortForward::Dnat {
+                target: "10.59.0.2:443".parse().unwrap(),
+                label: Some("PCP".to_string()),
+                enabled: true,
+                count: 1,
+                auto: true,
+            },
+        );
+        db.port_forwards.0.insert(
+            "127.0.0.1:5000".parse::<SocketAddrV4>().unwrap().into(),
+            PortForward::Dnat {
+                target: "10.59.0.2:5000".parse().unwrap(),
+                label: None,
+                enabled: true,
+                count: 3,
+                auto: false,
+            },
+        );
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+
+        let err = add_forward(
+            ctx.clone(),
+            AddPortForwardParams {
+                external_port: 443,
+                target: "10.59.0.3:443".parse().unwrap(),
+                label: None,
+                sni: vec!["b.example.com".to_string()],
+                count: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert_eq!(
+            err.source.to_string(),
+            "127.0.0.1:443 is already an automatic DNAT forward for another client"
+        );
+
+        let err = add_forward(
+            ctx.clone(),
+            AddPortForwardParams {
+                external_port: 5001,
+                target: "10.59.0.3:443".parse().unwrap(),
+                label: None,
+                sni: vec!["overlap.example.com".to_string()],
+                count: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert_eq!(
+            err.source.to_string(),
+            "127.0.0.1:5001 overlaps an existing forward at 127.0.0.1:5000"
+        );
+
+        let err = add_forward(
+            ctx.clone(),
+            AddPortForwardParams {
+                external_port: 5000,
+                target: "10.59.0.2:443".parse().unwrap(),
+                label: None,
+                sni: vec!["range.example.com".to_string()],
+                count: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert_eq!(
+            err.source.to_string(),
+            "127.0.0.1:5000 is already a DNAT range forward"
+        );
+
+        let probe = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let free_port = probe.local_addr().unwrap().port();
+        drop(probe);
+        add_forward(
+            ctx.clone(),
+            AddPortForwardParams {
+                external_port: free_port,
+                target: "10.59.0.2:443".parse().unwrap(),
+                label: Some("App A".to_string()),
+                sni: vec!["app.example.com".to_string()],
+                count: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let err = add_forward(
+            ctx.clone(),
+            AddPortForwardParams {
+                external_port: free_port,
+                target: "10.59.0.3:443".parse().unwrap(),
+                label: None,
+                sni: vec!["app.example.com".to_string()],
+                count: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidRequest);
+        assert_eq!(
+            err.source.to_string(),
+            format!(
+                "SNI hostname app.example.com on 127.0.0.1:{free_port} is held by another client"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn update_forward_label_serializes_with_staged_sni_changes() {
+        let source: ForwardAddress = "127.0.0.1:443".parse::<SocketAddrV4>().unwrap().into();
+        let hostname = "app.example.com";
+        let mut db = TunnelDatabase::default();
+        db.port_forwards.0.insert(
+            source.clone(),
+            PortForward::Sni {
+                routes: std::collections::BTreeMap::from([(
+                    hostname.to_owned(),
+                    crate::tunnel::db::SniRoute {
+                        target: "10.59.0.2:443".parse().unwrap(),
+                        label: Some("original".to_owned()),
+                        enabled: true,
+                        auto: false,
+                    },
+                )]),
+                fallback: None,
+            },
+        );
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+        let guard = ctx.forward_write_lock.lock().await;
+        let ctx_bg = ctx.clone();
+        let label_source = source.clone();
+        let mut update = tokio::spawn(async move {
+            update_forward_label(
+                ctx_bg,
+                UpdatePortForwardLabelParams {
+                    source: label_source,
+                    label: Some("edited".to_owned()),
+                    hostname: Some(hostname.to_owned()),
+                },
+            )
+            .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut update)
+                .await
+                .is_err()
+        );
+        let pf = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert!(matches!(
+            pf.0.get(&source),
+            Some(PortForward::Sni { routes, .. })
+                if routes[hostname].label.as_deref() == Some("original")
+        ));
+        drop(guard);
+        update.await.unwrap().unwrap();
+        let pf = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert!(matches!(
+            pf.0.get(&source),
+            Some(PortForward::Sni { routes, .. })
+                if routes[hostname].label.as_deref() == Some("edited")
+        ));
+    }
+
+    #[tokio::test]
+    async fn set_forward_enabled_sni_bind_failure_leaves_db_disabled_and_demux_empty() {
+        let blocked = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let blocked_src = match blocked.local_addr().unwrap() {
+            std::net::SocketAddr::V4(addr) => addr,
+            std::net::SocketAddr::V6(_) => unreachable!(),
+        };
+        let mut db = TunnelDatabase::default();
+        db.port_forwards.0.insert(
+            blocked_src.into(),
+            PortForward::Sni {
+                routes: std::collections::BTreeMap::from([(
+                    "app.example.com".to_string(),
+                    crate::tunnel::db::SniRoute {
+                        target: "10.59.0.2:443".parse().unwrap(),
+                        label: Some("App".to_string()),
+                        enabled: false,
+                        auto: false,
+                    },
+                )]),
+                fallback: None,
+            },
+        );
+        let (_dir, ctx) = TunnelContext::for_test(db).await;
+
+        let err = set_forward_enabled(
+            ctx.clone(),
+            SetPortForwardEnabledParams {
+                source: blocked_src.into(),
+                enabled: true,
+                hostname: Some("app.example.com".to_string()),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Network);
+        assert_eq!(
+            err.source.to_string(),
+            format!("SNI listener on {blocked_src} could not bind")
+        );
+        let pf = ctx.db.peek().await.as_port_forwards().de().unwrap();
+        assert!(matches!(
+            pf.0.get(&blocked_src.into()),
+            Some(PortForward::Sni { routes, .. })
+                if routes.get("app.example.com").is_some_and(|r| !r.enabled)
+        ));
+        assert!(ctx.sni.snapshot().is_empty());
     }
 }

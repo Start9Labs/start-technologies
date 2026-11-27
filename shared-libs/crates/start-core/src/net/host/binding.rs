@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::{CliContext, RpcContext};
 use crate::db::prelude::Map;
 use crate::hostname::ServerHostname;
+use crate::mcp::{EFFECT, Effect};
 use crate::net::forward::{AvailablePorts, START9_BRIDGE_IFACE};
 use crate::net::host::HostApiKind;
 use crate::net::service_interface::{
@@ -1048,6 +1049,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "reassign-port",
             from_fn_async(reassign::reassign_port::<Kind>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
                 .no_display()
@@ -1057,6 +1059,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "list",
             from_fn_async(list_bindings::<Kind>)
+                .with_metadata(EFFECT, Effect::Read.into())
                 .with_inherited(Kind::inheritance)
                 .with_display_serializable()
                 .with_custom_display_fn(|HandlerArgs { params, .. }, res| {
@@ -1108,6 +1111,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-address-enabled",
             from_fn_async(set_address_enabled::<Kind>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
                 .no_cli(),
@@ -1123,6 +1127,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-range-address-enabled",
             from_fn_async(set_range_address_enabled::<Kind>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
                 .no_cli(),
@@ -1138,6 +1143,7 @@ pub fn binding<C: Context, Kind: HostApiKind>()
         .subcommand(
             "set-gua-wan",
             from_fn_async(set_gua_wan::<Kind>)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_metadata("sync_db", Value::Bool(true))
                 .with_inherited(Kind::inheritance)
                 .no_cli(),

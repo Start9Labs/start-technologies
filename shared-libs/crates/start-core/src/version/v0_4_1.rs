@@ -1,11 +1,16 @@
+use std::collections::BTreeSet;
+
 use exver::VersionRange;
 use imbl_value::json;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::v0_4_0_2::for_each_host;
+use super::v0_4_0_3::{TrustedOsUpdateSigner, TrustedOsUpdateSigners};
 use super::{VersionT, v0_4_0_5};
 use crate::prelude::*;
-use crate::trusted_keys::legacy::{migrate_signers, os_signers};
+use crate::sign::{AnyVerifyingKey, canonicalize_verifying_keys};
+use crate::trusted_keys::legacy::{TrustedKeyring, TrustedKeyrings, initial_keyrings};
+use crate::trusted_keys::{START9, manual_origin};
 
 lazy_static::lazy_static! {
     static ref V0_4_1: exver::Version = exver::Version::new([0, 4, 1], []);
@@ -13,6 +18,75 @@ lazy_static::lazy_static! {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Version;
+
+pub(super) fn os_signers(keys: &TrustedKeyrings) -> TrustedOsUpdateSigners {
+    keys.values()
+        .filter(|group| group.os)
+        .flat_map(|group| {
+            group.public_keys.iter().map(|key| {
+                (
+                    key.interned_der64(),
+                    TrustedOsUpdateSigner {
+                        label: group.name.clone(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub(super) fn trusted_key_os_signers(
+    keys: &crate::trusted_keys::TrustedKeys,
+) -> TrustedOsUpdateSigners {
+    keys.values()
+        .filter(|key| key.os)
+        .map(|key| {
+            (
+                key.public_key.interned_der64(),
+                TrustedOsUpdateSigner {
+                    label: key.name.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
+fn migrate_signers(legacy: TrustedOsUpdateSigners) -> Result<TrustedKeyrings, Error> {
+    let legacy = canonicalize_verifying_keys(legacy)?;
+    let mut keys = initial_keyrings();
+    let start9 = keys.get_mut(START9).unwrap();
+    start9.os = start9
+        .public_keys
+        .iter()
+        .all(|key| legacy.contains_key(&key.interned_der64()));
+    let grouped = if start9.os {
+        start9.public_keys.clone()
+    } else {
+        BTreeSet::new()
+    };
+    for (key, signer) in legacy {
+        let public_key: AnyVerifyingKey = key.parse()?;
+        if !grouped.contains(&public_key) {
+            keys.insert(
+                key,
+                TrustedKeyring {
+                    name: signer.label,
+                    origin: manual_origin(),
+                    origin_registry: None,
+                    public_keys: BTreeSet::from([public_key]),
+                    gpg_exports: BTreeSet::new(),
+                    contact: BTreeSet::new(),
+                    added_at: None,
+                    removable: true,
+                    marketplace: true,
+                    os: true,
+                },
+            );
+        }
+    }
+    Ok(keys)
+}
 
 impl VersionT for Version {
     type Previous = v0_4_0_5::Version;
@@ -140,10 +214,8 @@ fn restore_legacy_http_options(
 mod tests {
     use super::*;
     use crate::auth::Session;
-    use crate::sign::AnyVerifyingKey;
-    use crate::trusted_keys::TrustedKeys;
-    use crate::trusted_keys::legacy::{self, TrustedKeyrings};
-    use crate::update::signers::{TrustedOsUpdateSigners, initial_signers};
+    use crate::trusted_keys::{TrustedKeys, legacy};
+    use crate::version::v0_4_0_3::initial_signers;
     use crate::version::{Current, Upgrade, rollback_to_unchecked, v0_4_0_3, v0_4_0_4};
 
     fn database(options: Value) -> Value {
@@ -381,6 +453,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn migration_preserves_legacy_os_policy_without_reenabling_removed_keys() {
+        let canonical = initial_signers();
+        let pem = canonical
+            .iter()
+            .map(|(key, signer)| {
+                (
+                    key.parse::<AnyVerifyingKey>().unwrap().to_string().into(),
+                    signer.clone(),
+                )
+            })
+            .collect::<TrustedOsUpdateSigners>();
+        for mut legacy in [canonical.clone(), pem] {
+            let groups = migrate_signers(legacy.clone()).unwrap();
+            assert_eq!(
+                os_signers(&groups).into_keys().collect::<Vec<_>>(),
+                canonical.keys().cloned().collect::<Vec<_>>()
+            );
+            let removed = legacy
+                .pop_first()
+                .unwrap()
+                .0
+                .parse::<AnyVerifyingKey>()
+                .unwrap();
+            let keys =
+                legacy::individual_keys(&migrate_signers(legacy).unwrap(), chrono::Utc::now())
+                    .unwrap();
+            assert!(!trusted_key_os_signers(&keys).contains_key(&removed.interned_der64()));
+            assert!(!keys[&removed.interned_der64()].os);
+        }
+    }
+
     #[tokio::test]
     async fn upgrade_from_0_4_0_3_reruns_its_stale_migration() {
         let initial = to_value(&initial_signers()).unwrap();
@@ -499,7 +603,7 @@ mod tests {
         let migrated_trust: TrustedKeys =
             from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
         assert_eq!(
-            crate::trusted_keys::os_signers(&migrated_trust),
+            trusted_key_os_signers(&migrated_trust),
             os_signers(&saved_trust)
         );
         assert_eq!(
@@ -569,7 +673,7 @@ mod tests {
             let migrated = Value::from(db.dump(&ROOT).await.value);
             let keyrings: TrustedKeys =
                 from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
-            assert_eq!(crate::trusted_keys::os_signers(&keyrings), legacy);
+            assert_eq!(trusted_key_os_signers(&keyrings), legacy);
             assert_eq!(migrated["private"]["sessions"], sessions);
             assert_eq!(
                 migrated["public"]["serverInfo"]["latestMigrationRevision"],

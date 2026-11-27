@@ -144,7 +144,7 @@ pub struct GcForwards {
 
 /// One external-port forward: an nftables DNAT or an SNI-demultiplexed shared
 /// port. Mutually exclusive for a given external address.
-#[derive(Clone, Debug, Deserialize, Serialize, VisitVariants)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, VisitVariants)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PortForward {
     Dnat {
@@ -175,7 +175,7 @@ pub enum PortForward {
 rpc_toolkit::reflect_ts!(PortForward);
 
 /// One SNI-demultiplexed hostname route on a shared external port.
-#[derive(Clone, Debug, Deserialize, Serialize, VisitFields)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, VisitFields)]
 #[serde(rename_all = "camelCase")]
 pub struct SniRoute {
     pub target: SocketAddrV4,

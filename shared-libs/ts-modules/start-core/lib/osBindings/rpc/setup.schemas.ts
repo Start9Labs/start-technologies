@@ -9,25 +9,23 @@ export const CapabilityVerdict: z.ZodObject<{
   /**
    * `None` = never probed.
    */
-  supported: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodBoolean>>,
-    z.ZodNullable<z.ZodBoolean>
-  >
-  at: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  supported: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
+  at: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * `None` = never probed.
    */
-  supported: wire(
-    z.boolean().nullable().optional(),
-    z.boolean().nullable(),
-  ).meta({
-    description: '`None` = never probed.',
-  }),
-  at: wire(z.string().nullable().optional(), z.string().nullable()),
+  supported: z
+    .boolean()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description: '`None` = never probed.',
+    }),
+  at: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'CapabilityVerdict',
 })
@@ -35,15 +33,15 @@ export const Cifs: z.ZodObject<{
   hostname: z.ZodString
   path: z.ZodString
   username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  password: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   hostname: z.string(),
   path: z.string(),
   username: z.string(),
-  password: wire(z.string().nullable().optional(), z.string().nullable()),
+  password: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'Cifs',
 })
@@ -111,28 +109,25 @@ export const IoFormat: z.ZodEnum<{
   })
 export const KeyboardOptions: z.ZodObject<{
   layout: z.ZodString
-  keymap: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  model: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  variant: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  options: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
+  keymap: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  model: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  variant: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  options: z.ZodDefault<z.ZodArray<z.ZodString>>
 }> = /* @__PURE__ */ object({
   layout: z.string(),
-  keymap: wire(z.string().nullable().optional(), z.string().nullable()),
-  model: wire(z.string().nullable().optional(), z.string().nullable()),
-  variant: wire(z.string().nullable().optional(), z.string().nullable()),
-  options: wire(z.array(z.string()).optional(), z.array(z.string())),
+  keymap: z
+    .string()
+    .nullable()
+    .default(() => null),
+  model: z
+    .string()
+    .nullable()
+    .default(() => null),
+  variant: z
+    .string()
+    .nullable()
+    .default(() => null),
+  options: z.array(z.string()).default(() => []),
 }).meta({
   id: 'KeyboardOptions',
 })
@@ -191,17 +186,17 @@ export const QueryDnsParams: z.ZodObject<{ fqdn: z.ZodString }> =
  * IPv4 and an `AAAA` at the box's IPv6 GUA. Either may be absent.
  */
 export const QueryDnsRes: z.ZodObject<{
-  ipv4: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  ipv6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ipv4: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  ipv6: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  ipv4: wire(z.string().nullable().optional(), z.string().nullable()),
-  ipv6: wire(z.string().nullable().optional(), z.string().nullable()),
+  ipv4: z
+    .string()
+    .nullable()
+    .default(() => null),
+  ipv6: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'QueryDnsRes',
   description:
@@ -238,10 +233,7 @@ export const SetLanguageParams: z.ZodObject<{ language: z.ZodString }> =
     id: 'SetLanguageParams',
   })
 export const SetupInfo: z.ZodObject<{
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  guid: z.ZodDefault<z.ZodNullable<z.ZodString>>
   attach: z.ZodBoolean
   mokEnrolled: z.ZodBoolean
   /**
@@ -250,12 +242,12 @@ export const SetupInfo: z.ZodObject<{
    * is pre-installed the wizard fixes this as the OS drive and asks only for
    * a data drive.
    */
-  osDrive: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  osDrive: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  guid: wire(z.string().nullable().optional(), z.string().nullable()),
+  guid: z
+    .string()
+    .nullable()
+    .default(() => null),
   attach: z.boolean(),
   mokEnrolled: z.boolean(),
   /**
@@ -264,10 +256,14 @@ export const SetupInfo: z.ZodObject<{
    * is pre-installed the wizard fixes this as the OS drive and asks only for
    * a data drive.
    */
-  osDrive: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'The whole disk the OS is installed on, recorded by whatever installed it\n(os_install, or init_resize for a pre-installed image). When the device\nis pre-installed the wizard fixes this as the OS drive and asks only for\na data drive.',
-  }),
+  osDrive: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'The whole disk the OS is installed on, recorded by whatever installed it\n(os_install, or init_resize for a pre-installed image). When the device\nis pre-installed the wizard fixes this as the OS drive and asks only for\na data drive.',
+    }),
 }).meta({
   id: 'SetupInfo',
 })
@@ -297,17 +293,14 @@ export const BackupTargetFS: z.ZodUnion<
  * Without an override or gateway-provided resolvers, the public fallback is used.
  */
 export const DnsSettings: z.ZodObject<{
-  staticServers: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>,
-    z.ZodNullable<z.ZodArray<z.ZodString>>
-  >
+  staticServers: z.ZodDefault<z.ZodNullable<z.ZodArray<z.ZodString>>>
   servers: z.ZodArray<z.ZodString>
   source: typeof DnsSource
 }> = /* @__PURE__ */ object({
-  staticServers: wire(
-    z.array(z.string()).nullable().optional(),
-    z.array(z.string()).nullable(),
-  ),
+  staticServers: z
+    .array(z.string())
+    .nullable()
+    .default(() => null),
   servers: z.array(z.string()),
   source: DnsSource,
 }).meta({
@@ -361,116 +354,108 @@ export const GatewayPortMapCapabilities: z.ZodObject<{
     "Whether the gateway reachable via this interface speaks each port-mapping\nprotocol, as last probed. Fed by the watcher's periodic probes and by\nfailure/success evidence from the port-map client, and synced to the db so a\nchronically uncooperative gateway is visible (and skipped) instead of being\nretried forever.",
 })
 export const InstallOsParams: z.ZodObject<{
-  osDrive: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  dataDrive: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof DataDrive>>,
-    z.ZodNullable<typeof DataDrive>
-  >
+  osDrive: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  dataDrive: z.ZodDefault<z.ZodNullable<typeof DataDrive>>
 }> = /* @__PURE__ */ object({
-  osDrive: wire(z.string().nullable().optional(), z.string().nullable()),
-  dataDrive: wire(DataDrive.nullable().optional(), DataDrive.nullable()),
+  osDrive: z
+    .string()
+    .nullable()
+    .default(() => null),
+  dataDrive: DataDrive.nullable().default(() => null),
 }).meta({
   id: 'InstallOsParams',
 })
 export const IpInfo: z.ZodObject<{
   name: z.ZodString
   scopeId: z.ZodInt
-  deviceType: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof NetworkInterfaceType>>,
-    z.ZodNullable<typeof NetworkInterfaceType>
-  >
+  deviceType: z.ZodDefault<z.ZodNullable<typeof NetworkInterfaceType>>
   subnets: z.ZodArray<z.ZodString>
   lanIp: z.ZodArray<z.ZodString>
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  wanIp: z.ZodDefault<z.ZodNullable<z.ZodString>>
   ntpServers: z.ZodArray<z.ZodString>
   dnsServers: z.ZodArray<z.ZodString>
   /**
    * Lowest IPv4 default-route metric in `main`, or `None` when absent.
    */
-  defaultRouteV4: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  defaultRouteV4: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   /**
    * Lowest IPv6 default-route metric in `main`, or `None` when absent.
    */
-  defaultRouteV6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  defaultRouteV6: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   scopeId: z.int(),
-  deviceType: wire(
-    NetworkInterfaceType.nullable().optional(),
-    NetworkInterfaceType.nullable(),
-  ),
+  deviceType: NetworkInterfaceType.nullable().default(() => null),
   subnets: z.array(z.string()),
   lanIp: z.array(z.string()),
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()),
+  wanIp: z
+    .string()
+    .nullable()
+    .default(() => null),
   ntpServers: z.array(z.string()),
   dnsServers: z.array(z.string()),
   /**
    * Lowest IPv4 default-route metric in `main`, or `None` when absent.
    */
-  defaultRouteV4: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Lowest IPv4 default-route metric in `main`, or `None` when absent.',
-  }),
+  defaultRouteV4: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Lowest IPv4 default-route metric in `main`, or `None` when absent.',
+    }),
   /**
    * Lowest IPv6 default-route metric in `main`, or `None` when absent.
    */
-  defaultRouteV6: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Lowest IPv6 default-route metric in `main`, or `None` when absent.',
-  }),
+  defaultRouteV6: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Lowest IPv6 default-route metric in `main`, or `None` when absent.',
+    }),
 }).meta({
   id: 'IpInfo',
 })
 export const LogFollowResponse: z.ZodObject<{
-  startCursor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  startCursor: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Present for ordinary replies; typed observations use same-ID events.
    */
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
-  >
+  guid: z.ZodDefault<z.ZodNullable<typeof Guid>>
 }> = /* @__PURE__ */ object({
-  startCursor: wire(z.string().nullable().optional(), z.string().nullable()),
+  startCursor: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Present for ordinary replies; typed observations use same-ID events.
    */
-  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
-    description:
-      'Present for ordinary replies; typed observations use same-ID events.',
-  }),
+  guid: Guid.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Present for ordinary replies; typed observations use same-ID events.',
+    }),
 }).meta({
   id: 'LogFollowResponse',
 })
 export const LogResponse: z.ZodObject<{
   entries: z.ZodArray<typeof LogEntry>
-  startCursor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  endCursor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  startCursor: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  endCursor: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   entries: z.array(LogEntry),
-  startCursor: wire(z.string().nullable().optional(), z.string().nullable()),
-  endCursor: wire(z.string().nullable().optional(), z.string().nullable()),
+  startCursor: z
+    .string()
+    .nullable()
+    .default(() => null),
+  endCursor: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'LogResponse',
 })
@@ -522,14 +507,11 @@ export const StartOsRecoveryInfo: z.ZodObject<{
     "The public view of a backup found on a target: enough to identify it, and none of\n[`BackupUnencryptedMetadata`]'s key material.",
 })
 export const AttachParams: z.ZodObject<{
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
-    z.ZodNullable<typeof PasswordType>
-  >
+  password: z.ZodDefault<z.ZodNullable<typeof PasswordType>>
   guid: z.ZodString
   kiosk: z.ZodBoolean
 }> = /* @__PURE__ */ object({
-  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+  password: PasswordType.nullable().default(() => null),
   guid: z.string(),
   kiosk: z.boolean(),
 }).meta({
@@ -631,40 +613,40 @@ export const NetworkInterfaceInfo: z.ZodCodec<
 export const PartitionInfo: z.ZodObject<{
   logicalname: z.ZodString
   stablePath: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  label: z.ZodDefault<z.ZodNullable<z.ZodString>>
   capacity: z.ZodInt
-  used: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  available: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  used: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+  available: z.ZodDefault<z.ZodNullable<z.ZodInt>>
   startOs: z.ZodRecord<z.ZodString, typeof StartOsRecoveryInfo>
   legacyBackup: z.ZodBoolean
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  filesystem: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  guid: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  filesystem: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   logicalname: z.string(),
   stablePath: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  label: z
+    .string()
+    .nullable()
+    .default(() => null),
   capacity: z.int(),
-  used: wire(z.int().nullable().optional(), z.int().nullable()),
-  available: wire(z.int().nullable().optional(), z.int().nullable()),
+  used: z
+    .int()
+    .nullable()
+    .default(() => null),
+  available: z
+    .int()
+    .nullable()
+    .default(() => null),
   startOs: z.record(z.string(), StartOsRecoveryInfo),
   legacyBackup: z.boolean(),
-  guid: wire(z.string().nullable().optional(), z.string().nullable()),
-  filesystem: wire(z.string().nullable().optional(), z.string().nullable()),
+  guid: z
+    .string()
+    .nullable()
+    .default(() => null),
+  filesystem: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'PartitionInfo',
 })
@@ -674,14 +656,8 @@ export const Progress: z.ZodUnion<
     z.ZodBoolean,
     z.ZodObject<{
       done: z.ZodInt
-      total: z.ZodCodec<
-        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-        z.ZodNullable<z.ZodInt>
-      >
-      units: z.ZodCodec<
-        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
-        z.ZodNullable<typeof ProgressUnits>
-      >
+      total: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+      units: z.ZodDefault<z.ZodNullable<typeof ProgressUnits>>
     }>,
     typeof FullProgress,
   ]
@@ -691,11 +667,11 @@ export const Progress: z.ZodUnion<
     z.boolean(),
     object({
       done: z.int(),
-      total: wire(z.int().nullable().optional(), z.int().nullable()),
-      units: wire(
-        ProgressUnits.nullable().optional(),
-        ProgressUnits.nullable(),
-      ),
+      total: z
+        .int()
+        .nullable()
+        .default(() => null),
+      units: ProgressUnits.nullable().default(() => null),
     }),
     FullProgress.meta({
       description:
@@ -707,30 +683,23 @@ export const Progress: z.ZodUnion<
   })
 export const SetupExecuteParams: z.ZodObject<{
   guid: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
-    z.ZodNullable<typeof PasswordType>
-  >
-  recoverySource: z.ZodCodec<
-    z.ZodOptional<
-      z.ZodNullable<ReturnType<typeof RecoverySource<typeof PasswordType>>>
-    >,
+  password: z.ZodDefault<z.ZodNullable<typeof PasswordType>>
+  recoverySource: z.ZodDefault<
     z.ZodNullable<ReturnType<typeof RecoverySource<typeof PasswordType>>>
   >
   kiosk: z.ZodBoolean
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  hostname: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   guid: z.string(),
-  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
-  recoverySource: wire(
-    RecoverySource(PasswordType).nullable().optional(),
-    RecoverySource(PasswordType).nullable(),
-  ),
+  password: PasswordType.nullable().default(() => null),
+  recoverySource: RecoverySource(PasswordType)
+    .nullable()
+    .default(() => null),
   kiosk: z.boolean(),
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()),
+  hostname: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'SetupExecuteParams',
 })
@@ -739,19 +708,18 @@ export const SetupProgress: z.ZodObject<{
   /**
    * Present for ordinary replies; typed streams use same-ID events.
    */
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof Guid>>,
-    z.ZodNullable<typeof Guid>
-  >
+  guid: z.ZodDefault<z.ZodNullable<typeof Guid>>
 }> = /* @__PURE__ */ object({
   progress: FullProgress,
   /**
    * Present for ordinary replies; typed streams use same-ID events.
    */
-  guid: wire(Guid.nullable().optional(), Guid.nullable()).meta({
-    description:
-      'Present for ordinary replies; typed streams use same-ID events.',
-  }),
+  guid: Guid.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Present for ordinary replies; typed streams use same-ID events.',
+    }),
 }).meta({
   id: 'SetupProgress',
 })
@@ -759,56 +727,47 @@ export const VerifyCifsParams: z.ZodObject<{
   hostname: z.ZodString
   path: z.ZodString
   username: z.ZodString
-  password: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PasswordType>>,
-    z.ZodNullable<typeof PasswordType>
-  >
+  password: z.ZodDefault<z.ZodNullable<typeof PasswordType>>
 }> = /* @__PURE__ */ object({
   hostname: z.string(),
   path: z.string(),
   username: z.string(),
-  password: wire(PasswordType.nullable().optional(), PasswordType.nullable()),
+  password: PasswordType.nullable().default(() => null),
 }).meta({
   id: 'VerifyCifsParams',
 })
 export const DiskInfo: z.ZodObject<{
   logicalname: z.ZodString
   stablePath: z.ZodString
-  partitionTable: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof PartitionTable>>,
-    z.ZodNullable<typeof PartitionTable>
-  >
-  vendor: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  model: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  partitionTable: z.ZodDefault<z.ZodNullable<typeof PartitionTable>>
+  vendor: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  model: z.ZodDefault<z.ZodNullable<z.ZodString>>
   partitions: z.ZodArray<typeof PartitionInfo>
   capacity: z.ZodInt
-  guid: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  filesystem: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  guid: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  filesystem: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   logicalname: z.string(),
   stablePath: z.string(),
-  partitionTable: wire(
-    PartitionTable.nullable().optional(),
-    PartitionTable.nullable(),
-  ),
-  vendor: wire(z.string().nullable().optional(), z.string().nullable()),
-  model: wire(z.string().nullable().optional(), z.string().nullable()),
+  partitionTable: PartitionTable.nullable().default(() => null),
+  vendor: z
+    .string()
+    .nullable()
+    .default(() => null),
+  model: z
+    .string()
+    .nullable()
+    .default(() => null),
   partitions: z.array(PartitionInfo),
   capacity: z.int(),
-  guid: wire(z.string().nullable().optional(), z.string().nullable()),
-  filesystem: wire(z.string().nullable().optional(), z.string().nullable()),
+  guid: z
+    .string()
+    .nullable()
+    .default(() => null),
+  filesystem: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'DiskInfo',
 })
@@ -858,10 +817,7 @@ export const DnsStatus: z.ZodObject<{
   /**
    * Present only before stored network policy takes authority.
    */
-  gateway: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<typeof NetworkGatewayInfo>>,
-    z.ZodNullable<typeof NetworkGatewayInfo>
-  >
+  gateway: z.ZodDefault<z.ZodNullable<typeof NetworkGatewayInfo>>
 }> = /* @__PURE__ */ object({
   /**
    * True until stored network policy takes authority.
@@ -872,12 +828,11 @@ export const DnsStatus: z.ZodObject<{
   /**
    * Present only before stored network policy takes authority.
    */
-  gateway: wire(
-    NetworkGatewayInfo.nullable().optional(),
-    NetworkGatewayInfo.nullable(),
-  ).meta({
-    description: 'Present only before stored network policy takes authority.',
-  }),
+  gateway: NetworkGatewayInfo.nullable()
+    .default(() => null)
+    .meta({
+      description: 'Present only before stored network policy takes authority.',
+    }),
 }).meta({
   id: 'DnsStatus',
   description: 'Active DNS authority and its bootstrap gateway.',
@@ -914,37 +869,9 @@ export const Api = {
     },
     diagnostic: {
       _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: {
-        disk: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _CHILDREN: {
-            forget: {
-              _PARAMS: /* @__PURE__ */ empty,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-            repair: {
-              _PARAMS: /* @__PURE__ */ empty,
-              _RETURN: /* @__PURE__ */ z.null(),
-              _ITEM: /* @__PURE__ */ z.never(),
-              _FINAL: /* @__PURE__ */ z.null(),
-            },
-          },
-        },
-      },
+      _CHILDREN: { disk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} } },
     },
-    disk: {
-      _PARAMS: /* @__PURE__ */ empty,
-      _CHILDREN: {
-        repair: {
-          _PARAMS: /* @__PURE__ */ empty,
-          _RETURN: /* @__PURE__ */ z.null(),
-          _ITEM: /* @__PURE__ */ z.never(),
-          _FINAL: /* @__PURE__ */ z.null(),
-        },
-      },
-    },
+    disk: { _PARAMS: /* @__PURE__ */ empty, _CHILDREN: {} },
     'git-info': {
       _PARAMS: /* @__PURE__ */ empty,
       _RETURN: /* @__PURE__ */ z.string(),
@@ -963,12 +890,7 @@ export const Api = {
             query: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 QueryDnsParams,
@@ -1050,9 +972,7 @@ export const Api = {
       _CHILDREN: {
         'device-info': {
           _PARAMS: /* @__PURE__ */ z.intersection(
-            object({
-              format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
-            }),
+            object({ format: IoFormat.nullable().default(() => null) }),
             empty,
           ),
           _CHILDREN: {},
@@ -1078,9 +998,7 @@ export const Api = {
         },
         metrics: {
           _PARAMS: /* @__PURE__ */ z.intersection(
-            object({
-              format: wire(IoFormat.nullable().optional(), IoFormat.nullable()),
-            }),
+            object({ format: IoFormat.nullable().default(() => null) }),
             empty,
           ),
           _CHILDREN: {},
@@ -1115,12 +1033,7 @@ export const Api = {
         complete: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -1135,12 +1048,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 empty,
@@ -1166,12 +1074,7 @@ export const Api = {
         'get-pubkey': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -1189,27 +1092,22 @@ export const Api = {
         logs: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             object({
-              limit: wire(z.int().nullable().optional(), z.int().nullable()),
-              cursor: wire(
-                z.string().nullable().optional(),
-                z.string().nullable(),
-              ),
-              boot: wire(
-                z
-                  .union([
-                    z.number().int().min(-2147483648).max(2147483647),
-                    z.string(),
-                  ])
-                  .nullable()
-                  .optional(),
-                z
-                  .union([
-                    z.number().int().min(-2147483648).max(2147483647),
-                    z.string(),
-                  ])
-                  .nullable(),
-              ),
-              before: wire(z.boolean().optional(), z.boolean()),
+              limit: z
+                .int()
+                .nullable()
+                .default(() => null),
+              cursor: z
+                .string()
+                .nullable()
+                .default(() => null),
+              boot: z
+                .union([
+                  z.number().int().min(-2147483648).max(2147483647),
+                  z.string(),
+                ])
+                .nullable()
+                .default(() => null),
+              before: z.boolean().default(() => false),
             }),
             empty,
           ),
@@ -1220,30 +1118,22 @@ export const Api = {
             follow: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 object({
-                  limit: wire(
-                    z.int().nullable().optional(),
-                    z.int().nullable(),
-                  ),
-                  cursor: wire(
-                    z.string().nullable().optional(),
-                    z.string().nullable(),
-                  ),
-                  boot: wire(
-                    z
-                      .union([
-                        z.number().int().min(-2147483648).max(2147483647),
-                        z.string(),
-                      ])
-                      .nullable()
-                      .optional(),
-                    z
-                      .union([
-                        z.number().int().min(-2147483648).max(2147483647),
-                        z.string(),
-                      ])
-                      .nullable(),
-                  ),
-                  before: wire(z.boolean().optional(), z.boolean()),
+                  limit: z
+                    .int()
+                    .nullable()
+                    .default(() => null),
+                  cursor: z
+                    .string()
+                    .nullable()
+                    .default(() => null),
+                  boot: z
+                    .union([
+                      z.number().int().min(-2147483648).max(2147483647),
+                      z.string(),
+                    ])
+                    .nullable()
+                    .default(() => null),
+                  before: z.boolean().default(() => false),
                 }),
                 empty,
               ),
@@ -1280,12 +1170,7 @@ export const Api = {
         status: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,

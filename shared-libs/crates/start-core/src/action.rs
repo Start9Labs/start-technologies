@@ -9,6 +9,7 @@ use tracing::instrument;
 pub use crate::ActionId;
 use crate::context::{CliContext, RpcContext};
 use crate::db::model::package::TaskSeverity;
+use crate::mcp::{EFFECT, Effect};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::util::serde::{
@@ -21,6 +22,7 @@ pub fn action_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "get-input",
             from_fn_async(get_action_input)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_display_serializable()
                 .with_about("about.get-action-input-spec")
                 .with_call_remote::<CliContext>(),
@@ -28,6 +30,7 @@ pub fn action_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "run",
             from_fn_async(run_action)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .with_display_serializable()
                 .with_custom_display_fn(|_, res| {
                     if let Some(res) = res {
@@ -41,6 +44,7 @@ pub fn action_api<C: Context>() -> ParentHandler<C> {
         .subcommand(
             "clear-task",
             from_fn_async(clear_task)
+                .with_metadata(EFFECT, Effect::Destructive.into())
                 .no_display()
                 .with_about("about.clear-service-task")
                 .with_call_remote::<CliContext>(),

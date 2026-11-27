@@ -9,15 +9,15 @@ export const AddDnsRecordParams: z.ZodObject<{
   name: z.ZodString
   type: z.ZodString
   value: z.ZodString
-  ttl: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  ttl: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   type: z.string(),
   value: z.string(),
-  ttl: wire(z.int().nullable().optional(), z.int().nullable()),
+  ttl: z
+    .int()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'AddDnsRecordParams',
 })
@@ -68,21 +68,12 @@ export const AddPinholeParams: z.ZodObject<{
    * Destination port on the GUA. Omit for a pure pinhole (no NAT, internal ==
    * external); set a different value for a port remap (e.g. 80 -> 443).
    */
-  internalPort: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  internalPort: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+  label: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Number of contiguous ports, counting up from external/internal. Default 1.
    */
-  count: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  count: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   /**
    * The client's global IPv6 (GUA) to expose. Must be an address this tunnel
@@ -102,18 +93,29 @@ export const AddPinholeParams: z.ZodObject<{
    * Destination port on the GUA. Omit for a pure pinhole (no NAT, internal ==
    * external); set a different value for a port remap (e.g. 80 -> 443).
    */
-  internalPort: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Destination port on the GUA. Omit for a pure pinhole (no NAT, internal ==\nexternal); set a different value for a port remap (e.g. 80 -> 443).',
-  }),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  internalPort: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Destination port on the GUA. Omit for a pure pinhole (no NAT, internal ==\nexternal); set a different value for a port remap (e.g. 80 -> 443).',
+    }),
+  label: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Number of contiguous ports, counting up from external/internal. Default 1.
    */
-  count: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Number of contiguous ports, counting up from external/internal. Default 1.',
-  }),
+  count: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Number of contiguous ports, counting up from external/internal. Default 1.',
+    }),
 }).meta({
   id: 'AddPinholeParams',
 })
@@ -124,26 +126,17 @@ export const AddPortForwardParams: z.ZodObject<{
    */
   externalPort: z.ZodInt
   target: z.ZodString
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  label: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.
    */
-  sni: z.ZodCodec<
-    z.ZodOptional<z.ZodArray<z.ZodString>>,
-    z.ZodArray<z.ZodString>
-  >
+  sni: z.ZodDefault<z.ZodArray<z.ZodString>>
   /**
    * Number of contiguous ports to forward (a PCP PORT_SET range), counting up
    * from both `external_port` and the target port. Defaults to 1. Not valid
    * together with SNI demux.
    */
-  count: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-    z.ZodNullable<z.ZodInt>
-  >
+  count: z.ZodDefault<z.ZodNullable<z.ZodInt>>
 }> = /* @__PURE__ */ object({
   /**
    * External (WAN) port to forward. The external IP is fixed to the target's
@@ -154,23 +147,33 @@ export const AddPortForwardParams: z.ZodObject<{
       "External (WAN) port to forward. The external IP is fixed to the target's\nWAN so return traffic stays symmetric.",
   }),
   target: z.string(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  label: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.
    */
-  sni: wire(z.array(z.string()).optional(), z.array(z.string())).meta({
-    description:
-      'Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.',
-  }),
+  sni: z
+    .array(z.string())
+    .default(() => [])
+    .meta({
+      description:
+        'Hostnames to SNI-demux on the shared external port. Empty = normal DNAT.',
+    }),
   /**
    * Number of contiguous ports to forward (a PCP PORT_SET range), counting up
    * from both `external_port` and the target port. Defaults to 1. Not valid
    * together with SNI demux.
    */
-  count: wire(z.int().nullable().optional(), z.int().nullable()).meta({
-    description:
-      'Number of contiguous ports to forward (a PCP PORT_SET range), counting up\nfrom both `external_port` and the target port. Defaults to 1. Not valid\ntogether with SNI demux.',
-  }),
+  count: z
+    .int()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Number of contiguous ports to forward (a PCP PORT_SET range), counting up\nfrom both `external_port` and the target port. Defaults to 1. Not valid\ntogether with SNI demux.',
+    }),
 }).meta({
   id: 'AddPortForwardParams',
 })
@@ -327,10 +330,7 @@ export const DnsRecordEntry: z.ZodObject<{
   /**
    * The device IP that injected this, or `null` for a manual record.
    */
-  source: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  source: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   type: z.string(),
@@ -339,10 +339,14 @@ export const DnsRecordEntry: z.ZodObject<{
   /**
    * The device IP that injected this, or `null` for a manual record.
    */
-  source: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'The device IP that injected this, or `null` for a manual record.',
-  }),
+  source: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'The device IP that injected this, or `null` for a manual record.',
+    }),
 }).meta({
   id: 'DnsRecordEntry',
   description:
@@ -477,13 +481,13 @@ export const RemoveDeviceParams: z.ZodObject<{
 })
 export const RemoveDnsRecordParams: z.ZodObject<{
   name: z.ZodString
-  type: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  type: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
-  type: wire(z.string().nullable().optional(), z.string().nullable()),
+  type: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'RemoveDnsRecordParams',
 })
@@ -565,28 +569,29 @@ export const Session: z.ZodObject<{
    * A friendly name for the key, if one was assigned at enrollment (e.g.
    * tunnel device keys). UI-enrolled keys are unnamed.
    */
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
   loggedIn: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
   lastActive: z.ZodCodec<z.ZodOptional<z.ZodString>, z.ZodString>
-  userAgent: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  userAgent: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * A friendly name for the key, if one was assigned at enrollment (e.g.
    * tunnel device keys). UI-enrolled keys are unnamed.
    */
-  name: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
-  }),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'A friendly name for the key, if one was assigned at enrollment (e.g.\ntunnel device keys). UI-enrolled keys are unnamed.',
+    }),
   loggedIn: wire(z.string().optional(), z.string()),
   lastActive: wire(z.string().optional(), z.string()),
-  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+  userAgent: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'Session',
 })
@@ -604,14 +609,14 @@ export const SetAutoPortForwardParams: z.ZodObject<{
 export const SetDeviceWanParams: z.ZodObject<{
   subnet: z.ZodString
   ip: z.ZodString
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  wanIp: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   subnet: z.string(),
   ip: z.string(),
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()),
+  wanIp: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'SetDeviceWanParams',
 })
@@ -657,29 +662,30 @@ export const SetSubnetIpv6Params: z.ZodObject<{
    * The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
    * a /56 from Linode). `null` disables IPv6 on the subnet.
    */
-  prefix: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  prefix: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,
    * a /56 from Linode). `null` disables IPv6 on the subnet.
    */
-  prefix: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,\na /56 from Linode). `null` disables IPv6 on the subnet.',
-  }),
+  prefix: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'The routed IPv6 prefix delegated to this subnet (e.g. a /64 from Hetzner,\na /56 from Linode). `null` disables IPv6 on the subnet.',
+    }),
 }).meta({
   id: 'SetSubnetIpv6Params',
 })
 export const SetSubnetWanParams: z.ZodObject<{
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  wanIp: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()),
+  wanIp: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'SetSubnetWanParams',
 })
@@ -689,20 +695,21 @@ export const ShowConfigParams: z.ZodObject<{
   /**
    * Overrides the generated WireGuard endpoint without changing the WAN assignment.
    */
-  endpoint: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  endpoint: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   subnet: z.string(),
   ip: z.string(),
   /**
    * Overrides the generated WireGuard endpoint without changing the WAN assignment.
    */
-  endpoint: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Overrides the generated WireGuard endpoint without changing the WAN assignment.',
-  }),
+  endpoint: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Overrides the generated WireGuard endpoint without changing the WAN assignment.',
+    }),
 }).meta({
   id: 'ShowConfigParams',
 })
@@ -810,10 +817,7 @@ export const WgClientKind: z.ZodEnum<{ client: 'client'; server: 'server' }> =
 export const AddDeviceParams: z.ZodObject<{
   subnet: z.ZodString
   name: z.ZodString
-  ip: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ip: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Client (no autoconfig) or Server (gateway-autoconfig on by default).
    */
@@ -821,7 +825,10 @@ export const AddDeviceParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   subnet: z.string(),
   name: z.string(),
-  ip: wire(z.string().nullable().optional(), z.string().nullable()),
+  ip: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Client (no autoconfig) or Server (gateway-autoconfig on by default).
    */
@@ -834,33 +841,31 @@ export const AddDeviceParams: z.ZodObject<{
 })
 export const AddKeyParams: z.ZodObject<{
   key: typeof AnyVerifyingKey
-  name: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
-  userAgent: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  name: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  userAgent: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   key: AnyVerifyingKey,
-  name: wire(z.string().nullable().optional(), z.string().nullable()),
-  userAgent: wire(z.string().nullable().optional(), z.string().nullable()),
+  name: z
+    .string()
+    .nullable()
+    .default(() => null),
+  userAgent: z
+    .string()
+    .nullable()
+    .default(() => null),
 }).meta({
   id: 'AddKeyParams',
 })
 export const ApplyWithPathParams: z.ZodIntersection<
-  z.ZodObject<{
-    path: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
-  }>,
+  z.ZodObject<{ path: z.ZodDefault<z.ZodNullable<z.ZodString>> }>,
   typeof ApplyParams
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      path: wire(z.string().nullable().optional(), z.string().nullable()),
+      path: z
+        .string()
+        .nullable()
+        .default(() => null),
     }),
     ApplyParams,
   )
@@ -888,7 +893,7 @@ export const LoginParams: z.ZodObject<{
    * Enroll in memory only, never persisted (kiosk mode, which re-enrolls
    * on every browser restart and would otherwise accumulate keys).
    */
-  ephemeral: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  ephemeral: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   password: z.string(),
   /**
@@ -904,10 +909,13 @@ export const LoginParams: z.ZodObject<{
    * Enroll in memory only, never persisted (kiosk mode, which re-enrolls
    * on every browser restart and would otherwise accumulate keys).
    */
-  ephemeral: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).',
-  }),
+  ephemeral: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Enroll in memory only, never persisted (kiosk mode, which re-enrolls\non every browser restart and would otherwise accumulate keys).',
+    }),
 }).meta({
   id: 'LoginParams',
 })
@@ -1114,19 +1122,20 @@ export const RemovePortForwardParams: z.ZodObject<{
   /**
    * Remove a single SNI route on `source`; omit to remove the whole forward.
    */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  hostname: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   source: ForwardAddress,
   /**
    * Remove a single SNI route on `source`; omit to remove the whole forward.
    */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Remove a single SNI route on `source`; omit to remove the whole forward.',
-  }),
+  hostname: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Remove a single SNI route on `source`; omit to remove the whole forward.',
+    }),
 }).meta({
   id: 'RemovePortForwardParams',
 })
@@ -1147,20 +1156,21 @@ export const SetPortForwardEnabledParams: z.ZodObject<{
   /**
    * Toggle a single SNI route on `source`; omit for a DNAT forward.
    */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  hostname: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   source: ForwardAddress,
   enabled: z.boolean(),
   /**
    * Toggle a single SNI route on `source`; omit for a DNAT forward.
    */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Toggle a single SNI route on `source`; omit for a DNAT forward.',
-  }),
+  hostname: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Toggle a single SNI route on `source`; omit for a DNAT forward.',
+    }),
 }).meta({
   id: 'SetPortForwardEnabledParams',
 })
@@ -1169,10 +1179,7 @@ export const SetSubnetDnsParams: z.ZodObject<{
   /**
    * The selected device's WireGuard IP; required when `mode` is `device`.
    */
-  deviceIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  deviceIp: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.
    */
@@ -1182,10 +1189,14 @@ export const SetSubnetDnsParams: z.ZodObject<{
   /**
    * The selected device's WireGuard IP; required when `mode` is `device`.
    */
-  deviceIp: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "The selected device's WireGuard IP; required when `mode` is `device`.",
-  }),
+  deviceIp: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "The selected device's WireGuard IP; required when `mode` is `device`.",
+    }),
   /**
    * Up to 3 upstream servers (bare IP or `ip:port`); used when `mode` is `custom`.
    */
@@ -1211,27 +1222,28 @@ export const TransportWire: z.ZodUnion<
   })
 export const UpdatePortForwardLabelParams: z.ZodObject<{
   source: typeof ForwardAddress
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  label: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Label a single SNI route on `source`; omit to label the DNAT forward.
    */
-  hostname: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  hostname: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   source: ForwardAddress,
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  label: z
+    .string()
+    .nullable()
+    .default(() => null),
   /**
    * Label a single SNI route on `source`; omit to label the DNAT forward.
    */
-  hostname: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Label a single SNI route on `source`; omit to label the DNAT forward.',
-  }),
+  hostname: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Label a single SNI route on `source`; omit to label the DNAT forward.',
+    }),
 }).meta({
   id: 'UpdatePortForwardLabelParams',
 })
@@ -1249,22 +1261,19 @@ export const WgConfig: z.ZodObject<{
    * — only enable for devices you trust (it lets the device add records to
    * the tunnel's DNS for every peer to resolve).
    */
-  allowDnsInjection: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  allowDnsInjection: z.ZodDefault<z.ZodBoolean>
   /**
    * Whether this device may auto-create port forwards via PCP/IGD. Off by
    * default — paired with `allow_dns_injection` under one "Gateway
    * Autoconfiguration" toggle, but tracked separately so each capability is
    * gated on its own.
    */
-  allowAutoPortForward: z.ZodCodec<z.ZodOptional<z.ZodBoolean>, z.ZodBoolean>
+  allowAutoPortForward: z.ZodDefault<z.ZodBoolean>
   /**
    * SNAT this device's egress to this WAN IP, overriding the subnet's
    * `wan_ip` / the default masquerade. `None` falls back to the subnet rule.
    */
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  wanIp: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   key: literal_0,
@@ -1282,43 +1291,51 @@ export const WgConfig: z.ZodObject<{
    * — only enable for devices you trust (it lets the device add records to
    * the tunnel's DNS for every peer to resolve).
    */
-  allowDnsInjection: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      "Whether this device may inject DNS records via RFC 2136. Off by default\n— only enable for devices you trust (it lets the device add records to\nthe tunnel's DNS for every peer to resolve).",
-  }),
+  allowDnsInjection: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        "Whether this device may inject DNS records via RFC 2136. Off by default\n— only enable for devices you trust (it lets the device add records to\nthe tunnel's DNS for every peer to resolve).",
+    }),
   /**
    * Whether this device may auto-create port forwards via PCP/IGD. Off by
    * default — paired with `allow_dns_injection` under one "Gateway
    * Autoconfiguration" toggle, but tracked separately so each capability is
    * gated on its own.
    */
-  allowAutoPortForward: wire(z.boolean().optional(), z.boolean()).meta({
-    description:
-      'Whether this device may auto-create port forwards via PCP/IGD. Off by\ndefault — paired with `allow_dns_injection` under one "Gateway\nAutoconfiguration" toggle, but tracked separately so each capability is\ngated on its own.',
-  }),
+  allowAutoPortForward: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Whether this device may auto-create port forwards via PCP/IGD. Off by\ndefault — paired with `allow_dns_injection` under one "Gateway\nAutoconfiguration" toggle, but tracked separately so each capability is\ngated on its own.',
+    }),
   /**
    * SNAT this device's egress to this WAN IP, overriding the subnet's
    * `wan_ip` / the default masquerade. `None` falls back to the subnet rule.
    */
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "SNAT this device's egress to this WAN IP, overriding the subnet's\n`wan_ip` / the default masquerade. `None` falls back to the subnet rule.",
-  }),
+  wanIp: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "SNAT this device's egress to this WAN IP, overriding the subnet's\n`wan_ip` / the default masquerade. `None` falls back to the subnet rule.",
+    }),
 }).meta({
   id: 'WgConfig',
 })
 export const DumpParams: z.ZodIntersection<
-  z.ZodObject<{
-    pointer: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
-  }>,
+  z.ZodObject<{ pointer: z.ZodDefault<z.ZodNullable<z.ZodString>> }>,
   typeof ProjectionParams
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+      pointer: z
+        .string()
+        .nullable()
+        .default(() => null),
     }),
     ProjectionParams,
   )
@@ -1330,13 +1347,13 @@ export const DumpParams: z.ZodIntersection<
  * Enrolled keys, including ephemeral ones, and the caller's own.
  */
 export const KeyList: z.ZodObject<{
-  current: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  current: z.ZodDefault<z.ZodNullable<z.ZodString>>
   keys: typeof AuthKeys
 }> = /* @__PURE__ */ object({
-  current: wire(z.string().nullable().optional(), z.string().nullable()),
+  current: z
+    .string()
+    .nullable()
+    .default(() => null),
   keys: AuthKeys,
 }).meta({
   id: 'KeyList',
@@ -1354,30 +1371,29 @@ export const Patch: z.ZodArray<typeof PatchOperation> = /* @__PURE__ */ z
   })
 export const SubscribeParams: z.ZodIntersection<
   z.ZodObject<{
-    pointer: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<z.ZodString>>,
-      z.ZodNullable<z.ZodString>
-    >
+    pointer: z.ZodDefault<z.ZodNullable<z.ZodString>>
     /**
      * The subscriber's last revision; resumes only within the epoch that reported it.
      */
-    since: z.ZodCodec<
-      z.ZodOptional<z.ZodNullable<typeof DbCursor>>,
-      z.ZodNullable<typeof DbCursor>
-    >
+    since: z.ZodDefault<z.ZodNullable<typeof DbCursor>>
   }>,
   typeof ProjectionParams
 > = /* @__PURE__ */ z
   .intersection(
     object({
-      pointer: wire(z.string().nullable().optional(), z.string().nullable()),
+      pointer: z
+        .string()
+        .nullable()
+        .default(() => null),
       /**
        * The subscriber's last revision; resumes only within the epoch that reported it.
        */
-      since: wire(DbCursor.nullable().optional(), DbCursor.nullable()).meta({
-        description:
-          "The subscriber's last revision; resumes only within the epoch that reported it.",
-      }),
+      since: DbCursor.nullable()
+        .default(() => null)
+        .meta({
+          description:
+            "The subscriber's last revision; resumes only within the epoch that reported it.",
+        }),
     }),
     ProjectionParams,
   )
@@ -1437,15 +1453,15 @@ export const SetPinholeEnabledParams: z.ZodObject<{
 export const UpdatePinholeLabelParams: z.ZodObject<{
   gua: z.ZodString
   externalPort: z.ZodInt
-  label: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  label: z.ZodDefault<z.ZodNullable<z.ZodString>>
   transport: z.ZodCodec<z.ZodOptional<typeof Transport>, typeof Transport>
 }> = /* @__PURE__ */ object({
   gua: z.string(),
   externalPort: z.int(),
-  label: wire(z.string().nullable().optional(), z.string().nullable()),
+  label: z
+    .string()
+    .nullable()
+    .default(() => null),
   transport: wire(Transport.optional(), Transport),
 }).meta({
   id: 'UpdatePinholeLabelParams',
@@ -1458,19 +1474,13 @@ export const WgSubnetConfig: z.ZodObject<{
    * SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`
    * keeps the default masquerade; a per-device `wan_ip` overrides this.
    */
-  wanIp: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  wanIp: z.ZodDefault<z.ZodNullable<z.ZodString>>
   /**
    * Routed IPv6 prefix delegated to this subnet, if any. Each host on the
    * subnet (the server and every client) gets one `/128` out of it with its
    * tunnel IPv4 embedded — see [`crate::tunnel::wg6`].
    */
-  ipv6: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  ipv6: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   name: z.string(),
   clients: WgSubnetClients,
@@ -1479,19 +1489,27 @@ export const WgSubnetConfig: z.ZodObject<{
    * SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`
    * keeps the default masquerade; a per-device `wan_ip` overrides this.
    */
-  wanIp: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      "SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`\nkeeps the default masquerade; a per-device `wan_ip` overrides this.",
-  }),
+  wanIp: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "SNAT this subnet's egress to this WAN IP instead of `masquerade`. `None`\nkeeps the default masquerade; a per-device `wan_ip` overrides this.",
+    }),
   /**
    * Routed IPv6 prefix delegated to this subnet, if any. Each host on the
    * subnet (the server and every client) gets one `/128` out of it with its
    * tunnel IPv4 embedded — see [`crate::tunnel::wg6`].
    */
-  ipv6: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'Routed IPv6 prefix delegated to this subnet, if any. Each host on the\nsubnet (the server and every client) gets one `/128` out of it with its\ntunnel IPv4 embedded — see [`crate::tunnel::wg6`].',
-  }),
+  ipv6: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Routed IPv6 prefix delegated to this subnet, if any. Each host on the\nsubnet (the server and every client) gets one `/128` out of it with its\ntunnel IPv4 embedded — see [`crate::tunnel::wg6`].',
+    }),
 }).meta({
   id: 'WgSubnetConfig',
 })
@@ -1506,14 +1524,8 @@ export const Revision: z.ZodObject<{ id: z.ZodInt; patch: typeof DiffPatch }> =
 export const SubscribeStart: z.ZodObject<{
   epoch: z.ZodString
   id: z.ZodInt
-  value: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodUnknown>>,
-    z.ZodNullable<z.ZodUnknown>
-  >
-  revisions: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodArray<typeof Revision>>>,
-    z.ZodNullable<z.ZodArray<typeof Revision>>
-  >
+  value: z.ZodDefault<z.ZodNullable<z.ZodUnknown>>
+  revisions: z.ZodDefault<z.ZodNullable<z.ZodArray<typeof Revision>>>
   /**
    * Names the stream to `db.subscription.update`; absent where its projection is fixed.
    */
@@ -1521,11 +1533,14 @@ export const SubscribeStart: z.ZodObject<{
 }> = /* @__PURE__ */ object({
   epoch: z.string(),
   id: z.int(),
-  value: wire(z.unknown().nullable().optional(), z.unknown().nullable()),
-  revisions: wire(
-    z.array(Revision).nullable().optional(),
-    z.array(Revision).nullable(),
-  ),
+  value: z
+    .unknown()
+    .nullable()
+    .default(() => null),
+  revisions: z
+    .array(Revision)
+    .nullable()
+    .default(() => null),
   /**
    * Names the stream to `db.subscription.update`; absent where its projection is fixed.
    */
@@ -1567,12 +1582,7 @@ export const Api = {
             list: {
               _PARAMS: /* @__PURE__ */ z.intersection(
                 z.intersection(
-                  object({
-                    format: wire(
-                      IoFormat.nullable().optional(),
-                      IoFormat.nullable(),
-                    ),
-                  }),
+                  object({ format: IoFormat.nullable().default(() => null) }),
                   empty,
                 ),
                 ListKeysParams,
@@ -1644,12 +1654,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             ListDevicesParams,
@@ -1708,12 +1713,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -1736,12 +1736,7 @@ export const Api = {
         list: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -1875,12 +1870,7 @@ export const Api = {
         apply: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -1892,12 +1882,7 @@ export const Api = {
         check: {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -1932,12 +1917,7 @@ export const Api = {
         'get-available-ips': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -1949,12 +1929,7 @@ export const Api = {
         'get-certificate': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,
@@ -1966,12 +1941,7 @@ export const Api = {
         'get-listen': {
           _PARAMS: /* @__PURE__ */ z.intersection(
             z.intersection(
-              object({
-                format: wire(
-                  IoFormat.nullable().optional(),
-                  IoFormat.nullable(),
-                ),
-              }),
+              object({ format: IoFormat.nullable().default(() => null) }),
               empty,
             ),
             empty,

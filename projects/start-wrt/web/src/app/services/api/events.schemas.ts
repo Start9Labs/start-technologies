@@ -1,6 +1,4 @@
 import { z } from 'zod'
-const wire = <A extends z.ZodType, B extends z.ZodType>(input: A, output: B) =>
-  z.codec(input, output, { decode: v => v as never, encode: v => v as never })
 const object = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
   z.object(shape).meta({ additionalProperties: true })
 export const EncryptedWire: z.ZodObject<{ encrypted: z.ZodUnknown }> =
@@ -97,14 +95,8 @@ export const Progress: z.ZodUnion<
     z.ZodBoolean,
     z.ZodObject<{
       done: z.ZodInt
-      total: z.ZodCodec<
-        z.ZodOptional<z.ZodNullable<z.ZodInt>>,
-        z.ZodNullable<z.ZodInt>
-      >
-      units: z.ZodCodec<
-        z.ZodOptional<z.ZodNullable<typeof ProgressUnits>>,
-        z.ZodNullable<typeof ProgressUnits>
-      >
+      total: z.ZodDefault<z.ZodNullable<z.ZodInt>>
+      units: z.ZodDefault<z.ZodNullable<typeof ProgressUnits>>
     }>,
   ]
 > = /* @__PURE__ */ z
@@ -118,11 +110,11 @@ export const Progress: z.ZodUnion<
     }),
     object({
       done: z.int(),
-      total: wire(z.int().nullable().optional(), z.int().nullable()),
-      units: wire(
-        ProgressUnits.nullable().optional(),
-        ProgressUnits.nullable(),
-      ),
+      total: z
+        .int()
+        .nullable()
+        .default(() => null),
+      units: ProgressUnits.nullable().default(() => null),
     }).meta({
       description: 'In progress',
     }),
@@ -138,20 +130,21 @@ export const FlashParams: z.ZodObject<{
   /**
    * IANA timezone name. An unknown name leaves the default unchanged.
    */
-  timezone: z.ZodCodec<
-    z.ZodOptional<z.ZodNullable<z.ZodString>>,
-    z.ZodNullable<z.ZodString>
-  >
+  timezone: z.ZodDefault<z.ZodNullable<z.ZodString>>
 }> = /* @__PURE__ */ object({
   mode: FlashMode,
   password: PasswordType,
   /**
    * IANA timezone name. An unknown name leaves the default unchanged.
    */
-  timezone: wire(z.string().nullable().optional(), z.string().nullable()).meta({
-    description:
-      'IANA timezone name. An unknown name leaves the default unchanged.',
-  }),
+  timezone: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'IANA timezone name. An unknown name leaves the default unchanged.',
+    }),
 }).meta({
   id: 'FlashParams',
 })

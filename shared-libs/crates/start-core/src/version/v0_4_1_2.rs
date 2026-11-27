@@ -1,15 +1,16 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use exver::VersionRange;
+use serde::Deserialize;
 
 use super::v0_3_5::V0_3_0_COMPAT;
 use super::{VersionT, v0_4_1_1};
 use crate::prelude::*;
 use crate::sign::AnyVerifyingKey;
-use crate::trusted_keys::legacy::{decode_keys, grouped_keys};
+use crate::trusted_keys::legacy::{TrustedKeyring, TrustedKeyrings, individual_keys};
 use crate::trusted_keys::{
-    TrustedKeys, initial_signer_certificates, protect_registry_keys, ui_registries,
+    Registries, TrustedKey, TrustedKeys, initial_signer_certificates, protect_registry_keys,
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -20,6 +21,61 @@ pub(crate) fn retired_alpha_keys() -> BTreeSet<AnyVerifyingKey> {
         "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
         "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=\n-----END PUBLIC KEY-----\n".parse().unwrap(),
     ])
+}
+
+/// Reads the `registries` map StartOS kept in `public.ui` before 0.4.2.1.
+pub(super) fn ui_registries(ui: &Value) -> Registries {
+    ui.get("registries")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(url, name)| (url.clone(), name.as_str().map(str::to_owned)))
+        .collect()
+}
+
+impl From<TrustedKey> for TrustedKeyring {
+    fn from(key: TrustedKey) -> Self {
+        Self {
+            name: key.name,
+            origin: key.origin,
+            origin_registry: key.origin_registry,
+            public_keys: BTreeSet::from([key.public_key]),
+            gpg_exports: key.gpg_exports,
+            contact: key.contact,
+            added_at: Some(key.added_at),
+            removable: key.removable,
+            marketplace: key.marketplace,
+            os: key.os,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredKey {
+    Individual(TrustedKey),
+    Grouped(TrustedKeyring),
+}
+
+pub(super) fn decode_keys(value: Value, now: DateTime<Utc>) -> Result<TrustedKeys, Error> {
+    let stored: BTreeMap<InternedString, StoredKey> = from_value(value)?;
+    let groups = stored
+        .into_iter()
+        .map(|(id, key)| {
+            (
+                id,
+                match key {
+                    StoredKey::Individual(key) => key.into(),
+                    StoredKey::Grouped(group) => group,
+                },
+            )
+        })
+        .collect();
+    individual_keys(&groups, now)
+}
+
+pub(super) fn grouped_keys(keys: TrustedKeys) -> TrustedKeyrings {
+    keys.into_iter().map(|(id, key)| (id, key.into())).collect()
 }
 
 fn remove_seeded_alpha_keys(keys: &mut TrustedKeys) {
@@ -106,7 +162,13 @@ impl VersionT for Version {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trusted_keys::{TrustContext, TrustedKeys, enabled_keys, legacy};
+    use crate::sign::gpg::parse_public_keys;
+    use crate::trusted_keys::legacy::start9_registry;
+    use crate::trusted_keys::{
+        START9, START9_REGISTRY, TrustContext, enabled_keys, initial_signer_labels,
+        initial_trusted_keys, legacy, remove_key,
+    };
+    use crate::version::v0_4_1::{os_signers, trusted_key_os_signers};
 
     #[test]
     fn grouped_trust_migration_preserves_both_policies_and_rolls_back_compatibly() {
@@ -149,10 +211,7 @@ mod tests {
         Version.down(&mut db).unwrap();
         let restored: legacy::TrustedKeyrings =
             from_value(db["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
-        assert_eq!(
-            legacy::os_signers(&restored),
-            crate::trusted_keys::os_signers(&migrated)
-        );
+        assert_eq!(os_signers(&restored), trusted_key_os_signers(&migrated));
         let rolled_back = db.clone();
         Version.down(&mut db).unwrap();
         assert_eq!(db, rolled_back);
@@ -169,9 +228,9 @@ mod tests {
     #[test]
     fn stored_drbonez_certificates_collapse_to_the_seed() {
         let seeded = crate::trusted_keys::initial_trusted_keys();
-        let (id, _) = crate::update::signers::initial_signers()
+        let (id, _) = initial_signer_labels()
             .into_iter()
-            .find(|(_, signer)| signer.label == "drbonez")
+            .find(|(_, label)| *label == "drbonez")
             .unwrap();
         let mut stale = seeded.clone();
         let key = stale.get_mut(&id).unwrap();
@@ -180,7 +239,7 @@ mod tests {
         key.gpg_exports.insert(certificate);
         for trusted_keys in [
             to_value(&stale).unwrap(),
-            to_value(&legacy::grouped_keys(stale.clone())).unwrap(),
+            to_value(&grouped_keys(stale.clone())).unwrap(),
         ] {
             let mut db =
                 imbl_value::json!({ "public": { "serverInfo": { "trustedKeys": trusted_keys } } });
@@ -299,5 +358,131 @@ mod tests {
         let before = db.clone();
         assert!(Version.up(&mut db, ()).is_err());
         assert_eq!(db, before);
+    }
+
+    #[test]
+    fn current_decoder_requires_a_singular_key_and_migration_accepts_historical_groups() {
+        let key = initial_signer_labels().into_keys().next().unwrap();
+        let historical = imbl_value::json!({ "name": "Publisher", "publicKeys": [key], "removable": true, "marketplace": true, "os": false });
+        assert!(from_value::<TrustedKey>(historical.clone()).is_err());
+        let migrated =
+            decode_keys(imbl_value::json!({ "legacy": historical }), Utc::now()).unwrap();
+        assert_eq!(migrated.len(), 1);
+        let current = &migrated[&key];
+        assert_eq!(current.public_key.interned_der64(), key);
+        assert_eq!(current.origin, "manual");
+        assert!(current.origin_registry.is_none());
+    }
+
+    #[test]
+    fn decoding_a_retained_full_certificate_does_not_restore_a_removed_signing_key() {
+        let imported =
+            parse_public_keys(&[include_str!("../sign/fixtures/ed25519-signers.asc").into()])
+                .unwrap();
+        let removed = imported.keys.first().unwrap().clone();
+        let groups = TrustedKeyrings::from([(
+            "publisher".into(),
+            TrustedKeyring {
+                name: "Publisher".into(),
+                origin: "manual".into(),
+                origin_registry: None,
+                public_keys: imported.keys,
+                gpg_exports: imported.gpg_exports,
+                contact: BTreeSet::new(),
+                added_at: None,
+                removable: true,
+                marketplace: true,
+                os: true,
+            },
+        )]);
+        let mut keys = individual_keys(&groups, Utc::now()).unwrap();
+        remove_key(&mut keys, &removed.interned_der64()).unwrap();
+        let wire = to_value(&keys).unwrap();
+        let restored: TrustedKeys = from_value(wire.clone()).unwrap();
+        assert_eq!(restored.len(), 1);
+        assert!(!restored.contains_key(&removed.interned_der64()));
+        assert_eq!(decode_keys(wire, Utc::now()).unwrap(), restored);
+    }
+
+    #[test]
+    fn grouped_duplicates_preserve_effective_trust_system_protection_and_identity() {
+        let mut groups = legacy::historical_keyrings();
+        groups.get_mut(START9).unwrap().os = false;
+        let public_key = groups[START9].public_keys.first().unwrap().clone();
+        let mut overlap = groups[START9].clone();
+        overlap.name = "Owner label".into();
+        overlap.public_keys = BTreeSet::from([public_key.clone()]);
+        overlap.origin = "manual".into();
+        overlap.origin_registry = Some(crate::trusted_keys::RegistryIdentity {
+            name: Some("Registry".into()),
+            icon: None,
+        });
+        overlap.removable = true;
+        overlap.os = true;
+        groups.insert("overlap".into(), overlap);
+        let keys = individual_keys(&groups, Utc::now()).unwrap();
+        assert_eq!(keys.len(), 5);
+        assert_eq!(
+            trusted_key_os_signers(&keys)
+                .into_keys()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([public_key.interned_der64()])
+        );
+        assert_eq!(enabled_keys(&keys, TrustContext::Marketplace).len(), 3);
+        for (id, key) in &keys {
+            assert_eq!(*id, key.public_key.interned_der64());
+            assert_eq!(key.origin, START9_REGISTRY);
+            assert_eq!(key.origin_registry, Some(start9_registry()));
+            assert!(!key.removable);
+            assert!(
+                key.gpg_exports
+                    .iter()
+                    .all(|export| export.identities.contains_key(id))
+            );
+        }
+        assert_eq!(keys[&public_key.interned_der64()].name, "Owner label");
+        assert_eq!(
+            decode_keys(to_value(&keys).unwrap(), Utc::now()).unwrap(),
+            keys
+        );
+    }
+
+    #[test]
+    fn historical_arrays_canonicalize_and_deduplicate_without_losing_keys() {
+        let first = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
+        let second = "MCowBQYDK2VwAyEA4P+LwrLkZfhgcM3MNz6g8ihBvNnIfGSu+ojr+lFoDxU=";
+        let value = imbl_value::json!({ "historical": { "name": "Publisher", "publicKeys": [second, first, second], "removable": true, "marketplace": false, "os": true } });
+        let keys = decode_keys(value, Utc::now()).unwrap();
+        assert_eq!(keys.len(), 2);
+        assert_eq!(
+            keys.keys().map(|key| &**key).collect::<BTreeSet<_>>(),
+            BTreeSet::from([first, second])
+        );
+        assert!(keys.values().all(|key| key.os && !key.marketplace));
+        assert_eq!(
+            decode_keys(to_value(&keys).unwrap(), Utc::now()).unwrap(),
+            keys
+        );
+    }
+
+    #[test]
+    fn mixed_current_and_historical_records_merge_by_canonical_identity() {
+        let mut initial = initial_trusted_keys();
+        let id = initial.keys().next().unwrap().clone();
+        initial.get_mut(&id).unwrap().removable = false;
+        let mut wire = to_value(&initial).unwrap();
+        let mut group: TrustedKeyring = initial[&id].clone().into();
+        group.origin = "manual".into();
+        group.name = "Alias".into();
+        group.removable = true;
+        group.os = true;
+        wire.as_object_mut()
+            .unwrap()
+            .insert("legacy".into(), to_value(&group).unwrap());
+        let keys = decode_keys(wire, Utc::now()).unwrap();
+        assert_eq!(keys.len(), initial.len());
+        assert!(keys[&id].os);
+        assert_eq!(keys[&id].origin, START9_REGISTRY);
+        assert!(!keys[&id].removable);
     }
 }

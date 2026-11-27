@@ -12,7 +12,7 @@ use crate::registry::os::promote::{CliOsPromoteParams, cli_os_promote};
 use crate::registry::os::version::{
     AddVersionParams, EditVersionParams, add_version, edit_version,
 };
-use crate::registry::package::promote::{call_registry, registry_rpc_url};
+use crate::registry::package::promote::call_registry;
 use crate::rpc_continuations::Guid;
 use crate::sign::commitment::blake3::Blake3Commitment;
 use crate::sign::ed25519::Ed25519ph;
@@ -398,7 +398,6 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
     }
 
     let (url, server_task) = registry_server(ctx.clone()).await;
-    let url = registry_rpc_url(&url).unwrap();
     let key_path = temp.path().join("identity.pem");
     write_signing_key(&uploader, &key_path).await.unwrap();
     let cli = CliContext::init(ClientConfig {

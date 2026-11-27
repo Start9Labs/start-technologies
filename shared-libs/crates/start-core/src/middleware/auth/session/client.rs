@@ -11,7 +11,6 @@ use rpc_toolkit::{BoxWebSocket, RpcResponse};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
-use super::RpcSessionUpgrader;
 use crate::middleware::auth::signature::rpc_request_body;
 use crate::prelude::*;
 use crate::sign::Signer;
@@ -27,18 +26,6 @@ pub use reusable::Client as SessionClient;
 
 #[cfg(test)]
 mod tests;
-
-/// Maps a versioned HTTP RPC URL to its sibling encrypted WebSocket endpoint.
-pub fn websocket_url(mut rpc_url: Url) -> Result<Url, Error> {
-    rpc_url
-        .path_segments_mut()
-        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
-        .with_kind(ErrorKind::ParseUrl)?
-        .pop_if_empty()
-        .pop()
-        .pop();
-    RpcSessionUpgrader::url(rpc_url)
-}
 
 async fn upgrade(
     client: &Client,
