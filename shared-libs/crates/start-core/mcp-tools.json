@@ -8119,13 +8119,46 @@
         "MetricsGeneral": {
           "type": "object",
           "properties": {
-            "temperature": {
-              "default": null,
-              "anyOf": [{ "$ref": "#/$defs/Celsius" }, { "type": "null" }]
+            "temperatures": {
+              "default": [],
+              "type": "array",
+              "items": { "$ref": "#/$defs/TemperatureSensor" }
             }
           },
-          "required": ["temperature"],
+          "required": ["temperatures"],
           "additionalProperties": true
+        },
+        "TemperatureSensor": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The lm-sensors chip name."
+            },
+            "kind": { "$ref": "#/$defs/SensorKind" },
+            "temperature": { "$ref": "#/$defs/Celsius" },
+            "high": {
+              "description": "Sustained readings at or above this are hot.",
+              "$ref": "#/$defs/Celsius"
+            },
+            "critical": { "$ref": "#/$defs/Celsius" }
+          },
+          "required": ["id", "kind", "temperature", "high", "critical"],
+          "additionalProperties": true,
+          "description": "One part's representative reading, with the limits it is judged against."
+        },
+        "SensorKind": {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "gpu",
+            "memory",
+            "storage",
+            "network",
+            "chipset",
+            "system",
+            "other"
+          ]
         },
         "Celsius": {
           "type": "object",
@@ -8288,13 +8321,46 @@
         "MetricsGeneral": {
           "type": "object",
           "properties": {
-            "temperature": {
-              "default": null,
-              "anyOf": [{ "$ref": "#/$defs/Celsius" }, { "type": "null" }]
+            "temperatures": {
+              "default": [],
+              "type": "array",
+              "items": { "$ref": "#/$defs/TemperatureSensor" }
             }
           },
-          "required": ["temperature"],
+          "required": ["temperatures"],
           "additionalProperties": true
+        },
+        "TemperatureSensor": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The lm-sensors chip name."
+            },
+            "kind": { "$ref": "#/$defs/SensorKind" },
+            "temperature": { "$ref": "#/$defs/Celsius" },
+            "high": {
+              "description": "Sustained readings at or above this are hot.",
+              "$ref": "#/$defs/Celsius"
+            },
+            "critical": { "$ref": "#/$defs/Celsius" }
+          },
+          "required": ["id", "kind", "temperature", "high", "critical"],
+          "additionalProperties": true,
+          "description": "One part's representative reading, with the limits it is judged against."
+        },
+        "SensorKind": {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "gpu",
+            "memory",
+            "storage",
+            "network",
+            "chipset",
+            "system",
+            "other"
+          ]
         },
         "Celsius": {
           "type": "object",

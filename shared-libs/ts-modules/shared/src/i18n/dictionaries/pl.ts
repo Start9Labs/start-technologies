@@ -1130,4 +1130,11 @@ export default {
   1335: 'Ostatnia synchronizacja',
   1336: 'przed chwilą',
   1337: 'Wprowadź hasło główne, aby kontynuować.',
+  1338: 'Procesor',
+  1339: 'Układ graficzny',
+  1340: 'Dysk',
+  1341: 'Karta sieciowa',
+  1342: 'Chipset',
+  1343: 'Czujnik',
+  1344: 'Nie znaleziono czujników temperatury',
 } satisfies i18n

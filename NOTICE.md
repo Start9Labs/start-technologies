@@ -14,7 +14,7 @@ license and is not redistributed in this repository.
 
 GPL-licensed, mostly GPL-2.0-only. Files added to, and patches against, the
 OpenWrt build tree — copyright SpaceMiT Ltd., OpenWrt.org, the Linux kernel
-contributors and the Debian ca-certificates contributors. Sixteen carry an explicit `SPDX-License-Identifier` header. Full
+contributors, the Debian ca-certificates contributors and the hostapd contributors. Sixteen carry an explicit `SPDX-License-Identifier` header. Full
 text: [`projects/start-wrt/openwrt-overlay/COPYING`](projects/start-wrt/openwrt-overlay/COPYING).
 Details: [`projects/start-wrt/openwrt-overlay/README.md`](projects/start-wrt/openwrt-overlay/README.md).
 

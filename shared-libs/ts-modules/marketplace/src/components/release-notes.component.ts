@@ -6,7 +6,7 @@ import {
 } from '@start9labs/shared'
 import { NgDompurifyPipe } from '@taiga-ui/dompurify'
 import { TuiCardLarge, TuiHeader } from '@taiga-ui/layout'
-import { MarketplacePkgBase } from '../types'
+import { MarketplaceListing } from '../types'
 
 @Component({
   selector: 'marketplace-release-notes',
@@ -38,5 +38,8 @@ import { MarketplacePkgBase } from '../types'
   ],
 })
 export class MarketplaceReleaseNotesComponent {
-  readonly pkg = input.required<MarketplacePkgBase>()
+  readonly pkg =
+    input.required<
+      Pick<MarketplaceListing, 'version' | 'releaseNotes' | 'defaultLocale'>
+    >()
 }

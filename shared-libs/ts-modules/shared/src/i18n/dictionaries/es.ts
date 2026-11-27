@@ -1130,4 +1130,11 @@ export default {
   1335: 'Última sincronización',
   1336: 'justo ahora',
   1337: 'Introduzca su contraseña maestra para continuar.',
+  1338: 'Procesador',
+  1339: 'Gráficos',
+  1340: 'Unidad de almacenamiento',
+  1341: 'Adaptador de red',
+  1342: 'Chipset',
+  1343: 'Sensor',
+  1344: 'No se encontraron sensores de temperatura',
 } satisfies i18n

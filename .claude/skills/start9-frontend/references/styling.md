@@ -32,8 +32,8 @@ ladder from SKILL.md doctrine #3, expanded:
    (`box-shadow: var(--tui-shadow-small)`, never `0 1rem 2.5rem rgb(0 0 0 / 14%)`); define new knobs as CSS
    custom properties bound from the template (`[style.--gap.rem]`).
 5. **`g-*` global utilities** (shared stylesheet only — never re-declared per app/component):
-   layout (`g-page`, `g-form`, `g-table`, `g-aside`, `g-buttons`, store's `g-band`/`g-wrap`
-   marketing system) and text colors (`g-positive/negative/warning/info/primary/secondary/tertiary`)
+   layout (`g-page`, `g-form`, `g-table`, `g-aside`, `g-buttons`, a marketing site's
+   `g-band`/`g-wrap` system) and text colors (`g-positive/negative/warning/info/primary/secondary/tertiary`)
    for things with no appearance input — `<tui-icon class="g-positive">`, never a
    `tui-icon { color: … }` rule in the component — and the selected state, `g-active`
    (`routerLinkActive="g-active"`, `[class.g-active]`): a selected button keeps its appearance
@@ -58,7 +58,7 @@ card's closing row is a `<footer>` that takes both, never a `margin: 0 !importan
 (`appearance="floating"`, `--tui-shadow-medium`) blur into a grey wash between them. Where cards
 sit on `--tui-background-base-alt`, drop the shadow on cards,
 `[tuiCardLarge] { --tui-shadow-medium: none }`, and let a darker light `base-alt` carry the
-contrast (start-equity).
+contrast.
 
 **Space with margins, not a flex column.** A page is block flow. The element that needs room
 takes a margin (`header { margin-block-end: 1.25rem }`, `form { margin-block-start: 2rem }`).

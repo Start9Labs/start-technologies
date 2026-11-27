@@ -1130,4 +1130,11 @@ export default {
   1335: 'Dernière synchronisation',
   1336: "à l'instant",
   1337: 'Saisissez votre mot de passe principal pour continuer.',
+  1338: 'Processeur',
+  1339: 'Processeur graphique',
+  1340: 'Disque de stockage',
+  1341: 'Carte réseau',
+  1342: 'Chipset',
+  1343: 'Capteur',
+  1344: 'Aucun capteur de température trouvé',
 } satisfies i18n

@@ -1529,6 +1529,29 @@ export const Security: z.ZodObject<{ ssl: z.ZodBoolean }> =
   /* @__PURE__ */ object({ ssl: z.boolean() }).meta({
     id: 'Security',
   })
+export const SensorKind: z.ZodEnum<{
+  cpu: 'cpu'
+  gpu: 'gpu'
+  memory: 'memory'
+  storage: 'storage'
+  network: 'network'
+  chipset: 'chipset'
+  system: 'system'
+  other: 'other'
+}> = /* @__PURE__ */ z
+  .enum([
+    'cpu',
+    'gpu',
+    'memory',
+    'storage',
+    'network',
+    'chipset',
+    'system',
+    'other',
+  ])
+  .meta({
+    id: 'SensorKind',
+  })
 export const ServerBackupReport: z.ZodObject<{
   attempted: z.ZodBoolean
   error: z.ZodDefault<z.ZodNullable<z.ZodString>>
@@ -3635,13 +3658,6 @@ export const MetricsDisk: z.ZodObject<{
 }).meta({
   id: 'MetricsDisk',
 })
-export const MetricsGeneral: z.ZodObject<{
-  temperature: z.ZodDefault<z.ZodNullable<typeof Celsius>>
-}> = /* @__PURE__ */ object({
-  temperature: Celsius.nullable().default(() => null),
-}).meta({
-  id: 'MetricsGeneral',
-})
 export const MetricsMemory: z.ZodObject<{
   percentageUsed: typeof Percentage
   total: typeof MebiBytes
@@ -4775,6 +4791,43 @@ export const TaskTrigger: z.ZodObject<{
 }).meta({
   id: 'TaskTrigger',
 })
+
+/**
+ * One part's representative reading, with the limits it is judged against.
+ */
+export const TemperatureSensor: z.ZodObject<{
+  /**
+   * The lm-sensors chip name.
+   */
+  id: z.ZodString
+  kind: typeof SensorKind
+  temperature: typeof Celsius
+  /**
+   * Sustained readings at or above this are hot.
+   */
+  high: typeof Celsius
+  critical: typeof Celsius
+}> = /* @__PURE__ */ object({
+  /**
+   * The lm-sensors chip name.
+   */
+  id: z.string().meta({
+    description: 'The lm-sensors chip name.',
+  }),
+  kind: SensorKind,
+  temperature: Celsius,
+  /**
+   * Sustained readings at or above this are hot.
+   */
+  high: Celsius.meta({
+    description: 'Sustained readings at or above this are hot.',
+  }),
+  critical: Celsius,
+}).meta({
+  id: 'TemperatureSensor',
+  description:
+    "One part's representative reading, with the limits it is judged against.",
+})
 export const TestSmtpParams: z.ZodObject<{
   host: z.ZodString
   port: z.ZodInt
@@ -5381,18 +5434,12 @@ export const MetadataSrc: z.ZodUnion<
   .meta({
     id: 'MetadataSrc',
   })
-export const Metrics: z.ZodObject<{
-  general: typeof MetricsGeneral
-  memory: typeof MetricsMemory
-  cpu: typeof MetricsCpu
-  disk: typeof MetricsDisk
+export const MetricsGeneral: z.ZodObject<{
+  temperatures: z.ZodDefault<z.ZodArray<typeof TemperatureSensor>>
 }> = /* @__PURE__ */ object({
-  general: MetricsGeneral,
-  memory: MetricsMemory,
-  cpu: MetricsCpu,
-  disk: MetricsDisk,
+  temperatures: z.array(TemperatureSensor).default(() => []),
 }).meta({
-  id: 'Metrics',
+  id: 'MetricsGeneral',
 })
 export const MountParams: z.ZodObject<{
   location: z.ZodString
@@ -6651,25 +6698,18 @@ export const ImageConfig: z.ZodCodec<
 ).meta({
   id: 'ImageConfig',
 })
-export const MetricsFollowResponse: z.ZodObject<{
-  /**
-   * Present for ordinary replies; typed observations use same-ID events.
-   */
-  guid: z.ZodDefault<z.ZodNullable<typeof Guid>>
-  metrics: typeof Metrics
+export const Metrics: z.ZodObject<{
+  general: typeof MetricsGeneral
+  memory: typeof MetricsMemory
+  cpu: typeof MetricsCpu
+  disk: typeof MetricsDisk
 }> = /* @__PURE__ */ object({
-  /**
-   * Present for ordinary replies; typed observations use same-ID events.
-   */
-  guid: Guid.nullable()
-    .default(() => null)
-    .meta({
-      description:
-        'Present for ordinary replies; typed observations use same-ID events.',
-    }),
-  metrics: Metrics,
+  general: MetricsGeneral,
+  memory: MetricsMemory,
+  cpu: MetricsCpu,
+  disk: MetricsDisk,
 }).meta({
-  id: 'MetricsFollowResponse',
+  id: 'Metrics',
 })
 export const NetworkGatewayInfo: z.ZodObject<{
   id: typeof GatewayId
@@ -6989,6 +7029,26 @@ export const LegacyProxySslOptions: z.ZodIntersection<
   .meta({
     id: 'LegacyProxySslOptions',
   })
+export const MetricsFollowResponse: z.ZodObject<{
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: z.ZodDefault<z.ZodNullable<typeof Guid>>
+  metrics: typeof Metrics
+}> = /* @__PURE__ */ object({
+  /**
+   * Present for ordinary replies; typed observations use same-ID events.
+   */
+  guid: Guid.nullable()
+    .default(() => null)
+    .meta({
+      description:
+        'Present for ordinary replies; typed observations use same-ID events.',
+    }),
+  metrics: Metrics,
+}).meta({
+  id: 'MetricsFollowResponse',
+})
 export const PackageInfo: z.ZodObject<{
   authorized: z.ZodRecord<z.ZodString, z.ZodString>
   versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>

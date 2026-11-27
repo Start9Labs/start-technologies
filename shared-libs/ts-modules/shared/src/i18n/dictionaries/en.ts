@@ -1131,4 +1131,11 @@ export const ENGLISH: Record<string, number> = {
   'Last synced': 1335,
   'just now': 1336,
   'Enter your master password to continue.': 1337,
+  'Processor': 1338,
+  'Graphics': 1339, // as in, a graphics card
+  'Storage drive': 1340,
+  'Network adapter': 1341,
+  'Chipset': 1342,
+  'Sensor': 1343, // as in, a temperature sensor
+  'No temperature sensors found': 1344,
 }
