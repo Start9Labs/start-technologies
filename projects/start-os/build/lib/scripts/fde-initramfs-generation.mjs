@@ -24,7 +24,7 @@ import {
 /**
  * Assembles an unsigned candidate from stable admitted public sources.
  * The caller owns the read-only source namespace and consumes the archive before return.
- * Complete runtime/plugin/configuration/EARLY admission remains a signing obligation.
+ * Complete runtime/plugin/configuration admission remains a signing obligation.
  */
 export async function withAssembledInitramfs(parent, descriptor, consume) {
   if (!descriptor.length) throw Error('Missing boot descriptor')
@@ -101,6 +101,11 @@ manual_add_modules ${bootModules.join(' ')}
           ),
           FDE_CAPTURE_DIR: captures,
         },
+      )
+      await profile.admitEarlyArchive(
+        capturedStreams(captures).earlyCpio,
+        configuration,
+        version,
       )
     },
     consume,

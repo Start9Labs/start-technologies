@@ -11,11 +11,10 @@ const streamNames = {
 }
 
 export function capturedStreams(directory) {
+  const earlyCpio = join(directory, streamNames.early)
   return {
-    prefixes: [
-      join(directory, streamNames.early),
-      join(directory, streamNames.uncompressed),
-    ],
+    earlyCpio,
+    prefixes: [earlyCpio, join(directory, streamNames.uncompressed)],
     mainCpio: join(directory, streamNames.main),
   }
 }
@@ -65,10 +64,26 @@ export function requireNativeProducer(bytes) {
   )
 }
 
-export function filesystemTableCommands(bytes) {
+function producerContext(bytes) {
   requireNativeProducer(bytes)
   const source = bytes.toString()
-  const umask = source.match(/^umask [0-7]+$/m)[0]
+  return {
+    source,
+    umask: source.match(/^umask [0-7]+$/m)[0],
+    path: source.match(/^export PATH=.*$/m)[0],
+  }
+}
+
+export function configurationCommands(bytes) {
+  const { source, umask, path } = producerContext(bytes)
+  const configuration = source.match(
+    /^(\. \/usr\/share\/initramfs-tools\/scripts\/functions\n[\s\S]*?)\nif \[ -z "\$\{outfile\}" \]; then/m,
+  )[1]
+  return `${umask}\n${path}\n${configuration}`
+}
+
+export function filesystemTableCommands(bytes) {
+  const { source, umask } = producerContext(bytes)
   const tables = source.match(
     /^# fstab and mtab\n([\s\S]*?)\n# module-init-tools$/m,
   )[1]
@@ -82,7 +97,7 @@ export function filesystemTableCommands(bytes) {
  * CONFDIR and its additional hooks also belong to this private generation.
  * FDE_ADMIT_SOURCES admits original runtime/configuration sources and native hook-functions.
  * Helpers and firmware also need admission before execution.
- * FDE_PREPARE must audit/harden the tree and native early stream before success.
+ * FDE_PREPARE audits/hardens the tree; its owner admits the captured early stream.
  * FDE_CAPTURE_DIR holds the captured streams, outside the generated tree.
  * Captures establish byte provenance, not authorization to sign an image.
  */

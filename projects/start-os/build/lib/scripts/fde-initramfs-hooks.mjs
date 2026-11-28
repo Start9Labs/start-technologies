@@ -3,11 +3,14 @@ import {
   access,
   lstat,
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
   realpath,
+  rm,
   writeFile,
 } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import {
   basename,
   dirname,
@@ -17,7 +20,10 @@ import {
   resolve,
 } from 'node:path'
 
+import { admitInitramfsSources } from './fde-initramfs-control.mjs'
 import { admitNativeProviders } from './fde-initramfs-dependencies.mjs'
+import { configurationCommands } from './fde-initramfs-producer.mjs'
+import { requireSameFile } from './fde-initramfs-providers.mjs'
 import {
   replaceOnce,
   requireReviewedContext,
@@ -173,7 +179,7 @@ function reviewedHook(name, bytes) {
  * Unknown hooks reject; non-bootstrap storage, live-media and graphics hooks stay outside this profile.
  * Hooks execute in their admitted source namespace; ordering/firmware/archives remain native.
  * BusyBox/klibc command aliases are symlinks; regular providers retain their source paths.
- * Invoke returned provider admission and metadata queries in that same admitted source namespace.
+ * Invoke returned admissions and metadata queries in that same admitted source namespace.
  */
 export async function prepareNativeHooks(sourceRoot, targetDirectory) {
   const source = await realpath(
@@ -237,6 +243,42 @@ export async function prepareNativeHooks(sourceRoot, targetDirectory) {
   }
   return Object.freeze({
     providerAliases,
+    /** The caller retains the public configuration and kernel version used for production. */
+    async admitEarlyArchive(archive, configuration, version) {
+      await admitInitramfsSources('/', configuration)
+      const reference = await mkdtemp(join(tmpdir(), '.fde-early-'))
+      try {
+        const selected = join(reference, 'hooks')
+        await mkdir(selected, { mode: 0o700 })
+        for (const [name, text] of output)
+          if (microcodeConfigs[name])
+            await writeFile(join(selected, name), text, {
+              flag: 'wx',
+              mode: 0o700,
+            })
+        await mkdir(join(reference, 'root'), { mode: 0o700 })
+        const expected = join(reference, 'early.cpio')
+        await writeFile(expected, Buffer.alloc(0), { flag: 'wx', mode: 0o600 })
+        await runSource('/bin/sh', [
+          '-c',
+          `set -e
+CONFDIR="$2"
+${configurationCommands(await readFile('/usr/sbin/mkinitramfs'))}
+export CONFDIR MODULES
+export version="$3" verbose=n
+export DESTDIR="$1/root" TMPDIR="$1" __TMPEARLYCPIO="$1/early.cpio"
+run_scripts "$1/hooks"
+`,
+          'fde-native-early-archive',
+          reference,
+          configuration,
+          version,
+        ])
+        await requireSameFile(archive, expected)
+      } finally {
+        await rm(reference, { recursive: true, force: true })
+      }
+    },
     async admitProviders(root) {
       await admitNativeProviders(root, providerAliases)
     },
