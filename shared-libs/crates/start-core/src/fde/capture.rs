@@ -908,13 +908,7 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
             .prepare_generation(&rootfs, &store, &enrollment.manifest_key)
             .await
     }
-    .await;
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            return crate::util::future::finish_with_cleanup(Err(error), projected.discard().await);
-        }
-    };
+    .await?;
     let result = async {
         memory.check()?;
         let descriptor = super::boot::Descriptor::for_generation(

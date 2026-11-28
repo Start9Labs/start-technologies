@@ -666,7 +666,10 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
     db.close().await;
     drop(overlay);
     projected.discard_generation(prepared).await.unwrap();
-    assert!(!backing.exists());
+    assert_eq!(
+        tokio::fs::read(&backing).await.unwrap(),
+        b"captured-private-shadow"
+    );
     data_alias.unmount(false).await.unwrap();
     fixture.cleanup().await;
 }

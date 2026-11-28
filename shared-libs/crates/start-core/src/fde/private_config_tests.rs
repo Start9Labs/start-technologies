@@ -55,6 +55,11 @@ fn target<'a>(projected: &'a ProjectedConfig, path: &str) -> &'a Path {
     target
 }
 
+async fn backing_directory(data: &Path, target: &Path) -> PathBuf {
+    let (id, _) = resolve_backing(data, target).await.unwrap();
+    data.join(DIRECTORY).join(id.to_string())
+}
+
 #[tokio::test]
 async fn native_network_candidates_and_aliases_are_private_without_redacting_certificates() {
     let (_root, raw, data) = fixture().await;
@@ -613,7 +618,7 @@ async fn unsupported_private_symlink_rejects_before_staging_or_legacy_changes() 
 }
 
 #[tokio::test]
-async fn failed_staging_keeps_legacy_boot_files_and_reclaims_partial_private_candidate() {
+async fn failed_staging_keeps_legacy_boot_files_and_retains_private_candidate() {
     let (root, raw, _) = fixture().await;
     let data = root
         .path()
@@ -654,7 +659,11 @@ async fn failed_staging_keeps_legacy_boot_files_and_reclaims_partial_private_can
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert!(entries.is_empty());
+    assert_eq!(entries.len(), 1);
+    let backing = entries[0].path();
+    assert!(backing.is_dir());
+    assert_eq!(std::fs::metadata(&backing).unwrap().mode() & 0o777, 0o700);
+    assert!(std::fs::read_dir(backing).unwrap().next().is_none());
 }
 
 #[tokio::test]

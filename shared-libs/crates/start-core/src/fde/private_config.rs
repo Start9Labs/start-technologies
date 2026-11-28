@@ -29,11 +29,10 @@ use openssl::pkey::{PKeyRef, Private};
 use tokio::io::AsyncReadExt;
 use zeroize::Zeroizing;
 
-use crate::os_overlay::{PreparedGeneration, remove_unpublished_directory, sync_tree};
+use crate::os_overlay::{PreparedGeneration, sync_tree};
 use crate::prelude::*;
 use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
-use crate::util::future::finish_with_cleanup;
 use crate::util::io::{
     AtomicFile, confined_relative, create_directory_beneath, delete_file, open_file,
     write_secret_file,
@@ -110,10 +109,10 @@ async fn unmount_view(data: &Path, runtime: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// Private backings survive projection disposal and failed construction.
 pub(crate) struct ProjectedConfig {
     snapshot: Squashfs<DynFileSource>,
     replacements: BTreeMap<PathBuf, PathBuf>,
-    new_backing: Option<PathBuf>,
     private_backing_uses: Vec<Arc<FileLock>>,
 }
 
@@ -455,7 +454,6 @@ impl ProjectedConfig {
         let mut projected = Self {
             snapshot,
             replacements,
-            new_backing: None,
             private_backing_uses,
         };
         if aliases.is_empty() {
@@ -468,125 +466,93 @@ impl ProjectedConfig {
             .mode(0o700)
             .create(&backing)
             .await?;
-        projected.new_backing = Some(backing.clone());
-        let result = async {
-            projected
-                .private_backing_uses
-                .push(Arc::new(reserve_backing_id(data, &id).await?));
-            use std::os::unix::fs::PermissionsExt;
-            tokio::fs::set_permissions(
-                data.join(DIRECTORY),
-                std::fs::Permissions::from_mode(0o755),
-            )
+        projected
+            .private_backing_uses
+            .push(Arc::new(reserve_backing_id(data, &id).await?));
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(data.join(DIRECTORY), std::fs::Permissions::from_mode(0o755))
             .await?;
-            tokio::fs::set_permissions(&backing, std::fs::Permissions::from_mode(0o700)).await?;
-            for path in aliases.keys() {
-                match tokio::fs::symlink_metadata(backing.join(path)).await {
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-                    Err(error) => return Err(error.into()),
-                    Ok(_) => return Err(invalid_layout(path)),
-                }
+        tokio::fs::set_permissions(&backing, std::fs::Permissions::from_mode(0o700)).await?;
+        for path in aliases.keys() {
+            match tokio::fs::symlink_metadata(backing.join(path)).await {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => return Err(error.into()),
+                Ok(_) => return Err(invalid_layout(path)),
             }
-            let mut directories = BTreeSet::from([PathBuf::new()]);
-            for paths in aliases.values() {
-                for path in paths {
-                    let mut parent = path.parent();
-                    while let Some(path) = parent {
-                        directories.insert(path.to_owned());
-                        parent = path.parent();
-                    }
-                }
-            }
-            for path in &directories {
-                create_directory_beneath(&backing, path)?;
-            }
-            for (canonical, paths) in aliases {
-                let (_, node) = resolved(&projected.snapshot, &canonical)?;
-                let NodeContents::File(source) = &node.contents else {
-                    unreachable!()
-                };
-                let size: usize = source
-                    .size()
-                    .await?
-                    .try_into()
-                    .map_err(|_| invalid_layout(&canonical))?;
-                let mut secret = Zeroizing::new(vec![0; size]);
-                source.reader().await?.read_exact(&mut secret).await?;
-                let destination = backing.join(&canonical);
-                let temporary = backing.join(format!(".{}.tmp", Guid::new()));
-                let file = AtomicFile::new(&destination, Some(&temporary)).await?;
-                file.set_permissions(std::fs::Permissions::from_mode(0o600))
-                    .await?;
-                write_secret_file(&file, secret).await?;
-                apply_metadata(&file, &node.metadata).await?;
-                file.save().await?;
-                for path in paths {
-                    if path != canonical {
-                        tokio::fs::hard_link(&destination, backing.join(&path)).await?;
-                    }
-                    let target = Path::new(RUNTIME).join(id.to_string()).join(&path);
-                    projected
-                        .snapshot
-                        .contents_mut()
-                        .insert_path(&path, private_reference(target.clone()))?;
-                    projected.replacements.insert(path, target);
-                }
-            }
-            for path in directories
-                .iter()
-                .rev()
-                .filter(|path| !path.as_os_str().is_empty())
-            {
-                let (_, node) = resolved(&projected.snapshot, path)?;
-                apply_metadata(&open_file(backing.join(path)).await?, &node.metadata).await?;
-            }
-            // The configuration container's mode does not govern the runtime namespace.
-            let mut namespace = Metadata::new(0o755);
-            namespace.uid = nix::unistd::geteuid().as_raw();
-            namespace.gid = nix::unistd::getegid().as_raw();
-            apply_metadata(&open_file(&backing).await?, &namespace).await?;
-            sync_tree(&backing).await?;
-            open_file(data.join(DIRECTORY)).await?.sync_all().await?;
-            open_file(data).await?.sync_all().await?;
-            Ok(())
         }
-        .await;
-        match result {
-            Ok(()) => Ok(projected),
-            Err(error) => finish_with_cleanup(Err(error), projected.discard().await),
+        let mut directories = BTreeSet::from([PathBuf::new()]);
+        for paths in aliases.values() {
+            for path in paths {
+                let mut parent = path.parent();
+                while let Some(path) = parent {
+                    directories.insert(path.to_owned());
+                    parent = path.parent();
+                }
+            }
         }
+        for path in &directories {
+            create_directory_beneath(&backing, path)?;
+        }
+        for (canonical, paths) in aliases {
+            let (_, node) = resolved(&projected.snapshot, &canonical)?;
+            let NodeContents::File(source) = &node.contents else {
+                unreachable!()
+            };
+            let size: usize = source
+                .size()
+                .await?
+                .try_into()
+                .map_err(|_| invalid_layout(&canonical))?;
+            let mut secret = Zeroizing::new(vec![0; size]);
+            source.reader().await?.read_exact(&mut secret).await?;
+            let destination = backing.join(&canonical);
+            let temporary = backing.join(format!(".{}.tmp", Guid::new()));
+            let file = AtomicFile::new(&destination, Some(&temporary)).await?;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))
+                .await?;
+            write_secret_file(&file, secret).await?;
+            apply_metadata(&file, &node.metadata).await?;
+            file.save().await?;
+            for path in paths {
+                if path != canonical {
+                    tokio::fs::hard_link(&destination, backing.join(&path)).await?;
+                }
+                let target = Path::new(RUNTIME).join(id.to_string()).join(&path);
+                projected
+                    .snapshot
+                    .contents_mut()
+                    .insert_path(&path, private_reference(target.clone()))?;
+                projected.replacements.insert(path, target);
+            }
+        }
+        for path in directories
+            .iter()
+            .rev()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            let (_, node) = resolved(&projected.snapshot, path)?;
+            apply_metadata(&open_file(backing.join(path)).await?, &node.metadata).await?;
+        }
+        // The configuration container's mode does not govern the runtime namespace.
+        let mut namespace = Metadata::new(0o755);
+        namespace.uid = nix::unistd::geteuid().as_raw();
+        namespace.gid = nix::unistd::getegid().as_raw();
+        apply_metadata(&open_file(&backing).await?, &namespace).await?;
+        sync_tree(&backing).await?;
+        open_file(data.join(DIRECTORY)).await?.sync_all().await?;
+        open_file(data).await?.sync_all().await?;
+        Ok(projected)
     }
 
-    /// Retire all candidate references before disposal; reused backings remain untouched.
-    /// The caller excludes runtime-ancestor and independent VFS users through deletion.
-    /// The caller retains the data mount and image-store reservation through completion.
-    pub(crate) async fn discard(self) -> Result<(), Error> {
-        let Self {
-            snapshot,
-            replacements,
-            new_backing,
-            private_backing_uses,
-        } = self;
-        drop(snapshot);
-        drop(replacements);
-        drop(private_backing_uses);
-        if let Some(backing) = new_backing {
-            let retirement = reserve_backing(&backing, FileLockAccess::Exclusive).await?;
-            let result = remove_unpublished_directory(&backing).await;
-            drop(retirement);
-            result?;
-        }
-        Ok(())
-    }
-
-    /// Retires the unpublished generation before its newly projected private backing.
+    /// Retires generation staging while preserving private backings for independent users.
     /// The caller retains the data mount and image-store reservation through completion.
     pub(crate) async fn discard_generation(
         self,
         prepared: PreparedGeneration,
     ) -> Result<(), Error> {
-        prepared.discard().await?;
-        self.discard().await
+        let result = prepared.discard().await;
+        drop(self);
+        result
     }
 
     /// Fresh ciphertext remains available before the data drive unlocks.

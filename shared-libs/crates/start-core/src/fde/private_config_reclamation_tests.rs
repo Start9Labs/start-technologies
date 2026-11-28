@@ -24,16 +24,45 @@ pub(super) async fn prepare(projected: &ProjectedConfig, root: &Path) -> Prepare
 }
 
 #[tokio::test]
-async fn unpublished_generation_and_fresh_backing_retire_together() {
-    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::unpublished_generation_and_fresh_backing_retire_together").await { return; }
+async fn generation_disposal_preserves_fresh_backing_for_preexisting_ancestor_readers() {
+    use std::io::Read;
+
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::generation_disposal_preserves_fresh_backing_for_preexisting_ancestor_readers").await { return; }
     let (root, raw, data) = fixture().await;
+    let namespace = data.join(DIRECTORY);
+    tokio::fs::create_dir(&namespace).await.unwrap();
+    let ancestor = std::fs::File::open(&namespace).unwrap();
     let projected = project(&raw, &data, &[]).await;
-    let backing = projected.new_backing.clone().unwrap();
+    let backing = backing_directory(&data, target(&projected, "etc/shadow")).await;
+    let credential = backing_file(&data, target(&projected, "etc/shadow"))
+        .await
+        .unwrap();
+    let relative = credential.strip_prefix(&namespace).unwrap().to_owned();
     let prepared = prepare(&projected, root.path()).await;
     let staging = prepared.staging_path().to_owned();
     projected.discard_generation(prepared).await.unwrap();
     assert!(!staging.exists());
-    assert!(!backing.exists());
+    assert!(backing.is_dir());
+    drop(
+        reserve_backing(&backing, FileLockAccess::Exclusive)
+            .await
+            .unwrap(),
+    );
+    tokio::fs::write(&credential, b"live-after-disposal")
+        .await
+        .unwrap();
+    let fd = nix::fcntl::openat(
+        &ancestor,
+        relative.as_path(),
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .unwrap();
+    let mut contents = String::new();
+    std::fs::File::from(fd)
+        .read_to_string(&mut contents)
+        .unwrap();
+    assert_eq!(contents, "live-after-disposal");
     assert!(raw.join("etc/shadow").is_file());
     assert!(data.join(DIRECTORY).is_dir());
 }
@@ -57,8 +86,17 @@ async fn resumed_disposal_preserves_published_backings_and_unrelated_files() {
     let resumed = ProjectedConfig::stage(snapshot.clone(), &data, &[])
         .await
         .unwrap();
-    assert!(resumed.new_backing.is_none());
-    resumed.discard().await.unwrap();
+    assert!(
+        crate::util::io::same_file(
+            &backing_file(&data, target(&resumed, "etc/shadow"))
+                .await
+                .unwrap(),
+            &retained
+        )
+        .await
+        .unwrap()
+    );
+    drop(resumed);
     let mut snapshot = snapshot;
     snapshot
         .contents_mut()
@@ -71,9 +109,11 @@ async fn resumed_disposal_preserves_published_backings_and_unrelated_files() {
         )
         .unwrap();
     let resumed = ProjectedConfig::stage(snapshot, &data, &[]).await.unwrap();
-    let fresh = resumed.new_backing.clone().unwrap();
-    resumed.discard().await.unwrap();
-    assert!(!fresh.exists());
+    let fresh = backing_file(&data, target(&resumed, "etc/fresh-secret"))
+        .await
+        .unwrap();
+    drop(resumed);
+    assert_eq!(tokio::fs::read(fresh).await.unwrap(), b"fresh-secret");
     assert_eq!(tokio::fs::read(&retained).await.unwrap(), b"private-shadow");
     assert_eq!(tokio::fs::read(unrelated).await.unwrap(), b"keep");
     assert!(published.join(crate::os_overlay::OVERLAY_FILE).is_file());
@@ -121,8 +161,8 @@ impl FileSource for TruncatedSource {
 }
 
 #[tokio::test]
-async fn failed_private_projection_reclaims_its_partially_written_backing() {
-    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::failed_private_projection_reclaims_its_partially_written_backing").await { return; }
+async fn failed_private_projection_retains_its_partially_written_backing() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::failed_private_projection_retains_its_partially_written_backing").await { return; }
     let (_root, raw, data) = fixture().await;
     let initial = project(&raw, &data, &[]).await;
     let retained = backing_file(&data, target(&initial, "etc/shadow"))
@@ -147,12 +187,31 @@ async fn failed_private_projection_reclaims_its_partially_written_backing() {
     let result = ProjectedConfig::stage(snapshot, &data, &[]).await;
     assert!(result.is_err());
     assert_eq!(tokio::fs::read(&retained).await.unwrap(), b"private-shadow");
-    let mut directories = tokio::fs::read_dir(data.join(DIRECTORY)).await.unwrap();
+    let initial_backing = backing_directory(&data, target(&initial, "etc/shadow")).await;
+    let backings: Vec<_> = backing_ids(&data)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|id| data.join(DIRECTORY).join(id.to_string()))
+        .collect();
+    assert_eq!(backings.len(), 2);
+    let partial = backings
+        .iter()
+        .find(|path| **path != initial_backing)
+        .unwrap();
     assert_eq!(
-        directories.next_entry().await.unwrap().unwrap().path(),
-        initial.new_backing.clone().unwrap()
+        tokio::fs::read(partial.join("etc/a-secret")).await.unwrap(),
+        b"fresh-secret"
     );
-    assert!(directories.next_entry().await.unwrap().is_none());
+    assert_eq!(
+        tokio::fs::metadata(partial)
+            .await
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
 }
 
 #[tokio::test]
@@ -160,7 +219,7 @@ async fn requester_loss_keeps_the_existing_lease_through_candidate_disposal() {
     if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::requester_loss_keeps_the_existing_lease_through_candidate_disposal").await { return; }
     let (root, raw, data) = fixture().await;
     let projected = project(&raw, &data, &[]).await;
-    let backing = projected.new_backing.clone().unwrap();
+    let backing = backing_directory(&data, target(&projected, "etc/shadow")).await;
     let prepared = prepare(&projected, root.path()).await;
     let staging = prepared.staging_path().to_owned();
     let lock_path = root.path().join("images.lock");
@@ -189,7 +248,7 @@ async fn requester_loss_keeps_the_existing_lease_through_candidate_disposal() {
             .unwrap()
             .unwrap()
     );
-    assert!(!backing.exists());
+    assert!(backing.is_dir());
     assert!(!staging.exists());
     crate::util::FileLock::new(&lock_path, false).await.unwrap();
 }
