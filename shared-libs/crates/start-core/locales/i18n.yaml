@@ -6259,13 +6259,6 @@ help.arg.os-git-hash:
   fr_FR: "Commit Git ayant produit la version du système"
   pl_PL: "Commit Git użyty do zbudowania wydania systemu"
 
-help.arg.os-security:
-  en_US: "Mark the OS release as a security update"
-  de_DE: "Die OS-Version als Sicherheitsupdate markieren"
-  es_ES: "Marcar la versión del SO como actualización de seguridad"
-  fr_FR: "Marquer la version du système comme mise à jour de sécurité"
-  pl_PL: "Oznacz wydanie systemu jako aktualizację bezpieczeństwa"
-
 help.arg.os-version:
   en_US: "StartOS version number"
   de_DE: "StartOS-Versionsnummer"
@@ -9960,27 +9953,6 @@ tunnel.web.ui-port-reserved:
   es_ES: "Este rango incluye el puerto de la interfaz de administración habilitada; use nombres SNI para compartirlo, o desactive primero la interfaz o cambie su dirección."
   fr_FR: "Cette plage inclut le port de l'interface d'administration activée ; utilisez des noms SNI pour le partager, ou désactivez d'abord l'interface ou changez son adresse."
   pl_PL: "Ten zakres obejmuje port włączonego panelu administracyjnego; użyj nazw SNI, aby go współdzielić, albo najpierw wyłącz panel lub zmień jego adres."
-
-update.security.available-message:
-  en_US: "StartOS %{version} includes security updates and is available from %{registry}."
-  de_DE: "StartOS %{version} enthält Sicherheitsupdates und ist unter %{registry} verfügbar."
-  es_ES: "StartOS %{version} incluye actualizaciones de seguridad y está disponible en %{registry}."
-  fr_FR: "StartOS %{version} contient des mises à jour de sécurité et est disponible sur %{registry}."
-  pl_PL: "StartOS %{version} zawiera aktualizacje bezpieczeństwa i jest dostępny w %{registry}."
-
-update.security.available-title:
-  en_US: "StartOS security update available"
-  de_DE: "StartOS-Sicherheitsupdate verfügbar"
-  es_ES: "Actualización de seguridad de StartOS disponible"
-  fr_FR: "Mise à jour de sécurité de StartOS disponible"
-  pl_PL: "Dostępna aktualizacja bezpieczeństwa StartOS"
-
-update.security.selected-registry:
-  en_US: "your selected OS registry"
-  de_DE: "Ihrer ausgewählten OS-Registry"
-  es_ES: "el registro del SO seleccionado"
-  fr_FR: "le registre du système sélectionné"
-  pl_PL: "wybranym rejestrze systemu"
 
 trusted-keys.invalid:
   en_US: "Enter a name and at least one Ed25519 public key"

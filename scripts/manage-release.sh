@@ -427,10 +427,6 @@ resolve_os_commit() {
     COMMIT=$hash
 }
 
-release_security() {
-    (cd "$REPO_ROOT" && node scripts/changelog.mjs security "projects/$PROJECT" "$VERSION" ${1:+--ref "$1"})
-}
-
 check_registry_notes_cli() {
     local help
     help=$(start-cli registry os version add --help) || return
@@ -441,7 +437,7 @@ check_registry_notes_cli() {
 }
 
 refresh_registry_notes() {
-    local registry=$1 range payload notes hash security metadata_args=()
+    local registry=$1 range payload notes hash metadata_args=()
     payload=$(registry_notes) || return
     check_registry_notes_cli || return
     notes=$(jq -r '.releaseNotes' <<< "$payload")
@@ -453,9 +449,7 @@ refresh_registry_notes() {
     fi
     if [ "$KIND" = os ]; then
         hash=$(jq -r --arg v "$VERSION" '.versions[$v].gitHash // empty' <<< "$_INDEX_JSON")
-        security=$(release_security "${hash:-${NOTES_REF:-}}") || return
         if [ -n "$hash" ]; then metadata_args+=(--git-hash "$hash" --expected-git-hash "$hash"); fi
-        if [ "$security" = true ]; then metadata_args+=(--security); fi
     fi
     echo "Setting ${VERSION} release notes on ${registry}..."
     start-cli --registry="$registry" registry os version add \

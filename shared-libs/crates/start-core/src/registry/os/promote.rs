@@ -111,7 +111,6 @@ mod tests {
             release_notes: "Release notes".parse().unwrap(),
             source_version: ">=0.4.0".parse().unwrap(),
             git_hash: Some("0123456789abcdef".parse().unwrap()),
-            security: true,
             ..Default::default()
         };
         let version: Version = "0.4.0.5".parse().unwrap();
@@ -120,7 +119,6 @@ mod tests {
         assert_eq!(params.release_notes, info.release_notes);
         assert_eq!(params.source_version, info.source_version);
         assert_eq!(params.git_hash, info.git_hash);
-        assert!(params.security);
         assert!(params.signer.is_none());
     }
 }

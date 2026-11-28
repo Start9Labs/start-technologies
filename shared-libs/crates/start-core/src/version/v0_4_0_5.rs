@@ -209,7 +209,7 @@ mod tests {
                 migrated["public"]["serverInfo"]["latestMigrationRevision"],
                 json!(Current::default().migration_revision())
             );
-            assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
+            assert!(migrated["private"].get("osSecurityNotifications").is_none());
             assert_eq!(
                 migrated["public"]["serverInfo"]["postInitMigrationTodos"],
                 json!({

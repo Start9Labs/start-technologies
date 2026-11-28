@@ -48,9 +48,6 @@ pub struct OsVersionInfo {
     /// Commit that produced the OS image, if recorded at publication.
     #[serde(default)]
     pub git_hash: Option<GitHash>,
-    /// Whether the release includes security fixes.
-    #[serde(default)]
-    pub security: bool,
     pub authorized: BTreeSet<Guid>,
     pub iso: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>,
     pub squashfs: BTreeMap<InternedString, RegistryAsset<Blake3Commitment>>,
@@ -120,10 +117,8 @@ mod tests {
             });
             let info: OsVersionInfo = from_value(wire.clone()).unwrap();
             assert!(info.git_hash.is_none());
-            assert!(!info.security);
             let mut expected = wire.clone();
             expected["gitHash"] = Value::Null;
-            expected["security"] = false.into();
             assert_eq!(to_value(&info).unwrap(), expected);
             let promotion = AddVersionParams::from_info("0.4.0.5".parse().unwrap(), &info);
             assert_eq!(promotion.release_notes, info.release_notes);

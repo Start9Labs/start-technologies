@@ -4,7 +4,7 @@
 .SH NAME
 start\-cli\-registry\-os\-version\-edit \- Edit OS version metadata; omitted fields remain unchanged
 .SH SYNOPSIS
-\fBstart\-cli registry os version edit\fR [\fB\-\-release\-notes\fR] [\fB\-\-source\-version\fR] [\fB\-\-git\-hash\fR] [\fB\-\-expected\-git\-hash\fR] [\fB\-\-security\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIVERSION\fR>
+\fBstart\-cli registry os version edit\fR [\fB\-\-release\-notes\fR] [\fB\-\-source\-version\fR] [\fB\-\-git\-hash\fR] [\fB\-\-expected\-git\-hash\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIVERSION\fR>
 .SH DESCRIPTION
 Edit OS version metadata; omitted fields remain unchanged
 .SH OPTIONS
@@ -20,19 +20,6 @@ Git commit that built the OS release
 .TP
 \fB\-\-expected\-git\-hash\fR \fI<EXPECTED_GIT_HASH>\fR
 Reject the operation if the indexed OS commit has changed
-.TP
-\fB\-\-security\fR \fI<SECURITY>\fR
-Mark the OS release as a security update
-.br
-
-.br
-\fIPossible values:\fR
-.RS 14
-.IP \(bu 2
-true
-.IP \(bu 2
-false
-.RE
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

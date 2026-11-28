@@ -42,7 +42,6 @@ impl Database {
                 ssh_privkey: Pem(account.ssh_key.clone()),
                 available_ports: AvailablePorts::new(),
                 notifications: Notifications::new(),
-                os_security_notifications: BTreeMap::new(),
                 registry_cursors: BTreeMap::new(),
                 push: Default::default(),
                 cifs: CifsTargets::new(),

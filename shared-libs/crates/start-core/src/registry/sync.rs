@@ -1083,13 +1083,6 @@ fn publish_snapshot(
                 None,
                 Some(&device.os.platform),
             )?)?;
-            let name = db
-                .as_public()
-                .as_registry_cache()
-                .as_idx(url)
-                .map(|cache| cache.as_info().de().map(|info| info.name))
-                .transpose()?
-                .flatten();
             let previous = db
                 .as_public()
                 .as_os_update_cache()
@@ -1099,7 +1092,6 @@ fn publish_snapshot(
                 .unwrap_or_default();
             let vulnerabilities =
                 crate::registry::vulnerability::published(index.as_vulnerabilities())?;
-            crate::update::security::notify_updates(db, url, name, index.de()?)?;
             db.as_public_mut()
                 .as_os_update_cache_mut()
                 .ser(&Some(OsUpdateCache {

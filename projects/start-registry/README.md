@@ -66,11 +66,11 @@ Supplemental keys enter the asset's signature map, not the registry signer direc
 Administrators can update an existing release without re-publishing its images:
 
 ```bash
-start-registry os version edit 0.4.0.5 --security false
+start-registry os version edit 0.4.0.5 --source-version '>=0.4.0'
 start-cli registry os version edit 0.4.0.5 --release-notes '{"en_US":"Updated notes","pl_PL":"Zaktualizowane informacje"}'
 ```
 
-Optional flags are `--release-notes`, `--source-version`, `--git-hash`, and `--security true|false`. Omitted fields remain unchanged, including image assets and authorized signers. Release notes accept plain text or a locale map and replace the complete existing value. The version must already exist. Use `--expected-git-hash <commit>` to reject the edit if the indexed image commit has changed. Mirrors reject this command; edit the upstream registry instead.
+Optional flags are `--release-notes`, `--source-version` and `--git-hash`. Omitted fields remain unchanged, including image assets and authorized signers. Release notes accept plain text or a locale map and replace the complete existing value. The version must already exist. Use `--expected-git-hash <commit>` to reject the edit if the indexed image commit has changed. Mirrors reject this command; edit the upstream registry instead.
 
 ## Binary layout
 

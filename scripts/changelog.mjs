@@ -995,7 +995,7 @@ function sync() {
 }
 
 const USAGE =
-  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] | security PRODUCT VERSION [--ref REF] | candidates PRODUCT VERSION [--ref REF] [--since REF] | compose-notes PRODUCT VERSION --selection FILE [--ref REF] [--since REF] [--base FILE] | release-notes PRODUCT VERSION [--ref REF] [--notes FILE] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] [--notes FILE] | archives PRODUCT [--ref REF] | format-notes FILE | section VERSION | sync'
+  'usage: changelog.mjs projects | changed BASE | validate PRODUCT | version PRODUCT | check-version PRODUCT [VERSION] | render PRODUCT VERSION [--ref REF] | notes PRODUCT VERSION [--ref REF] | candidates PRODUCT VERSION [--ref REF] [--since REF] | compose-notes PRODUCT VERSION --selection FILE [--ref REF] [--since REF] [--base FILE] | release-notes PRODUCT VERSION [--ref REF] [--notes FILE] | registry-notes PRODUCT VERSION [--ref REF] [--changelog-ref REF] [--notes FILE] | archives PRODUCT [--ref REF] | format-notes FILE | section VERSION | sync'
 
 try {
   const { values, positionals } = parseArgs({
@@ -1019,7 +1019,6 @@ try {
     'check-version': [1, 2],
     render: [2],
     notes: [2],
-    security: [2],
     candidates: [2],
     'compose-notes': [2],
     'release-notes': [2],
@@ -1036,7 +1035,6 @@ try {
         ![
           'render',
           'notes',
-          'security',
           'candidates',
           'compose-notes',
           'release-notes',
@@ -1066,12 +1064,6 @@ try {
     process.stdout.write(render(productPath(args[0]), args[1], values.ref))
   else if (command === 'notes')
     process.stdout.write(renderNotes(productPath(args[0]), args[1], values.ref))
-  else if (command === 'security')
-    console.log(
-      releaseFragments(productPath(args[0]), args[1], values.ref).some(
-        fragment => fragment.kind === 'security',
-      ),
-    )
   else if (command === 'candidates')
     console.log(
       JSON.stringify(

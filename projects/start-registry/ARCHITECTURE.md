@@ -127,9 +127,9 @@ A public-mirror subscriber must resubscribe after receiving a private-access gra
 registry-management More menu offers refresh in every connection state, restarting that
 registry's grouped watches without changing signing-key trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
 
-StartOS derives security notifications from the selected source's OS metadata, filtering by source
-version, platform, and installed build. Delivery history remains keyed by registry URL, version, and
-build hash across reconnects and restarts.
+StartOS notifies about StartOS vulnerabilities in the selected source's OS index that a key trusted
+for StartOS updates signed and that affect the running version. `osUpdateCache.trustedVulnerabilities`
+records which it has announced.
 
 ## Mirroring (`registry/upstream.rs`)
 

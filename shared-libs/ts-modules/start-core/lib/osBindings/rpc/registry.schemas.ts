@@ -823,14 +823,12 @@ export const AddVersionParams: z.ZodObject<{
   sourceVersion: z.ZodString
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
   expectedGitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  security: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   gitHash: GitHash.nullable().default(() => null),
   expectedGitHash: GitHash.nullable().default(() => null),
-  security: z.boolean().default(() => false),
 }).meta({
   id: 'AddVersionParams',
 })
@@ -942,7 +940,6 @@ export const EditVersionParams: z.ZodObject<{
   sourceVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
   expectedGitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  security: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   releaseNotes: LocaleString.nullable().default(() => null),
@@ -952,10 +949,6 @@ export const EditVersionParams: z.ZodObject<{
     .default(() => null),
   gitHash: GitHash.nullable().default(() => null),
   expectedGitHash: GitHash.nullable().default(() => null),
-  security: z
-    .boolean()
-    .nullable()
-    .default(() => null),
 }).meta({
   id: 'EditVersionParams',
   description:
@@ -1042,10 +1035,6 @@ export const OsVersionInfo: z.ZodObject<{
    * Commit that produced the OS image, if recorded at publication.
    */
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  /**
-   * Whether the release includes security fixes.
-   */
-  security: z.ZodDefault<z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -1070,15 +1059,6 @@ export const OsVersionInfo: z.ZodObject<{
     .meta({
       description:
         'Commit that produced the OS image, if recorded at publication.',
-    }),
-  /**
-   * Whether the release includes security fixes.
-   */
-  security: z
-    .boolean()
-    .default(() => false)
-    .meta({
-      description: 'Whether the release includes security fixes.',
     }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),

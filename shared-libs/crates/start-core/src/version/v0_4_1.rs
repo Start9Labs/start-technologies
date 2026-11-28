@@ -494,7 +494,7 @@ mod tests {
         db.put(&ROOT, &fixture).await.unwrap();
         Current::default().pre_init(&db).await.unwrap();
         let migrated = db.dump(&ROOT).await.value;
-        assert_eq!(migrated["private"]["osSecurityNotifications"], json!({}));
+        assert!(migrated["private"].get("osSecurityNotifications").is_none());
         assert_eq!(migrated["private"]["sessions"], saved_sessions);
         let migrated_trust: TrustedKeys =
             from_value(migrated["public"]["serverInfo"]["trustedKeys"].clone()).unwrap();
