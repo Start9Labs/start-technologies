@@ -443,6 +443,7 @@ pub async fn remove_package(
                             ErrorKind::InvalidRequest,
                         ));
                     }
+                    crate::registry::vulnerability::authorize_package_deletion(db, &signer, &id)?;
                     db.as_index_mut()
                         .as_package_mut()
                         .as_packages_mut()

@@ -115,7 +115,7 @@ impl Model<FullIndex> {
         })
     }
 
-    /// Resolves every `LocaleString` with `LocaleString::localize_for` and its owner's default.
+    /// Localizes registry and release metadata while preserving signed vulnerability text.
     pub fn localize_for(&mut self, locale: Option<&str>) -> Result<(), Error> {
         let default = self.as_default_locale().de()?;
         self.for_each_unpackaged_locale_string(&mut |s| {
@@ -129,7 +129,7 @@ impl Model<FullIndex> {
         Ok(())
     }
 
-    /// Visits every `LocaleString` outside `PackageIndex.packages`.
+    /// Visits the registry description, categories and OS release notes.
     pub(crate) fn for_each_unpackaged_locale_string(
         &mut self,
         f: &mut impl FnMut(&mut LocaleString),
