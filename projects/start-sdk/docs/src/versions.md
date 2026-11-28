@@ -185,6 +185,8 @@ Keep a declared historical node when a migration path needs its data conversion,
 
 The manifest's `canMigrateFrom` / `canMigrateTo` fields are **computed from the graph** — a reverse/forward search from `current`, which `setupManifest` serializes into the manifest at pack time. They include versions reachable through multiple edges, including explicit cross-flavor connections. With `other: []`, an allowed `up` already accepts every lower version of the same flavor through the range vertex above. Add historical nodes to preserve the steps and connections a path needs, rather than to enumerate releases.
 
+A registry publishes each version's `canMigrateFrom` as its source range, but that range does not decide a flavor switch: StartOS decides at install from both manifests ([below](#how-startos-runs-a-migration-path)), so a version whose range omits another flavor is still reachable when that flavor's `canMigrateTo` covers it.
+
 ### Upstream Update
 
 When the upstream project releases a new version:
