@@ -100,7 +100,6 @@ export namespace Mock {
   export const RegistryOSUpdate: T.OsVersionInfoMap = {
     [`${version}.2`]: {
       gitHash: null,
-      security: false,
       releaseNotes:
         '## Highlights\n\n- Backups resume where they left off after an interruption.\n- The Updates tab shows release notes in place.\n\n## Fixes\n\n- Services no longer restart twice after a reboot.',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.17:0',
@@ -191,7 +190,6 @@ export namespace Mock {
     },
     [`${version}.1`]: {
       gitHash: null,
-      security: false,
       releaseNotes:
         '## Fixes\n\n- Restored network profiles after upgrading from 0.3.5.1.\n- Long service names no longer overflow the sidebar.',
       sourceVersion: '*',
@@ -202,7 +200,6 @@ export namespace Mock {
     },
     '0.4.1-alpha.5': {
       gitHash: null,
-      security: false,
       releaseNotes: 'Some more release notes',
       sourceVersion: '>=0.3.5:0 <=0.4.0-alpha.5:0',
       authorized: ['G24CSA5HNYEPIXJNMK7ZM4KD5SX5N6X4'],

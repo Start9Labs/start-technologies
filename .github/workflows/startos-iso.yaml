@@ -121,7 +121,6 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           CHANGELOG_REF="$COMMIT" ./scripts/manage-release.sh registry-notes start-os > "$RUNNER_TEMP/release-notes.json"
-          node scripts/changelog.mjs security projects/start-os "$VERSION" --ref "$COMMIT" > "$RUNNER_TEMP/release-security"
 
       - name: Install start-cli
         uses: Start9Labs/start-technologies/.github/actions/install-start-cli@master
@@ -154,10 +153,8 @@ jobs:
             start-cli --registry="$REGISTRY" registry os version remove "$VERSION"
           fi
           NOTES=$(jq -r '.releaseNotes' "$RUNNER_TEMP/release-notes.json")
-          SECURITY_ARGS=()
-          if [ "$(cat "$RUNNER_TEMP/release-security")" = true ]; then SECURITY_ARGS+=(--security); fi
           start-cli --registry="$REGISTRY" registry os version add \
-            --git-hash "$COMMIT" "${SECURITY_ARGS[@]}" \
+            --git-hash "$COMMIT" \
             "$VERSION" "$NOTES" ">=0.3.5 <=${VERSION}"
 
       - name: Hand off to the image deploys

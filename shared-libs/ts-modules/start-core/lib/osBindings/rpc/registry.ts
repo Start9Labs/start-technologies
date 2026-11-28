@@ -200,6 +200,9 @@ export type RemoveCategoryParamsInput = z.input<
  * JSON Patch 'remove' operation representation
  */
 export type RemoveOperation = z.output<typeof schemas.RemoveOperation>
+export type RemoveOsVulnerabilityParamsInput = z.input<
+  typeof schemas.RemoveOsVulnerabilityParams
+>
 export type RemoveVersionParamsInput = z.input<
   typeof schemas.RemoveVersionParams
 >
@@ -298,6 +301,9 @@ export type RemovePackageParamsInput = z.input<
 export type RemovePackageSignerParamsInput = z.input<
   typeof schemas.RemovePackageSignerParams
 >
+export type RemovePackageVulnerabilityParamsInput = z.input<
+  typeof schemas.RemovePackageVulnerabilityParams
+>
 export type RemoveReaderParamsInput = z.input<typeof schemas.RemoveReaderParams>
 export type RemoveSignerParamsInput = z.input<typeof schemas.RemoveSignerParams>
 export type SetDescriptionParamsInput = z.input<
@@ -317,6 +323,22 @@ export type SubscribeRes = z.output<typeof schemas.SubscribeRes>
 export type VersionSignerParamsInput = z.input<
   typeof schemas.VersionSignerParams
 >
+
+/**
+ * A security vulnerability in a range of versions.
+ */
+export type Vulnerability = z.output<typeof schemas.Vulnerability>
+
+/**
+ * A security vulnerability in a range of versions.
+ */
+export type VulnerabilityInput = z.input<typeof schemas.Vulnerability>
+export type AddOsVulnerabilityParamsInput = z.input<
+  typeof schemas.AddOsVulnerabilityParams
+>
+export type AddPackageVulnerabilityParamsInput = z.input<
+  typeof schemas.AddPackageVulnerabilityParams
+>
 export type DependencyMetadata = z.output<typeof schemas.DependencyMetadata>
 export type DumpParamsInput = z.input<typeof schemas.DumpParams>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
@@ -327,6 +349,11 @@ export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
  */
 export type Patch = z.output<typeof schemas.Patch>
 export type RegistryInfo = z.output<typeof schemas.RegistryInfo>
+
+/**
+ * A `Vulnerability` as a registry publishes it.
+ */
+export type SignedVulnerability = z.output<typeof schemas.SignedVulnerability>
 
 /**
  * Database-generated patches contain only add, remove and replace operations.

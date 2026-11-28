@@ -71,7 +71,6 @@ try {
     state.versions[version] = {
       ...(state.versions[version] ?? { iso: {}, img: {}, squashfs: {} }),
       gitHash: hash === -1 ? null : args[hash + 1],
-      security: args.includes('--security'),
     }
     save()
   } else if (command === 'registry os asset add') {
@@ -203,7 +202,6 @@ for (const [name, registered, wiped] of [
       'runner/release-notes.json',
       JSON.stringify({ releaseNotes: 'Notes.' }),
     )
-    f.write('runner/release-security', 'false\n')
     const result = f.run(register, { RUNNER_TEMP: join(f.root, 'runner') })
     assert.equal(result.status, 0, result.stderr)
     const removed = f
@@ -222,7 +220,6 @@ test('deploy-prepare: an absent version is registered without a removal', t => {
     'runner/release-notes.json',
     JSON.stringify({ releaseNotes: 'Notes.' }),
   )
-  f.write('runner/release-security', 'true\n')
   const result = f.run(register, { RUNNER_TEMP: join(f.root, 'runner') })
   assert.equal(result.status, 0, result.stderr)
   assert.deepEqual(
@@ -230,7 +227,6 @@ test('deploy-prepare: an absent version is registered without a removal', t => {
     ['registry os index', 'registry os version add'],
   )
   assert.deepEqual(f.registry().versions[VERSION].gitHash, SHA)
-  assert.equal(f.registry().versions[VERSION].security, true)
 })
 
 test('deploy-prepare: an unreadable index stops before any write', t => {
@@ -239,7 +235,6 @@ test('deploy-prepare: an unreadable index stops before any write', t => {
     'runner/release-notes.json',
     JSON.stringify({ releaseNotes: 'Notes.' }),
   )
-  f.write('runner/release-security', 'false\n')
   const result = f.run(register, {
     RUNNER_TEMP: join(f.root, 'runner'),
     INDEX_FAILS: '1',

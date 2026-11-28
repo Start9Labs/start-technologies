@@ -1,11 +1,11 @@
 import { CommonModule } from '@angular/common'
 import { Component, computed, inject } from '@angular/core'
-import { toSignal } from '@angular/core/rxjs-interop'
+import { toObservable, toSignal } from '@angular/core/rxjs-interop'
 import { ActivatedRoute } from '@angular/router'
 import { isEmptyObject } from '@start9labs/shared'
 import { T } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
-import { map, of } from 'rxjs'
+import { map, of, switchMap } from 'rxjs'
 import { ConnectionService } from 'src/app/services/connection.service'
 import { DepErrorService } from 'src/app/services/dep-error.service'
 import {
@@ -21,6 +21,9 @@ import { ServiceHealthChecksComponent } from '../components/health-checks.compon
 import { ServiceInstallProgressComponent } from '../components/progress.component'
 import { ServiceStatusComponent } from '../components/status.component'
 import { ServiceUptimeComponent } from '../components/uptime.component'
+import { ServiceVulnerabilitiesComponent } from '../components/vulnerabilities.component'
+import { MarketplaceService } from 'src/app/services/marketplace.service'
+import { getManifest } from 'src/app/utils/get-package-data'
 
 @Component({
   template: `
@@ -35,6 +38,15 @@ import { ServiceUptimeComponent } from '../components/uptime.component'
             <service-controls [pkg]="pkg" [status]="status()" />
           }
         </service-status>
+
+        @let found = vulnerabilities();
+        @if (found.length) {
+          <service-vulnerabilities
+            [pkg]="pkg"
+            [connected]="!!connected()"
+            [vulnerabilities]="found"
+          />
+        }
 
         @if (status() !== 'backing-up') {
           <service-health-checks [checks]="health()" />
@@ -96,6 +108,7 @@ import { ServiceUptimeComponent } from '../components/uptime.component'
     ServiceErrorComponent,
     ServiceTasksComponent,
     ServiceUptimeComponent,
+    ServiceVulnerabilitiesComponent,
   ],
 })
 export class ServiceRoute {
@@ -116,6 +129,22 @@ export class ServiceRoute {
   )
 
   protected readonly pkg = computed(() => this.services()[this.id() || ''])
+
+  private readonly marketplace = inject(MarketplaceService)
+
+  protected readonly vulnerabilities = toSignal(
+    toObservable(this.pkg).pipe(
+      switchMap(pkg =>
+        pkg?.stateInfo.state === 'installed'
+          ? this.marketplace.packageVulnerabilities$(
+              getManifest(pkg).id,
+              getManifest(pkg).version,
+            )
+          : of([]),
+      ),
+    ),
+    { initialValue: [] },
+  )
 
   protected readonly health = computed((pkg = this.pkg()) =>
     pkg ? toHealthCheck(pkg.statusInfo) : [],

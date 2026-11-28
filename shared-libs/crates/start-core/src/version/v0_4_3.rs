@@ -38,7 +38,7 @@ impl VersionT for Version {
         V0_4_3.clone()
     }
     fn migration_revision(self) -> usize {
-        4
+        5
     }
     fn compat(self) -> &'static VersionRange {
         &V0_3_0_COMPAT
@@ -56,6 +56,9 @@ impl VersionT for Version {
             }
         });
         suffix_duplicate_shared_volume_names(db);
+        if let Some(private) = db.get_mut("private").and_then(Value::as_object_mut) {
+            private.remove("osSecurityNotifications");
+        }
         Ok(Value::Null)
     }
     async fn post_up(self, _ctx: &RpcContext, _input: Value) -> Result<(), Error> {
@@ -292,6 +295,18 @@ mod tests {
             automatic_wireguard_mtu_uuid(&profile("802-3-ethernet", None)).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn retired_security_update_records_are_dropped_idempotently() {
+        let mut db = json!({
+            "private": { "osSecurityNotifications": { "https://registry.test/": {} } }
+        });
+        Version.up(&mut db, ()).unwrap();
+        assert!(db["private"].get("osSecurityNotifications").is_none());
+        let migrated = db.clone();
+        Version.up(&mut db, ()).unwrap();
+        assert_eq!(db, migrated);
     }
 
     #[test]

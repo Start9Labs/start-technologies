@@ -119,7 +119,6 @@ else if (args.includes('promote')) {
   if (flag('--expected-git-hash') !== item.gitHash) throw new Error('metadata hash mismatch')
   item.gitHash = flag('--git-hash')
   item.releaseNotes = JSON.parse(args.at(-2))
-  item.security = args.includes('--security')
   write(channel, value)
 } else throw new Error('unexpected start-cli args: ' + args.join(' '))
 `,
@@ -236,7 +235,6 @@ test('prerelease adopts the indexed image commit and allocates another RC after 
   assert.equal(published.title, `StartOS v${VERSION}-rc.1`)
   assert.ok(published.body.includes('Security correction.'))
   assert.equal(data('alpha.json').versions[VERSION].gitHash, imageCommit)
-  assert.equal(data('alpha.json').versions[VERSION].security, true)
   delete env.FAIL_PROMOTE
   release()
   assert.equal(
@@ -244,7 +242,6 @@ test('prerelease adopts the indexed image commit and allocates another RC after 
     `${PREFIX}-rc.1\n${PREFIX}-rc.2`,
   )
   assert.equal(data('beta.json').versions[VERSION].gitHash, imageCommit)
-  assert.equal(data('beta.json').versions[VERSION].security, true)
   const notes = data('beta.json').versions[VERSION].releaseNotes
   assert.ok(notes.en_US.includes('Visible correction.'))
   assert.ok(notes.pl_PL.includes('Translated pl_PL.'))

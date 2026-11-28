@@ -205,7 +205,6 @@ async fn os_asset_ingestion_defaults_old_requests_and_verifies_signatures_atomic
             source_version: ">=0.4.0".parse().unwrap(),
             git_hash: None,
             expected_git_hash: None,
-            security: false,
             signer: None,
         },
     )
@@ -332,7 +331,6 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
             source_version: ">=0.4.0".parse().unwrap(),
             git_hash: Some("old-build".parse().unwrap()),
             expected_git_hash: None,
-            security: true,
             signer: Some(uploader_key),
         },
     )
@@ -364,8 +362,6 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
         imbl_value::json!({}),
         imbl_value::json!({ "releaseNotes": { "en_US": "Revised", "pl_PL": "Informacje" } }),
         imbl_value::json!({ "sourceVersion": ">=0.4.0.1:0" }),
-        imbl_value::json!({ "security": false }),
-        imbl_value::json!({ "security": true }),
         imbl_value::json!({ "gitHash": "new-build" }),
     ] {
         let mut request = changes.clone();
@@ -389,7 +385,6 @@ async fn os_version_edits_preserve_omitted_metadata_assets_and_signers() {
             "version": target,
             "expectedGitHash": hash,
             "releaseNotes": "Must not persist",
-            "security": false,
         }))
         .unwrap();
         let err = edit_version(ctx.clone(), request).await.unwrap_err();

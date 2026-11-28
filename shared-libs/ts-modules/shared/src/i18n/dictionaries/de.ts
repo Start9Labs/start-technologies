@@ -1113,4 +1113,10 @@ export default {
   1319: 'Chipsatz',
   1320: 'Sensor',
   1321: 'Keine Temperatursensoren gefunden',
+  1322: 'Schwachstellen',
+  1323: 'Angreifbar, wenn',
+  1324: 'Auswirkung',
+  1325: 'Es wird empfohlen, diesen Dienst anzuhalten, bis er auf eine korrigierte Version aktualisiert ist.',
+  1326: 'Diese StartOS-Version hat eine bekannte Schwachstelle',
+  1327: 'Diese Version hat eine bekannte Schwachstelle',
 } satisfies i18n

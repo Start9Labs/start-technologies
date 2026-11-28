@@ -1474,6 +1474,11 @@ export const RemoveDomainParams: z.ZodObject<{ fqdn: z.ZodString }> =
   /* @__PURE__ */ object({ fqdn: z.string() }).meta({
     id: 'RemoveDomainParams',
   })
+export const RemoveOsVulnerabilityParams: z.ZodObject<{
+  vulnerabilityId: z.ZodString
+}> = /* @__PURE__ */ object({ vulnerabilityId: z.string() }).meta({
+  id: 'RemoveOsVulnerabilityParams',
+})
 export const RemoveTokensParams: z.ZodObject<{
   tokens: z.ZodArray<z.ZodString>
 }> = /* @__PURE__ */ object({ tokens: z.array(z.string()) }).meta({
@@ -2538,14 +2543,12 @@ export const AddVersionParams: z.ZodObject<{
   sourceVersion: z.ZodString
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
   expectedGitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  security: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   gitHash: GitHash.nullable().default(() => null),
   expectedGitHash: GitHash.nullable().default(() => null),
-  security: z.boolean().default(() => false),
 }).meta({
   id: 'AddVersionParams',
 })
@@ -2998,7 +3001,6 @@ export const EditVersionParams: z.ZodObject<{
   sourceVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
   expectedGitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  security: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   releaseNotes: LocaleString.nullable().default(() => null),
@@ -3008,10 +3010,6 @@ export const EditVersionParams: z.ZodObject<{
     .default(() => null),
   gitHash: GitHash.nullable().default(() => null),
   expectedGitHash: GitHash.nullable().default(() => null),
-  security: z
-    .boolean()
-    .nullable()
-    .default(() => null),
 }).meta({
   id: 'EditVersionParams',
   description:
@@ -3848,10 +3846,6 @@ export const OsVersionInfo: z.ZodObject<{
    * Commit that produced the OS image, if recorded at publication.
    */
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  /**
-   * Whether the release includes security fixes.
-   */
-  security: z.ZodDefault<z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -3876,15 +3870,6 @@ export const OsVersionInfo: z.ZodObject<{
     .meta({
       description:
         'Commit that produced the OS image, if recorded at publication.',
-    }),
-  /**
-   * Whether the release includes security fixes.
-   */
-  security: z
-    .boolean()
-    .default(() => false)
-    .meta({
-      description: 'Whether the release includes security fixes.',
     }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
@@ -3953,7 +3938,7 @@ export const PackageInfoShort: z.ZodObject<{
 })
 
 /**
- * A package's releases this server can run, by version; release data stays in the saved index.
+ * Runnable releases and trusted advisories; advisories survive an empty release selection.
  */
 export const PackageSelection: z.ZodObject<{
   /**
@@ -3973,6 +3958,10 @@ export const PackageSelection: z.ZodObject<{
    * server can install.
    */
   updateTarget: z.ZodOptional<z.ZodNullable<typeof Version>>
+  /**
+   * Published vulnerabilities, in the saved index, that a key trusted for packages signed.
+   */
+  vulnerabilities: z.ZodOptional<z.ZodArray<z.ZodString>>
 }> = /* @__PURE__ */ object({
   /**
    * The newest release of each flavor, preferring releases this StartOS can install.
@@ -4003,10 +3992,17 @@ export const PackageSelection: z.ZodObject<{
     description:
       'Newest release of the installed flavor that the installed version can migrate to and this\nserver can install.',
   }),
+  /**
+   * Published vulnerabilities, in the saved index, that a key trusted for packages signed.
+   */
+  vulnerabilities: z.array(z.string()).optional().meta({
+    description:
+      'Published vulnerabilities, in the saved index, that a key trusted for packages signed.',
+  }),
 }).meta({
   id: 'PackageSelection',
   description:
-    "A package's releases this server can run, by version; release data stays in the saved index.",
+    'Runnable releases and trusted advisories; advisories survive an empty release selection.',
 })
 export const PassthroughInfo: z.ZodObject<{
   hostname: z.ZodString
@@ -4314,6 +4310,15 @@ export const RemovePackageSignerParams: z.ZodObject<{
   signer: typeof Guid
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'RemovePackageSignerParams',
+})
+export const RemovePackageVulnerabilityParams: z.ZodObject<{
+  id: typeof PackageId
+  vulnerabilityId: z.ZodString
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  vulnerabilityId: z.string(),
+}).meta({
+  id: 'RemovePackageVulnerabilityParams',
 })
 export const RemoveReaderParams: z.ZodObject<{ id: typeof Guid }> =
   /* @__PURE__ */ object({ id: Guid }).meta({
@@ -4965,6 +4970,109 @@ export const VolumeBackupReport: z.ZodIntersection<
   .meta({
     id: 'VolumeBackupReport',
   })
+
+/**
+ * A security vulnerability in a range of versions.
+ */
+export const Vulnerability: z.ZodObject<{
+  /**
+   * Versions the vulnerability affects.
+   */
+  affected: z.ZodString
+  /**
+   * When the affected versions are exploitable.
+   */
+  circumstances: typeof LocaleString
+  /**
+   * Damage a successful exploit can do.
+   */
+  impact: typeof LocaleString
+  /**
+   * Whether to stop the service until it leaves the affected range.
+   */
+  stopRecommended: z.ZodDefault<z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  /**
+   * Versions the vulnerability affects.
+   */
+  affected: z.string().meta({
+    description: 'Versions the vulnerability affects.',
+  }),
+  /**
+   * When the affected versions are exploitable.
+   */
+  circumstances: LocaleString.meta({
+    description: 'When the affected versions are exploitable.',
+  }),
+  /**
+   * Damage a successful exploit can do.
+   */
+  impact: LocaleString.meta({
+    description: 'Damage a successful exploit can do.',
+  }),
+  /**
+   * Whether to stop the service until it leaves the affected range.
+   */
+  stopRecommended: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Whether to stop the service until it leaves the affected range.',
+    }),
+}).meta({
+  id: 'Vulnerability',
+  description: 'A security vulnerability in a range of versions.',
+})
+
+/**
+ * A newly trusted vulnerability affecting an installed package or this StartOS.
+ */
+export const VulnerabilityFound: z.ZodIntersection<
+  z.ZodObject<{
+    kind: z.ZodCodec<
+      z.ZodOptional<z.ZodLiteral<'vulnerability-found'>>,
+      z.ZodLiteral<'vulnerability-found'>
+    >
+  }>,
+  z.ZodObject<{
+    registry: z.ZodString
+    /**
+     * The affected package; absent for StartOS.
+     */
+    packageId: z.ZodDefault<z.ZodNullable<typeof PackageId>>
+    version: typeof Version
+    vulnerabilityId: z.ZodString
+    stopRecommended: z.ZodBoolean
+  }>
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      kind: wire(
+        z.literal('vulnerability-found').optional(),
+        z.literal('vulnerability-found'),
+      ),
+    }),
+    object({
+      registry: z.string(),
+      /**
+       * The affected package; absent for StartOS.
+       */
+      packageId: PackageId.nullable()
+        .default(() => null)
+        .meta({
+          description: 'The affected package; absent for StartOS.',
+        }),
+      version: Version,
+      vulnerabilityId: z.string(),
+      stopRecommended: z.boolean(),
+    }),
+  )
+  .meta({
+    id: 'VulnerabilityFound',
+    description:
+      'A newly trusted vulnerability affecting an installed package or this StartOS.',
+  })
 export const WifiInfo: z.ZodObject<{
   enabled: z.ZodBoolean
   interface: z.ZodDefault<z.ZodNullable<typeof GatewayId>>
@@ -5078,6 +5186,30 @@ export const ActionResultV1: z.ZodObject<{
     }),
 }).meta({
   id: 'ActionResultV1',
+})
+export const AddOsVulnerabilityParams: z.ZodObject<{
+  vulnerabilityId: z.ZodString
+  vulnerability: typeof Vulnerability
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  vulnerabilityId: z.string(),
+  vulnerability: Vulnerability,
+  signature: AnySignature,
+}).meta({
+  id: 'AddOsVulnerabilityParams',
+})
+export const AddPackageVulnerabilityParams: z.ZodObject<{
+  id: typeof PackageId
+  vulnerabilityId: z.ZodString
+  vulnerability: typeof Vulnerability
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  vulnerabilityId: z.string(),
+  vulnerability: Vulnerability,
+  signature: AnySignature,
+}).meta({
+  id: 'AddPackageVulnerabilityParams',
 })
 export const AddPublicDomainRes: z.ZodObject<{
   dns: typeof QueryDnsRes
@@ -5592,51 +5724,6 @@ export const NutConfig: z.ZodObject<{
   id: 'NutConfig',
   description: 'Stored NUT configuration and its independent enabled state.',
 })
-
-/**
- * Compatible releases from the selected StartOS update source.
- */
-export const OsUpdateCache: z.ZodObject<{
-  registry: z.ZodString
-  versions: z.ZodRecord<z.ZodString, typeof OsVersionInfo>
-  /**
-   * Tracks the source registry's cached `RegistryInfo::default_locale`.
-   */
-  defaultLocale: z.ZodDefault<z.ZodNullable<z.ZodString>>
-  status: z.ZodCodec<
-    z.ZodOptional<typeof RegistryStatus>,
-    typeof RegistryStatus
-  >
-  /**
-   * Failure of the latest synchronization attempt; absent while connecting or connected.
-   */
-  error: z.ZodOptional<z.ZodNullable<z.ZodString>>
-}> = /* @__PURE__ */ object({
-  registry: z.string(),
-  versions: z.record(z.string(), OsVersionInfo),
-  /**
-   * Tracks the source registry's cached `RegistryInfo::default_locale`.
-   */
-  defaultLocale: z
-    .string()
-    .nullable()
-    .default(() => null)
-    .meta({
-      description:
-        "Tracks the source registry's cached `RegistryInfo::default_locale`.",
-    }),
-  status: wire(RegistryStatus.optional(), RegistryStatus),
-  /**
-   * Failure of the latest synchronization attempt; absent while connecting or connected.
-   */
-  error: z.string().nullable().optional().meta({
-    description:
-      'Failure of the latest synchronization attempt; absent while connecting or connected.',
-  }),
-}).meta({
-  id: 'OsUpdateCache',
-  description: 'Compatible releases from the selected StartOS update source.',
-})
 export const OsVersionInfoMap: z.ZodRecord<z.ZodString, typeof OsVersionInfo> =
   /* @__PURE__ */ z.record(z.string(), OsVersionInfo).meta({
     id: 'OsVersionInfoMap',
@@ -6072,6 +6159,28 @@ export const SideloadParams: z.ZodObject<{
 }).meta({
   id: 'SideloadParams',
 })
+
+/**
+ * A `Vulnerability` as a registry publishes it.
+ */
+export const SignedVulnerability: z.ZodIntersection<
+  z.ZodObject<{
+    publishedAt: z.ZodString
+    signatures: z.ZodRecord<z.ZodString, typeof AnySignature>
+  }>,
+  typeof Vulnerability
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      publishedAt: z.string(),
+      signatures: z.record(z.string(), AnySignature),
+    }),
+    Vulnerability,
+  )
+  .meta({
+    id: 'SignedVulnerability',
+    description: 'A `Vulnerability` as a registry publishes it.',
+  })
 export const Task: z.ZodObject<{
   packageId: typeof PackageId
   actionId: typeof ActionId
@@ -6712,10 +6821,92 @@ export const NetworkGatewayInfo: z.ZodObject<{
     id: 'NetworkGatewayInfo',
   },
 )
-export const OsIndex: z.ZodObject<{ versions: typeof OsVersionInfoMap }> =
-  /* @__PURE__ */ object({ versions: OsVersionInfoMap }).meta({
-    id: 'OsIndex',
-  })
+export const OsIndex: z.ZodObject<{
+  versions: typeof OsVersionInfoMap
+  vulnerabilities: z.ZodOptional<
+    z.ZodRecord<z.ZodString, typeof SignedVulnerability>
+  >
+}> = /* @__PURE__ */ object({
+  versions: OsVersionInfoMap,
+  vulnerabilities: z.record(z.string(), SignedVulnerability).optional(),
+}).meta({
+  id: 'OsIndex',
+})
+
+/**
+ * Compatible releases from the selected StartOS update source.
+ */
+export const OsUpdateCache: z.ZodObject<{
+  registry: z.ZodString
+  versions: z.ZodRecord<z.ZodString, typeof OsVersionInfo>
+  /**
+   * Tracks the source registry's cached `RegistryInfo::default_locale`.
+   */
+  defaultLocale: z.ZodDefault<z.ZodNullable<z.ZodString>>
+  status: z.ZodCodec<
+    z.ZodOptional<typeof RegistryStatus>,
+    typeof RegistryStatus
+  >
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.ZodOptional<z.ZodNullable<z.ZodString>>
+  /**
+   * StartOS vulnerabilities the source publishes, signed or not by a trusted key.
+   */
+  vulnerabilities: z.ZodDefault<
+    z.ZodRecord<z.ZodString, typeof SignedVulnerability>
+  >
+  /**
+   * Entries of `vulnerabilities` that a key trusted for StartOS updates signed.
+   */
+  trustedVulnerabilities: z.ZodDefault<z.ZodArray<z.ZodString>>
+}> = /* @__PURE__ */ object({
+  registry: z.string(),
+  versions: z.record(z.string(), OsVersionInfo),
+  /**
+   * Tracks the source registry's cached `RegistryInfo::default_locale`.
+   */
+  defaultLocale: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .meta({
+      description:
+        "Tracks the source registry's cached `RegistryInfo::default_locale`.",
+    }),
+  status: wire(RegistryStatus.optional(), RegistryStatus),
+  /**
+   * Failure of the latest synchronization attempt; absent while connecting or connected.
+   */
+  error: z.string().nullable().optional().meta({
+    description:
+      'Failure of the latest synchronization attempt; absent while connecting or connected.',
+  }),
+  /**
+   * StartOS vulnerabilities the source publishes, signed or not by a trusted key.
+   */
+  vulnerabilities: z
+    .record(z.string(), SignedVulnerability)
+    .default(() => ({}))
+    .meta({
+      description:
+        'StartOS vulnerabilities the source publishes, signed or not by a trusted key.',
+    }),
+  /**
+   * Entries of `vulnerabilities` that a key trusted for StartOS updates signed.
+   */
+  trustedVulnerabilities: z
+    .array(z.string())
+    .default(() => [])
+    .meta({
+      description:
+        'Entries of `vulnerabilities` that a key trusted for StartOS updates signed.',
+    }),
+}).meta({
+  id: 'OsUpdateCache',
+  description: 'Compatible releases from the selected StartOS update source.',
+})
 export const PackageVersionInfo: z.ZodIntersection<
   z.ZodObject<{
     icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
@@ -7046,10 +7237,14 @@ export const PackageInfo: z.ZodObject<{
   authorized: z.ZodRecord<z.ZodString, z.ZodString>
   versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   categories: z.ZodArray<z.ZodString>
+  vulnerabilities: z.ZodOptional<
+    z.ZodRecord<z.ZodString, typeof SignedVulnerability>
+  >
 }> = /* @__PURE__ */ object({
   authorized: z.record(z.string(), z.string()),
   versions: z.record(z.string(), PackageVersionInfo),
   categories: z.array(z.string()),
+  vulnerabilities: z.record(z.string(), SignedVulnerability).optional(),
 }).meta({
   id: 'PackageInfo',
 })

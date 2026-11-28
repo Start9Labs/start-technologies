@@ -1157,3 +1157,222 @@ fn update_targets_follow_the_installed_version_through_migration_and_os_ranges()
     refresh_update_targets(&mut db, &device).unwrap();
     assert_eq!(update_target(&db), None);
 }
+
+mod vulnerabilities {
+    use super::*;
+    use crate::notifications::{NotificationType, VulnerabilityFound};
+    use crate::registry::vulnerability::{SIG_CONTEXT, SignedVulnerability, Vulnerability};
+    use crate::sign::{AnySigningKey, AnyVerifyingKey, Signer};
+
+    fn key(seed: u8) -> (Signer, AnyVerifyingKey) {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
+        let public = AnyVerifyingKey::Ed25519(key.verifying_key());
+        (Signer::Key(AnySigningKey::Ed25519(key)), public)
+    }
+
+    async fn signed(seed: u8, subject: &str, id: &str, affected: &str) -> SignedVulnerability {
+        let vulnerability = Vulnerability {
+            affected: affected.parse().unwrap(),
+            circumstances: "Exposed peer port".parse().unwrap(),
+            impact: "Crash".parse().unwrap(),
+            stop_recommended: true,
+        };
+        let (signer, public) = key(seed);
+        let signature = signer
+            .sign_commitment(&vulnerability.commitment(subject, id).unwrap(), SIG_CONTEXT)
+            .await
+            .unwrap();
+        SignedVulnerability {
+            vulnerability,
+            published_at: chrono::Utc::now(),
+            signatures: [(public, signature)].into(),
+        }
+    }
+
+    fn trust(db: &mut DatabaseModel, seed: u8, marketplace: bool, os: bool) {
+        let (_, public_key) = key(seed);
+        db.as_public_mut()
+            .as_server_info_mut()
+            .as_trusted_keys_mut()
+            .insert(
+                &public_key.interned_der64(),
+                &crate::trusted_keys::TrustedKey {
+                    name: "Test".into(),
+                    origin: "manual".into(),
+                    origin_registry: None,
+                    public_key,
+                    gpg_exports: Default::default(),
+                    contact: Default::default(),
+                    added_at: chrono::Utc::now(),
+                    removable: true,
+                    marketplace,
+                    os,
+                },
+            )
+            .unwrap();
+    }
+
+    fn found(db: &DatabaseModel) -> Vec<VulnerabilityFound> {
+        db.as_private()
+            .as_notifications()
+            .de()
+            .unwrap()
+            .0
+            .into_values()
+            .filter(|n| n.code == VulnerabilityFound::CODE)
+            .map(|n| from_value(n.data).unwrap())
+            .collect()
+    }
+
+    fn trusted_ids(db: &DatabaseModel) -> Vec<String> {
+        db.as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .de()
+            .unwrap()
+            .selections[&"test".parse::<crate::PackageId>().unwrap()]
+            .vulnerabilities
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn only_trusted_package_vulnerabilities_are_selected_and_announced_once() {
+        let mut db = database();
+        let mut index = index();
+        let package = index
+            .package
+            .packages
+            .get_mut(&"test".parse::<crate::PackageId>().unwrap())
+            .unwrap();
+        package
+            .vulnerabilities
+            .insert("CVE-1".into(), signed(7, "test", "CVE-1", "<2.0.0:0").await);
+        package
+            .vulnerabilities
+            .insert("CVE-2".into(), signed(8, "test", "CVE-2", "<2.0.0:0").await);
+        package.vulnerabilities.insert(
+            "CVE-3".into(),
+            signed(7, "other", "CVE-3", "<2.0.0:0").await,
+        );
+        publish_snapshot(
+            &mut db,
+            &Subscription::Index(url()),
+            &to_value(&index).unwrap(),
+            &device(),
+        )
+        .unwrap();
+        assert!(trusted_ids(&db).is_empty());
+        install(&mut db, "1.0.0:0");
+        trust(&mut db, 7, true, false);
+        refresh_trusted_vulnerabilities(&mut db, &device()).unwrap();
+        assert_eq!(trusted_ids(&db), ["CVE-1"]);
+        let announced = found(&db);
+        assert_eq!(announced.len(), 1);
+        assert_eq!(announced[0].vulnerability_id, "CVE-1");
+        assert_eq!(announced[0].package_id.as_deref(), Some("test"));
+        assert!(announced[0].stop_recommended);
+        refresh_trusted_vulnerabilities(&mut db, &device()).unwrap();
+        assert_eq!(found(&db).len(), 1);
+        trust(&mut db, 7, false, true);
+        refresh_trusted_vulnerabilities(&mut db, &device()).unwrap();
+        assert!(trusted_ids(&db).is_empty());
+    }
+
+    #[tokio::test]
+    async fn trusted_advisories_survive_an_empty_release_selection() {
+        let mut db = database();
+        let mut index = index();
+        let id: crate::PackageId = "test".parse().unwrap();
+        let package = index.package.packages.get_mut(&id).unwrap();
+        package.versions.clear();
+        package
+            .vulnerabilities
+            .insert("CVE-1".into(), signed(7, "test", "CVE-1", "<2.0.0:0").await);
+        publish_snapshot(
+            &mut db,
+            &Subscription::Index(url()),
+            &to_value(&index).unwrap(),
+            &device(),
+        )
+        .unwrap();
+        install(&mut db, "1.0.0:0");
+        trust(&mut db, 7, true, false);
+        refresh_trusted_vulnerabilities(&mut db, &device()).unwrap();
+        assert_eq!(trusted_ids(&db), ["CVE-1"]);
+        let selection = db
+            .as_public()
+            .as_registry_cache()
+            .as_idx(&url())
+            .unwrap()
+            .as_selections()
+            .as_idx(&id)
+            .unwrap()
+            .de()
+            .unwrap();
+        assert!(selection.best.is_empty());
+        assert!(selection.versions.is_empty());
+        assert_eq!(found(&db).len(), 1);
+        refresh_update_targets(&mut db, &device()).unwrap();
+        assert_eq!(trusted_ids(&db), ["CVE-1"]);
+        assert_eq!(found(&db).len(), 1);
+        trust(&mut db, 7, false, true);
+        refresh_trusted_vulnerabilities(&mut db, &device()).unwrap();
+        assert!(
+            db.as_public()
+                .as_registry_cache()
+                .as_idx(&url())
+                .unwrap()
+                .as_selections()
+                .as_idx(&id)
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn os_vulnerabilities_need_os_trust_and_announce_for_the_running_version() {
+        let mut db = database();
+        let mut index = OsIndex::default();
+        index.vulnerabilities.insert(
+            "OS-1".into(),
+            signed(
+                7,
+                crate::registry::vulnerability::OS_SUBJECT,
+                "OS-1",
+                ">=0.4.0:0",
+            )
+            .await,
+        );
+        index.vulnerabilities.insert(
+            "OS-2".into(),
+            signed(
+                7,
+                crate::registry::vulnerability::OS_SUBJECT,
+                "OS-2",
+                "<0.4.0:0",
+            )
+            .await,
+        );
+        trust(&mut db, 7, true, false);
+        publish_snapshot(
+            &mut db,
+            &Subscription::Os(url()),
+            &to_value(&index).unwrap(),
+            &device(),
+        )
+        .unwrap();
+        let cache = db.as_public().as_os_update_cache().de().unwrap().unwrap();
+        assert!(cache.trusted_vulnerabilities.is_empty());
+        assert!(found(&db).is_empty());
+        trust(&mut db, 7, false, true);
+        refresh_trusted_vulnerabilities(&mut db, &device()).unwrap();
+        let cache = db.as_public().as_os_update_cache().de().unwrap().unwrap();
+        assert_eq!(cache.trusted_vulnerabilities.len(), 2);
+        let announced = found(&db);
+        assert_eq!(announced.len(), 1);
+        assert_eq!(announced[0].vulnerability_id, "OS-1");
+        assert!(announced[0].package_id.is_none());
+    }
+}

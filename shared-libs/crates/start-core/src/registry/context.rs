@@ -289,6 +289,7 @@ pub(crate) async fn call_cli(
     method: &str,
     mut params: Value,
 ) -> Result<Value, RpcError> {
+    let method = method.strip_prefix("registry.").unwrap_or(method);
     super::compat::pem_wire(&mut params);
     if let Some(signer) = ctx.rpc_signer(&headers)? {
         let request = ctx.rpc_client.capture(method, params)?;
@@ -331,66 +332,86 @@ pub(crate) async fn call_cli(
     }
 }
 
+struct CliRegistryTarget {
+    url: Url,
+    address: InternedString,
+    local_auth: Option<http::HeaderValue>,
+}
+
+async fn cli_registry_target(ctx: &CliContext) -> Result<CliRegistryTarget, RpcError> {
+    let local_auth = local_auth_header::<RegistryContext>().await;
+    let (url, is_local) = if let Some(url) = &ctx.registry_url {
+        let url = url.get()?.clone();
+        let is_local = is_loopback(&url);
+        (url, is_local)
+    } else if local_auth.is_some() || !ctx.registry_hostname.is_empty() {
+        let url: Url = format!(
+            "http://{}",
+            dial_addr(ctx.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN))
+        )
+        .parse()
+        .map_err(Error::from)?;
+        // The listen address identifies this machine, including non-loopback binds.
+        (url, true)
+    } else {
+        return Err(Error::new(
+            eyre!("{}", t!("registry.context.registry-required")),
+            ErrorKind::InvalidRequest,
+        )
+        .into());
+    };
+    let address = ctx
+        .registry_hostname
+        .first()
+        .cloned()
+        .or_else(|| {
+            ctx.registry_url
+                .as_ref()
+                .and_then(|url| url.selected_host())
+                .map(InternedString::intern)
+        })
+        .or_else(|| url.host_str().map(InternedString::intern))
+        .or_not_found("registry hostname")?;
+    Ok(CliRegistryTarget {
+        url,
+        address,
+        local_auth: local_auth.filter(|_| is_local),
+    })
+}
+
+/// Signer-dependent commands retain identity authentication on the registry host.
+pub(crate) async fn call_as_identity(
+    ctx: &CliContext,
+    method: &str,
+    params: Value,
+) -> Result<Value, RpcError> {
+    ctx.id_key()?;
+    let target = cli_registry_target(ctx).await?;
+    call_cli(
+        ctx,
+        &target.url,
+        HeaderMap::new(),
+        &target.address,
+        method,
+        params,
+    )
+    .await
+}
+
 impl CallRemote<RegistryContext> for CliContext {
     async fn call_remote(
         &self,
-        mut method: &str,
+        method: &str,
         _: OrdMap<&'static str, Value>,
         params: Value,
         _: Empty,
     ) -> Result<Value, RpcError> {
-        let local_auth = local_auth_header::<RegistryContext>().await;
-
-        let (url, is_local) = if let Some(url) = &self.registry_url {
-            let url = url.get()?.clone();
-            let is_local = is_loopback(&url);
-            (url, is_local)
-        } else if local_auth.is_some() || !self.registry_hostname.is_empty() {
-            let url: Url = format!(
-                "http://{}",
-                dial_addr(self.registry_listen.unwrap_or(DEFAULT_REGISTRY_LISTEN))
-            )
-            .parse()
-            .map_err(Error::from)?;
-            // The listen address identifies this machine, including non-loopback binds.
-            (url, true)
-        } else {
-            return Err(Error::new(
-                eyre!("{}", t!("registry.context.registry-required")),
-                ErrorKind::InvalidRequest,
-            )
-            .into());
-        };
-
+        let target = cli_registry_target(self).await?;
         let mut headers = HeaderMap::new();
-        if is_local {
-            if let Some(auth) = local_auth {
-                headers.insert(AUTHORIZATION, auth);
-            }
+        if let Some(auth) = target.local_auth {
+            headers.insert(AUTHORIZATION, auth);
         }
-
-        method = method.strip_prefix("registry.").unwrap_or(method);
-        let sig_context = self
-            .registry_hostname
-            .get(0)
-            .cloned()
-            .or_else(|| {
-                self.registry_url
-                    .as_ref()
-                    .and_then(|url| url.selected_host())
-                    .map(InternedString::intern)
-            })
-            .or_else(|| url.host_str().map(InternedString::intern));
-
-        call_cli(
-            self,
-            &url,
-            headers,
-            sig_context.as_deref().or_not_found("registry hostname")?,
-            method,
-            params,
-        )
-        .await
+        call_cli(self, &target.url, headers, &target.address, method, params).await
     }
 }
 

@@ -266,7 +266,8 @@ pub async fn cli_add_asset(
     verify_phase.complete();
 
     index_phase.start();
-    ctx.call_remote::<RegistryContext>(
+    crate::registry::context::call_as_identity(
+        &ctx,
         &parent_method
             .into_iter()
             .chain(method)

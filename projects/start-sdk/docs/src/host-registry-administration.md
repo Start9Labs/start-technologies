@@ -111,7 +111,26 @@ Remove an entire package (all versions):
 start-cli registry package remove <PACKAGE_ID>
 ```
 
-The second form refuses to run if the package has versions, unless you pass `--force`.
+The second form refuses to run if the package has versions, unless you pass `--force`. Removing a whole package also requires [withdrawal authority](#vulnerabilities) for every vulnerability it contains.
+
+### Vulnerabilities
+
+Publish a vulnerability when versions of a package are exploitable. An authorized signer can publish it when the affected range intersects their authorized range; admins can publish any range.
+
+```sh
+start-cli registry package vulnerability add <PACKAGE_ID> <VULNERABILITY_ID> \
+  --affected '<1.4.3:0' \
+  --circumstances 'The RPC port is exposed to the LAN' \
+  --impact 'Remote code execution' \
+  --stop-recommended
+```
+
+- `<VULNERABILITY_ID>` names the vulnerability, such as its CVE number.
+- `--affected` is the version range that is exploitable. Any release outside it is patched.
+- `--circumstances` and `--impact` are short descriptions of when an exploit applies and what it can do.
+- `--stop-recommended` tells StartOS to recommend stopping the service until it is updated out of the affected range.
+
+The CLI signs the vulnerability with your identity key, binding the signature to the package and the vulnerability ID. StartOS shows a vulnerability only when a key the user trusts for packages signed it. Another authorized signer can cosign by running the same command with identical fields. Changing any field replaces the vulnerability and drops its signatures, and only an admin or one of its current signers can do that. The same rule applies to `start-cli registry package vulnerability remove <PACKAGE_ID> <VULNERABILITY_ID>`. Cosigning makes that key a current signer, including authority to replace or withdraw the entire specification.
 
 ### Mirrors
 
@@ -165,6 +184,20 @@ start-cli registry os asset add <FILE> <URL> \
 ```
 
 Repeat per platform (`x86_64`, `aarch64`, `riscv64`) and per asset type (`img`, `iso`, `squashfs`).
+
+### StartOS vulnerabilities
+
+Admins publish StartOS vulnerabilities the same way, without a package ID:
+
+```sh
+start-cli registry os vulnerability add <VULNERABILITY_ID> \
+  --affected '>=0.4.0 <0.4.2.1' \
+  --circumstances 'Remote access is enabled over a public IP address' \
+  --impact 'An attacker can read service credentials'
+start-cli registry os vulnerability remove <VULNERABILITY_ID>
+```
+
+StartOS shows these only when a key the user trusts for StartOS updates signed them.
 
 ## Inspecting the registry
 

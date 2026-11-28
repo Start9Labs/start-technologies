@@ -296,10 +296,7 @@ test('sparse deploy canonical versions and notes', t => {
     assert.deepEqual(JSON.parse(text(join(runnerTemp, 'release-notes.json'))), {
       releaseNotes: derived,
     })
-    if (project === 'start-os') {
-      assert.equal(text(join(runnerTemp, 'release-security')), 'true\n')
-      contains(deploy, '--git-hash "$COMMIT" "${SECURITY_ARGS[@]}"')
-    }
+    if (project === 'start-os') contains(deploy, '--git-hash "$COMMIT" \\')
     const fragmentPath = `checkout-${project}/projects/${project}/changelog/patch-fixed-feature.md`
     write(fragmentPath, '---\nrelease-notes: invalid\n---\n\n- Invalid.\n')
     const invalid = compile()
@@ -1322,7 +1319,6 @@ start-cli() {
       .replaceAll('${{ github.sha }}', 'fixture-sha')
     const runnerTemp = join(root, 'runner')
     write('runner/release-notes.json', JSON.stringify(expected))
-    write('runner/release-security', 'true\n')
     const result = run(
       'bash',
       [
@@ -1345,19 +1341,12 @@ start-cli() {
     )
     assert.equal(result.status, 0, result.stderr)
     const args = text(capture).split('\0').slice(0, -1)
-    const notesIndex = workflow === 'startos-iso.yaml' ? 9 : 6
+    const notesIndex = workflow === 'startos-iso.yaml' ? 8 : 6
     assert.deepEqual(JSON.parse(args[notesIndex]), expected.releaseNotes)
     assert.equal(args.length, notesIndex + 2)
     if (workflow === 'startos-iso.yaml')
-      assert.deepEqual(args.slice(5, 8), [
-        '--git-hash',
-        'fixture-sha',
-        '--security',
-      ])
-    else {
-      excludes(args.join(' '), '--git-hash')
-      excludes(args.join(' '), '--security')
-    }
+      assert.deepEqual(args.slice(5, 7), ['--git-hash', 'fixture-sha'])
+    else excludes(args.join(' '), '--git-hash')
   }
 })
 

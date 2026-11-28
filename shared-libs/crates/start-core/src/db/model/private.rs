@@ -10,7 +10,6 @@ use crate::net::forward::AvailablePorts;
 use crate::net::keys::KeyStore;
 use crate::notifications::Notifications;
 use crate::prelude::*;
-use crate::update::security::SecurityNotifications;
 use crate::util::serde::{Der64, Pem};
 
 #[derive(Debug, Deserialize, Serialize, HasModel)]
@@ -27,8 +26,6 @@ pub struct Private {
     pub ssh_privkey: Pem<ssh_key::PrivateKey>,
     pub available_ports: AvailablePorts,
     pub notifications: Notifications,
-    #[serde(default)]
-    pub os_security_notifications: SecurityNotifications,
     #[serde(default)]
     pub registry_cursors: BTreeMap<url::Url, crate::registry::sync::RegistryCursor>,
     #[serde(default)]

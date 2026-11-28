@@ -1114,4 +1114,10 @@ export const ENGLISH: Record<string, number> = {
   'Chipset': 1319,
   'Sensor': 1320, // as in, a temperature sensor
   'No temperature sensors found': 1321,
+  'Vulnerabilities': 1322,
+  'Vulnerable when': 1323,
+  'Impact': 1324,
+  'Stopping this service is recommended until it is updated to a patched version.': 1325,
+  'This StartOS version has a known vulnerability': 1326,
+  'This version has a known vulnerability': 1327,
 }

@@ -1113,4 +1113,10 @@ export default {
   1319: 'Chipset',
   1320: 'Sensor',
   1321: 'No se encontraron sensores de temperatura',
+  1322: 'Vulnerabilidades',
+  1323: 'Vulnerable cuando',
+  1324: 'Impacto',
+  1325: 'Se recomienda detener este servicio hasta que se actualice a una versión corregida.',
+  1326: 'Esta versión de StartOS tiene una vulnerabilidad conocida',
+  1327: 'Esta versión tiene una vulnerabilidad conocida',
 } satisfies i18n

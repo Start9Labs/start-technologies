@@ -562,6 +562,11 @@ export const RemoveOperation: z.ZodObject<{
   id: 'RemoveOperation',
   description: "JSON Patch 'remove' operation representation",
 })
+export const RemoveOsVulnerabilityParams: z.ZodObject<{
+  vulnerabilityId: z.ZodString
+}> = /* @__PURE__ */ object({ vulnerabilityId: z.string() }).meta({
+  id: 'RemoveOsVulnerabilityParams',
+})
 export const RemoveVersionParams: z.ZodObject<{ version: z.ZodString }> =
   /* @__PURE__ */ object({ version: z.string() }).meta({
     id: 'RemoveVersionParams',
@@ -818,14 +823,12 @@ export const AddVersionParams: z.ZodObject<{
   sourceVersion: z.ZodString
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
   expectedGitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  security: z.ZodDefault<z.ZodBoolean>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   releaseNotes: LocaleString,
   sourceVersion: z.string(),
   gitHash: GitHash.nullable().default(() => null),
   expectedGitHash: GitHash.nullable().default(() => null),
-  security: z.boolean().default(() => false),
 }).meta({
   id: 'AddVersionParams',
 })
@@ -937,7 +940,6 @@ export const EditVersionParams: z.ZodObject<{
   sourceVersion: z.ZodDefault<z.ZodNullable<z.ZodString>>
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
   expectedGitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  security: z.ZodDefault<z.ZodNullable<z.ZodBoolean>>
 }> = /* @__PURE__ */ object({
   version: z.string(),
   releaseNotes: LocaleString.nullable().default(() => null),
@@ -947,10 +949,6 @@ export const EditVersionParams: z.ZodObject<{
     .default(() => null),
   gitHash: GitHash.nullable().default(() => null),
   expectedGitHash: GitHash.nullable().default(() => null),
-  security: z
-    .boolean()
-    .nullable()
-    .default(() => null),
 }).meta({
   id: 'EditVersionParams',
   description:
@@ -1037,10 +1035,6 @@ export const OsVersionInfo: z.ZodObject<{
    * Commit that produced the OS image, if recorded at publication.
    */
   gitHash: z.ZodDefault<z.ZodNullable<typeof GitHash>>
-  /**
-   * Whether the release includes security fixes.
-   */
-  security: z.ZodDefault<z.ZodBoolean>
   authorized: z.ZodArray<typeof Guid>
   iso: z.ZodRecord<
     z.ZodString,
@@ -1065,15 +1059,6 @@ export const OsVersionInfo: z.ZodObject<{
     .meta({
       description:
         'Commit that produced the OS image, if recorded at publication.',
-    }),
-  /**
-   * Whether the release includes security fixes.
-   */
-  security: z
-    .boolean()
-    .default(() => false)
-    .meta({
-      description: 'Whether the release includes security fixes.',
     }),
   authorized: z.array(Guid),
   iso: z.record(z.string(), RegistryAsset(Blake3Commitment)),
@@ -1380,6 +1365,15 @@ export const RemovePackageSignerParams: z.ZodObject<{
 }> = /* @__PURE__ */ object({ id: PackageId, signer: Guid }).meta({
   id: 'RemovePackageSignerParams',
 })
+export const RemovePackageVulnerabilityParams: z.ZodObject<{
+  id: typeof PackageId
+  vulnerabilityId: z.ZodString
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  vulnerabilityId: z.string(),
+}).meta({
+  id: 'RemovePackageVulnerabilityParams',
+})
 export const RemoveReaderParams: z.ZodObject<{ id: typeof Guid }> =
   /* @__PURE__ */ object({ id: Guid }).meta({
     id: 'RemoveReaderParams',
@@ -1512,6 +1506,84 @@ export const VersionSignerParams: z.ZodObject<{
   signer: typeof Guid
 }> = /* @__PURE__ */ object({ version: z.string(), signer: Guid }).meta({
   id: 'VersionSignerParams',
+})
+
+/**
+ * A security vulnerability in a range of versions.
+ */
+export const Vulnerability: z.ZodObject<{
+  /**
+   * Versions the vulnerability affects.
+   */
+  affected: z.ZodString
+  /**
+   * When the affected versions are exploitable.
+   */
+  circumstances: typeof LocaleString
+  /**
+   * Damage a successful exploit can do.
+   */
+  impact: typeof LocaleString
+  /**
+   * Whether to stop the service until it leaves the affected range.
+   */
+  stopRecommended: z.ZodDefault<z.ZodBoolean>
+}> = /* @__PURE__ */ object({
+  /**
+   * Versions the vulnerability affects.
+   */
+  affected: z.string().meta({
+    description: 'Versions the vulnerability affects.',
+  }),
+  /**
+   * When the affected versions are exploitable.
+   */
+  circumstances: LocaleString.meta({
+    description: 'When the affected versions are exploitable.',
+  }),
+  /**
+   * Damage a successful exploit can do.
+   */
+  impact: LocaleString.meta({
+    description: 'Damage a successful exploit can do.',
+  }),
+  /**
+   * Whether to stop the service until it leaves the affected range.
+   */
+  stopRecommended: z
+    .boolean()
+    .default(() => false)
+    .meta({
+      description:
+        'Whether to stop the service until it leaves the affected range.',
+    }),
+}).meta({
+  id: 'Vulnerability',
+  description: 'A security vulnerability in a range of versions.',
+})
+export const AddOsVulnerabilityParams: z.ZodObject<{
+  vulnerabilityId: z.ZodString
+  vulnerability: typeof Vulnerability
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  vulnerabilityId: z.string(),
+  vulnerability: Vulnerability,
+  signature: AnySignature,
+}).meta({
+  id: 'AddOsVulnerabilityParams',
+})
+export const AddPackageVulnerabilityParams: z.ZodObject<{
+  id: typeof PackageId
+  vulnerabilityId: z.ZodString
+  vulnerability: typeof Vulnerability
+  signature: typeof AnySignature
+}> = /* @__PURE__ */ object({
+  id: PackageId,
+  vulnerabilityId: z.string(),
+  vulnerability: Vulnerability,
+  signature: AnySignature,
+}).meta({
+  id: 'AddPackageVulnerabilityParams',
 })
 export const DependencyMetadata: z.ZodIntersection<
   z.ZodObject<{
@@ -1721,6 +1793,28 @@ export const RegistryInfo: z.ZodObject<{
 })
 
 /**
+ * A `Vulnerability` as a registry publishes it.
+ */
+export const SignedVulnerability: z.ZodIntersection<
+  z.ZodObject<{
+    publishedAt: z.ZodString
+    signatures: z.ZodRecord<z.ZodString, typeof AnySignature>
+  }>,
+  typeof Vulnerability
+> = /* @__PURE__ */ z
+  .intersection(
+    object({
+      publishedAt: z.string(),
+      signatures: z.record(z.string(), AnySignature),
+    }),
+    Vulnerability,
+  )
+  .meta({
+    id: 'SignedVulnerability',
+    description: 'A `Vulnerability` as a registry publishes it.',
+  })
+
+/**
  * Database-generated patches contain only add, remove and replace operations.
  */
 export const DiffPatch: typeof Patch = /* @__PURE__ */ Patch.meta({
@@ -1728,10 +1822,17 @@ export const DiffPatch: typeof Patch = /* @__PURE__ */ Patch.meta({
   description:
     'Database-generated patches contain only add, remove and replace operations.',
 })
-export const OsIndex: z.ZodObject<{ versions: typeof OsVersionInfoMap }> =
-  /* @__PURE__ */ object({ versions: OsVersionInfoMap }).meta({
-    id: 'OsIndex',
-  })
+export const OsIndex: z.ZodObject<{
+  versions: typeof OsVersionInfoMap
+  vulnerabilities: z.ZodOptional<
+    z.ZodRecord<z.ZodString, typeof SignedVulnerability>
+  >
+}> = /* @__PURE__ */ object({
+  versions: OsVersionInfoMap,
+  vulnerabilities: z.record(z.string(), SignedVulnerability).optional(),
+}).meta({
+  id: 'OsIndex',
+})
 export const PackageVersionInfo: z.ZodIntersection<
   z.ZodObject<{
     icon: z.ZodOptional<z.ZodNullable<typeof PackageIcon>>
@@ -1816,10 +1917,14 @@ export const PackageInfo: z.ZodObject<{
   authorized: z.ZodRecord<z.ZodString, z.ZodString>
   versions: z.ZodRecord<z.ZodString, typeof PackageVersionInfo>
   categories: z.ZodArray<z.ZodString>
+  vulnerabilities: z.ZodOptional<
+    z.ZodRecord<z.ZodString, typeof SignedVulnerability>
+  >
 }> = /* @__PURE__ */ object({
   authorized: z.record(z.string(), z.string()),
   versions: z.record(z.string(), PackageVersionInfo),
   categories: z.array(z.string()),
+  vulnerabilities: z.record(z.string(), SignedVulnerability).optional(),
 }).meta({
   id: 'PackageInfo',
 })
@@ -2427,6 +2532,23 @@ export const Api = {
             },
           },
         },
+        vulnerability: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddOsVulnerabilityParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemoveOsVulnerabilityParams,
+              _RETURN: /* @__PURE__ */ z.boolean(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
       },
     },
     package: {
@@ -2571,6 +2693,23 @@ export const Api = {
                 ExportPackageVersionParams,
               ),
               _RETURN: /* @__PURE__ */ PackageVersionExport,
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+          },
+        },
+        vulnerability: {
+          _PARAMS: /* @__PURE__ */ empty,
+          _CHILDREN: {
+            add: {
+              _PARAMS: /* @__PURE__ */ AddPackageVulnerabilityParams,
+              _RETURN: /* @__PURE__ */ z.null(),
+              _ITEM: /* @__PURE__ */ z.never(),
+              _FINAL: /* @__PURE__ */ z.null(),
+            },
+            remove: {
+              _PARAMS: /* @__PURE__ */ RemovePackageVulnerabilityParams,
+              _RETURN: /* @__PURE__ */ z.boolean(),
               _ITEM: /* @__PURE__ */ z.never(),
               _FINAL: /* @__PURE__ */ z.null(),
             },

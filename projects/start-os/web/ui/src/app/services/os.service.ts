@@ -2,7 +2,7 @@ import { inject, Injectable } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { sameUrl } from '@start9labs/shared'
 import { registryStatus } from '@start9labs/marketplace'
-import { T, Version } from '@start9labs/start-core'
+import { T, Version, VersionRange } from '@start9labs/start-core'
 import { PatchDB } from 'patch-db-client'
 import {
   combineLatest,
@@ -13,6 +13,7 @@ import {
   shareReplay,
 } from 'rxjs'
 import { DataModel } from './patch-db/data-model'
+import { affecting } from 'src/app/utils/vulnerabilities'
 
 @Injectable({
   providedIn: 'root',
@@ -32,6 +33,18 @@ export class OSService {
     ),
     distinctUntilChanged(),
     shareReplay({ bufferSize: 1, refCount: true }),
+  )
+
+  /** Trusted vulnerabilities that affect the running StartOS. */
+  readonly vulnerabilities$ = combineLatest([
+    this.catalog$,
+    this.patch.watch$('serverInfo', 'version'),
+  ]).pipe(
+    map(([cache, version]) =>
+      affecting(cache?.vulnerabilities, cache?.trustedVulnerabilities, range =>
+        Version.parse(version).satisfies(VersionRange.parse(range)),
+      ),
+    ),
   )
 
   readonly registryStatus$ = this.catalog$.pipe(

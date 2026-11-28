@@ -15,12 +15,13 @@ import {
   Exver,
   ExverComparesPipe,
   i18nPipe,
+  LocalizePipe,
   sameUrl,
   TaskService,
 } from '@start9labs/shared'
 import { TuiButton, TuiNotification } from '@taiga-ui/core'
 import { PatchDB } from 'patch-db-client'
-import { firstValueFrom, switchMap } from 'rxjs'
+import { combineLatest, firstValueFrom, of, switchMap } from 'rxjs'
 import { ToManifestPipe } from 'src/app/routes/portal/pipes/to-manifest'
 import { ApiService } from 'src/app/services/api/embassy-api.service'
 import { MarketplaceService } from 'src/app/services/marketplace.service'
@@ -49,6 +50,12 @@ type KEYS =
     @if (!trusted().length) {
       <div tuiNotification appearance="warning">
         {{ "This service package isn't signed by anyone you trust." | i18n }}
+      </div>
+    }
+    @for (vulnerability of vulnerabilities(); track vulnerability.id) {
+      <div tuiNotification appearance="negative">
+        {{ 'This version has a known vulnerability' | i18n }}:
+        {{ vulnerability.impact | localize }}
       </div>
     }
     @if (needsOsUpdate()) {
@@ -134,6 +141,7 @@ type KEYS =
     }
   `,
   imports: [
+    LocalizePipe,
     CommonModule,
     ExverComparesPipe,
     TuiButton,
@@ -156,6 +164,21 @@ export class MarketplaceControlsComponent {
 
   readonly pkg = input.required<Pick<MarketplacePkg, KEYS>>()
   readonly file = input<File>()
+
+  protected readonly vulnerabilities = toSignal(
+    combineLatest([
+      toObservable(this.pkg),
+      toObservable(this.file),
+      this.marketplace.currentRegistryUrl$,
+    ]).pipe(
+      switchMap(([{ id, version }, file, registry]) =>
+        file
+          ? of([])
+          : this.marketplace.vulnerabilities$(registry, id, version),
+      ),
+    ),
+    { initialValue: [] },
+  )
 
   readonly localPkg = toSignal(
     toObservable(this.pkg).pipe(

@@ -71,7 +71,7 @@ back that far; otherwise the response is a dump with `revisions` null. Each view
 in-memory database with a random epoch, so a cursor from another view, or from one released with
 its last subscriber and rebuilt, always dumps. Clients that read only `{ id, value }` are unaffected.
 
-`language` resolves every `LocaleString` in the view with `LocaleString::localize_for`:
+`language` resolves registry and release metadata with `LocaleString::localize_for`:
 the exact or same-language translation, else the owner's declared default locale
 (`PackageMetadata::default_locale` for package text, `FullIndex::default_locale` for
 registry text, set by `info set-default-locale`), else an arbitrary stored one. The
@@ -90,7 +90,7 @@ created in-memory PatchDB mirror (`registry/mirror.rs`), shared by its
 subscribers and dropped with the last of them. A localized mirror ends its subscriptions
 when the reader-visible locale inventory changes; reconnecting resolves the requested
 language again, including newly added exact or same-language translations. Unlocalized
-mirrors continue streaming.
+mirrors continue streaming. Signed vulnerability specifications retain their locale maps for signature verification.
 
 With `rpcstream: "1.0"` on `/rpc/v2`, the same method returns the dump directly as its initiating
 result and sends subsequent `Revision` events under that request ID. Closing a stream releases
@@ -127,9 +127,9 @@ A public-mirror subscriber must resubscribe after receiving a private-access gra
 registry-management More menu offers refresh in every connection state, restarting that
 registry's grouped watches without changing signing-key trust or discarding cached listings. Weak mirror entries share work across subscribers; dropping the last subscriber cancels that mirror's task.
 
-StartOS derives security notifications from the selected source's OS metadata, filtering by source
-version, platform, and installed build. Delivery history remains keyed by registry URL, version, and
-build hash across reconnects and restarts.
+StartOS notifies about StartOS vulnerabilities in the selected source's OS index that a key trusted
+for StartOS updates signed and that affect the running version. `osUpdateCache.trustedVulnerabilities`
+records every trusted id, including those that do not affect the running version; notifications compare against the previous trusted set.
 
 ## Mirroring (`registry/upstream.rs`)
 
@@ -175,8 +175,7 @@ versions are hidden. Browsing endpoints, mirrors, and stored-icon references use
 projections drop reader lists for everyone but admins and the package's publishers, and the reader
 directory for non-admins. `package.add` decrypts each URL
 with the submitted keystream before verifying it; `add-mirror` uses the stored keystream.
-`RegistryAsset` download helpers decrypt through `KeyStreamSource`. StartOS keeps keystreams in its
-private synced index and strips them from the UI-readable registry cache. `package.version.export` returns a
+`RegistryAsset` download helpers decrypt through `KeyStreamSource`. StartOS keeps the server-identity-admitted index, including private-asset keystreams, in `public.registryIndexes`; authenticated UI subscriptions read selected subtrees. `package.version.export` returns a
 version as the requester sees it, with the reader-directory entries it lists for admins and the
 package's publishers. Promotion reads it, forwards each keystream, and registers missing reader keys on the
 destination with their labels. Migration

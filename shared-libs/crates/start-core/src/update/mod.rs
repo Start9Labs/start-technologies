@@ -13,7 +13,6 @@ use tokio::process::Command;
 use tracing::instrument;
 
 pub mod diagnostic;
-pub mod security;
 pub(crate) mod signer_files;
 
 #[cfg(test)]
@@ -265,16 +264,6 @@ pub fn display_update_result(_: UpdateSystemParams, status: UpdateResult) {
             println!("No updates available");
         }
     }
-}
-
-pub(crate) fn is_os_update(
-    version: &Version,
-    git_hash: Option<&crate::s9pk::git_hash::GitHash>,
-    installed: &Version,
-    installed_hash: &str,
-) -> bool {
-    version > installed
-        || (version == installed && git_hash.is_some_and(|hash| hash.as_ref() != installed_hash))
 }
 
 fn validate_update_signatures(
@@ -612,6 +601,7 @@ mod tests {
                 ("0.4.0.6".parse().unwrap(), release(&PLATFORM)),
                 ("0.4.0.7".parse().unwrap(), release(other_platform)),
             ])),
+            vulnerabilities: Default::default(),
         };
         let params: GetOsVersionParams = from_value(version_query_params(
             &"0.4.0.5".parse().unwrap(),

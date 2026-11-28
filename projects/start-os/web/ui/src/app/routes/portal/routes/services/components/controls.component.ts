@@ -8,14 +8,17 @@ import { map } from 'rxjs'
 import { ControlsService } from 'src/app/services/controls.service'
 import { DepErrorService } from 'src/app/services/dep-error.service'
 import { PackageDataEntry } from 'src/app/services/patch-db/data-model'
-import { PrimaryStatus } from 'src/app/services/pkg-status-rendering.service'
+import {
+  PrimaryStatus,
+  STOPPABLE_STATUSES,
+} from 'src/app/services/pkg-status-rendering.service'
 import { getManifest } from 'src/app/utils/get-package-data'
 import { InterfaceService } from '../../../components/interfaces/interface.service'
 
 @Component({
   selector: 'service-controls',
   template: `
-    @if (['running', 'starting', 'restarting'].includes(status()!)) {
+    @if (stoppable.includes(status()!)) {
       <button
         tuiButton
         appearance="primary-destructive"
@@ -132,6 +135,7 @@ export class ServiceControlsComponent {
   private readonly errors = inject(DepErrorService)
   private readonly interfaceService = inject(InterfaceService)
   private readonly document = inject(DOCUMENT)
+  protected readonly stoppable = STOPPABLE_STATUSES
 
   readonly pkg = input.required<PackageDataEntry>()
   readonly status = input<PrimaryStatus>()

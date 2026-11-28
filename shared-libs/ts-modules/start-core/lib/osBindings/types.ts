@@ -444,6 +444,12 @@ export type RemoveCategoryParamsInput = z.input<
 >
 export type RemoveDomainParams = z.output<typeof schemas.RemoveDomainParams>
 export type RemoveDomainParamsInput = z.input<typeof schemas.RemoveDomainParams>
+export type RemoveOsVulnerabilityParams = z.output<
+  typeof schemas.RemoveOsVulnerabilityParams
+>
+export type RemoveOsVulnerabilityParamsInput = z.input<
+  typeof schemas.RemoveOsVulnerabilityParams
+>
 export type RemoveTokensParams = z.output<typeof schemas.RemoveTokensParams>
 export type RemoveTokensParamsInput = z.input<typeof schemas.RemoveTokensParams>
 export type RemoveVersionParams = z.output<typeof schemas.RemoveVersionParams>
@@ -1024,12 +1030,12 @@ export type PackageInfoShort = z.output<typeof schemas.PackageInfoShort>
 export type PackageInfoShortInput = z.input<typeof schemas.PackageInfoShort>
 
 /**
- * A package's releases this server can run, by version; release data stays in the saved index.
+ * Runnable releases and trusted advisories; advisories survive an empty release selection.
  */
 export type PackageSelection = z.output<typeof schemas.PackageSelection>
 
 /**
- * A package's releases this server can run, by version; release data stays in the saved index.
+ * Runnable releases and trusted advisories; advisories survive an empty release selection.
  */
 export type PackageSelectionInput = z.input<typeof schemas.PackageSelection>
 export type PassthroughInfo = z.output<typeof schemas.PassthroughInfo>
@@ -1141,6 +1147,12 @@ export type RemovePackageSignerParams = z.output<
 >
 export type RemovePackageSignerParamsInput = z.input<
   typeof schemas.RemovePackageSignerParams
+>
+export type RemovePackageVulnerabilityParams = z.output<
+  typeof schemas.RemovePackageVulnerabilityParams
+>
+export type RemovePackageVulnerabilityParamsInput = z.input<
+  typeof schemas.RemovePackageVulnerabilityParams
 >
 export type RemoveReaderParams = z.output<typeof schemas.RemoveReaderParams>
 export type RemoveReaderParamsInput = z.input<typeof schemas.RemoveReaderParams>
@@ -1310,6 +1322,26 @@ export type VersionSignerParamsInput = z.input<
 >
 export type VolumeBackupReport = z.output<typeof schemas.VolumeBackupReport>
 export type VolumeBackupReportInput = z.input<typeof schemas.VolumeBackupReport>
+
+/**
+ * A security vulnerability in a range of versions.
+ */
+export type Vulnerability = z.output<typeof schemas.Vulnerability>
+
+/**
+ * A security vulnerability in a range of versions.
+ */
+export type VulnerabilityInput = z.input<typeof schemas.Vulnerability>
+
+/**
+ * A newly trusted vulnerability affecting an installed package or this StartOS.
+ */
+export type VulnerabilityFound = z.output<typeof schemas.VulnerabilityFound>
+
+/**
+ * A newly trusted vulnerability affecting an installed package or this StartOS.
+ */
+export type VulnerabilityFoundInput = z.input<typeof schemas.VulnerabilityFound>
 export type WifiInfo = z.output<typeof schemas.WifiInfo>
 export type WifiInfoInput = z.input<typeof schemas.WifiInfo>
 export type WifiListOut = z.output<typeof schemas.WifiListOut>
@@ -1318,6 +1350,18 @@ export type ActionResultMember = z.output<typeof schemas.ActionResultMember>
 export type ActionResultMemberInput = z.input<typeof schemas.ActionResultMember>
 export type ActionResultV1 = z.output<typeof schemas.ActionResultV1>
 export type ActionResultV1Input = z.input<typeof schemas.ActionResultV1>
+export type AddOsVulnerabilityParams = z.output<
+  typeof schemas.AddOsVulnerabilityParams
+>
+export type AddOsVulnerabilityParamsInput = z.input<
+  typeof schemas.AddOsVulnerabilityParams
+>
+export type AddPackageVulnerabilityParams = z.output<
+  typeof schemas.AddPackageVulnerabilityParams
+>
+export type AddPackageVulnerabilityParamsInput = z.input<
+  typeof schemas.AddPackageVulnerabilityParams
+>
 export type AddPublicDomainRes = z.output<typeof schemas.AddPublicDomainRes>
 export type AddPublicDomainResInput = z.input<typeof schemas.AddPublicDomainRes>
 export type AttachParams = z.output<typeof schemas.AttachParams>
@@ -1416,16 +1460,6 @@ export type NutConfig = z.output<typeof schemas.NutConfig>
  * Stored NUT configuration and its independent enabled state.
  */
 export type NutConfigInput = z.input<typeof schemas.NutConfig>
-
-/**
- * Compatible releases from the selected StartOS update source.
- */
-export type OsUpdateCache = z.output<typeof schemas.OsUpdateCache>
-
-/**
- * Compatible releases from the selected StartOS update source.
- */
-export type OsUpdateCacheInput = z.input<typeof schemas.OsUpdateCache>
 export type OsVersionInfoMap = z.output<typeof schemas.OsVersionInfoMap>
 export type OsVersionInfoMapInput = z.input<typeof schemas.OsVersionInfoMap>
 export type PackageMetadata = z.output<typeof schemas.PackageMetadata>
@@ -1470,6 +1504,18 @@ export type SharedVolume = z.output<typeof schemas.SharedVolume>
 export type SharedVolumeInput = z.input<typeof schemas.SharedVolume>
 export type SideloadParams = z.output<typeof schemas.SideloadParams>
 export type SideloadParamsInput = z.input<typeof schemas.SideloadParams>
+
+/**
+ * A `Vulnerability` as a registry publishes it.
+ */
+export type SignedVulnerability = z.output<typeof schemas.SignedVulnerability>
+
+/**
+ * A `Vulnerability` as a registry publishes it.
+ */
+export type SignedVulnerabilityInput = z.input<
+  typeof schemas.SignedVulnerability
+>
 export type Task = z.output<typeof schemas.Task>
 export type TaskParams = z.input<typeof schemas.Task>
 
@@ -1560,6 +1606,16 @@ export type NetworkGatewayInfo = z.output<typeof schemas.NetworkGatewayInfo>
 export type NetworkGatewayInfoInput = z.input<typeof schemas.NetworkGatewayInfo>
 export type OsIndex = z.output<typeof schemas.OsIndex>
 export type OsIndexInput = z.input<typeof schemas.OsIndex>
+
+/**
+ * Compatible releases from the selected StartOS update source.
+ */
+export type OsUpdateCache = z.output<typeof schemas.OsUpdateCache>
+
+/**
+ * Compatible releases from the selected StartOS update source.
+ */
+export type OsUpdateCacheInput = z.input<typeof schemas.OsUpdateCache>
 export type PackageVersionInfo = z.output<typeof schemas.PackageVersionInfo>
 export type PackageVersionInfoInput = z.input<typeof schemas.PackageVersionInfo>
 

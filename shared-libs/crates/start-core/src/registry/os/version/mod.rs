@@ -87,9 +87,6 @@ pub struct AddVersionParams {
     pub git_hash: Option<GitHash>,
     #[arg(long, help = "help.arg.expected-os-git-hash")]
     pub expected_git_hash: Option<GitHash>,
-    #[arg(long, help = "help.arg.os-security")]
-    #[serde(default)]
-    pub security: bool,
     #[arg(skip)]
     #[visit(ts(skip))]
     #[serde(rename = "__Auth_signer")]
@@ -107,7 +104,6 @@ impl AddVersionParams {
             source_version: info.source_version.clone(),
             git_hash: info.git_hash.clone(),
             expected_git_hash: None,
-            security: info.security,
             signer: None,
         }
     }
@@ -121,7 +117,6 @@ pub async fn add_version(
         source_version,
         git_hash,
         expected_git_hash,
-        security,
         signer,
     }: AddVersionParams,
 ) -> Result<(), Error> {
@@ -141,7 +136,6 @@ pub async fn add_version(
                     i.release_notes = release_notes;
                     i.source_version = source_version;
                     i.git_hash = git_hash;
-                    i.security = security;
                     i.authorized.extend(signer);
                     Ok(())
                 })
@@ -170,8 +164,6 @@ pub struct EditVersionParams {
     pub git_hash: Option<GitHash>,
     #[arg(long, help = "help.arg.expected-os-git-hash")]
     pub expected_git_hash: Option<GitHash>,
-    #[arg(long, help = "help.arg.os-security", action = clap::ArgAction::Set)]
-    pub security: Option<bool>,
 }
 
 rpc_toolkit::reflect_ts!(EditVersionParams);
@@ -185,7 +177,6 @@ pub async fn edit_version(
         source_version,
         git_hash,
         expected_git_hash,
-        security,
     }: EditVersionParams,
 ) -> Result<(), Error> {
     ctx.db
@@ -207,9 +198,6 @@ pub async fn edit_version(
                     }
                     if let Some(git_hash) = git_hash {
                         info.git_hash = Some(git_hash);
-                    }
-                    if let Some(security) = security {
-                        info.security = security;
                     }
                     Ok(())
                 })
@@ -348,7 +336,6 @@ pub fn display_version_info<T>(params: WithIoFormat<T>, info: Value) -> Result<(
         "VERSION",
         "RELEASE NOTES",
         "GIT HASH",
-        "SECURITY",
         "ISO PLATFORMS",
         "IMG PLATFORMS",
         "SQUASHFS PLATFORMS",
@@ -358,7 +345,6 @@ pub fn display_version_info<T>(params: WithIoFormat<T>, info: Value) -> Result<(
             &version.to_string(),
             &info.release_notes.clone().localized(None),
             info.git_hash.as_deref().unwrap_or("N/A"),
-            info.security,
             &info.iso.keys().into_iter().join(", "),
             &info.img.keys().into_iter().join(", "),
             &info.squashfs.keys().into_iter().join(", "),
@@ -383,27 +369,23 @@ mod tests {
             ">=0.4.0",
             "--git-hash",
             "0123456789abcdef",
-            "--security",
         ])
         .unwrap();
         let value = to_value(&params).unwrap();
         assert!(value.get("headline").is_none());
         assert_eq!(value["releaseNotes"].as_str(), Some("Notes"));
         assert_eq!(value["gitHash"].as_str(), Some("0123456789abcdef"));
-        assert_eq!(value["security"].as_bool(), Some(true));
         let params: AddVersionParams = from_value(value).unwrap();
         assert_eq!(params.git_hash.as_deref(), Some("0123456789abcdef"));
-        assert!(params.security);
     }
 
     #[test]
-    fn legacy_publication_defaults_to_no_security_metadata() {
+    fn legacy_publication_defaults_to_no_git_hash() {
         let params: AddVersionParams = from_value(json!({
             "version": "0.4.0.5", "releaseNotes": "Notes", "sourceVersion": ">=0.4.0",
         }))
         .unwrap();
         assert!(params.git_hash.is_none());
-        assert!(!params.security);
     }
 
     #[test]
@@ -436,9 +418,8 @@ mod tests {
         let cli = EditVersionParams::try_parse_from(["edit", "0.4.0.5"]).unwrap();
         let rpc: EditVersionParams = from_value(json!({ "version": "0.4.0.5" })).unwrap();
         assert_eq!(to_value(&cli).unwrap(), to_value(&rpc).unwrap());
-        assert!(cli.security.is_none());
 
-        for security in ["true", "false"] {
+        {
             let notes = r#"{"en_US":"Notes","pl_PL":"Informacje"}"#;
             let cli = EditVersionParams::try_parse_from([
                 "edit",
@@ -451,8 +432,6 @@ mod tests {
                 "new-build",
                 "--expected-git-hash",
                 "old-build",
-                "--security",
-                security,
             ])
             .unwrap();
             let rpc: EditVersionParams = from_value(json!({
@@ -461,11 +440,9 @@ mod tests {
                 "sourceVersion": ">=0.4.0.1",
                 "gitHash": "new-build",
                 "expectedGitHash": "old-build",
-                "security": security == "true",
             }))
             .unwrap();
             assert_eq!(to_value(&cli).unwrap(), to_value(&rpc).unwrap());
-            assert_eq!(cli.security, Some(security == "true"));
         }
     }
 
