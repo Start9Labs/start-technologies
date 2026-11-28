@@ -2,6 +2,17 @@
 
 SOURCE_DIR="$(dirname $(realpath "${BASH_SOURCE[0]}"))"
 
+# The caller owns the unpublished output and stable source view.
+prepare_repack_output() {
+    local output=$1 root=$2 configuration=$3 size
+    rm -f -- "$output" || return
+    if [ -h "$configuration/current.rootfs" ] && [ -e "$configuration/current.rootfs" ]; then
+        size=$(du -s --bytes -- "$root") || return
+        size=${size%%[[:space:]]*}
+        "$SOURCE_DIR/prune-images" "$size" || return
+    fi
+}
+
 if [ "$UID" -ne 0 ]; then
     >&2 echo 'Must be run as root'
     exit 1
@@ -9,6 +20,9 @@ fi
 
 source "$SOURCE_DIR/os-image-store"
 startos_reserve_image_store /media/startos/config || exit
+REPACK_ROOT=$(startos_repack_root /media/startos) || exit
+REPACK_UPPER=$(startos_repack_upper /media/startos) || exit
+REPACK_IMAGE=/media/startos/images/next.squashfs
 
 POSITIONAL_ARGS=()
 
@@ -37,76 +51,73 @@ set -- "${POSITIONAL_ARGS[@]}"
 
 if [ -z "$NO_SYNC" ]; then
     echo 'Syncing...'
-    umount -l /media/startos/next 2> /dev/null
-    umount /media/startos/upper 2> /dev/null
-    rm -rf /media/startos/upper /media/startos/next
-    mkdir /media/startos/upper
-    mount -t tmpfs tmpfs /media/startos/upper
-    mkdir -p /media/startos/upper/data /media/startos/upper/work /media/startos/next
+    umount -l "$REPACK_ROOT" 2> /dev/null
+    umount "$REPACK_UPPER" 2> /dev/null
+    rm -rf "$REPACK_UPPER" "$REPACK_ROOT"
+    mkdir "$REPACK_UPPER"
+    mount -t tmpfs tmpfs "$REPACK_UPPER"
+    mkdir -p "$REPACK_UPPER/data" "$REPACK_UPPER/work" "$REPACK_ROOT"
     mount -t overlay \
-		  -olowerdir=/media/startos/current,upperdir=/media/startos/upper/data,workdir=/media/startos/upper/work \
-		  overlay /media/startos/next
+        -o "lowerdir=/media/startos/current,upperdir=$REPACK_UPPER/data,workdir=$REPACK_UPPER/work" \
+        overlay "$REPACK_ROOT"
 fi
 
 if [ -n "$ONLY_CREATE" ]; then
     exit 0
 fi
 
-mkdir -p /media/startos/next/run
-mkdir -p /media/startos/next/dev
-mkdir -p /media/startos/next/sys
-mkdir -p /media/startos/next/proc
-mkdir -p /media/startos/next/boot
-mkdir -p /media/startos/next/media/startos/root
-mount -t tmpfs tmpfs /media/startos/next/run
-mount -t tmpfs tmpfs /media/startos/next/tmp
-mount --bind /dev /media/startos/next/dev
-mount -t sysfs sysfs /media/startos/next/sys
-mount -t proc proc /media/startos/next/proc
-mount --bind /boot /media/startos/next/boot
-mount --bind /media/startos/root /media/startos/next/media/startos/root
+mkdir -p "$REPACK_ROOT/run"
+mkdir -p "$REPACK_ROOT/dev"
+mkdir -p "$REPACK_ROOT/sys"
+mkdir -p "$REPACK_ROOT/proc"
+mkdir -p "$REPACK_ROOT/boot"
+mkdir -p "$REPACK_ROOT/media/startos/root"
+mount -t tmpfs tmpfs "$REPACK_ROOT/run"
+mount -t tmpfs tmpfs "$REPACK_ROOT/tmp"
+mount --bind /dev "$REPACK_ROOT/dev"
+mount -t sysfs sysfs "$REPACK_ROOT/sys"
+mount -t proc proc "$REPACK_ROOT/proc"
+mount --bind /boot "$REPACK_ROOT/boot"
+mount --bind /media/startos/root "$REPACK_ROOT/media/startos/root"
 
 if mountpoint /sys/firmware/efi/efivars 2>&1 > /dev/null; then
-  mount -t efivarfs efivarfs /media/startos/next/sys/firmware/efi/efivars
+  mount -t efivarfs efivarfs "$REPACK_ROOT/sys/firmware/efi/efivars"
 fi
 
 if [ -z "$*" ]; then
-    chroot /media/startos/next
+    chroot "$REPACK_ROOT"
     CHROOT_RES=$?
 else
-    chroot /media/startos/next "$SHELL" -c "$*"
+    chroot "$REPACK_ROOT" "$SHELL" -c "$*"
     CHROOT_RES=$?
 fi
 
-if mountpoint /media/startos/next/sys/firmware/efi/efivars 2>&1 > /dev/null; then
-  umount /media/startos/next/sys/firmware/efi/efivars 
+if mountpoint "$REPACK_ROOT/sys/firmware/efi/efivars" 2>&1 > /dev/null; then
+  umount "$REPACK_ROOT/sys/firmware/efi/efivars"
 fi
 
-umount -l /media/startos/next/run
-umount -l /media/startos/next/tmp
-umount -l /media/startos/next/dev
-umount -l /media/startos/next/sys
-umount -l /media/startos/next/proc
-umount -l /media/startos/next/boot
-umount -l /media/startos/next/media/startos/root
+umount -l "$REPACK_ROOT/run"
+umount -l "$REPACK_ROOT/tmp"
+umount -l "$REPACK_ROOT/dev"
+umount -l "$REPACK_ROOT/sys"
+umount -l "$REPACK_ROOT/proc"
+umount -l "$REPACK_ROOT/boot"
+umount -l "$REPACK_ROOT/media/startos/root"
 
 if [ "$CHROOT_RES" -eq 0 ]; then
 
-    if [ -h /media/startos/config/current.rootfs ] && [ -e /media/startos/config/current.rootfs ]; then
-        ${SOURCE_DIR}/prune-images $(du -s --bytes /media/startos/next | awk '{print $1}')
-    fi
+    prepare_repack_output "$REPACK_IMAGE" "$REPACK_ROOT" /media/startos/config || exit
 
     echo 'Upgrading...'
 
-    rm -f /media/startos/images/next.squashfs
-    if ! time mksquashfs /media/startos/next /media/startos/images/next.squashfs -b 4096 -comp gzip; then
-        umount -l /media/startos/next
-        umount -l /media/startos/upper
-        rm -rf /media/startos/upper /media/startos/next
+    if ! time mksquashfs "$REPACK_ROOT" "$REPACK_IMAGE" -b 4096 -comp gzip; then
+        umount -l "$REPACK_ROOT"
+        umount -l "$REPACK_UPPER"
+        rm -rf "$REPACK_UPPER" "$REPACK_ROOT"
         exit 1
     fi
-    hash=$(b3sum /media/startos/images/next.squashfs | head -c 32)
-    mv /media/startos/images/next.squashfs /media/startos/images/${hash}.rootfs
+    hash=$(b3sum "$REPACK_IMAGE" | head -c 32)
+    mv "$REPACK_IMAGE" /media/startos/images/${hash}.rootfs
     ln -rsf /media/startos/images/${hash}.rootfs /media/startos/config/current.rootfs
 
     sync
@@ -114,6 +125,6 @@ if [ "$CHROOT_RES" -eq 0 ]; then
     reboot
 fi
 
-umount -l /media/startos/next
-umount -l /media/startos/upper
-rm -rf /media/startos/upper /media/startos/next
+umount -l "$REPACK_ROOT"
+umount -l "$REPACK_UPPER"
+rm -rf "$REPACK_UPPER" "$REPACK_ROOT"

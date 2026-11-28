@@ -18,6 +18,18 @@ startos_reserve_image_store() {
     flock --exclusive "$descriptor"
 }
 
+startos_repack_root() {
+    printf '%s/next' "$1"
+}
+
+startos_repack_upper() {
+    printf '%s/upper' "$1"
+}
+
+startos_repack_paths() {
+    printf '%s\0' "$(startos_repack_root "$1")" "$(startos_repack_upper "$1")"
+}
+
 startos_prune_public_sources() {
     local volume=$1 name tool
     startos_reserve_image_store "$volume/config" || return

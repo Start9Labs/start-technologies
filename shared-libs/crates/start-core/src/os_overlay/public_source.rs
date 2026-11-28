@@ -334,12 +334,17 @@ impl SourceCache {
         Ok(())
     }
 
+    /// Nonempty native repack workspaces retain every cached source until retired.
     pub(crate) async fn prune_boot_sources(&self) -> Result<(), Error> {
         self.recover_workspace().await?;
         if self.entries().await?.is_empty() {
             return Ok(());
         }
-        self.prune(&self.retained_releases().await?).await
+        let retained = self.retained_releases().await?;
+        if !super::image_store::has_repack_workspace(&self.os_volume).await? {
+            self.prune(&retained).await?;
+        }
+        Ok(())
     }
 
     /// Stored images and published rootfs bytes pin releases independently of boot eligibility.

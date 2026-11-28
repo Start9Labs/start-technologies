@@ -1,6 +1,9 @@
 use super::*;
 use crate::rpc_continuations::Guid;
 
+#[path = "public_source_repack_tests.rs"]
+mod repack;
+
 pub(super) async fn published_rootfs(configuration: &Path, image: &Path) -> PathBuf {
     let store = crate::fde::boot::create_generation_store(configuration).unwrap();
     let generation = store.join(format!("generation-{}", Guid::new()));
@@ -122,6 +125,11 @@ async fn invalid_stored_or_published_inputs_preserve_every_cached_source() {
     tokio::fs::symlink(&image, volume.join("config/current.rootfs"))
         .await
         .unwrap();
+    let pending = volume.join("next");
+    tokio::fs::create_dir(&pending).await.unwrap();
+    tokio::fs::write(pending.join("private-input"), b"mutable repack")
+        .await
+        .unwrap();
     let bad = volume.join("images/bad.rootfs");
     tokio::fs::write(&bad, b"not SquashFS").await.unwrap();
     assert!(cache.prune_boot_sources().await.is_err());
@@ -161,6 +169,7 @@ async fn invalid_stored_or_published_inputs_preserve_every_cached_source() {
     assert!(cache.prune_boot_sources().await.is_err());
     assert!(retained.path.is_file());
     tokio::fs::remove_file(staging).await.unwrap();
+    crate::util::io::delete_dir(pending).await.unwrap();
     cache.prune_boot_sources().await.unwrap();
     assert!(!retained.path.exists());
 }

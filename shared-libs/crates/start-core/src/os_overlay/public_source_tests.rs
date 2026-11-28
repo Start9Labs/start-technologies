@@ -615,6 +615,13 @@ async fn shell_space_admission_prunes_public_sources_with_the_native_owner_and_l
     assert!(sources[3].is_file());
     assert!(staging.is_dir());
     tokio::fs::remove_file(&other).await.unwrap();
+    let workspace = volume.join("next");
+    tokio::fs::create_dir(&workspace).await.unwrap();
+    let private = workspace.join("unpublished-input");
+    nix::unistd::mkfifo(&private, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    shell_prune(&lease, &volume, &binary).await.unwrap();
+    assert!(sources[2].is_file());
+    tokio::fs::remove_file(private).await.unwrap();
     shell_prune(&lease, &volume, &binary).await.unwrap();
     assert!(!sources[2].exists());
     assert!(sources[3].is_file());

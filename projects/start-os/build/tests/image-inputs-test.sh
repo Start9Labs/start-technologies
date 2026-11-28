@@ -4,6 +4,7 @@ cd "$(dirname -- "$0")/../../../.."
 make --no-print-directory -f - check <<'MAKE'
 include build/common.mk
 required := build/rust-build-profile.sh \
+ projects/start-os/build/lib/scripts/os-image-store \
  projects/start-os/build/lib/scripts/os-image-lock-name \
  projects/start-os/build/lib/scripts/os-image-lock-fd-name \
  projects/start-os/build/lib/scripts/os-public-source-cache-name \

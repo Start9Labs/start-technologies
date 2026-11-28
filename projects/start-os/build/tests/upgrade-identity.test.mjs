@@ -120,6 +120,175 @@ test('emulated reflash delegates identity cleanup to the staged native owner', (
   assert.doesNotMatch(result.stdout, /sudo rm -f[^\n]*disk\.guid/)
 })
 
+test('deployment recipes take their staged root from the shared workspace owner', () => {
+  for (const target of ['start-os-update', 'start-os-emulate-reflash']) {
+    const result = spawnSync(
+      'make',
+      [
+        '--no-print-directory',
+        '--dry-run',
+        target,
+        'STARTOS_TARGETS=',
+        'REMOTE=fixture',
+        'MAKE=true',
+        'STARTOS_REPACK_ROOT=/owned/repack-root',
+      ],
+      { cwd: root, encoding: 'utf8' },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /DESTDIR=\/owned\/repack-root/)
+    assert.match(
+      result.stdout,
+      /sudo \/owned\/repack-root\/usr\/lib\/startos\/scripts\/chroot-and-upgrade/,
+    )
+    assert.doesNotMatch(result.stdout, /\/media\/startos\/next/)
+  }
+})
+
+test('upgrade refreshes missing and legacy workspace helpers before using their paths', t => {
+  const start = upgrade.indexOf('if [ ! -f "$SOURCE_DIR/os-image-store" ]')
+  const stop = upgrade.indexOf(
+    'startos_reserve_image_store /media/startos/config',
+  )
+  assert.ok(start > 0 && stop > start)
+  const loader = upgrade.slice(start, stop)
+  const helper = path.join(
+    root,
+    'projects/start-os/build/lib/scripts/os-image-store',
+  )
+  for (const initial of ['missing', 'legacy', 'current']) {
+    const directory = mkdtempSync(
+      path.join(tmpdir(), 'startos-workspace-loader-'),
+    )
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const trace = path.join(directory, 'extract.log')
+    const volume = path.join(directory, 'volume with space')
+    for (const name of [
+      'os-public-source-cache-name',
+      'os-public-source-prune-name',
+    ]) {
+      writeFileSync(path.join(directory, name), 'present\n')
+    }
+    if (initial !== 'missing') {
+      writeFileSync(
+        path.join(directory, 'os-image-store'),
+        initial === 'current'
+          ? readFileSync(helper)
+          : 'startos_reserve_image_store() { :; }\n',
+      )
+    }
+    const result = spawnSync(
+      'bash',
+      [
+        '-ec',
+        `
+SOURCE_DIR=$1
+unsquashfs() {
+    printf '%s\\n' "$*" >> "$TRACE"
+    cp "$HELPER" "$SOURCE_DIR/os-image-store"
+}
+${loader}
+startos_repack_paths "$2"
+`,
+        'workspace-loader',
+        directory,
+        volume,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, TRACE: trace, HELPER: helper },
+      },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(result.stdout.split('\0'), [
+      path.join(volume, 'next'),
+      path.join(volume, 'upper'),
+      '',
+    ])
+    assert.equal(existsSync(trace), initial !== 'current')
+    if (initial !== 'current') {
+      assert.match(
+        readFileSync(trace, 'utf8'),
+        /-n -f -d \/.*\/usr\/lib\/startos\/scripts\/os-image-store/,
+      )
+    }
+  }
+})
+
+test('private repacks retire partial output before admission and stop on admission failure', t => {
+  const source = read('projects/start-os/build/lib/scripts/chroot-and-upgrade')
+  const prepare = source.match(/^prepare_repack_output\(\) \{[\s\S]*?^\}/m)?.[0]
+  assert.ok(prepare)
+  assert.match(
+    source,
+    /prepare_repack_output "\$REPACK_IMAGE" "\$REPACK_ROOT" \/media\/startos\/config \|\| exit/,
+  )
+  for (const status of [0, 73]) {
+    const directory = mkdtempSync(
+      path.join(tmpdir(), 'startos-repack-admission-'),
+    )
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const tree = path.join(directory, 'root with space')
+    const config = path.join(directory, 'config')
+    const output = path.join(directory, 'next.squashfs')
+    const trace = path.join(directory, 'admission')
+    const built = path.join(directory, 'build-entered')
+    mkdirSync(tree)
+    mkdirSync(config)
+    writeFileSync(path.join(tree, 'private'), 'retained workspace data')
+    writeFileSync(path.join(config, 'selected.rootfs'), 'selected')
+    execFileSync('ln', [
+      '-s',
+      'selected.rootfs',
+      path.join(config, 'current.rootfs'),
+    ])
+    writeFileSync(output, 'incomplete SquashFS')
+    writeFileSync(path.join(directory, 'unrelated'), 'keep')
+    writeFileSync(
+      path.join(directory, 'prune-images'),
+      `#!/bin/bash
+[ ! -e "$OUTPUT" ] || exit 91
+printf '%s\\n' "$1" > "$TRACE"
+exit "$STATUS"
+`,
+      { mode: 0o755 },
+    )
+    const result = spawnSync(
+      'bash',
+      [
+        '-ec',
+        `SOURCE_DIR=$1
+${prepare}
+prepare_repack_output "$OUTPUT" "$TREE" "$CONFIG" || exit
+printf built > "$BUILT"
+`,
+        'repack-admission',
+        directory,
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          OUTPUT: output,
+          TREE: tree,
+          CONFIG: config,
+          TRACE: trace,
+          STATUS: String(status),
+          BUILT: built,
+        },
+      },
+    )
+    assert.equal(result.status, status, result.stderr)
+    assert.equal(existsSync(output), false)
+    assert.equal(existsSync(built), status === 0)
+    assert.match(readFileSync(trace, 'utf8'), /^\d+\n$/)
+    assert.equal(
+      readFileSync(path.join(directory, 'unrelated'), 'utf8'),
+      'keep',
+    )
+  }
+})
+
 test('the OTA script reserves image storage before seeding identity and changing boot state', () => {
   const call = `preserve_server_identity ${runtimePath} ${persistentPath}`
   const seed = upgrade.indexOf(call)

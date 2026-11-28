@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "image_store_repack_tests.rs"]
+mod repack;
+
 #[tokio::test]
 async fn native_namespace_and_oldest_selection_preserve_byte_paths() {
     let root = tempfile::tempdir().unwrap();
