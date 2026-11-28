@@ -130,7 +130,7 @@ start-cli registry package vulnerability add <PACKAGE_ID> <VULNERABILITY_ID> \
 - `--circumstances` and `--impact` are short descriptions of when an exploit applies and what it can do.
 - `--stop-recommended` tells StartOS to recommend stopping the service until it is updated out of the affected range.
 
-The CLI signs the vulnerability with your identity key, binding the signature to the package and the vulnerability ID. StartOS shows a vulnerability only when a key the user trusts for packages signed it. Another trusted signer can cosign by running the same command with identical fields. Changing any field replaces the vulnerability and its signatures. Remove a vulnerability with `start-cli registry package vulnerability remove <PACKAGE_ID> <VULNERABILITY_ID>`.
+The CLI signs the vulnerability with your identity key, binding the signature to the package and the vulnerability ID. StartOS shows a vulnerability only when a key the user trusts for packages signed it. Another authorized signer can cosign by running the same command with identical fields. Changing any field replaces the vulnerability and drops its signatures, and only an admin or one of its current signers can do that. The same rule applies to `start-cli registry package vulnerability remove <PACKAGE_ID> <VULNERABILITY_ID>`, so a publisher cannot withdraw an advisory that another key signed.
 
 ### Mirrors
 
