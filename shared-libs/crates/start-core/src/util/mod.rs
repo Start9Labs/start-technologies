@@ -696,6 +696,7 @@ impl<F: FnOnce() -> T, T> Drop for GeneralGuard<F, T> {
 
 /// The kernel lease lasts until its last inherited descriptor closes.
 /// Existing reservations open without writes, including on frozen filesystems.
+#[derive(Debug)]
 pub struct FileLock(#[allow(unused)] Option<OwnedMutexGuard<()>>, Option<File>);
 
 #[derive(Clone, Copy)]

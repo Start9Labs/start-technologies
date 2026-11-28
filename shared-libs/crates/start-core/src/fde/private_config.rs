@@ -12,7 +12,8 @@
 //! Backing reclamation must preserve live service and network availability.
 //! Its online ownership contract lives in `projects/start-os/FDE.md`.
 //! Projection directory reservations follow prepared generations and legacy replacement
-//! plans through publication or disposal. Runtime mounts retain independent lifetimes.
+//! plans through publication or disposal. Whole-data query views reserve every existing
+//! backing directory they expose. Runtime mounts retain independent lifetimes.
 
 #[cfg(test)]
 #[path = "private_config_tests.rs"]
@@ -115,7 +116,6 @@ async fn resolve_backing(data: &Path, target: &Path) -> Result<(Guid, PathBuf), 
     let relative = confined_relative(relative)?;
     let parent = relative.parent().ok_or_else(|| invalid_layout(target))?;
     let parent_path = data.join(DIRECTORY).join(parent);
-    // Backing identity belongs to its GUID directory, without redirected ancestors.
     if tokio::fs::canonicalize(&parent_path).await?
         != tokio::fs::canonicalize(data)
             .await?
@@ -147,10 +147,18 @@ async fn backing_file(data: &Path, target: &Path) -> Result<PathBuf, Error> {
     Ok(resolve_backing(data, target).await?.1)
 }
 
-async fn reserve_backing(path: &Path, access: FileLockAccess) -> Result<FileLock, Error> {
+pub(super) async fn reserve_backing(
+    path: &Path,
+    access: FileLockAccess,
+) -> Result<FileLock, Error> {
     use std::os::unix::fs::MetadataExt;
 
-    let file = open_file(path).await?;
+    let file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .await
+        .with_ctx(|_| (ErrorKind::Filesystem, path.display()))?;
     let opened = file.metadata().await?;
     let reservation = FileLock::existing(file, access).await?;
     let current = tokio::fs::symlink_metadata(path).await?;
@@ -158,6 +166,29 @@ async fn reserve_backing(path: &Path, access: FileLockAccess) -> Result<FileLock
         return Err(invalid_layout(path));
     }
     Ok(reservation)
+}
+
+/// Retains every backing exposed by a whole-data native query, including unreferenced entries.
+/// The caller excludes namespace changes and retains the opening mount through these uses.
+pub(super) async fn reserve_visible_backings(data: &Path) -> Result<Vec<FileLock>, Error> {
+    let namespace = data.join(DIRECTORY);
+    match tokio::fs::symlink_metadata(&namespace).await {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+        Ok(_) => (),
+    }
+    let mut entries = crate::os_overlay::read_generation_directory(&namespace).await?;
+    require_data_filesystem(data, &namespace).await?;
+    let mut uses = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if entry.file_name().to_str().and_then(Guid::from).is_none() {
+            return Err(invalid_layout(&entry.path()));
+        }
+        let backing = entry.path();
+        uses.push(reserve_backing(&backing, FileLockAccess::Shared).await?);
+        require_data_filesystem(data, &backing).await?;
+    }
+    Ok(uses)
 }
 
 fn reference_nodes(

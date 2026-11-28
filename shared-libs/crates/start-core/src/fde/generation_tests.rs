@@ -7,6 +7,9 @@ use crate::rpc_continuations::Guid;
 use crate::s9pk::merkle_archive::source::multi_cursor_file::MultiCursorFile;
 use crate::util::squashfs::{Entry, NodeContents};
 
+#[path = "generation_lifetime_tests.rs"]
+mod lifetimes;
+
 async fn prepare_test_configuration<D: GenericMountGuard>(
     snapshot: Squashfs<DynFileSource>,
     public: VerityMount,
@@ -23,6 +26,7 @@ async fn prepare_test_configuration<D: GenericMountGuard>(
                 .await?
         );
         let capture = capture_configuration(snapshot, public, data).await?;
+        assert!(!capture.layers.lower().private_backing_uses.is_empty());
         let result = async {
             let image = crate::util::io::open_file(capture.image()).await?;
             let snapshot = Squashfs::deserialize(MultiCursorFile::open(&image).await?)
@@ -70,6 +74,17 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
         .unwrap()
         .with_strict_unmount();
     tokio::fs::create_dir(&store).await.unwrap();
+    let unrelated = data
+        .join(crate::MAIN_FILESYSTEM)
+        .join(crate::fde::private_config::DIRECTORY)
+        .join(Guid::new().to_string());
+    tokio::fs::create_dir_all(&unrelated).await.unwrap();
+    tokio::fs::write(
+        unrelated.join("not-referenced-by-configuration"),
+        b"private ancestor input",
+    )
+    .await
+    .unwrap();
     tokio::fs::write(raw.join("etc/shadow"), b"private-shadow-marker")
         .await
         .unwrap();

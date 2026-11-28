@@ -26,6 +26,7 @@ struct ConfigurationRoots<P: GenericMountGuard, D: GenericMountGuard> {
     base: P,
     data: D,
     workspace: PathBuf,
+    private_backing_uses: Vec<crate::util::FileLock>,
 }
 
 impl<P: GenericMountGuard, D: GenericMountGuard> GenericMountGuard for ConfigurationRoots<P, D> {
@@ -35,6 +36,7 @@ impl<P: GenericMountGuard, D: GenericMountGuard> GenericMountGuard for Configura
 
     async fn unmount(self) -> Result<(), Error> {
         let base = self.base.unmount().await;
+        drop(self.private_backing_uses);
         let data = self.data.unmount().await;
         // Mount failures can leave live data beneath the workspace.
         let workspace = tokio::fs::remove_dir(self.workspace)
@@ -63,6 +65,7 @@ async fn query(root: &Path, configuration: &Path) -> Result<Vec<PathBuf>, Error>
 }
 
 /// Private immutable inputs; borrowed file sources require these mounts to remain alive.
+/// Whole-ancestor backing reservations follow the owned query views through cleanup.
 /// Capture completion releases no source reservations owned by the caller.
 pub(crate) struct CapturedConfiguration<P: GenericMountGuard, D: GenericMountGuard> {
     layers: VerifiedMounts<ConfigurationRoots<P, D>>,
@@ -95,6 +98,10 @@ pub(crate) async fn capture_configuration<P: GenericMountGuard, D: GenericMountG
 ) -> Result<CapturedConfiguration<P, D>, Error> {
     complete_owned_operation(async move {
         let memory = super::memory::ProcessSecretMemory::protect()?;
+        let private_backing_uses = super::private_config::reserve_visible_backings(
+            &data.path().join(crate::MAIN_FILESYSTEM),
+        )
+        .await?;
         let workspace = TmpDir::new().await?;
         let directory = workspace.to_path_buf();
         workspace.leak();
@@ -102,6 +109,7 @@ pub(crate) async fn capture_configuration<P: GenericMountGuard, D: GenericMountG
             base,
             data,
             workspace: directory.clone(),
+            private_backing_uses,
         });
         let captured = directory.join("configuration.squashfs");
         let configuration = directory.join("configuration");
