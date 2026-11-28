@@ -11,29 +11,25 @@ async fn prepare_test_configuration<D: GenericMountGuard>(
     snapshot: Squashfs<DynFileSource>,
     public: VerityMount,
     data: D,
+    backing_data: PathBuf,
     store: PathBuf,
     key: PKey<Private>,
 ) -> Result<(PreparedGeneration, LegacyReplacements), Error> {
     complete_owned_operation(async move {
         let memory = super::super::memory::ProcessSecretMemory::protect()?;
         let rootfs = public.image_path().to_owned();
+        assert!(
+            crate::util::io::same_file(&data.path().join(crate::MAIN_FILESYSTEM), &backing_data)
+                .await?
+        );
         let capture = capture_configuration(snapshot, public, data).await?;
         let result = async {
             let image = crate::util::io::open_file(capture.image()).await?;
             let snapshot = Squashfs::deserialize(MultiCursorFile::open(&image).await?)
                 .await?
                 .into_dyn();
-            let projected = ProjectedConfig::stage(
-                snapshot,
-                &capture
-                    .layers
-                    .lower()
-                    .data
-                    .path()
-                    .join(crate::MAIN_FILESYSTEM),
-                capture.host_keys(),
-            )
-            .await?;
+            let projected =
+                ProjectedConfig::stage(snapshot, &backing_data, capture.host_keys()).await?;
             let prepared = projected.prepare_generation(&rootfs, &store, &key).await?;
             let legacy = projected.legacy_replacements();
             memory.check()?;
@@ -125,10 +121,16 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
         .with_strict_unmount();
     let snapshot = Squashfs::from_directory(&raw).await.unwrap().into_dyn();
     let key = crate::os_overlay::generate_signing_key().unwrap();
-    let (prepared, legacy) =
-        prepare_test_configuration(snapshot, public, mounted_data, store.clone(), key)
-            .await
-            .unwrap();
+    let (prepared, legacy) = prepare_test_configuration(
+        snapshot,
+        public,
+        mounted_data,
+        data.join("main"),
+        store.clone(),
+        key,
+    )
+    .await
+    .unwrap();
     assert!(
         !crate::disk::mount::util::is_mountpoint(&source)
             .await
@@ -179,6 +181,7 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
             .is_symlink()
     );
 
+    drop(legacy);
     tokio::fs::write(raw.join("etc/ssl/openssl.cnf"), b"config_diagnostics = 1\nopenssl_conf = init\n[init]\nalg_section = algorithms\n[algorithms]\ndefault_properties = fips=yes\n").await.unwrap();
     let snapshot = Squashfs::from_directory(&raw).await.unwrap().into_dyn();
     let public = verity
@@ -199,6 +202,7 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
             snapshot,
             public,
             mounted_data,
+            data.join("main"),
             store.clone(),
             crate::os_overlay::generate_signing_key().unwrap()
         )
@@ -246,6 +250,7 @@ async fn authorized_configuration_uses_prospective_native_inputs_and_redacts_bef
             snapshot,
             public,
             mounted_data,
+            data.join("main"),
             store.clone(),
             crate::os_overlay::generate_signing_key().unwrap(),
         ),

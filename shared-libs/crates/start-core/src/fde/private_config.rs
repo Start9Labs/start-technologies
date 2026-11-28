@@ -250,6 +250,7 @@ fn snapshot_directory<'a>(
 
 impl ProjectedConfig {
     /// Requires an unlocked encrypted data mount and quiescent source paths.
+    /// The supplied data mount must outlive prepared generations and legacy replacement plans.
     /// Supply both native default and prospective HostKey paths from the admitted root.
     /// Discards prior bootstrap input; complete boot publication requires fresh sealed credentials.
     /// Native destination-path admission precedes private directory-tree creation.
