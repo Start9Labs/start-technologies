@@ -40,6 +40,7 @@ const IMAGES: &str = "/media/startos/images";
 const CONFIGURATION: &str = "/media/startos/config/overlay";
 const CAPTURE_FILE: &str = "configuration.squashfs";
 const KEYS_FILE: &str = "host-keys.json";
+const BACKINGS_FILE: &str = "backing-references.json";
 const PROFILES_FILE: &str = "network-profiles.json";
 const PROFILE_CONTENTS: &str = "network-profiles";
 
@@ -317,7 +318,7 @@ async fn request(path: &Path) -> Result<ReadEpoch, Error> {
         .with_kind(ErrorKind::Deserialization)?)
 }
 
-/// Nonsecret paths and timestamps only; credential bytes use raw archive members.
+/// Nonsecret metadata only; credential bytes use raw archive members.
 fn append_json<T: Serialize>(
     archive: &mut tar::Builder<std::fs::File>,
     name: &str,
@@ -365,7 +366,7 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
     epoch.enter().await?;
     let result = async {
         let snapshot = epoch.snapshot().await?;
-        configuration_backings(
+        let backings = configuration_backings(
             Path::new("/"),
             &epoch.base_root,
             &epoch.data_root.join(crate::MAIN_FILESYSTEM),
@@ -394,6 +395,7 @@ pub(crate) async fn run(path: &Path) -> Result<(), Error> {
                 let mut archive = tar::Builder::new(stdout);
                 archive.append_file(CAPTURE_FILE, &mut std::fs::File::open(image)?)?;
                 append_json(&mut archive, KEYS_FILE, &keys)?;
+                append_json(&mut archive, BACKINGS_FILE, &backings)?;
                 append_profiles(&mut archive, &profiles)?;
                 archive.into_inner()?;
                 Ok(())
@@ -592,17 +594,18 @@ async fn receive(
         tokio::fs::File,
         Vec<PathBuf>,
         crate::net::wifi::NetworkProfiles,
+        std::collections::BTreeSet<Guid>,
     ),
     Error,
 > {
     archive.rewind().await?;
     let archive = archive.into_std().await;
     let output = anonymous_file()?.into_std().await;
-    let (output, keys, profiles) =
+    let (output, keys, profiles, backings) =
         tokio::task::spawn_blocking(move || receive_archive(archive, output))
             .await
             .with_kind(ErrorKind::Unknown)??;
-    Ok((tokio::fs::File::from_std(output), keys, profiles))
+    Ok((tokio::fs::File::from_std(output), keys, profiles, backings))
 }
 
 fn receive_archive(
@@ -613,6 +616,7 @@ fn receive_archive(
         std::fs::File,
         Vec<PathBuf>,
         crate::net::wifi::NetworkProfiles,
+        std::collections::BTreeSet<Guid>,
     ),
     Error,
 > {
@@ -623,6 +627,7 @@ fn receive_archive(
     archive.set_ignore_zeros(true);
     let mut snapshot = false;
     let mut keys = None;
+    let mut backings = None;
     let mut metadata: Option<std::collections::BTreeMap<String, (i64, i64)>> = None;
     let mut profiles = crate::net::wifi::NetworkProfiles::new();
     for entry in archive.entries_with_seek()? {
@@ -643,6 +648,17 @@ fn receive_archive(
                 let paths: Vec<OsString> =
                     serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?;
                 keys = Some(paths.into_iter().map(PathBuf::from).collect());
+            }
+            path if path == Path::new(BACKINGS_FILE) && backings.is_none() => {
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes)?;
+                let ids: std::collections::BTreeSet<String> =
+                    serde_json::from_slice(&bytes).with_kind(ErrorKind::Deserialization)?;
+                backings = Some(
+                    ids.into_iter()
+                        .map(|id| Guid::from(&id).ok_or_else(invalid_source))
+                        .collect::<Result<std::collections::BTreeSet<_>, _>>()?,
+                );
             }
             path if path == Path::new(PROFILES_FILE) && metadata.is_none() => {
                 let mut bytes = Vec::new();
@@ -682,7 +698,12 @@ fn receive_archive(
     if !snapshot || !metadata.is_some_and(|values| values.is_empty()) {
         return Err(invalid_source());
     }
-    Ok((output, keys.ok_or_else(invalid_source)?, profiles))
+    Ok((
+        output,
+        keys.ok_or_else(invalid_source)?,
+        profiles,
+        backings.ok_or_else(invalid_source)?,
+    ))
 }
 
 /// Executable and request paths must be literal systemd arguments.
@@ -697,6 +718,7 @@ async fn capture_in_unit(
         tokio::fs::File,
         Vec<PathBuf>,
         crate::net::wifi::NetworkProfiles,
+        std::collections::BTreeSet<Guid>,
     ),
     Error,
 > {
@@ -827,7 +849,7 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     let unit = format!("startos-fde-capture-{}", Guid::new());
     let captured = capture_in_unit(&epoch, Path::new("/usr/bin/startbox"), &unit, &images).await;
     drop(pause);
-    let (image, keys, profiles) = captured?;
+    let (image, keys, profiles, backings) = captured?;
     credentials.network_profiles = profiles;
     let snapshot = Squashfs::deserialize(MultiCursorFile::from(image))
         .await?
@@ -850,6 +872,9 @@ pub(crate) async fn prepare(ctx: &RpcContext) -> Result<(), Error> {
     let mut projected =
         ProjectedConfig::stage(snapshot, Path::new(crate::MAIN_DATA), &keys).await?;
     let prepared = async {
+        projected
+            .retain_backings(Path::new(crate::MAIN_DATA), &backings)
+            .await?;
         projected.insert_bootstrap(sealed)?;
         projected
             .prepare_generation(&rootfs, &store, &enrollment.manifest_key)

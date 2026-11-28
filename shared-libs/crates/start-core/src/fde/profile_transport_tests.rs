@@ -12,6 +12,12 @@ async fn transported(profiles: &NetworkProfiles) -> NetworkProfiles {
         .append_data(&mut header, CAPTURE_FILE, std::io::empty())
         .unwrap();
     append_json(&mut archive, KEYS_FILE, &Vec::<OsString>::new()).unwrap();
+    append_json(
+        &mut archive,
+        BACKINGS_FILE,
+        &std::collections::BTreeSet::<Guid>::new(),
+    )
+    .unwrap();
     append_profiles(&mut archive, profiles).unwrap();
     receive(tokio::fs::File::from_std(archive.into_inner().unwrap()))
         .await

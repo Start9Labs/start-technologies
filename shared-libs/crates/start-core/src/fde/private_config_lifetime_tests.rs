@@ -136,6 +136,54 @@ async fn whole_private_ancestor_uses_include_unreferenced_backings_and_keep_writ
 }
 
 #[tokio::test]
+async fn captured_dependencies_outside_the_overlay_follow_prepared_generation_ownership() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::captured_dependencies_outside_the_overlay_follow_prepared_generation_ownership").await {
+        return;
+    }
+    let (root, raw, data) = fixture().await;
+    let base = project(&raw, &data, &[]).await;
+    let backing = base.new_backing.clone().unwrap();
+    let id = Guid::from(backing.file_name().unwrap().to_str().unwrap()).unwrap();
+    let mut projected = project(&raw, &data, &[]).await;
+    projected
+        .retain_backings(&data, &BTreeSet::from([id]))
+        .await
+        .unwrap();
+    let prepared = reclamation::prepare(&projected, root.path()).await;
+    assert!(base.discard().await.is_err());
+    assert!(backing.is_dir());
+    drop(projected);
+    assert!(
+        reserve_backing(&backing, FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    prepared.discard().await.unwrap();
+    reserve_backing(&backing, FileLockAccess::Exclusive)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn missing_captured_dependency_rejects_preparation_and_retains_existing_data() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::missing_captured_dependency_rejects_preparation_and_retains_existing_data").await {
+        return;
+    }
+    let (_root, raw, data) = fixture().await;
+    let mut projected = project(&raw, &data, &[]).await;
+    let backing = projected.new_backing.clone().unwrap();
+    assert!(
+        projected
+            .retain_backings(&data, &BTreeSet::from([Guid::new()]))
+            .await
+            .is_err()
+    );
+    assert!(backing.is_dir());
+    projected.discard().await.unwrap();
+    assert!(!backing.exists());
+}
+
+#[tokio::test]
 async fn visible_backing_uses_reject_unknown_redirected_and_special_entries_without_leaks() {
     if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::visible_backing_uses_reject_unknown_redirected_and_special_entries_without_leaks").await {
         return;

@@ -13,7 +13,8 @@
 //! Its online ownership contract lives in `projects/start-os/FDE.md`.
 //! Projection directory reservations follow prepared generations and legacy replacement
 //! plans through publication or disposal. Whole-data query views reserve every existing
-//! backing directory they expose. Runtime mounts retain independent lifetimes.
+//! backing directory they expose. Captured independent-root dependencies follow projected
+//! snapshots, prepared generations and legacy plans. Runtime mounts retain independent lifetimes.
 
 #[cfg(test)]
 #[path = "private_config_tests.rs"]
@@ -168,6 +169,13 @@ pub(super) async fn reserve_backing(
     Ok(reservation)
 }
 
+async fn reserve_backing_id(data: &Path, id: &Guid) -> Result<FileLock, Error> {
+    let path = data.join(DIRECTORY).join(id.to_string());
+    let reservation = reserve_backing(&path, FileLockAccess::Shared).await?;
+    require_data_filesystem(data, &path).await?;
+    Ok(reservation)
+}
+
 /// Retains every backing exposed by a whole-data native query, including unreferenced entries.
 /// The caller excludes namespace changes and retains the opening mount through these uses.
 pub(super) async fn reserve_visible_backings(data: &Path) -> Result<Vec<FileLock>, Error> {
@@ -181,12 +189,12 @@ pub(super) async fn reserve_visible_backings(data: &Path) -> Result<Vec<FileLock
     require_data_filesystem(data, &namespace).await?;
     let mut uses = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
-        if entry.file_name().to_str().and_then(Guid::from).is_none() {
-            return Err(invalid_layout(&entry.path()));
-        }
-        let backing = entry.path();
-        uses.push(reserve_backing(&backing, FileLockAccess::Shared).await?);
-        require_data_filesystem(data, &backing).await?;
+        let id = entry
+            .file_name()
+            .to_str()
+            .and_then(Guid::from)
+            .ok_or_else(|| invalid_layout(&entry.path()))?;
+        uses.push(reserve_backing_id(data, &id).await?);
     }
     Ok(uses)
 }
@@ -387,11 +395,8 @@ impl ProjectedConfig {
         let mut private_backing_uses = Vec::new();
         for (path, target) in &replacements {
             let (id, backing) = resolve_backing(data, target).await?;
-            let directory = data.join(DIRECTORY).join(id.to_string());
-            if reserved.insert(id) {
-                private_backing_uses.push(Arc::new(
-                    reserve_backing(&directory, FileLockAccess::Shared).await?,
-                ));
+            if reserved.insert(id.clone()) {
+                private_backing_uses.push(Arc::new(reserve_backing_id(data, &id).await?));
             }
             open_file(&backing).await?.sync_all().await?;
             open_file(backing.parent().expect("credential parent"))
@@ -419,19 +424,18 @@ impl ProjectedConfig {
         if aliases.is_empty() {
             return Ok(projected);
         }
-        let id = Guid::new().to_string();
+        let id = Guid::new();
         create_directory_beneath(data, Path::new(DIRECTORY))?;
-        let backing = data.join(DIRECTORY).join(&id);
+        let backing = data.join(DIRECTORY).join(id.to_string());
         tokio::fs::DirBuilder::new()
             .mode(0o700)
             .create(&backing)
             .await?;
         projected.new_backing = Some(backing.clone());
         let result = async {
-            require_data_filesystem(data, &backing).await?;
-            projected.private_backing_uses.push(Arc::new(
-                reserve_backing(&backing, FileLockAccess::Shared).await?,
-            ));
+            projected
+                .private_backing_uses
+                .push(Arc::new(reserve_backing_id(data, &id).await?));
             use std::os::unix::fs::PermissionsExt;
             tokio::fs::set_permissions(
                 data.join(DIRECTORY),
@@ -483,7 +487,7 @@ impl ProjectedConfig {
                     if path != canonical {
                         tokio::fs::hard_link(&destination, backing.join(&path)).await?;
                     }
-                    let target = Path::new(RUNTIME).join(&id).join(&path);
+                    let target = Path::new(RUNTIME).join(id.to_string()).join(&path);
                     projected
                         .snapshot
                         .contents_mut()
@@ -553,6 +557,21 @@ impl ProjectedConfig {
         credentials: super::credentials::SealedCredentials,
     ) -> Result<(), Error> {
         credentials.insert_into(&mut self.snapshot)
+    }
+
+    /// The caller preserves captured namespace identity until these stable-mount uses exist.
+    /// Acquire dependencies before deriving prepared generations or legacy plans.
+    /// Dependencies retain no content-write exclusion or reclamation authority.
+    pub(crate) async fn retain_backings(
+        &mut self,
+        data: &Path,
+        backings: &BTreeSet<Guid>,
+    ) -> Result<(), Error> {
+        for id in backings {
+            self.private_backing_uses
+                .push(Arc::new(reserve_backing_id(data, id).await?));
+        }
+        Ok(())
     }
 
     pub(crate) async fn prepare_generation(

@@ -11,6 +11,8 @@ use super::*;
 
 #[path = "configuration_reference_tests.rs"]
 mod configuration_references;
+#[path = "capture_dependency_tests.rs"]
+mod dependencies;
 #[path = "capture_lifecycle_tests.rs"]
 mod lifecycle;
 #[path = "profile_transport_tests.rs"]
@@ -45,6 +47,14 @@ async fn transport(profiles: bool) -> tokio::fs::File {
         &vec![OsString::from_vec(b"/key-\xff".to_vec())],
     )
     .unwrap();
+    append_json(
+        &mut archive,
+        BACKINGS_FILE,
+        &std::collections::BTreeSet::from(
+            [Guid::from("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap()],
+        ),
+    )
+    .unwrap();
     if profiles {
         append_profiles(
             &mut archive,
@@ -63,7 +73,11 @@ async fn transport(profiles: bool) -> tokio::fs::File {
 
 #[tokio::test]
 async fn capture_transport_keeps_private_profiles_and_native_paths_in_owned_memory() {
-    let (mut image, keys, profiles) = receive(transport(true).await).await.unwrap();
+    let (mut image, keys, profiles, backings) = receive(transport(true).await).await.unwrap();
+    assert_eq!(
+        backings,
+        std::collections::BTreeSet::from([Guid::from("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap()])
+    );
     let mut contents = Zeroizing::new(Vec::new());
     image.read_to_end(&mut contents).await.unwrap();
     assert_eq!(&*contents, b"private configuration bytes");
@@ -520,7 +534,17 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
         .await
         .unwrap();
     drop(gate);
-    let (image, keys, profiles) = capture.await.unwrap();
+    let (image, keys, profiles, backings) = capture.await.unwrap();
+    assert_eq!(
+        backings,
+        std::collections::BTreeSet::from([
+            current_id,
+            published_id,
+            stored_id,
+            selected_id,
+            pinned_id
+        ])
+    );
     assert_eq!(
         profiles
             .get("private.nmconnection")
@@ -557,10 +581,14 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
         .await
         .unwrap()
         .into_dyn();
-    let projected =
+    let mut projected =
         ProjectedConfig::stage(snapshot, &fixture.volume.path().join("data/main"), &keys)
             .await
             .unwrap();
+    projected
+        .retain_backings(&fixture.volume.path().join("data/main"), &backings)
+        .await
+        .unwrap();
     let source = PathBuf::from(std::env::var_os("FDE_SOURCE_IMAGE").unwrap());
     let signing = crate::os_overlay::generate_signing_key().unwrap();
     let prepared = projected
