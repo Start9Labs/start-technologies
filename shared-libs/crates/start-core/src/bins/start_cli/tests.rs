@@ -10,6 +10,13 @@ const CHILD_ARGS: &str = "START_CLI_OUTPUT_ARGS";
 const BROKEN_STREAM: &str = "START_CLI_BROKEN_STREAM";
 
 #[test]
+fn fde_enrollment_is_rpc_only() {
+    let command = super::app().into_command();
+    let server = command.find_subcommand("server").unwrap();
+    assert!(server.find_subcommand("fde").is_none());
+}
+
+#[test]
 fn binding_reassign_port_accepts_server_and_package_targets() {
     for prefix in [
         vec!["start-cli", "server", "host", "binding"],

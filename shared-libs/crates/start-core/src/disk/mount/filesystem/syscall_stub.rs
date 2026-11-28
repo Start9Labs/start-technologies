@@ -40,6 +40,14 @@ pub fn open_tree_clone(_path: &Path, _recursive: bool) -> Result<OwnedFd, Error>
     unsupported()
 }
 
+pub fn open_tree_private(
+    _path: &Path,
+    _recursive: bool,
+    _readonly: bool,
+) -> Result<OwnedFd, Error> {
+    unsupported()
+}
+
 pub fn unmount_fd(_mount: BorrowedFd) -> Result<(), Error> {
     unsupported()
 }
@@ -73,6 +81,9 @@ impl DetachedMount {
         unsupported()
     }
     pub fn set_private(&self) -> Result<(), Error> {
+        unsupported()
+    }
+    pub fn set_slave(&self) -> Result<(), Error> {
         unsupported()
     }
     pub fn configure_bind(&self, _readonly: bool) -> Result<(), Error> {

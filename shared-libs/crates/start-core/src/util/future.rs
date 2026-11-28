@@ -266,6 +266,69 @@ impl<'a> Until<'a> {
     }
 }
 
+/// Caller cancellation abandons the result, not the owned operation.
+/// Propagates the original panic payload.
+pub(crate) async fn complete_owned_operation<T: Send + 'static>(
+    operation: impl Future<Output = Result<T, Error>> + Send + 'static,
+) -> Result<T, Error> {
+    match tokio::spawn(operation).await {
+        Ok(result) => result,
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => Err(Error::new(error, ErrorKind::Filesystem)),
+    }
+}
+
+#[tokio::test]
+async fn complete_owned_operation_propagates_original_panic() {
+    use std::panic::{AssertUnwindSafe, panic_any};
+    use std::sync::Arc;
+
+    let payload = Arc::new(42);
+    let expected = payload.clone();
+    let error = AssertUnwindSafe(complete_owned_operation::<()>(
+        async move { panic_any(payload) },
+    ))
+    .catch_unwind()
+    .await
+    .unwrap_err();
+    assert!(Arc::ptr_eq(
+        error.downcast_ref::<Arc<i32>>().unwrap(),
+        &expected
+    ));
+}
+
+/// Preserves the operation's failure, logging a secondary cleanup failure.
+pub(crate) fn finish_with_cleanup<T>(
+    result: Result<T, Error>,
+    cleanup: Result<(), Error>,
+) -> Result<T, Error> {
+    match result {
+        Ok(value) => cleanup.map(|()| value),
+        Err(error) => {
+            cleanup.log_err();
+            Err(error)
+        }
+    }
+}
+
+#[test]
+fn cleanup_failure_does_not_replace_the_operation_failure() {
+    let failure = || Error::new(eyre!("operation"), ErrorKind::InvalidRequest);
+    let cleanup = || Error::new(eyre!("cleanup"), ErrorKind::Filesystem);
+    assert_eq!(finish_with_cleanup(Ok(42), Ok(())).unwrap(), 42);
+    assert_eq!(
+        finish_with_cleanup(Ok(42), Err(cleanup()))
+            .unwrap_err()
+            .kind,
+        ErrorKind::Filesystem
+    );
+    for cleanup in [Ok(()), Err(cleanup())] {
+        let error = finish_with_cleanup::<()>(Err(failure()), cleanup).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+        assert_eq!(error.source.to_string(), "operation");
+    }
+}
+
 pub async fn make_send<F, Fut, T>(f: F) -> Result<T, Error>
 where
     F: FnOnce() -> Fut + Send + 'static,

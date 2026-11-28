@@ -1,0 +1,9 @@
+[Unit]
+Description=StartOS password unlock
+DefaultDependencies=no
+Requires=sysinit.target
+After=sysinit.target
+Wants=NetworkManager.service systemd-resolved.service systemd-timesyncd.service avahi-daemon.service startd.service
+Conflicts=shutdown.target
+Before=shutdown.target
+AllowIsolate=yes

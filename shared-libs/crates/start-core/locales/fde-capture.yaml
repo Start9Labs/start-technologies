@@ -1,0 +1,6 @@
+fde.capture.unsupported-filesystem:
+  en_US: 'Full-disk encryption enrollment requires Btrfs at %{path}.'
+  de_DE: 'Die Registrierung der vollständigen Datenträgerverschlüsselung erfordert Btrfs unter %{path}.'
+  es_ES: 'La inscripción en el cifrado de disco completo requiere Btrfs en %{path}.'
+  fr_FR: 'L’inscription au chiffrement intégral du disque nécessite Btrfs sur %{path}.'
+  pl_PL: 'Włączenie szyfrowania całego dysku wymaga Btrfs w %{path}.'

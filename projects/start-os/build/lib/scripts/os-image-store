@@ -1,0 +1,130 @@
+#!/bin/bash
+
+startos_reserve_image_store() {
+    local configuration=$1 name variable path descriptor
+    read -r name < "$(dirname -- "${BASH_SOURCE[0]}")/os-image-lock-name"
+    read -r variable < "$(dirname -- "${BASH_SOURCE[0]}")/os-image-lock-fd-name"
+    path="$configuration/$name"
+    descriptor=${!variable-}
+    # An inherited descriptor must name the actual lock file.
+    if ! [[ $descriptor =~ ^[0-9]+$ && /proc/self/fd/$descriptor -ef $path ]]; then
+        if ! [[ -e $path ]]; then
+            (set -o noclobber; : >"$path") 2>/dev/null || [[ -f $path ]] || return
+        fi
+        exec {descriptor}<"$path" || return
+        printf -v "$variable" '%s' "$descriptor"
+        export "$variable"
+    fi
+    flock --exclusive "$descriptor"
+}
+
+startos_repack_root() {
+    printf '%s/next' "$1"
+}
+
+startos_repack_upper() {
+    printf '%s/upper' "$1"
+}
+
+startos_repack_paths() {
+    printf '%s\0' "$(startos_repack_root "$1")" "$(startos_repack_upper "$1")"
+}
+
+startos_prune_public_sources() {
+    local volume=$1 name tool
+    startos_reserve_image_store "$volume/config" || return
+    read -r name < "$(dirname -- "${BASH_SOURCE[0]}")/os-public-source-cache-name" || return
+    if [[ -e "$volume/images/$name" || -L "$volume/images/$name" ]]; then
+        read -r tool < "$(dirname -- "${BASH_SOURCE[0]}")/os-public-source-prune-name" || return
+        startbox "$tool" "$volume" || return
+    fi
+}
+
+# NUL-delimited, newest first; callers retain the image-store lease.
+startos_image_paths() (
+    local images=$1 path
+    [[ -d $images && ! -L $images && -r $images && -x $images ]] || return 1
+    shopt -s nullglob
+    local -a paths=("$images"/*.rootfs "$images"/*.squashfs)
+    ((${#paths[@]})) || return 0
+    for path in "${paths[@]}"; do
+        [[ -f $path && ! -L $path ]] || return 1
+    done
+    LC_ALL=C ls -dt --zero -- "${paths[@]}"
+)
+
+startos_oldest_unselected_image() (
+    set -o pipefail
+    local images=$1 current=$2
+    startos_image_paths "$images" | {
+        local path oldest=''
+        while IFS= read -r -d '' path; do
+            if [[ $path != "$current" ]]; then
+                oldest=$path
+            fi
+        done
+        printf '%s' "$oldest"
+    }
+)
+
+startos_newest_rootfs() (
+    set -o pipefail
+    startos_image_paths "$1" | {
+        local path newest=''
+        while IFS= read -r -d '' path; do
+            if [[ -z $newest && $path == *.rootfs ]]; then
+                newest=$path
+            fi
+        done
+        printf '%s' "$newest"
+    }
+)
+
+# The caller holds the image-store lease; initramfs fallback may leave no pointer.
+startos_repair_image_selection() {
+    local volume=$1 newest
+    if ! [ -h "$volume/config/current.rootfs" ] || ! [ -e "$volume/config/current.rootfs" ]; then
+        newest="$(startos_newest_rootfs "$volume/images")" || return
+        if [ -f "$newest" ]; then
+            echo "Recreating missing current.rootfs -> $newest"
+            ln -rsf "$newest" "$volume/config/current.rootfs" || return
+        fi
+    fi
+}
+
+startos_selected_image() {
+    local pointer="$1/current.rootfs" target
+    [[ -h $pointer && -e $pointer ]] || return 1
+    IFS= read -r -d '' target < <(readlink -ez -- "$pointer") || return
+    [[ -f $target && ! -L $target ]] || return 1
+    printf '%s\0' "$target"
+}
+
+startos_prune_images() {
+    local volume=$1 needed=$2 margin=$3 current to_prune
+    local target=$((needed + margin))
+    startos_reserve_image_store "$volume/config" || return
+    startos_repair_image_selection "$volume" || return
+
+    if [ -h "$volume/config/current.rootfs" ] && [ -e "$volume/config/current.rootfs" ]; then
+        startos_prune_public_sources "$volume" || return
+        echo 'Pruning...'
+        IFS= read -r -d '' current < <(startos_selected_image "$volume/config") || return
+        while [[ "$(df -B1 --output=avail --sync "$volume/images" | tail -n1)" -lt "$target" ]]; do
+            to_prune="$(startos_oldest_unselected_image "$volume/images" "$current")" || return
+            if [ -e "$to_prune" ]; then
+                echo "  Pruning $to_prune"
+                rm -rf "$to_prune" || return
+                startos_prune_public_sources "$volume" || return
+                sync || return
+            else
+                >&2 echo "Not enough space and nothing to prune!"
+                return 1
+            fi
+        done
+        echo 'done.'
+    else
+        >&2 echo 'No current.rootfs, not safe to prune'
+        return 1
+    fi
+}

@@ -28,12 +28,12 @@ in the same build checkout before Cargo.
 
 - `cargo check -p start-core` — type-check the library.
 - `make start-core-test` — run the start-core and exver test suites (wraps `run-tests.sh`, which builds `testenv.Dockerfile`
-  over the Rust builder with Node 24 and SquashFS oracle tools, uses the `test` and `ts` features and the
+  over the Rust builder with Node 24, SquashFS/verity and native archive tools, uses the `test` and `ts` features and the
   `unit-test` Cargo profile, and skips `export_` tests). `RUST_BUILDER_IMAGE` selects a prebuilt test image instead. Or run a single
   test directly: `cargo test -p start-core <name> --features=test` (add `ts` for binding tests).
   The runner also executes the conversion worker lifecycle cases with the controlled `testdata/backup-conversion` subprocess fixture on PATH. The ignored `real_helper_converts_the_frozen_backup_through_the_background_worker` case instead requires the built real `startos-backup-fs` on PATH.
-  Native SquashFS interoperability tests require `mksquashfs` and `unsquashfs`; backup filesystem
-  tests require `btrfs-progs`; manifest tests require Node.
+  Native SquashFS interoperability tests require `mksquashfs`, `unsquashfs` and `veritysetup`; backup filesystem
+  tests require `btrfs-progs`; manifest tests require Node. Descriptor preparation tests use actual Node/CPIO/gzip data archives without mount privileges or firmware.
 - `make start-core-format` — format the shared Rust crates with the pinned nightly container (`make start-core-format-check` checks formatting). Set `FMT_NATIVE=1` only when that nightly is installed locally.
 - `cargo build -p start-os --bin startbox` (or the other product crate/bin) to build a binary.
 

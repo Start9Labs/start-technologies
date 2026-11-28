@@ -1,0 +1,256 @@
+use super::*;
+
+#[tokio::test]
+async fn reused_backings_admit_concurrent_projections_and_live_credential_writes() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::reused_backings_admit_concurrent_projections_and_live_credential_writes").await {
+        return;
+    }
+    let (_root, raw, data) = fixture().await;
+    let initial = project(&raw, &data, &[]).await;
+    let backing = backing_directory(&data, target(&initial, "etc/shadow")).await;
+    let credential = backing_file(&data, target(&initial, "etc/shadow"))
+        .await
+        .unwrap();
+    let resumed = ProjectedConfig::stage(initial.snapshot.clone(), &data, &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        backing_directory(&data, target(&resumed, "etc/shadow")).await,
+        backing
+    );
+    assert_eq!(backing_ids(&data).await.unwrap().len(), 1);
+    assert!(
+        reserve_backing(&backing, FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    tokio::fs::write(&credential, b"changed-while-projected")
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read(&credential).await.unwrap(),
+        b"changed-while-projected"
+    );
+    drop(initial);
+    assert!(
+        reserve_backing(&backing, FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    let snapshot = resumed.snapshot.clone();
+    drop(resumed);
+    let retirement = reserve_backing(&backing, FileLockAccess::Exclusive)
+        .await
+        .unwrap();
+    assert!(
+        ProjectedConfig::stage(snapshot.clone(), &data, &[])
+            .await
+            .is_err()
+    );
+    drop(retirement);
+    ProjectedConfig::stage(snapshot, &data, &[]).await.unwrap();
+}
+
+#[tokio::test]
+async fn prepared_generation_retains_backing_uses_after_projection_drop() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::prepared_generation_retains_backing_uses_after_projection_drop").await {
+        return;
+    }
+    let (root, raw, data) = fixture().await;
+    let projected = project(&raw, &data, &[]).await;
+    let backing = backing_directory(&data, target(&projected, "etc/shadow")).await;
+    let prepared = reclamation::prepare(&projected, root.path()).await;
+    drop(projected);
+    assert!(
+        reserve_backing(&backing, FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    prepared.discard().await.unwrap();
+    reserve_backing(&backing, FileLockAccess::Exclusive)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn pending_legacy_replacement_retains_fresh_backing_during_disposal() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::pending_legacy_replacement_retains_fresh_backing_during_disposal").await {
+        return;
+    }
+    let (_root, raw, data) = fixture().await;
+    let projected = project(&raw, &data, &[]).await;
+    let backing = backing_directory(&data, target(&projected, "etc/shadow")).await;
+    let credential = backing_file(&data, target(&projected, "etc/shadow"))
+        .await
+        .unwrap();
+    let legacy = projected.legacy_replacements();
+    drop(projected);
+    assert_eq!(
+        tokio::fs::read(credential).await.unwrap(),
+        b"private-shadow"
+    );
+    assert!(
+        reserve_backing(&backing, FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    drop(legacy);
+    reserve_backing(&backing, FileLockAccess::Exclusive)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn whole_private_ancestor_uses_include_unreferenced_backings_and_keep_writes_live() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::whole_private_ancestor_uses_include_unreferenced_backings_and_keep_writes_live").await {
+        return;
+    }
+    let (_root, raw, data) = fixture().await;
+    let projected = project(&raw, &data, &[]).await;
+    let backing = backing_directory(&data, target(&projected, "etc/shadow")).await;
+    let orphan = data.join(DIRECTORY).join(Guid::new().to_string());
+    tokio::fs::create_dir(&orphan).await.unwrap();
+    let credential = orphan.join("not-in-the-snapshot");
+    tokio::fs::write(&credential, b"before query")
+        .await
+        .unwrap();
+    let uses = reserve_visible_backings(&data).await.unwrap();
+    assert_eq!(uses.len(), 2);
+    drop(projected);
+    assert!(backing.is_dir());
+    assert!(
+        reserve_backing(&orphan, FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    tokio::fs::write(&credential, b"live credential write")
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read(credential).await.unwrap(),
+        b"live credential write"
+    );
+    drop(uses);
+    reserve_backing(&backing, FileLockAccess::Exclusive)
+        .await
+        .unwrap();
+    reserve_backing(&orphan, FileLockAccess::Exclusive)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn runtime_retention_admits_absence_and_rejects_unowned_private_views() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::runtime_retention_admits_absence_and_rejects_unowned_private_views").await { return; }
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("root");
+    let data = directory.path().join("data");
+    tokio::fs::create_dir_all(&data).await.unwrap();
+    assert!(runtime_backings(&root, &data).await.unwrap().is_empty());
+    let runtime = root.join(Path::new(RUNTIME).strip_prefix("/").unwrap());
+    tokio::fs::create_dir_all(&runtime).await.unwrap();
+    assert!(runtime_backings(&root, &data).await.unwrap().is_empty());
+    tokio::fs::write(runtime.join("unknown"), b"unowned runtime")
+        .await
+        .unwrap();
+    assert!(runtime_backings(&root, &data).await.is_err());
+    tokio::fs::remove_file(runtime.join("unknown"))
+        .await
+        .unwrap();
+    tokio::fs::remove_dir(&runtime).await.unwrap();
+    tokio::fs::write(&runtime, b"not a directory")
+        .await
+        .unwrap();
+    assert!(runtime_backings(&root, &data).await.is_err());
+    tokio::fs::remove_file(&runtime).await.unwrap();
+    tokio::fs::symlink(&data, &runtime).await.unwrap();
+    assert!(runtime_backings(&root, &data).await.is_err());
+}
+
+#[tokio::test]
+async fn captured_dependencies_outside_the_overlay_follow_prepared_generation_ownership() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::captured_dependencies_outside_the_overlay_follow_prepared_generation_ownership").await {
+        return;
+    }
+    let (root, raw, data) = fixture().await;
+    let base = project(&raw, &data, &[]).await;
+    let backing = backing_directory(&data, target(&base, "etc/shadow")).await;
+    let id = Guid::from(backing.file_name().unwrap().to_str().unwrap()).unwrap();
+    let mut projected = project(&raw, &data, &[]).await;
+    projected
+        .retain_backings(&data, &BTreeSet::from([id]))
+        .await
+        .unwrap();
+    let prepared = reclamation::prepare(&projected, root.path()).await;
+    drop(base);
+    assert!(backing.is_dir());
+    drop(projected);
+    assert!(
+        reserve_backing(&backing, FileLockAccess::Exclusive)
+            .await
+            .is_err()
+    );
+    prepared.discard().await.unwrap();
+    reserve_backing(&backing, FileLockAccess::Exclusive)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn missing_captured_dependency_rejects_preparation_and_retains_existing_data() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::missing_captured_dependency_rejects_preparation_and_retains_existing_data").await {
+        return;
+    }
+    let (_root, raw, data) = fixture().await;
+    let mut projected = project(&raw, &data, &[]).await;
+    let backing = backing_directory(&data, target(&projected, "etc/shadow")).await;
+    assert!(
+        projected
+            .retain_backings(&data, &BTreeSet::from([Guid::new()]))
+            .await
+            .is_err()
+    );
+    assert!(backing.is_dir());
+    drop(projected);
+    assert!(backing.is_dir());
+}
+
+#[tokio::test]
+async fn visible_backing_uses_reject_unknown_redirected_and_special_entries_without_leaks() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::visible_backing_uses_reject_unknown_redirected_and_special_entries_without_leaks").await {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path();
+    assert!(reserve_visible_backings(data).await.unwrap().is_empty());
+    let namespace = data.join(DIRECTORY);
+    tokio::fs::create_dir(&namespace).await.unwrap();
+    assert!(reserve_visible_backings(data).await.unwrap().is_empty());
+    let valid = namespace.join(Guid::new().to_string());
+    tokio::fs::create_dir(&valid).await.unwrap();
+    let unknown = namespace.join("not-a-guid");
+    tokio::fs::create_dir(&unknown).await.unwrap();
+    assert!(reserve_visible_backings(data).await.is_err());
+    tokio::fs::remove_dir(unknown).await.unwrap();
+    let bad = namespace.join(Guid::new().to_string());
+    for kind in ["symlink", "file", "fifo"] {
+        match kind {
+            "symlink" => tokio::fs::symlink(&valid, &bad).await.unwrap(),
+            "file" => tokio::fs::write(&bad, b"not a directory").await.unwrap(),
+            _ => nix::unistd::mkfifo(&bad, nix::sys::stat::Mode::S_IRUSR).unwrap(),
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            assert!(reserve_visible_backings(data).await.is_err());
+            reserve_backing(&valid, FileLockAccess::Exclusive)
+                .await
+                .unwrap();
+        })
+        .await
+        .unwrap();
+        tokio::fs::remove_file(&bad).await.unwrap();
+    }
+    tokio::fs::remove_dir(&valid).await.unwrap();
+    tokio::fs::remove_dir(&namespace).await.unwrap();
+    tokio::fs::symlink(data, &namespace).await.unwrap();
+    assert!(reserve_visible_backings(data).await.is_err());
+}

@@ -9,6 +9,13 @@
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
+// Mirrors the source inputs in build/common.mk's CORE_SRC.
+const CORE_SOURCE_PATHS = [
+  'shared-libs/crates/**',
+  'projects/start-os/build/lib/scripts/**',
+  'projects/start-os/build/dpkg-deps/uefi.platforms',
+]
+
 // Each product's build inputs, mirroring its build.mk (root AGENTS.md, "Coupled changes"), and
 // the workflow that builds it. Patterns follow GitHub's `paths:` filters: the last matching
 // pattern decides, and `!` excludes. `release` paths are publishing inputs that count for pushes
@@ -44,7 +51,7 @@ export const PRODUCTS = {
     workflow: 'build-products.yaml',
     paths: [
       'projects/start-cli/**',
-      'shared-libs/crates/**',
+      ...CORE_SOURCE_PATHS,
       'Cargo.toml',
       'Cargo.lock',
       'build/**',
@@ -57,7 +64,7 @@ export const PRODUCTS = {
     workflow: 'build-products.yaml',
     paths: [
       'projects/start-registry/**',
-      'shared-libs/crates/**',
+      ...CORE_SOURCE_PATHS,
       'Cargo.toml',
       'Cargo.lock',
       'build/**',
@@ -70,7 +77,7 @@ export const PRODUCTS = {
     workflow: 'build-products.yaml',
     paths: [
       'projects/start-tunnel/**',
-      'shared-libs/crates/**',
+      ...CORE_SOURCE_PATHS,
       'shared-libs/ts-modules/**',
       'Cargo.toml',
       'Cargo.lock',
@@ -90,7 +97,7 @@ export const PRODUCTS = {
     workflow: 'start-wrt.yaml',
     paths: [
       'projects/start-wrt/**',
-      'shared-libs/crates/**',
+      ...CORE_SOURCE_PATHS,
       'shared-libs/ts-modules/**',
       'Cargo.toml',
       'Cargo.lock',

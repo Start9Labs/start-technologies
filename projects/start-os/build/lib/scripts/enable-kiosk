@@ -14,8 +14,8 @@ if ! id kiosk; then
     useradd -s /bin/bash --create-home kiosk
 fi
 
-mkdir /home/kiosk/fx-profile
-cat >> /home/kiosk/fx-profile/prefs.js << EOF
+mkdir -p /home/kiosk/fx-profile
+cat > /home/kiosk/fx-profile/prefs.js << EOF
 user_pref("app.normandy.api_url", "");
 user_pref("app.normandy.enabled", false);
 user_pref("app.shield.optoutstudies.enabled", false);

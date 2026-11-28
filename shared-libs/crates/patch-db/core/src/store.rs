@@ -20,7 +20,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
-use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
+use tokio::sync::{Mutex, MutexGuard, OwnedMutexGuard, RwLock, RwLockWriteGuard};
 
 use crate::patch::{diff, Catchup, DiffPatch, Dump, JsonCatchup, Revision};
 use crate::subscriber::Broadcast;
@@ -409,6 +409,7 @@ impl<T, E> From<Result<(T, Option<Arc<Revision>>), E>> for MutateResult<T, E> {
 #[derive(Clone)]
 pub struct PatchDb {
     pub(crate) store: Arc<RwLock<Store>>,
+    mutations: Arc<Mutex<()>>,
 }
 impl PatchDb {
     /// Creates an independent database with a null root and revision zero.
@@ -423,16 +424,31 @@ impl PatchDb {
                 revision: 0,
                 broadcast: Broadcast::new(),
             })),
+            mutations: Arc::new(Mutex::new(())),
         }
     }
 
     pub async fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         Ok(PatchDb {
             store: Arc::new(RwLock::new(Store::open(path).await?)),
+            mutations: Arc::new(Mutex::new(())),
         })
     }
+
+    /// Pauses value mutations across cloned and typed handles; reads and subscriptions proceed.
+    /// Waits for in-flight mutations. Do not await a mutation or close while holding the guard.
+    pub async fn pause_mutations(&self) -> OwnedMutexGuard<()> {
+        self.mutations.clone().lock_owned().await
+    }
+
+    async fn mutation(&self) -> (MutexGuard<'_, ()>, RwLockWriteGuard<'_, Store>) {
+        let gate = self.mutations.lock().await;
+        (gate, self.store.write().await)
+    }
+
     pub async fn close(self) {
         if let Ok(store) = Arc::try_unwrap(self.store) {
+            let _gate = self.mutations.lock().await;
             let _ = store.into_inner().close().await;
         }
     }
@@ -596,12 +612,12 @@ impl PatchDb {
         ptr: &JsonPointer<S, V>,
         value: &T,
     ) -> Result<Option<Arc<Revision>>, Error> {
-        let mut store = self.store.write().await;
+        let (_gate, mut store) = self.mutation().await;
         let rev = store.put(ptr, value).await?;
         Ok(rev)
     }
     pub async fn apply(&self, patch: DiffPatch) -> Result<Option<Arc<Revision>>, Error> {
-        let mut store = self.store.write().await;
+        let (_gate, mut store) = self.mutation().await;
         let rev = store.apply(patch).await?;
         Ok(rev)
     }
@@ -611,7 +627,7 @@ impl PatchDb {
         E: From<Error>,
     {
         async {
-            let mut store = self.store.write().await;
+            let (_gate, mut store) = self.mutation().await;
             let old = store.persistent.clone();
             let (new, res) = std::panic::catch_unwind(move || f(old)).map_err(|e| {
                 Error::Panic(
@@ -649,7 +665,7 @@ impl PatchDb {
                             .unwrap_or_else(|_| "UNKNOWN".to_owned()),
                     )
                 })??;
-            let mut store = self.store.write().await;
+            let (_gate, mut store) = self.mutation().await;
             if old == store.persistent {
                 let diff = diff(&store.persistent, &new);
                 store.apply(diff).await?;

@@ -13,6 +13,9 @@ use tokio::runtime::Builder;
 
 use crate::{self as patch_db};
 
+#[path = "mutation_pause_tests.rs"]
+mod mutation_pause_tests;
+
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_db_path(prefix: &str) -> String {

@@ -14,6 +14,7 @@ use crate::shared_volumes::{
     SharedVolumeCredentials, SharedVolumeDrive, SharedVolumeId, SharedVolumeInspection,
     SharedVolumeSource, local_path,
 };
+use crate::util::io::create_directory_beneath;
 
 mod ownership;
 pub(crate) use ownership::migrate_local_ownership;
@@ -458,23 +459,6 @@ pub(super) async fn prepare_external_source(
         path,
         drive,
     })
-}
-
-fn create_directory_beneath(root: &Path, path: &Path) -> Result<(), Error> {
-    use nix::errno::Errno;
-    use nix::sys::stat::{Mode, mkdirat};
-    let relative = confined_relative(path)?;
-    let mut parent = PathBuf::new();
-    for name in relative.iter() {
-        let directory = open_beneath(root, &parent)?;
-        match mkdirat(&directory, name, Mode::from_bits_truncate(0o755)) {
-            Ok(()) | Err(Errno::EEXIST) => {}
-            Err(error) => return Err(Error::new(error, ErrorKind::Filesystem)),
-        }
-        parent.push(name);
-    }
-    open_beneath(root, &relative)?;
-    Ok(())
 }
 
 #[cfg(test)]

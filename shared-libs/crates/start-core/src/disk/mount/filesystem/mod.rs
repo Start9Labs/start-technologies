@@ -20,6 +20,7 @@ pub mod idmapped;
 pub mod label;
 pub mod loop_dev;
 pub mod overlayfs;
+pub mod private_tmpfs;
 #[cfg(target_os = "linux")]
 pub mod syscall;
 #[cfg(not(target_os = "linux"))]
@@ -94,6 +95,10 @@ pub trait FileSystem: Send + Sync {
     }
     fn source(&self) -> impl Future<Output = Result<Option<impl AsRef<Path>>, Error>> + Send {
         async { Ok(None::<&Path>) }
+    }
+    /// Owns submounts cloned into the attachment.
+    fn is_mount_tree(&self) -> bool {
+        false
     }
     /// The block-device path available for mount retirement.
     fn device(&self) -> impl Future<Output = Result<Option<std::path::PathBuf>, Error>> + Send {

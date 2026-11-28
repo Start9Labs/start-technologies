@@ -239,7 +239,8 @@ is a sequence of CBOR values:
 
 ## Concurrency model
 
-- `PatchDb` wraps `Arc<RwLock<Store>>` — multiple concurrent readers, exclusive writer
+- `PatchDb` wraps `Arc<RwLock<Store>>` — multiple concurrent readers, exclusive writer.
+- `pause_mutations` waits for value mutations and holds their shared acquisition gate ahead of the Store write lock. Cloned/typed value mutations and final file-backed close wait; cached reads and subscription registration continue. Callers must not await a mutation or close while retaining the pause. This separation permits persistence to be held unavailable without a queued persistence writer blocking readers.
 - Typed subscriptions use `mpsc::unbounded_channel`; bounded JSON subscriptions share Tokio broadcast rings grouped by pointer and capacity. Writes never block on slow consumers.
 - JSON overflow closes that receiver permanently; a fresh atomic dump/subscription recovers state. Other receivers remain independent.
 - JSON dumps are cached per pointer until any database revision. Scoped revisions serialize once per pointer and share immutable `Bytes` across all capacities and listeners. Dropped JSON receivers unregister from their ring without waiting for a database change.

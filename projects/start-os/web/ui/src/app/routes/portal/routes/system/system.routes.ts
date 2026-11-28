@@ -8,7 +8,7 @@ import {
 } from '@angular/router'
 import { titleResolver } from 'src/app/utils/title-resolver'
 import { SystemComponent } from './system.component'
-import { TRUSTED_KEYS_MENU_ITEM } from './system.const'
+import { FDE_MENU_ITEM, TRUSTED_KEYS_MENU_ITEM } from './system.const'
 
 export default [
   {
@@ -91,6 +91,12 @@ export default [
         path: 'password',
         title: titleResolver,
         loadComponent: () => import('./routes/password/password.component'),
+      },
+      {
+        path: FDE_MENU_ITEM.link,
+        title: titleResolver,
+        data: { title: FDE_MENU_ITEM.item },
+        loadComponent: () => import('./routes/fde'),
       },
       {
         path: 'gateways',

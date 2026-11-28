@@ -1,0 +1,7 @@
+_version: 2
+fde.memory.unsafe-environment:
+  en_US: 'Secret handling requires RAM-backed temporary storage, no active swap and protected core-dump handling'
+  de_DE: 'Der Umgang mit Geheimnissen erfordert temporären RAM-Speicher, keinen aktiven Swap und geschützte Speicherabbilder'
+  es_ES: 'El manejo de secretos requiere almacenamiento temporal en RAM, sin intercambio activo y volcados de memoria protegidos'
+  fr_FR: 'La gestion des secrets nécessite un stockage temporaire en RAM, sans échange actif et des vidages mémoire protégés'
+  pl_PL: 'Obsługa sekretów wymaga tymczasowej pamięci RAM, braku aktywnej wymiany i ochrony zrzutów pamięci'

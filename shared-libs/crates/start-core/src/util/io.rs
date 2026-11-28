@@ -27,6 +27,7 @@ use tokio::io::{
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, OwnedMutexGuard};
 use tokio::time::{Instant, Sleep};
+use zeroize::Zeroizing;
 
 use crate::prelude::*;
 use crate::util::FromStrParser;
@@ -871,12 +872,16 @@ fn dir_copy_inner<'a>(
     .boxed()
 }
 
+/// Leaves aliases untouched; callers retain both path identities during copying.
 pub async fn copy_file(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<(), Error> {
     let src = src.as_ref();
     tokio::fs::metadata(src)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, src.display()))?;
     let dst = dst.as_ref();
+    if same_file(src, dst).await? {
+        return Ok(());
+    }
     if let Some(parent) = dst.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -985,8 +990,15 @@ pub struct TmpDir {
     path: PathBuf,
 }
 impl TmpDir {
+    pub const BASE: &'static str = "/var/tmp/startos";
+
     pub async fn new() -> Result<Self, Error> {
-        let path = Path::new("/var/tmp/startos").join(base32::encode(
+        Self::new_in(Self::BASE).await
+    }
+
+    /// Mounts beneath this directory must be retired before drop.
+    pub async fn new_in(parent: impl AsRef<Path>) -> Result<Self, Error> {
+        let path = parent.as_ref().join(base32::encode(
             base32::Alphabet::Rfc4648 { padding: false },
             &rand::random::<[u8; 8]>(),
         ));
@@ -1009,10 +1021,13 @@ impl TmpDir {
         std::mem::take(&mut self.path);
     }
 
-    pub async fn unmount_and_delete(self) -> Result<(), Error> {
-        crate::disk::mount::util::unmount_all_under(&self.path, false).await?;
-        tokio::fs::remove_dir_all(&self.path).await?;
-        Ok(())
+    /// Failed or abandoned teardown leaves the directory for explicit recovery.
+    pub fn unmount_and_delete(mut self) -> impl Future<Output = Result<(), Error>> + Send {
+        let path = std::mem::take(&mut self.path);
+        async move {
+            crate::disk::mount::util::unmount_all_under(&path, false).await?;
+            delete_dir(path).await
+        }
     }
 
     pub async fn gc(self: Arc<Self>) -> Result<(), Error> {
@@ -1045,6 +1060,58 @@ impl Drop for TmpDir {
     }
 }
 
+#[cfg(test)]
+mod tmp_dir_tests {
+    use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn unpolled_teardown_preserves_the_directory_without_scheduling_deletion() {
+        use futures::StreamExt;
+        use inotify::WatchMask;
+
+        let parent = tempfile::tempdir().unwrap();
+        let directory = TmpDir::new_in(parent.path()).await.unwrap();
+        let path = directory.to_path_buf();
+        tokio::fs::write(path.join("witness"), b"keep")
+            .await
+            .unwrap();
+        let notify = Inotify::init().unwrap();
+        notify.watches().add(&path, WatchMask::DELETE).unwrap();
+        let mut events = notify.into_event_stream([0u8; 1024]).unwrap();
+        drop(directory.unmount_and_delete());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), events.next())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            tokio::fs::read(path.join("witness")).await.unwrap(),
+            b"keep"
+        );
+        delete_dir(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn selected_parent_owns_only_the_temporary_directory() {
+        let parent = tempfile::tempdir().unwrap();
+        tokio::fs::write(parent.path().join("retained"), b"keep")
+            .await
+            .unwrap();
+        let directory = TmpDir::new_in(parent.path()).await.unwrap();
+        assert_eq!(directory.parent(), Some(parent.path()));
+        let path = directory.to_path_buf();
+        directory.delete().await.unwrap();
+        assert!(!path.exists());
+        assert_eq!(
+            tokio::fs::read(parent.path().join("retained"))
+                .await
+                .unwrap(),
+            b"keep"
+        );
+    }
+}
+
 #[instrument(skip_all)]
 pub async fn maybe_open_file(path: impl AsRef<Path>) -> Result<Option<File>, Error> {
     let path = path.as_ref();
@@ -1061,6 +1128,51 @@ pub async fn open_file(path: impl AsRef<Path>) -> Result<File, Error> {
     maybe_open_file(path.as_ref())
         .await?
         .or_not_found(path.as_ref().display())
+}
+
+/// Consumes zeroizing bytes without Tokio's intermediate write buffer.
+/// The caller excludes concurrent cursor access.
+pub(crate) async fn write_secret_file(
+    file: &File,
+    contents: Zeroizing<Vec<u8>>,
+) -> Result<(), Error> {
+    let mut file = file.try_clone().await?.into_std().await;
+    tokio::task::spawn_blocking(move || -> Result<(), Error> {
+        std::io::Write::write_all(&mut file, &contents)?;
+        Ok(())
+    })
+    .await
+    .with_kind(ErrorKind::Unknown)?
+}
+
+/// Requires stable contents; avoids reallocations and intermediate file-read buffers.
+pub(crate) async fn read_secret_file(file: File) -> Result<Zeroizing<Vec<u8>>, Error> {
+    let file = file.into_std().await;
+    tokio::task::spawn_blocking(move || -> Result<_, Error> {
+        let metadata = file.metadata()?;
+        ensure_code!(
+            metadata.is_file(),
+            ErrorKind::Filesystem,
+            "expected a regular credential file"
+        );
+        read_secret_at(&file, 0, metadata.len())
+    })
+    .await
+    .with_kind(ErrorKind::Unknown)?
+}
+
+/// Requires stable regular-file bytes; reads exactly the requested range without cursor changes.
+pub(crate) fn read_secret_at(
+    file: &std::fs::File,
+    offset: u64,
+    length: u64,
+) -> Result<Zeroizing<Vec<u8>>, Error> {
+    use std::os::unix::fs::FileExt;
+
+    let size = usize::try_from(length).with_kind(ErrorKind::Filesystem)?;
+    let mut bytes = Zeroizing::new(vec![0; size]);
+    file.read_exact_at(&mut bytes, offset)?;
+    Ok(bytes)
 }
 
 #[instrument(skip_all)]
@@ -1194,6 +1306,7 @@ pub async fn write_file_atomic(
     Ok(())
 }
 
+/// The containing directory must not be writable by untrusted processes.
 #[instrument(skip_all)]
 pub async fn write_file_private_atomic(
     path: impl AsRef<Path>,
@@ -1207,13 +1320,13 @@ pub async fn write_file_private_atomic(
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
     }
-    let mut file = AtomicFile::new(path, None::<&Path>)
+    let file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("chmod 600 {path:?}")))?;
-    file.write_all(contents.as_ref())
+    write_secret_file(&file, Zeroizing::new(contents.as_ref().to_vec()))
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {path:?}")))?;
     file.save()
@@ -1235,11 +1348,11 @@ pub async fn write_file_owned_atomic(
             .await
             .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("mkdir -p {parent:?}")))?;
     }
-    let mut file = AtomicFile::new(path, None::<&Path>)
+    let file = AtomicFile::new(path, None::<&Path>)
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("create {path:?}")))?;
     fchown(&*file, Some(uid.into()), Some(gid.into())).with_kind(ErrorKind::Filesystem)?;
-    file.write_all(contents.as_ref())
+    write_secret_file(&file, Zeroizing::new(contents.as_ref().to_vec()))
         .await
         .with_ctx(|_| (ErrorKind::Filesystem, lazy_format!("write {path:?}")))?;
     file.save()
@@ -1823,10 +1936,11 @@ impl<R: AsyncRead> AsyncRead for ByteReplacementReader<R> {
 
 pub fn to_tmp_path(path: impl AsRef<Path>) -> Result<PathBuf, Error> {
     let path = path.as_ref();
-    if let (Some(parent), Some(file_name)) =
-        (path.parent(), path.file_name().and_then(|f| f.to_str()))
-    {
-        Ok(parent.join(format!(".{}.tmp", file_name)))
+    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
+        let mut temporary = std::ffi::OsString::from(".");
+        temporary.push(file_name);
+        temporary.push(".tmp");
+        Ok(parent.join(temporary))
     } else {
         Err(Error::new(
             eyre!("invalid path: {}", path.display()),
@@ -1847,6 +1961,56 @@ pub(crate) fn case_folded(path: &Path) -> PathBuf {
             _ => None,
         })
         .collect()
+}
+
+pub fn confined_relative(path: &Path) -> Result<PathBuf, Error> {
+    let mut relative = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(name) => relative.push(name),
+            _ => {
+                return Err(Error::new(
+                    color_eyre::eyre::eyre!(t!("shared-volumes.invalid-path")),
+                    ErrorKind::InvalidRequest,
+                ));
+            }
+        }
+    }
+    Ok(relative)
+}
+
+pub(crate) fn create_directory_beneath(root: &Path, path: &Path) -> Result<(), Error> {
+    use nix::errno::Errno;
+    use nix::sys::stat::{Mode, mkdirat};
+
+    use crate::disk::mount::filesystem::syscall::open_beneath;
+
+    let relative = confined_relative(path)?;
+    let mut parent = PathBuf::new();
+    for name in relative.iter() {
+        let directory = open_beneath(root, &parent)?;
+        match mkdirat(&directory, name, Mode::from_bits_truncate(0o755)) {
+            Ok(()) | Err(Errno::EEXIST) => {}
+            Err(error) => return Err(Error::new(error, ErrorKind::Filesystem)),
+        }
+        parent.push(name);
+    }
+    open_beneath(root, &relative)?;
+    Ok(())
+}
+
+pub(crate) async fn same_file(left: &Path, right: &Path) -> Result<bool, Error> {
+    if !tokio::fs::try_exists(left)
+        .await
+        .with_kind(ErrorKind::Filesystem)?
+        || !tokio::fs::try_exists(right)
+            .await
+            .with_kind(ErrorKind::Filesystem)?
+    {
+        return Ok(false);
+    }
+    Ok(file_identity(left).await? == file_identity(right).await?)
 }
 
 pub(crate) async fn file_identity(path: impl AsRef<Path>) -> Result<(u64, u64), Error> {
@@ -2034,6 +2198,83 @@ impl Drop for AtomicFile {
 
 #[cfg(test)]
 mod test {
+    #[tokio::test]
+    async fn native_byte_temporary_paths_support_atomic_secret_io() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let root = tempfile::tempdir().unwrap();
+        let name = std::ffi::OsString::from_vec(b"credential-\xff".to_vec());
+        let path = root.path().join(name);
+        let temporary = super::to_tmp_path(&path).unwrap();
+        assert_eq!(temporary.parent(), Some(root.path()));
+        assert_eq!(
+            temporary.file_name().unwrap().as_bytes(),
+            b".credential-\xff.tmp"
+        );
+        let bytes: Vec<_> = (0..32768).map(|n| (n % 251) as u8).collect();
+        let file = super::AtomicFile::new(&path, None::<&std::path::Path>)
+            .await
+            .unwrap();
+        super::write_secret_file(&file, zeroize::Zeroizing::new(bytes.clone()))
+            .await
+            .unwrap();
+        file.save().await.unwrap();
+        assert_eq!(
+            &*super::read_secret_file(super::open_file(&path).await.unwrap())
+                .await
+                .unwrap(),
+            &bytes
+        );
+        assert!(!temporary.exists());
+        super::write_file_private_atomic(&path, b"replacement")
+            .await
+            .unwrap();
+        assert_eq!(
+            &*super::read_secret_file(super::open_file(&path).await.unwrap())
+                .await
+                .unwrap(),
+            b"replacement"
+        );
+        super::write_file_private_atomic(&path, b"").await.unwrap();
+        assert!(
+            super::read_secret_file(super::open_file(&path).await.unwrap())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn copying_file_aliases_preserves_contents_and_distinct_copies_still_work() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("credential");
+        let hardlink = root.path().join("hardlink");
+        let symlink = root.path().join("symlink");
+        tokio::fs::write(&source, b"private-credential")
+            .await
+            .unwrap();
+        tokio::fs::hard_link(&source, &hardlink).await.unwrap();
+        tokio::fs::symlink(&source, &symlink).await.unwrap();
+        for alias in [&source, &hardlink, &symlink] {
+            super::copy_file(&source, alias).await.unwrap();
+            assert_eq!(
+                tokio::fs::read(&source).await.unwrap(),
+                b"private-credential"
+            );
+        }
+        let destination = root.path().join("new/credential");
+        super::copy_file(&source, &destination).await.unwrap();
+        assert_eq!(
+            tokio::fs::read(destination).await.unwrap(),
+            b"private-credential"
+        );
+        assert!(
+            !super::same_file(&source, &root.path().join("missing"))
+                .await
+                .unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn atomic_publication_does_not_replace_existing_contents() {
         let temp = tempfile::tempdir().unwrap();

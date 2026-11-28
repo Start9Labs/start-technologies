@@ -417,6 +417,21 @@ mod tests {
                         .and_then(|line| line.split_whitespace().nth(1))
                         .unwrap_or("/");
                     match path {
+                        "/exact" => {
+                            let _ = stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc")
+                                .await;
+                        }
+                        "/appended" => {
+                            let _ = stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nabc\0")
+                                .await;
+                        }
+                        "/short" => {
+                            let _ = stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nab")
+                                .await;
+                        }
                         "/resume" if request_lower.contains("range: bytes=5-") => {
                             let _ = stream
                                 .write_all(
@@ -515,6 +530,32 @@ mod tests {
         let mut contents = Vec::new();
         source.fetch_all().await?.read_to_end(&mut contents).await?;
         Ok(contents)
+    }
+
+    #[tokio::test]
+    async fn blake3_asset_download_checks_the_complete_http_body() -> Result<(), Error> {
+        let server = spawn_test_server().await?;
+        let source: Arc<[u8]> = Arc::from(&b"abc"[..]);
+        let commitment = crate::sign::commitment::blake3::Blake3Commitment::create(&source).await?;
+        for path in ["exact", "appended", "short"] {
+            let asset = RegistryAsset {
+                published_at: chrono::Utc::now(),
+                urls: vec![server.url.join(path)?],
+                commitment: commitment.clone(),
+                signatures: Default::default(),
+                private: None,
+                readers: Default::default(),
+            };
+            let mut output = Vec::new();
+            let result = asset.download(Client::new(), &mut output).await;
+            if path == "exact" {
+                result?;
+                assert_eq!(output, b"abc");
+            } else {
+                assert!(result.is_err());
+            }
+        }
+        Ok(())
     }
 
     #[tokio::test]

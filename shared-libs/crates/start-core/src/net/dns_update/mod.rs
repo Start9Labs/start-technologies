@@ -140,6 +140,45 @@ pub struct DnsUpdateController {
 }
 
 impl DnsUpdateController {
+    pub fn from_network_manager(
+        interfaces: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
+    ) -> Self {
+        Self::new(
+            interfaces,
+            Arc::new(
+                |gateway: GatewayId| -> std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Result<Option<[u8; 32]>, ()>> + Send>,
+                > {
+                    Box::pin(async move {
+                        crate::net::gateway::wireguard_psk(gateway.as_str())
+                            .await
+                            .map_err(|_| ())
+                    })
+                },
+            ),
+        )
+    }
+
+    pub fn reconcile_mdns(
+        &self,
+        current: &mut Option<InternedString>,
+        hostname: &ServerHostname,
+        interfaces: &OrdMap<GatewayId, NetworkInterfaceInfo>,
+    ) {
+        let name = hostname.local_domain_name();
+        let gateways = wireguard_gateways(interfaces);
+        if let Some(previous) = &*current {
+            if *previous != name || gateways.is_empty() {
+                self.gc(std::iter::once(previous.clone()).collect());
+                *current = None;
+            }
+        }
+        if !gateways.is_empty() {
+            self.add(name.clone(), gateways);
+            *current = Some(name);
+        }
+    }
+
     pub fn new(
         mut net_iface: Watch<OrdMap<GatewayId, NetworkInterfaceInfo>>,
         psk: PskLookup,
@@ -256,19 +295,8 @@ pub fn spawn_server_mdns_injection(
             // signals below, so a network change is never missed while it's unset.
             match ServerHostname::load(db.peek().await.as_public().as_server_info()) {
                 Ok(h) => {
-                    let name = h.local_domain_name();
-                    let gateways = net_iface.peek(wireguard_gateways);
-                    if let Some(prev) = &current {
-                        if *prev != name || gateways.is_empty() {
-                            dns_update.gc(std::iter::once(prev.clone()).collect());
-                            current = None;
-                        }
-                    }
-                    if !gateways.is_empty() {
-                        // Idempotent; also picks up a gateway added to / removed from the set.
-                        dns_update.add(name.clone(), gateways);
-                        current = Some(name);
-                    }
+                    net_iface
+                        .peek(|interfaces| dns_update.reconcile_mdns(&mut current, &h, interfaces));
                 }
                 Err(e) => {
                     tracing::error!("mDNS injection: could not read server hostname: {e}");

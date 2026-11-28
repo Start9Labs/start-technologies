@@ -73,6 +73,28 @@ fn der64_pkcs8_interoperates_with_openssl() {
 }
 
 #[test]
+fn der64_openssl_public_keys_use_spki_and_accept_pem() {
+    for key in [
+        PKey::generate_ed25519().unwrap(),
+        crate::util::crypto::gen_nistp256().unwrap(),
+    ] {
+        let public = PKey::public_key_from_der(&key.public_key_to_der().unwrap()).unwrap();
+        let pem = String::from_utf8(public.public_key_to_pem().unwrap()).unwrap();
+        let from_pem: Der64<PKey<Public>> = pem.parse().unwrap();
+        assert!(from_pem.public_eq(&public));
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(from_pem.to_string())
+            .unwrap();
+        assert!(PKey::public_key_from_der(&raw).unwrap().public_eq(&public));
+        for format in [IoFormat::Json, IoFormat::Cbor] {
+            let encoded = format.to_vec(&from_pem).unwrap();
+            let decoded: Der64<PKey<Public>> = format.from_slice(&encoded).unwrap();
+            assert!(decoded.public_eq(&public));
+        }
+    }
+}
+
+#[test]
 fn der64_field_adapter_matches_wrapper() {
     #[derive(Deserialize, Serialize)]
     struct Field {

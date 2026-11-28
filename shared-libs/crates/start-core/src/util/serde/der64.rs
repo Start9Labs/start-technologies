@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use base64::Engine;
 use clap::builder::ValueParserFactory;
-use openssl::pkey::{PKey, Private};
+use openssl::pkey::{PKey, Private, Public};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use visit_rs::VisitFields;
 
@@ -26,6 +26,15 @@ impl DerEncoding for PKey<Private> {
     }
     fn to_der<E: serde::ser::Error>(&self) -> Result<Vec<u8>, E> {
         self.private_key_to_pkcs8().map_err(E::custom)
+    }
+}
+
+impl DerEncoding for PKey<Public> {
+    fn from_der<E: serde::de::Error>(der: &[u8]) -> Result<Self, E> {
+        Self::public_key_from_der(der).map_err(E::custom)
+    }
+    fn to_der<E: serde::ser::Error>(&self) -> Result<Vec<u8>, E> {
+        self.public_key_to_der().map_err(E::custom)
     }
 }
 

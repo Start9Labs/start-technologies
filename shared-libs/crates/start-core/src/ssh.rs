@@ -19,6 +19,54 @@ use crate::util::serde::{HandlerExtSerde, Pem, WithIoFormat, display_serializabl
 use crate::util::{FromStrParser, Invoke};
 
 pub const SSH_DIR: &str = "/home/start9/.ssh";
+pub(crate) const HOST_KEY_DIRECTORY: &str = "/etc/ssh";
+const HOST_KEY_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+pub(crate) fn is_installer_host_key(name: &std::ffi::OsStr) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let name = name.as_bytes();
+    name.starts_with(b"ssh_host_") && name.ends_with(b"_key")
+}
+
+/// Includes and NSS expansion use the caller's actual prospective namespace.
+/// The caller authenticates stable executable, library and runtime configuration inputs.
+/// OpenSSL initializes before configuration output and can load configured providers.
+pub(crate) async fn host_key_files(configuration: &Path) -> Result<Vec<std::path::PathBuf>, Error> {
+    query_host_key_files(&mut host_key_command(configuration)).await
+}
+
+pub(crate) async fn query_host_key_files(
+    command: &mut Command,
+) -> Result<Vec<std::path::PathBuf>, Error> {
+    let output = command
+        .stdin(std::process::Stdio::null())
+        .timeout(Some(HOST_KEY_QUERY_TIMEOUT))
+        .invoke(ErrorKind::Filesystem)
+        .await?;
+    Ok(parse_host_key_files(&output))
+}
+
+pub(crate) fn host_key_command(configuration: &Path) -> Command {
+    let mut command = Command::new("/usr/sbin/sshd");
+    command
+        .args(["-G", "-f"])
+        .arg(configuration)
+        .current_dir("/")
+        .env_clear()
+        .env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
+        .env("LC_ALL", "C")
+        .kill_on_drop(true);
+    command
+}
+
+pub(crate) fn parse_host_key_files(output: &[u8]) -> Vec<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    output
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| line.strip_prefix(b"hostkey "))
+        .map(|path| std::ffi::OsString::from_vec(path.to_vec()).into())
+        .collect()
+}
 
 /// Authorized-key intent shared by SSH mutations and subscribed clients.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, VisitFields)]
@@ -285,9 +333,15 @@ pub async fn sync_keys<P: AsRef<Path>>(
     };
 
     let privkey_path = ssh_dir.join(id_alg);
-    let mut f = OpenOptions::new()
+    let encoded = zeroize::Zeroizing::new(
+        crate::util::serde::PemEncoding::to_pem::<serde_json::Error>(&privkey.0)
+            .with_kind(ErrorKind::OpenSsh)?,
+    );
+    let bytes = zeroize::Zeroizing::new([encoded.as_bytes(), b"\n"].concat());
+    let file = OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(true)
         .mode(0o600)
         .open(&privkey_path)
         .await
@@ -297,9 +351,8 @@ pub async fn sync_keys<P: AsRef<Path>>(
                 lazy_format!("create {privkey_path:?}"),
             )
         })?;
-    f.write_all(privkey.to_string().as_bytes()).await?;
-    f.write_all(b"\n").await?;
-    f.sync_all().await?;
+    crate::util::io::write_secret_file(&file, bytes).await?;
+    file.sync_all().await?;
     let mut f = create_file(ssh_dir.join(id_alg).with_extension("pub")).await?;
     f.write_all(
         (privkey
@@ -348,6 +401,150 @@ pub async fn sync_pubkeys<P: AsRef<Path>>(pubkeys: &SshKeys, ssh_dir: P) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn host_key_queries_exclude_supplied_standard_input() {
+        use std::io::{Seek, Write};
+        use std::path::PathBuf;
+        use std::process::Stdio;
+
+        let mut input = tempfile::tempfile().unwrap();
+        input.write_all(b"private-lease-input\n").unwrap();
+        input.rewind().unwrap();
+        let script = "if IFS= read -r value; then printf 'hostkey /unexpected-input\\n'; else printf 'hostkey /no-input\\n'; fi";
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", script])
+            .stdin(Stdio::from(input.try_clone().unwrap()));
+        assert_eq!(
+            command.invoke(ErrorKind::Filesystem).await.unwrap(),
+            b"hostkey /unexpected-input\n"
+        );
+        input.rewind().unwrap();
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", script]).stdin(Stdio::from(input));
+        assert_eq!(
+            query_host_key_files(&mut command).await.unwrap(),
+            vec![PathBuf::from("/no-input")]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native OpenSSH/OpenSSL and start9 identity"]
+    async fn real_host_key_query_excludes_inherited_runtime_overrides() {
+        use std::os::unix::ffi::OsStringExt;
+        use std::path::PathBuf;
+
+        const CHILD_CONFIG: &str = "STARTOS_TEST_SSH_QUERY_CONFIG";
+        if let Some(configuration) = std::env::var_os(CHILD_CONFIG) {
+            assert_eq!(
+                host_key_files(Path::new(&configuration)).await.unwrap(),
+                vec![
+                    PathBuf::from("/home/start9/native-key"),
+                    PathBuf::from("/private/with space"),
+                    std::ffi::OsString::from_vec(b"/private/\xff".to_vec()).into(),
+                ]
+            );
+            return;
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let configuration = root.path().join("sshd_config");
+        let included = root.path().join("included.conf");
+        tokio::fs::write(&included, b"HostKey ~start9/native-key\n")
+            .await
+            .unwrap();
+        let mut settings = format!(
+            "Include {}\nHostKey \"/private/with space\"\n",
+            included.display()
+        )
+        .into_bytes();
+        settings.extend_from_slice(b"HostKey /private/\xff\n");
+        tokio::fs::write(&configuration, settings).await.unwrap();
+        let overrides = root.path().join("openssl.cnf");
+        tokio::fs::write(&overrides, "config_diagnostics = 1\nopenssl_conf = init\n[init]\nalg_section = algorithms\n[algorithms]\ndefault_properties = fips=yes\n").await.unwrap();
+        let control = Command::new("/usr/sbin/sshd")
+            .args(["-G", "-f"])
+            .arg(&configuration)
+            .env("OPENSSL_CONF", &overrides)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            !control.status.success(),
+            "native OpenSSL override must distinguish the boundary"
+        );
+        Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "ssh::tests::real_host_key_query_excludes_inherited_runtime_overrides",
+                "--nocapture",
+            ])
+            .env(CHILD_CONFIG, &configuration)
+            .env("OPENSSL_CONF", &overrides)
+            .env("OPENSSL_MODULES", root.path().join("missing-modules"))
+            .env("PATH", root.path().join("missing-commands"))
+            .invoke(ErrorKind::Filesystem)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires native start9/startos system identities"]
+    async fn real_private_key_sync_replaces_longer_contents_and_preserves_native_attributes() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("id_ed25519");
+        tokio::fs::write(&path, vec![b'x'; 16384]).await.unwrap();
+        tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .unwrap();
+        xattr::set(&path, "user.startos-fixture", b"native-attributes").unwrap();
+        let inode = tokio::fs::metadata(&path).await.unwrap().ino();
+        let key = Pem(ssh_key::PrivateKey::random(
+            &mut crate::util::crypto::os_rng(),
+            ssh_key::Algorithm::Ed25519,
+        )
+        .unwrap());
+        sync_keys(
+            &ServerHostname::new("native-test".into()).unwrap(),
+            &key,
+            &SshKeys(BTreeMap::new()),
+            root.path(),
+        )
+        .await
+        .unwrap();
+        let encoded = crate::util::serde::PemEncoding::to_pem::<serde_json::Error>(&key.0).unwrap();
+        assert_eq!(
+            tokio::fs::read(&path).await.unwrap(),
+            [encoded.as_bytes(), b"\n"].concat()
+        );
+        assert_eq!(
+            tokio::fs::metadata(&path)
+                .await
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(tokio::fs::metadata(&path).await.unwrap().ino(), inode);
+        assert_eq!(
+            xattr::get(&path, "user.startos-fixture")
+                .unwrap()
+                .as_deref(),
+            Some(b"native-attributes".as_slice())
+        );
+    }
+
+    #[test]
+    fn host_key_output_retains_spaces_and_non_utf8_paths() {
+        use std::os::unix::ffi::OsStringExt;
+        assert_eq!(parse_host_key_files(b"port 22\nhostkey /keys/with space\nhostcertificate /public/cert\nhostkey /keys/\xff\n"),
+            vec![std::path::PathBuf::from("/keys/with space"), std::ffi::OsString::from_vec(b"/keys/\xff".to_vec()).into()]);
+    }
 
     const KEY: &str =
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMcFf+jmv4w+tRbA1aXDvovqViM0NVRu86Hk5kcQItfI laptop";

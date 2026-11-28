@@ -11,11 +11,15 @@ use tokio::sync::Mutex;
 use tracing::instrument;
 
 use super::filesystem::{FileSystem, MountType, ReadOnly, ReadWrite};
-use super::util::{is_mountpoint, unmount};
+use super::util::{is_mountpoint, unmount, unmount_tree};
 use crate::prelude::{eyre, t};
 use crate::util::sync::SyncMutex;
 use crate::util::{Invoke, Never};
 use crate::{Error, ErrorKind, ResultExt};
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "source_reservation_tests.rs"]
+mod source_reservation_tests;
 
 pub const TMP_MOUNTPOINT: &'static str = "/media/startos/tmp";
 
@@ -84,6 +88,8 @@ impl DeviceIdentity {
 pub struct MountGuard {
     mountpoint: PathBuf,
     mounted: AtomicBool,
+    strict_unmount: bool,
+    mount_tree: bool,
     device: Option<DeviceIdentity>,
     slot: Option<MountSlot>,
 }
@@ -99,6 +105,8 @@ impl MountGuard {
         let guard = MountGuard {
             mountpoint,
             mounted: AtomicBool::new(true),
+            strict_unmount: false,
+            mount_tree: filesystem.is_mount_tree(),
             device,
             slot: None,
         };
@@ -106,10 +114,22 @@ impl MountGuard {
         filesystem.check_mount(guard.path()).await?;
         Ok(guard)
     }
+    /// Rejects busy references during explicit and drop teardown.
+    pub(crate) fn with_strict_unmount(mut self) -> Self {
+        self.strict_unmount = true;
+        self
+    }
+    /// Transfers unmount responsibility to the caller, retaining the kernel mount.
+    pub fn persist(mut self) -> PathBuf {
+        self.mounted.store(false, Ordering::Release);
+        std::mem::take(&mut self.mountpoint)
+    }
     fn as_unmounted(&self) -> Self {
         Self {
             mountpoint: self.mountpoint.clone(),
             mounted: AtomicBool::new(false),
+            strict_unmount: self.strict_unmount,
+            mount_tree: self.mount_tree,
             device: self.device.clone(),
             slot: self.slot.clone(),
         }
@@ -142,7 +162,7 @@ impl MountGuard {
 
     async fn retire(&self) -> Result<(), Error> {
         if self.is_mounted() {
-            unmount(&self.mountpoint, true).await?;
+            unmount_slot(&None, &self.mountpoint, true, false, self.mount_tree).await?;
             self.mounted.store(false, Ordering::Release);
             if let Some(device) = &self.device {
                 RETIRED_DEVICES.mutate(|retired| retired.insert(device.path.clone()));
@@ -156,8 +176,9 @@ impl MountGuard {
             unmount_slot(
                 &self.slot,
                 &self.mountpoint,
-                !cfg!(feature = "unstable"),
+                !self.strict_unmount && !cfg!(feature = "unstable"),
                 delete_mountpoint,
+                self.mount_tree,
             )
             .await?;
             self.mounted.store(false, Ordering::Release);
@@ -178,6 +199,7 @@ async fn unmount_slot(
     mountpoint: &Path,
     lazy: bool,
     delete_mountpoint: bool,
+    mount_tree: bool,
 ) -> Result<(), Error> {
     let occupancy = match slot {
         Some(slot) => {
@@ -189,7 +211,11 @@ async fn unmount_slot(
         }
         None => None,
     };
-    unmount(mountpoint, lazy).await?;
+    if mount_tree {
+        unmount_tree(mountpoint, lazy).await?;
+    } else {
+        unmount(mountpoint, lazy).await?;
+    }
     if delete_mountpoint {
         match tokio::fs::remove_dir(mountpoint).await {
             Err(e)
@@ -217,8 +243,10 @@ impl Drop for MountGuard {
         if self.is_mounted() {
             let mountpoint = std::mem::take(&mut self.mountpoint);
             let slot = self.slot.take();
+            let lazy = !self.strict_unmount;
+            let mount_tree = self.mount_tree;
             tokio::spawn(async move {
-                unmount_slot(&slot, &mountpoint, true, false)
+                unmount_slot(&slot, &mountpoint, lazy, false, mount_tree)
                     .await
                     .log_err()
             });
@@ -295,11 +323,13 @@ impl TmpMountGuard {
         }
         // Mounts can survive a hard-killed owner.
         if is_mountpoint(&mountpoint).await? {
-            unmount(&mountpoint, true).await?;
+            unmount_slot(&None, &mountpoint, true, false, filesystem.is_mount_tree()).await?;
         }
         let mount_guard = MountGuard {
             mountpoint: mountpoint.clone(),
             mounted: AtomicBool::new(true),
+            strict_unmount: false,
+            mount_tree: filesystem.is_mount_tree(),
             device,
             slot: Some(slot_handle.clone()),
         };
@@ -312,14 +342,22 @@ impl TmpMountGuard {
         Ok(TmpMountGuard { guard })
     }
 
+    /// Excludes cached mounts through source removal, including residual kernel subtrees.
+    /// Independent aliases and handles require their own reader lifetime.
     pub(crate) async fn reserve_unmounted(
         filesystem: &impl FileSystem,
         mount_type: MountType,
     ) -> Result<UnusedMountSource, Error> {
-        let slot = mount_slot(tmp_mountpoint(filesystem, mount_type).await?, mount_type)
+        let mountpoint = tmp_mountpoint(filesystem, mount_type).await?;
+        let slot = mount_slot(mountpoint.clone(), mount_type)
             .lock_owned()
             .await;
-        if slot.1.upgrade().is_some() {
+        if slot.1.upgrade().is_some()
+            || (tokio::fs::try_exists(&mountpoint).await?
+                && !super::util::mountpoints_under(&mountpoint)
+                    .await?
+                    .is_empty())
+        {
             return Err(Error::new(
                 eyre!(t!("disk.mount.guard.in-use")),
                 ErrorKind::InvalidRequest,
@@ -461,6 +499,26 @@ impl<G: GenericMountGuard> GenericMountGuard for SubPath<G> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn persist_transfers_teardown_without_scheduling_work() {
+        let path = PathBuf::from("/owned-mount");
+        let mut guard = MountGuard {
+            mountpoint: path.clone(),
+            mounted: AtomicBool::new(true),
+            strict_unmount: false,
+            mount_tree: true,
+            device: None,
+            slot: None,
+        }
+        .with_strict_unmount();
+        let owned = guard.take();
+        assert!(guard.strict_unmount);
+        assert!(owned.strict_unmount);
+        assert!(owned.mount_tree);
+        assert!(!guard.is_mounted());
+        assert_eq!(owned.persist(), path);
+    }
+
     struct UnmountedFilesystem {
         id: String,
         attempted: AtomicBool,
@@ -513,6 +571,8 @@ mod tests {
         let guard = Arc::new(MountGuard {
             mountpoint,
             mounted: AtomicBool::new(true),
+            strict_unmount: false,
+            mount_tree: false,
             device: None,
             slot: Some(slot.clone()),
         });
@@ -571,6 +631,8 @@ mod tests {
             let guard = Arc::new(MountGuard {
                 mountpoint,
                 mounted: AtomicBool::new(true),
+                strict_unmount: false,
+                mount_tree: false,
                 device: None,
                 slot: Some(slot.clone()),
             });
@@ -694,6 +756,8 @@ mod tests {
         let old = Arc::new(MountGuard {
             mountpoint,
             mounted: AtomicBool::new(true),
+            strict_unmount: false,
+            mount_tree: false,
             device: Some(DeviceIdentity::capture(node.clone()).await.unwrap()),
             slot: Some(slot.clone()),
         });
@@ -717,6 +781,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mountpoint = directory.path().join("missing");
 
-        unmount_slot(&None, &mountpoint, true, true).await.unwrap();
+        unmount_slot(&None, &mountpoint, true, true, false)
+            .await
+            .unwrap();
     }
 }

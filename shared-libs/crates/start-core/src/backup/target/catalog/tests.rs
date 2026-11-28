@@ -90,6 +90,89 @@ async fn failed_local_deletion_stays_registered_and_can_be_retried() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn cancelled_target_removal_retains_source_reservation_until_catalog_commit() {
+    use futures::StreamExt;
+    use inotify::{Inotify, WatchMask};
+
+    let directory = tempfile::tempdir().unwrap();
+    let id = BackupTargetId::new();
+    let path = local_path(directory.path(), &id);
+    tokio::fs::create_dir_all(&path).await.unwrap();
+    tokio::fs::write(path.join("sentinel"), b"backup data")
+        .await
+        .unwrap();
+    let mut model = database();
+    model
+        .as_public_mut()
+        .as_backup_targets_mut()
+        .insert(
+            &id,
+            &BackupTarget::new("Local".into(), SharedVolumeSource::Local),
+        )
+        .unwrap();
+    let database = TypedPatchDb::<crate::db::model::Database>::load_unchecked(
+        patch_db::PatchDb::open(directory.path().join("state.db"))
+            .await
+            .unwrap(),
+    );
+    database.put(&ROOT, &model).await.unwrap();
+    let pause = database.pause_mutations().await;
+    let notify = Inotify::init().unwrap();
+    notify
+        .watches()
+        .add(path.parent().unwrap(), WatchMask::DELETE)
+        .unwrap();
+    let mut events = notify.into_event_stream([0; 4096]).unwrap();
+    let client = {
+        let database = database.clone();
+        let id = id.clone();
+        let package_data = directory.path().to_owned();
+        tokio::spawn(async move { remove_target(&database, &id, &package_data).await })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while let Some(event) = events.next().await {
+            if event.unwrap().name.as_deref() == path.file_name() {
+                return;
+            }
+        }
+        panic!("target deletion notification ended");
+    })
+    .await
+    .unwrap();
+    client.abort();
+    assert!(client.await.unwrap_err().is_cancelled());
+    assert!(
+        database
+            .peek()
+            .await
+            .as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .is_some()
+    );
+    let filesystem = Bind::new(&path);
+    let reservation = TmpMountGuard::reserve_unmounted(&filesystem, ReadOnly);
+    tokio::pin!(reservation);
+    assert!(futures::poll!(&mut reservation).is_pending());
+    drop(pause);
+    let _unused = tokio::time::timeout(std::time::Duration::from_secs(10), reservation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!path.exists());
+    assert!(
+        database
+            .peek()
+            .await
+            .as_public()
+            .as_backup_targets()
+            .as_idx(&id)
+            .is_none()
+    );
+}
+
 #[tokio::test]
 #[ignore = "requires BTRFS_TEST_VOLUMES_DIR and Btrfs subvolume permissions"]
 async fn local_targets_are_private_subvolumes_and_delete_before_unregistering() {

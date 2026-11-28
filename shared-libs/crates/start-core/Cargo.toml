@@ -159,6 +159,7 @@ new_mime_guess = "4"
 nix = { version = "0.30.1", features = [
   "fs",
   "hostname",
+  "ioctl",
   "mount",
   "net",
   "process",
@@ -259,7 +260,7 @@ x25519-dalek = { version = "3.0.0-rc.1", features = ["static_secrets"] }
 xattr = "1.6.1"
 xmltree = "0.10"
 zbus = "5.1.1"
-zeroize = "1"
+zeroize = { version = "1", features = ["serde"] }
 zstd = "0.13.3"
 
 [[example]]

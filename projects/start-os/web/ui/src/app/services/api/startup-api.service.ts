@@ -13,8 +13,10 @@ import type { WebsocketConfig } from './api.types'
 
 /** Initialization and diagnostic admission does not imply enrolled authorization. */
 export abstract class StartupApiService {
-  abstract readonly rpc: RpcClient<RPC.Init & RPC.Diagnostic>
-  abstract readonly streams: RpcStreamClient<RPC.Init & RPC.Diagnostic>
+  abstract readonly rpc: RpcClient<RPC.Init & RPC.Diagnostic & RPC.Unlock>
+  abstract readonly streams: RpcStreamClient<
+    RPC.Init & RPC.Diagnostic & RPC.Unlock
+  >
   abstract openWebsocket$<T>(
     guid: string,
     config?: WebsocketConfig<T>,
@@ -27,7 +29,7 @@ export class StartupLiveApiService extends StartupApiService {
   private readonly authKeys = inject(AuthKeyService)
 
   readonly rpc: StartupApiService['rpc'] = createRpcClient<
-    RpcClient<RPC.Init & RPC.Diagnostic>
+    StartupApiService['rpc']
   >({
     call: async (method, params, options) => {
       const request = rpcRequestBody({

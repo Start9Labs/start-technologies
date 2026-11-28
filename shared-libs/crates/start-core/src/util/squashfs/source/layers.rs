@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::ops::Bound;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
@@ -12,7 +13,7 @@ use crate::prelude::*;
 use crate::s9pk::merkle_archive::source::{DynFileSource, FileSource};
 use crate::util::squashfs::blocks::invalid;
 use crate::util::squashfs::tree::resolve_hardlink;
-use crate::util::squashfs::{Entry, Node, NodeContents, Squashfs};
+use crate::util::squashfs::{DirectoryContents, Entry, Node, NodeContents, Squashfs};
 
 pub(crate) struct LayerFilesystem {
     nodes: BTreeMap<PathBuf, Arc<Node<DynFileSource>>>,
@@ -103,6 +104,20 @@ impl LayerFilesystem {
         for path in &opaque {
             self.remove_descendants(path);
         }
+        self.apply_entries(entries)?;
+        for path in whiteouts {
+            self.ensure_directory(path.parent().expect("whiteout target has a filename"))?;
+        }
+        for path in opaque {
+            self.ensure_directory(&path)?;
+        }
+        Ok(())
+    }
+
+    fn apply_entries(
+        &mut self,
+        entries: impl IntoIterator<Item = (PathBuf, Entry<DynFileSource>)>,
+    ) -> std::io::Result<()> {
         let mut pending = BTreeMap::new();
         for (path, entry) in entries {
             if let Some(parent) = path.parent() {
@@ -145,12 +160,97 @@ impl LayerFilesystem {
             node.validate_hardlink_target()?;
             self.nodes.insert(path.clone(), node);
         }
+        Ok(())
+    }
+
+    pub(crate) fn from_squashfs(image: Squashfs<DynFileSource>) -> Result<Self, Error> {
+        let mut filesystem = Self::new();
+        filesystem.apply_entries(snapshot_entries(&image))?;
+        Ok(filesystem)
+    }
+
+    pub(crate) fn apply_overlayfs_upper(
+        &mut self,
+        upper: Squashfs<DynFileSource>,
+    ) -> Result<(), Error> {
+        let mut entries = Vec::new();
+        let mut links = Vec::new();
+        let mut whiteouts = Vec::new();
+        let mut opaque = Vec::new();
+        for (path, entry) in snapshot_entries(&upper) {
+            let Entry::Node(mut node) = entry else {
+                let node = resolve_hardlink(&path, |target| {
+                    upper.contents().get_path(target).map(|entry| match entry {
+                        Entry::Node(node) => Ok(node),
+                        Entry::Hardlink(target) => Err(target.clone()),
+                    })
+                })?;
+                if overlay_whiteout(node) {
+                    whiteouts.push(path);
+                } else {
+                    links.push((path, entry));
+                }
+                continue;
+            };
+            let whiteout = overlay_whiteout(&node);
+            let xattrs = &mut node.metadata.xattrs;
+            for name in overlay_names("metacopy").chain(overlay_names("redirect")) {
+                if xattrs.contains_key(&name) {
+                    return Err(invalid(
+                        "OverlayFS snapshot requires metacopy and redirect_dir disabled",
+                    )
+                    .into());
+                }
+            }
+            let has_whiteout = overlay_names("whiteout").any(|name| xattrs.contains_key(&name));
+            if whiteout {
+                if path.as_os_str().is_empty() {
+                    return Err(invalid("OverlayFS root is a whiteout").into());
+                }
+                whiteouts.push(path);
+                continue;
+            }
+            if has_whiteout {
+                return Err(invalid("OverlayFS whiteout is not a file").into());
+            }
+            let recreated =
+                overlay_names("opaque").any(|name| xattrs.get(&name).is_some_and(|v| v == b"y"));
+            if recreated {
+                if !matches!(node.contents, NodeContents::Directory(_)) {
+                    return Err(invalid("OverlayFS opaque inode is not a directory").into());
+                }
+                opaque.push(path.clone());
+            }
+            xattrs.retain(|name, _| {
+                !OVERLAY_PREFIXES
+                    .iter()
+                    .any(|prefix| name.as_bytes().starts_with(prefix.as_bytes()))
+            });
+            if !opaque.iter().any(|ancestor| path.starts_with(ancestor))
+                && matches!(node.contents, NodeContents::Directory(_))
+            {
+                if let Some(lower) = self
+                    .nodes
+                    .get(&path)
+                    .filter(|node| matches!(node.contents, NodeContents::Directory(_)))
+                {
+                    for name in overlay_names("opaque") {
+                        if let Some(value) = lower.metadata.xattrs.get(&name) {
+                            xattrs.insert(name, value.clone());
+                        }
+                    }
+                }
+            }
+            entries.push((path, Entry::Node(node)));
+        }
         for path in whiteouts {
-            self.ensure_directory(path.parent().expect("whiteout target has a filename"))?;
+            self.remove_subtree(&path);
         }
         for path in opaque {
-            self.ensure_directory(&path)?;
+            self.remove_descendants(&path);
         }
+        entries.extend(links);
+        self.apply_entries(entries)?;
         Ok(())
     }
 
@@ -170,6 +270,49 @@ impl LayerFilesystem {
         }
         Ok(image)
     }
+}
+
+const OVERLAY_PREFIXES: [&str; 2] = ["trusted.overlay.", "user.overlay."];
+
+fn overlay_names(suffix: &str) -> impl Iterator<Item = OsString> + '_ {
+    OVERLAY_PREFIXES
+        .iter()
+        .map(move |prefix| format!("{prefix}{suffix}").into())
+}
+
+pub(crate) fn overlay_whiteout(node: &Node<DynFileSource>) -> bool {
+    matches!(
+        node.contents,
+        NodeContents::CharacterDevice(crate::util::squashfs::Device { major: 0, minor: 0 })
+    ) || (matches!(node.contents, NodeContents::File(_))
+        && overlay_names("whiteout").any(|name| node.metadata.xattrs.contains_key(&name)))
+}
+
+pub(crate) fn snapshot_entries(
+    image: &Squashfs<DynFileSource>,
+) -> Vec<(PathBuf, Entry<DynFileSource>)> {
+    let mut entries = Vec::new();
+    let mut pending = vec![(PathBuf::new(), image.root())];
+    while let Some((path, node)) = pending.pop() {
+        if let NodeContents::Directory(children) = &node.contents {
+            entries.push((
+                path.clone(),
+                Entry::directory(node.metadata.clone(), DirectoryContents::new()),
+            ));
+            for (name, entry) in children.iter() {
+                let path = path.join(name);
+                match entry {
+                    Entry::Node(node) => pending.push((path, node)),
+                    Entry::Hardlink(target) => {
+                        entries.push((path, Entry::Hardlink(target.clone())))
+                    }
+                }
+            }
+        } else {
+            entries.push((path, Entry::Node(node.clone())));
+        }
+    }
+    entries
 }
 
 #[cfg(test)]

@@ -187,6 +187,7 @@ mod test {
             "package.logs.follow",
             "package.sideload",
             "registry.db.subscribe",
+            "server.fde.begin-enable",
             "server.kernel-logs.follow",
             "server.logs.follow",
             "server.metrics.follow",
@@ -206,6 +207,7 @@ mod test {
             "package.exec",
             "package.list",
             "package.logs",
+            "server.fde.status",
             "server.time",
             "volumes.create",
             "volumes.set-grant",
@@ -228,6 +230,8 @@ mod test {
                 tool.name
             );
         }
+        let begin = api.method_from_dots("server.fde.begin-enable").unwrap();
+        assert_eq!(Effect::of(&api.metadata(begin)), Some(Effect::Destructive));
     }
 
     #[test]
@@ -240,6 +244,7 @@ mod test {
         let server = server(http).unwrap();
         for (name, read_only, destructive) in [
             ("package.list", Some(true), None),
+            ("server.fde.status", Some(true), None),
             ("volumes.inspect", Some(false), Some(false)),
             ("package.stop", Some(false), Some(false)),
             ("server.restart", Some(false), Some(false)),

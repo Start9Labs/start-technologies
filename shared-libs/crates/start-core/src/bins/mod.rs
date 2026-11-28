@@ -8,6 +8,13 @@ use rust_i18n::t;
 pub mod completions;
 pub mod container_cli;
 pub mod deprecated;
+#[cfg(target_os = "linux")]
+pub mod fde_capture;
+pub mod fde_prepare;
+#[cfg(target_os = "linux")]
+mod native_tool;
+#[cfg(target_os = "linux")]
+mod os_image;
 pub mod registry;
 pub mod start_cli;
 pub mod start_init;
@@ -164,6 +171,32 @@ impl MultiExecutable {
     }
     pub fn enable_start_tunnel(&mut self) -> &mut Self {
         self.bins.insert("start-tunnel", tunnel::cli);
+        self
+    }
+    pub fn enable_fde_prepare(&mut self) -> &mut Self {
+        self.bins.insert("start-fde-prepare", fde_prepare::main);
+        #[cfg(target_os = "linux")]
+        {
+            self.bins.insert("start-fde-capture", fde_capture::capture);
+            self.bins.insert("start-fde-release", fde_capture::release);
+            self.bins.insert("start-fde-stop", fde_capture::stop);
+            self.bins.insert(
+                crate::fde::public_image::SOURCE_APPLET,
+                os_image::assemble_source,
+            );
+        }
+        self
+    }
+    pub fn enable_os_image_tools(&mut self) -> &mut Self {
+        #[cfg(target_os = "linux")]
+        self.bins.insert(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../projects/start-os/build/lib/scripts/os-public-source-prune-name"
+            ))
+            .trim(),
+            os_image::prune_sources,
+        );
         self
     }
     pub fn enable_unshare_userns(&mut self) -> &mut Self {

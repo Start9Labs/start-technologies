@@ -38,6 +38,8 @@ impl Database {
             private: Private {
                 key_store: KeyStore::new(account)?,
                 password: account.password.clone(),
+                luks_credentials: None,
+                fde_enrollment: None,
                 sessions: Sessions::default(),
                 ssh_privkey: Pem(account.ssh_key.clone()),
                 available_ports: AvailablePorts::new(),

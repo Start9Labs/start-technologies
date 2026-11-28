@@ -400,7 +400,20 @@ pub async fn remove(ctx: RpcContext, TargetParams { id }: TargetParams) -> Resul
     remove_target(&ctx.db, &id, Path::new(crate::PACKAGE_DATA)).await
 }
 
+/// Requester cancellation retains the source reservation through catalog commit.
 async fn remove_target(
+    database: &TypedPatchDb<crate::db::model::Database>,
+    id: &BackupTargetId,
+    package_data: &Path,
+) -> Result<(), Error> {
+    let (database, id, package_data) = (database.clone(), id.clone(), package_data.to_owned());
+    crate::util::future::complete_owned_operation(async move {
+        remove_target_owned(&database, &id, &package_data).await
+    })
+    .await
+}
+
+async fn remove_target_owned(
     database: &TypedPatchDb<crate::db::model::Database>,
     id: &BackupTargetId,
     package_data: &Path,

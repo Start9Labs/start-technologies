@@ -7,6 +7,7 @@ use color_eyre::eyre::eyre;
 use const_format::formatcp;
 use itertools::Itertools;
 use josekit::jwk::Jwk;
+use patch_db::ModelExt;
 use patch_db::json_ptr::ROOT;
 use rpc_toolkit::yajrc::RpcError;
 use rpc_toolkit::{Context, Empty, HandlerArgs, HandlerExt, ParentHandler, from_fn_async};
@@ -23,7 +24,7 @@ use crate::bins::set_locale;
 use crate::context::rpc::InitRpcContextPhases;
 use crate::context::setup::SetupResult;
 use crate::context::{CliContext, RpcContext, SetupContext};
-use crate::db::model::Database;
+use crate::db::model::{Database, DatabaseModel};
 use crate::disk::REPAIR_DISK_PATH;
 use crate::disk::fsck::RepairStrategy;
 use crate::disk::main::{DEFAULT_PASSWORD, ImportMode};
@@ -175,6 +176,7 @@ fn setup_hostname(existing: ServerHostname, requested: Option<ServerHostname>) -
 #[instrument(skip_all)]
 async fn setup_init(
     ctx: &SetupContext,
+    disk_guid: &str,
     password: Option<String>,
     kiosk: bool,
     hostname: Option<ServerHostname>,
@@ -184,6 +186,7 @@ async fn setup_init(
         &ctx.webserver,
         ctx.dns.clone(),
         &ctx.config.peek(|c| c.clone()),
+        disk_guid,
         init_phases,
     )
     .await?;
@@ -316,7 +319,7 @@ pub async fn attach(
         disk_phase.complete();
 
         let (account, net_ctrl) =
-            setup_init(&setup_ctx, password, kiosk, None, init_phases).await?;
+            setup_init(&setup_ctx, &disk_guid, password, kiosk, None, init_phases).await?;
 
         let rpc_ctx = RpcContext::init(
             &setup_ctx.webserver,
@@ -1089,7 +1092,7 @@ async fn fresh_setup(
 
     let config = ctx.config.peek(|c| c.clone());
 
-    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, init_phases).await?;
+    let init_result = init(&ctx.webserver, ctx.dns.clone(), &config, &guid, init_phases).await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,
@@ -1138,6 +1141,20 @@ async fn recover(
         progress,
     )
     .await
+}
+
+/// New-volume copies cannot inherit source-volume keyslot authority.
+fn reset_transferred_volume_authority(db: &mut DatabaseModel) -> Result<(), Error> {
+    let private = db.as_private_mut();
+    private.as_luks_credentials_mut().ser(&None)?;
+    if let Some(enrollment) = private
+        .as_fde_enrollment_mut()
+        .as_value_mut()
+        .as_object_mut()
+    {
+        enrollment.remove("administrator");
+    }
+    Ok(())
 }
 
 #[instrument(skip_all)]
@@ -1228,6 +1245,10 @@ async fn migrate(
                 }
             } => res,
         }
+        let db = TypedPatchDb::<Database>::load_unchecked(ctx.db().await?);
+        let _secret_memory = crate::fde::memory::protect_authorities(&db.peek().await)?;
+        db.mutate(reset_transferred_volume_authority).await.result?;
+        drop(db);
         Command::new("sync").invoke(ErrorKind::Filesystem).await?;
         Ok::<_, Error>(())
     }
@@ -1241,7 +1262,8 @@ async fn migrate(
     deactivate_result?;
     restore_phase.complete();
 
-    let (account, net_ctrl) = setup_init(&ctx, password, kiosk, hostname, init_phases).await?;
+    let (account, net_ctrl) =
+        setup_init(&ctx, &guid, password, kiosk, hostname, init_phases).await?;
 
     let rpc_ctx = RpcContext::init(
         &ctx.webserver,
@@ -1262,6 +1284,10 @@ async fn migrate(
         rpc_ctx,
     ))
 }
+
+#[cfg(test)]
+#[path = "setup_transfer_tests.rs"]
+mod transfer_tests;
 
 pub async fn set_language(
     ctx: SetupContext,

@@ -24,6 +24,83 @@ fn terse_line_plain_fields() {
     );
 }
 
+fn secure_profiles(directory: &std::path::Path) {
+    for entry in std::fs::read_dir(directory).unwrap() {
+        std::fs::set_permissions(
+            entry.unwrap().path(),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn native_saved_and_runtime_filename_scopes_are_distinct() {
+    for (name, saved, runtime) in [
+        ("legacy", true, false),
+        ("abcdef", true, false),
+        ("wired.nmconnection", true, true),
+        ("backup.nmconnection.bak", true, false),
+        ("certificate.PEM", false, false),
+        ("certificate.der", false, false),
+        ("temp.A1b2C3", false, false),
+        ("temp.nmload", false, false),
+        (".hidden.nmconnection", false, false),
+        ("backup~", false, false),
+        ("", false, false),
+        ("notes.txt", true, false),
+    ] {
+        assert_eq!(
+            super::is_network_profile_name(std::ffi::OsStr::new(name)),
+            saved,
+            "{name}"
+        );
+        assert_eq!(
+            super::is_runtime_profile_name(std::ffi::OsStr::new(name)),
+            runtime,
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn saved_capture_keeps_suffixless_symlinks_and_excludes_insecure_files() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("legacy"),
+        keyfile(WIRED_UUID, "ethernet", ""),
+    )
+    .unwrap();
+    std::fs::write(
+        root.path().join("private.nmconnection"),
+        "[wifi-security]\npsk=private-value\n",
+    )
+    .unwrap();
+    secure_profiles(root.path());
+    std::os::unix::fs::symlink("legacy", root.path().join("alias")).unwrap();
+    std::fs::write(
+        root.path().join("insecure.nmconnection"),
+        "[wifi-security]\npsk=invalid\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        root.path().join("insecure.nmconnection"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    let profiles = super::read_network_profiles(root.path()).await.unwrap();
+    assert_eq!(
+        profiles.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["alias", "legacy", "private.nmconnection"]
+    );
+    assert_eq!(&*profiles["legacy"].contents, &*profiles["alias"].contents);
+    assert!(
+        profiles["private.nmconnection"]
+            .contents
+            .contains("psk=private-value")
+    );
+}
+
 const WIRED_UUID: &str = "11111111-2222-3333-4444-555555555555";
 const OTHER_UUID: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
@@ -72,18 +149,14 @@ async fn runtime_cleanup_removes_only_defaults_shadowing_saved_wired_profiles() 
     let saved = directory.path().join("saved");
     std::fs::create_dir(&runtime).unwrap();
     std::fs::create_dir(&saved).unwrap();
-    std::fs::write(
-        saved.join("wired.nmconnection"),
-        keyfile(WIRED_UUID, "ethernet", ""),
-    )
-    .unwrap();
+    std::fs::write(saved.join("wired"), keyfile(WIRED_UUID, "ethernet", "")).unwrap();
     std::fs::write(
         saved.join("wifi.nmconnection"),
         keyfile(OTHER_UUID, "wifi", ""),
     )
     .unwrap();
     std::fs::write(
-        saved.join("backup.nmconnection.bak"),
+        saved.join("backup.nmconnection~"),
         keyfile(OTHER_UUID, "ethernet", ""),
     )
     .unwrap();
@@ -112,6 +185,8 @@ async fn runtime_cleanup_removes_only_defaults_shadowing_saved_wired_profiles() 
         )
         .unwrap();
     }
+    secure_profiles(&runtime);
+    secure_profiles(&saved);
     super::remove_shadowing_wired_profiles(&runtime, &saved)
         .await
         .unwrap();
@@ -212,6 +287,8 @@ fn normalize_profiles(failure: &str, product: Option<&str>, eee: &str) -> tempfi
     if failure == "cleanup" {
         std::fs::write(runtime.join("unreadable.nmconnection"), [0xff]).unwrap();
     }
+    secure_profiles(&runtime);
+    secure_profiles(&saved);
     let wired = if eee.is_empty() {
         "mtu=1400\n".to_owned()
     } else {

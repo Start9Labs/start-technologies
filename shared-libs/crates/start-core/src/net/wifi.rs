@@ -23,7 +23,32 @@ use crate::util::Invoke;
 use crate::util::serde::{HandlerExtSerde, WithIoFormat, display_serializable};
 use crate::{Error, ErrorKind, GatewayId};
 
-const SAVED_PROFILE_DIRECTORY: &str = "/etc/NetworkManager/system-connections";
+pub(crate) const SAVED_PROFILE_DIRECTORY: &str = "/etc/NetworkManager/system-connections";
+
+/// Saved NetworkManager profiles indexed by their original basenames.
+pub type NetworkProfiles = BTreeMap<String, NetworkProfile>;
+
+/// NetworkManager ranks duplicate UUIDs by nanosecond mtime, then filename.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NetworkProfile {
+    pub contents: zeroize::Zeroizing<String>,
+    /// Unix modification time in seconds and nanoseconds.
+    pub modified: (i64, i64),
+}
+
+impl NetworkProfile {
+    pub(crate) async fn install_at(&self, path: &Path) -> Result<(), Error> {
+        crate::util::io::write_file_private_atomic(path, &self.contents).await?;
+        let file = crate::util::io::open_file(path).await?.into_std().await;
+        nix::sys::stat::futimens(
+            &file,
+            &nix::sys::time::TimeSpec::UTIME_OMIT,
+            &nix::sys::time::TimeSpec::new(self.modified.0, self.modified.1),
+        )
+        .with_kind(ErrorKind::Filesystem)
+    }
+}
 
 impl RpcContext {
     async fn read_wifi_manager(&self) -> Result<RwLockReadGuard<'_, WpaCli>, Error> {
@@ -1086,16 +1111,16 @@ impl TypedValueParser for CountryCodeParser {
 
 #[instrument(skip_all)]
 pub async fn synchronize_network_manager<P: AsRef<Path>>(
-    main_datadir: P,
+    profiles: P,
     wifi: &WifiInfo,
     system_product_name: Option<&str>,
 ) -> Result<(), Error> {
-    let persistent = main_datadir.as_ref().join("system-connections");
+    let persistent = profiles.as_ref();
 
     if tokio::fs::metadata(&persistent).await.is_err() {
-        tokio::fs::create_dir_all(&persistent).await?;
+        tokio::fs::create_dir_all(persistent).await?;
     }
-    crate::disk::mount::util::bind(&persistent, SAVED_PROFILE_DIRECTORY, false).await?;
+    crate::disk::mount::util::bind(persistent, SAVED_PROFILE_DIRECTORY, false).await?;
 
     if !wifi.enabled {
         Command::new("rfkill")
@@ -1211,17 +1236,79 @@ fn parse_wired_profile(contents: &str) -> Option<WiredProfile> {
     })
 }
 
-async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredProfile>, Error> {
-    if entry
-        .path()
-        .extension()
-        .is_none_or(|extension| extension != "nmconnection")
-        || !entry.file_type().await?.is_file()
+fn is_visible_profile_name(name: &[u8]) -> bool {
+    !name.is_empty() && !name.starts_with(b".") && !name.contains(&b'/') && !name.contains(&0)
+}
+
+/// Native `/etc` keyfile candidates include suffixless names; backup and certificate names are excluded.
+pub(crate) fn is_network_profile_name(name: &std::ffi::OsStr) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let name = name.as_bytes();
+    is_visible_profile_name(name)
+        && !name.ends_with(b"~")
+        && !name
+            .iter()
+            .rposition(|&byte| byte == b'.')
+            .map(|index| &name[index + 1..])
+            .is_some_and(|suffix| {
+                suffix.eq_ignore_ascii_case(b"pem")
+                    || suffix.eq_ignore_ascii_case(b"der")
+                    || (suffix.len() == 6 && suffix.iter().all(u8::is_ascii_alphanumeric))
+            })
+}
+
+fn is_runtime_profile_name(name: &std::ffi::OsStr) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let name = name.as_bytes();
+    is_visible_profile_name(name) && name.ends_with(b".nmconnection")
+}
+
+async fn read_network_profile(
+    entry: &tokio::fs::DirEntry,
+) -> Result<Option<NetworkProfile>, Error> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = tokio::fs::metadata(entry.path()).await?;
+    if !metadata.is_file()
+        || metadata.mode() & 0o077 != 0
+        || ![0, nix::unistd::geteuid().as_raw()].contains(&metadata.uid())
     {
         return Ok(None);
     }
-    let contents = crate::util::io::read_file_to_string(entry.path()).await?;
-    Ok(parse_wired_profile(&contents))
+    let bytes =
+        crate::util::io::read_secret_file(crate::util::io::open_file(entry.path()).await?).await?;
+    Ok(Some(NetworkProfile {
+        contents: zeroize::Zeroizing::new(
+            std::str::from_utf8(&bytes)
+                .with_kind(ErrorKind::Filesystem)?
+                .to_owned(),
+        ),
+        modified: (metadata.mtime(), metadata.mtime_nsec()),
+    }))
+}
+
+async fn read_wired_profile(entry: &tokio::fs::DirEntry) -> Result<Option<WiredProfile>, Error> {
+    Ok(read_network_profile(entry)
+        .await?
+        .and_then(|profile| parse_wired_profile(&profile.contents)))
+}
+
+pub(crate) async fn read_network_profiles(directory: &Path) -> Result<NetworkProfiles, Error> {
+    let mut entries = tokio::fs::read_dir(directory).await?;
+    let mut profiles = BTreeMap::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if is_network_profile_name(&entry.file_name())
+            && let Some(contents) = read_network_profile(&entry).await?
+        {
+            let name = entry.file_name().into_string().map_err(|_| {
+                Error::new(
+                    eyre!("{}", t!("fde.bootstrap.invalid-profile-name")),
+                    ErrorKind::Filesystem,
+                )
+            })?;
+            profiles.insert(name, contents);
+        }
+    }
+    Ok(profiles)
 }
 
 async fn remove_shadowing_wired_profiles(runtime: &Path, saved: &Path) -> Result<(), Error> {
@@ -1233,12 +1320,15 @@ async fn remove_shadowing_wired_profiles(runtime: &Path, saved: &Path) -> Result
     let mut saved_entries = tokio::fs::read_dir(saved).await?;
     let mut saved_uuids = BTreeSet::new();
     while let Some(entry) = saved_entries.next_entry().await? {
-        if let Some(profile) = read_wired_profile(&entry).await? {
+        if is_network_profile_name(&entry.file_name())
+            && let Some(profile) = read_wired_profile(&entry).await?
+        {
             saved_uuids.insert(profile.uuid);
         }
     }
     while let Some(entry) = entries.next_entry().await? {
-        if let Some(profile) = read_wired_profile(&entry).await?
+        if is_runtime_profile_name(&entry.file_name())
+            && let Some(profile) = read_wired_profile(&entry).await?
             && profile.auto_default
             && saved_uuids.contains(&profile.uuid)
         {

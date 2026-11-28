@@ -14,6 +14,7 @@ use crate::util::serde::HandlerExtSerde;
 use crate::{Error, ErrorKind};
 
 pub(crate) mod discovery;
+pub mod fde;
 pub mod format;
 pub mod fsck;
 pub mod main;
