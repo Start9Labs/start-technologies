@@ -49,6 +49,11 @@ impl From<Vec<AnyVerifyingKey>> for ImportedPublicKeys {
     }
 }
 
+const PEM_PUBLIC_KEY_BEGIN: &str = "-----BEGIN PUBLIC KEY-----";
+const PEM_PUBLIC_KEY_END: &str = "-----END PUBLIC KEY-----";
+const PGP_PUBLIC_KEY_BEGIN: &str = "-----BEGIN PGP PUBLIC KEY BLOCK-----";
+const PGP_PUBLIC_KEY_END: &str = "-----END PGP PUBLIC KEY BLOCK-----";
+
 fn invalid_key() -> Error {
     Error::new(
         eyre!("{}", t!("sign.gpg.invalid-public-key")),
@@ -56,18 +61,70 @@ fn invalid_key() -> Error {
     )
 }
 
+fn flattened_gpg_key() -> Error {
+    Error::new(
+        eyre!("{}", t!("sign.gpg.flattened-public-key")),
+        ErrorKind::InvalidRequest,
+    )
+}
+
+fn is_flattened_pgp_public_key(rest: &str) -> bool {
+    !rest.contains('\n')
+        && rest
+            .split_once(PGP_PUBLIC_KEY_END)
+            .is_some_and(|(body, trailing)| trailing.is_empty() && !body.trim().is_empty())
+}
+
+fn normalize_pem_public_key(trimmed: &str) -> Result<Option<String>, Error> {
+    let Some(rest) = trimmed.strip_prefix(PEM_PUBLIC_KEY_BEGIN) else {
+        if trimmed.starts_with("-----BEGIN ") {
+            return Err(invalid_key());
+        }
+        return Ok(None);
+    };
+    let (body, trailing) = rest
+        .split_once(PEM_PUBLIC_KEY_END)
+        .ok_or_else(invalid_key)?;
+    if !trailing.is_empty() {
+        return Err(invalid_key());
+    }
+    let compact: String = body.chars().filter(|c| !c.is_whitespace()).collect();
+    if compact.is_empty() || !compact.is_ascii() {
+        return Err(invalid_key());
+    }
+    let mut normalized = String::with_capacity(
+        PEM_PUBLIC_KEY_BEGIN.len()
+            + PEM_PUBLIC_KEY_END.len()
+            + compact.len()
+            + compact.len().div_ceil(64)
+            + 2,
+    );
+    normalized.push_str(PEM_PUBLIC_KEY_BEGIN);
+    normalized.push('\n');
+    for start in (0..compact.len()).step_by(64) {
+        normalized.push_str(&compact[start..(start + 64).min(compact.len())]);
+        normalized.push('\n');
+    }
+    normalized.push_str(PEM_PUBLIC_KEY_END);
+    normalized.push('\n');
+    Ok(Some(normalized))
+}
+
 pub(crate) fn parse_public_keys(values: &[String]) -> Result<ImportedPublicKeys, Error> {
     let mut imported = ImportedPublicKeys::default();
     for value in values {
-        if value
-            .trim_start()
-            .starts_with("-----BEGIN PGP PUBLIC KEY BLOCK-----")
-        {
+        let trimmed = value.trim();
+        if let Some(rest) = trimmed.strip_prefix(PGP_PUBLIC_KEY_BEGIN) {
+            if is_flattened_pgp_public_key(rest) {
+                return Err(flattened_gpg_key());
+            }
             let gpg = parse_gpg_keys(value)?;
             imported.keys.extend(gpg.keys);
             imported.gpg_exports.extend(gpg.gpg_exports);
+        } else if let Some(pem) = normalize_pem_public_key(trimmed)? {
+            imported.keys.insert(pem.parse()?);
         } else {
-            imported.keys.insert(value.parse()?);
+            imported.keys.insert(trimmed.parse()?);
         }
     }
     Ok(imported)
@@ -597,5 +654,92 @@ mod tests {
         assert_eq!(keys.keys.len(), 2);
         assert_eq!(keys.gpg_exports.len(), 1);
         assert!(parse_public_keys(&["not a public key".into()]).is_err());
+    }
+
+    #[test]
+    fn imports_flattened_and_whitespace_varied_pem_public_keys() {
+        let raw = "MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=";
+        let expected: AnyVerifyingKey = raw.parse().unwrap();
+        let multiline = expected.to_string();
+        for input in [
+            multiline.as_str(),
+            "-----BEGIN PUBLIC KEY----- MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y= -----END PUBLIC KEY-----",
+            "-----BEGIN PUBLIC KEY----- MCowBQYD K2VwAyEA GaAYxsY7iO5GyQrC A5vcLWYIQyoKImp0 du4WWvIzr2Y= -----END PUBLIC KEY-----",
+            "  \t-----BEGIN PUBLIC KEY-----\r\n\tMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\r\n-----END PUBLIC KEY-----\r\n  ",
+            "-----BEGIN PUBLIC KEY-----\rMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\r-----END PUBLIC KEY-----",
+            "-----BEGIN PUBLIC KEY-----MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=-----END PUBLIC KEY-----",
+            raw,
+            "  MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n",
+        ] {
+            let imported = parse_public_keys(&[input.into()]).unwrap_or_else(|e| {
+                panic!("failed to import {input:?}: {e}");
+            });
+            assert_eq!(imported.keys, BTreeSet::from([expected.clone()]));
+            assert!(imported.gpg_exports.is_empty());
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_or_non_public_key_pem_inputs() {
+        for input in [
+            "-----BEGIN PUBLIC KEY----- MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y= -----END PUBLIC KEY----- trailing",
+            "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PUBLIC KEY-----\ntrailing",
+            "-----BEGIN PRIVATE KEY-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END PRIVATE KEY-----",
+            "-----BEGIN CERTIFICATE-----\nMCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=\n-----END CERTIFICATE-----",
+            "-----BEGIN PRIVATE KEY----- MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y= -----END PRIVATE KEY-----",
+            "-----BEGIN PUBLIC KEY----- -----END PUBLIC KEY-----",
+            "-----BEGIN PUBLIC KEY-----\n-----END PUBLIC KEY-----",
+            "-----BEGIN PUBLIC KEY----- MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=",
+            "-----BEGIN PUBLIC KEY----- MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y=é -----END PUBLIC KEY-----",
+            "-----BEGIN PUBLIC KEY----- MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y= -----END PUBLIC KEY----- -----BEGIN PUBLIC KEY----- MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y= -----END PUBLIC KEY-----",
+        ] {
+            let err = parse_public_keys(&[input.into()]).unwrap_err();
+            assert_eq!(err.kind, ErrorKind::InvalidRequest, "input: {input:?}");
+        }
+        for input in [
+            "-----BEGIN PUBLIC KEY----- not!valid!base64 -----END PUBLIC KEY-----",
+            "-----BEGIN PUBLIC KEY----- MCowBQYDK2VwAyEAgTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q= -----END PUBLIC KEY-----",
+            "prefix -----BEGIN PUBLIC KEY----- MCowBQYDK2VwAyEAGaAYxsY7iO5GyQrCA5vcLWYIQyoKImp0du4WWvIzr2Y= -----END PUBLIC KEY-----",
+        ] {
+            let err = parse_public_keys(&[input.into()]).unwrap_err();
+            assert_eq!(err.kind, ErrorKind::Deserialization, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_flattened_armored_pgp_key_with_line_break_guidance() {
+        let source = include_str!("fixtures/start9-public.asc");
+        let flattened = source.lines().collect::<Vec<_>>().join(" ");
+        for input in [flattened.clone(), format!("  {flattened}\n")] {
+            let err = parse_public_keys(&[input]).unwrap_err();
+            assert_eq!(err.kind, ErrorKind::InvalidRequest);
+            assert_eq!(
+                err.source.to_string(),
+                t!("sign.gpg.flattened-public-key").as_ref()
+            );
+        }
+
+        let rsa_err =
+            parse_public_keys(&[include_str!("fixtures/rsa-public.asc").into()]).unwrap_err();
+        assert_eq!(rsa_err.kind, ErrorKind::InvalidRequest);
+        assert_eq!(
+            rsa_err.source.to_string(),
+            t!("sign.gpg.invalid-public-key").as_ref()
+        );
+
+        for other in [
+            "-----BEGIN PGP PUBLIC KEY BLOCK-----\ninvalid\n-----END PGP PUBLIC KEY BLOCK-----"
+                .into(),
+            "-----BEGIN PGP PUBLIC KEY BLOCK----- truncated".into(),
+            format!("{flattened} trailing"),
+            format!("{flattened} {flattened}"),
+        ] {
+            let err = parse_public_keys(&[other]).unwrap_err();
+            assert_ne!(
+                err.source.to_string(),
+                t!("sign.gpg.flattened-public-key").as_ref()
+            );
+        }
+        assert_eq!(parse_public_keys(&[source.into()]).unwrap().keys.len(), 1);
     }
 }

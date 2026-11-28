@@ -4117,6 +4117,13 @@ sign.gpg-agent.no-signing-key:
   fr_FR: "Aucune clé de signature Ed25519 avec sa partie secrète dans le trousseau GnuPG ne correspond à %{key}"
   pl_PL: "Żaden klucz podpisujący Ed25519 z częścią tajną w bazie kluczy GnuPG nie pasuje do %{key}"
 
+sign.gpg.flattened-public-key:
+  en_US: "Paste the PGP public key with its original line breaks"
+  de_DE: "Fügen Sie den öffentlichen PGP-Schlüssel mit seinen ursprünglichen Zeilenumbrüchen ein"
+  es_ES: "Pegue la clave pública PGP con sus saltos de línea originales"
+  fr_FR: "Collez la clé publique PGP avec ses sauts de ligne d'origine"
+  pl_PL: "Wklej publiczny klucz PGP z oryginalnymi podziałami wierszy"
+
 sign.gpg.invalid-public-key:
   en_US: "Use an Ed25519 public signing key in PEM or GPG format"
   de_DE: "Verwenden Sie einen öffentlichen Ed25519-Signaturschlüssel im PEM- oder GPG-Format"
