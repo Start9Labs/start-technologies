@@ -136,6 +136,34 @@ async fn whole_private_ancestor_uses_include_unreferenced_backings_and_keep_writ
 }
 
 #[tokio::test]
+async fn runtime_retention_admits_absence_and_rejects_unowned_private_views() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::runtime_retention_admits_absence_and_rejects_unowned_private_views").await { return; }
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("root");
+    let data = directory.path().join("data");
+    tokio::fs::create_dir_all(&data).await.unwrap();
+    assert!(runtime_backings(&root, &data).await.unwrap().is_empty());
+    let runtime = root.join(Path::new(RUNTIME).strip_prefix("/").unwrap());
+    tokio::fs::create_dir_all(&runtime).await.unwrap();
+    assert!(runtime_backings(&root, &data).await.unwrap().is_empty());
+    tokio::fs::write(runtime.join("unknown"), b"unowned runtime")
+        .await
+        .unwrap();
+    assert!(runtime_backings(&root, &data).await.is_err());
+    tokio::fs::remove_file(runtime.join("unknown"))
+        .await
+        .unwrap();
+    tokio::fs::remove_dir(&runtime).await.unwrap();
+    tokio::fs::write(&runtime, b"not a directory")
+        .await
+        .unwrap();
+    assert!(runtime_backings(&root, &data).await.is_err());
+    tokio::fs::remove_file(&runtime).await.unwrap();
+    tokio::fs::symlink(&data, &runtime).await.unwrap();
+    assert!(runtime_backings(&root, &data).await.is_err());
+}
+
+#[tokio::test]
 async fn captured_dependencies_outside_the_overlay_follow_prepared_generation_ownership() {
     if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::lifetimes::captured_dependencies_outside_the_overlay_follow_prepared_generation_ownership").await {
         return;

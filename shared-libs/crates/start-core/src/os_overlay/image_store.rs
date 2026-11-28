@@ -46,13 +46,17 @@ pub(crate) async fn image_paths(directory: &Path) -> Result<Vec<PathBuf>, Error>
     paths(command).await
 }
 
+pub(crate) async fn repack_paths(volume: &Path) -> Result<Vec<PathBuf>, Error> {
+    let mut command = command();
+    command.arg("startos_repack_paths").arg(volume);
+    paths(command).await
+}
+
 /// Nonempty native workspaces can retain unpublished private repack dependencies.
 /// The caller excludes workspace creation and retirement through the image-store lease.
 pub(crate) async fn has_repack_workspace(volume: &Path) -> Result<bool, Error> {
-    let mut command = command();
-    command.arg("startos_repack_paths").arg(volume);
     let mut present = false;
-    for path in paths(command).await? {
+    for path in repack_paths(volume).await? {
         match tokio::fs::symlink_metadata(&path).await {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
             Err(error) => return Err(error.into()),

@@ -431,6 +431,29 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
         snapshot.serialize(&mut file).await.unwrap();
         file.sync_all().await.unwrap();
     }
+    let unreferenced_id = Guid::new();
+    let unreferenced = fixture
+        .volume
+        .path()
+        .join("data/main")
+        .join(super::super::private_config::DIRECTORY)
+        .join(unreferenced_id.to_string());
+    tokio::fs::create_dir(&unreferenced).await.unwrap();
+    tokio::fs::write(
+        unreferenced.join("not-in-an-image"),
+        b"pending repack input",
+    )
+    .await
+    .unwrap();
+    let pending = fixture.volume.path().join("next");
+    tokio::fs::create_dir(&pending).await.unwrap();
+    tokio::fs::write(pending.join("private-workspace"), b"mutable repack")
+        .await
+        .unwrap();
+    std::fs::File::open(&pending)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_accessed(std::time::UNIX_EPOCH))
+        .unwrap();
     let data_alias = MountGuard::mount(
         &IsolatedBind::new(fixture.volume.path().join("data/main")),
         fixture.volume.path().join("alias"),
@@ -497,7 +520,8 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
             std::ffi::OsString::from(published_id.to_string()),
             std::ffi::OsString::from(stored_id.to_string()),
             std::ffi::OsString::from(selected_id.to_string()),
-            std::ffi::OsString::from(pinned_id.to_string())
+            std::ffi::OsString::from(pinned_id.to_string()),
+            std::ffi::OsString::from(unreferenced_id.to_string())
         ])
     );
     drop(existing);
@@ -542,7 +566,8 @@ async fn native_capture_freezes_sources_keeps_db_reads_live_and_projects_after_t
             published_id,
             stored_id,
             selected_id,
-            pinned_id
+            pinned_id,
+            unreferenced_id
         ])
     );
     assert_eq!(

@@ -25,6 +25,7 @@ pub(super) async fn prepare(projected: &ProjectedConfig, root: &Path) -> Prepare
 
 #[tokio::test]
 async fn unpublished_generation_and_fresh_backing_retire_together() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::unpublished_generation_and_fresh_backing_retire_together").await { return; }
     let (root, raw, data) = fixture().await;
     let projected = project(&raw, &data, &[]).await;
     let backing = projected.new_backing.clone().unwrap();
@@ -39,6 +40,7 @@ async fn unpublished_generation_and_fresh_backing_retire_together() {
 
 #[tokio::test]
 async fn resumed_disposal_preserves_published_backings_and_unrelated_files() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::resumed_disposal_preserves_published_backings_and_unrelated_files").await { return; }
     let (root, raw, data) = fixture().await;
     let initial = project(&raw, &data, &[]).await;
     let retained = backing_file(&data, target(&initial, "etc/shadow"))
@@ -79,6 +81,7 @@ async fn resumed_disposal_preserves_published_backings_and_unrelated_files() {
 
 #[tokio::test]
 async fn failed_generation_retirement_preserves_its_fresh_private_backing() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::failed_generation_retirement_preserves_its_fresh_private_backing").await { return; }
     let (root, raw, data) = fixture().await;
     let projected = project(&raw, &data, &[]).await;
     let backing = backing_file(&data, target(&projected, "etc/shadow"))
@@ -119,6 +122,7 @@ impl FileSource for TruncatedSource {
 
 #[tokio::test]
 async fn failed_private_projection_reclaims_its_partially_written_backing() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::failed_private_projection_reclaims_its_partially_written_backing").await { return; }
     let (_root, raw, data) = fixture().await;
     let initial = project(&raw, &data, &[]).await;
     let retained = backing_file(&data, target(&initial, "etc/shadow"))
@@ -153,6 +157,7 @@ async fn failed_private_projection_reclaims_its_partially_written_backing() {
 
 #[tokio::test]
 async fn requester_loss_keeps_the_existing_lease_through_candidate_disposal() {
+    if crate::util::file_lock_tests::isolated_test("fde::private_config::tests::reclamation::requester_loss_keeps_the_existing_lease_through_candidate_disposal").await { return; }
     let (root, raw, data) = fixture().await;
     let projected = project(&raw, &data, &[]).await;
     let backing = projected.new_backing.clone().unwrap();

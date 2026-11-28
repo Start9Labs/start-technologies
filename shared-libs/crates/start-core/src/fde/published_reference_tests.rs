@@ -17,7 +17,7 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
     let store = root.path().join("generations");
     let base = root.path().join("base");
     let stored = root.path().join("images");
-    let upper = root.path().join("upper");
+    let upper = root.path().join("running-upper");
     for path in [&data, &store, &base, &stored, &upper] {
         tokio::fs::create_dir(path).await.unwrap();
     }
@@ -145,6 +145,30 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
         .invoke(ErrorKind::Filesystem)
         .await
         .unwrap();
+    let references = || {
+        configuration_backings(
+            running.path(),
+            &base,
+            &data,
+            &store,
+            &stored,
+            &selected,
+            &working,
+        )
+    };
+    let orphan = Guid::new();
+    let orphan_directory = data
+        .join(crate::fde::private_config::DIRECTORY)
+        .join(orphan.to_string());
+    tokio::fs::create_dir(&orphan_directory).await.unwrap();
+    tokio::fs::write(
+        orphan_directory.join("not-referenced"),
+        b"namespace-only dependency",
+    )
+    .await
+    .unwrap();
+    let mut all: std::collections::BTreeSet<_> = ids.iter().cloned().collect();
+    all.insert(orphan);
     let before = crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
         .await
         .unwrap();
@@ -168,6 +192,46 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
             .unwrap(),
         before
     );
+    let runtime = running.path().join(
+        Path::new(crate::fde::private_config::RUNTIME)
+            .strip_prefix("/")
+            .unwrap(),
+    );
+    let runtime_view = MountGuard::mount(
+        &Bind::new(data.join(crate::fde::private_config::DIRECTORY)),
+        &runtime,
+        ReadWrite,
+    )
+    .await
+    .unwrap()
+    .with_strict_unmount();
+    assert_eq!(references().await.unwrap(), all);
+    runtime_view.unmount(false).await.unwrap();
+    assert_eq!(references().await.unwrap(), ids.iter().cloned().collect());
+    let foreign = root.path().join("foreign-runtime");
+    tokio::fs::create_dir(&foreign).await.unwrap();
+    let foreign_view = MountGuard::mount(&Bind::new(&foreign), &runtime, ReadOnly)
+        .await
+        .unwrap()
+        .with_strict_unmount();
+    assert!(references().await.is_err());
+    foreign_view.unmount(false).await.unwrap();
+    for path in crate::os_overlay::image_store::repack_paths(root.path())
+        .await
+        .unwrap()
+    {
+        tokio::fs::create_dir(&path).await.unwrap();
+        assert_eq!(references().await.unwrap(), ids.iter().cloned().collect());
+        let pending = path.join("mutable-private-input");
+        nix::unistd::mkfifo(&pending, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        assert_eq!(references().await.unwrap(), all);
+        tokio::fs::remove_file(pending).await.unwrap();
+        assert_eq!(references().await.unwrap(), ids.iter().cloned().collect());
+    }
+    let pending = root.path().join("next/pending");
+    tokio::fs::write(&pending, b"incomplete private repack")
+        .await
+        .unwrap();
     let unknown = store.join("unknown");
     tokio::fs::create_dir(&unknown).await.unwrap();
     assert!(
@@ -230,6 +294,8 @@ async fn native_configuration_union_retains_published_gzip_and_zstd_without_boot
         .is_err()
     );
     substitute.unmount(false).await.unwrap();
+    tokio::fs::remove_file(pending).await.unwrap();
+    assert_eq!(references().await.unwrap(), ids.iter().cloned().collect());
     assert_eq!(
         crate::disk::mount::util::mountpoints_under(Path::new(TmpDir::BASE))
             .await

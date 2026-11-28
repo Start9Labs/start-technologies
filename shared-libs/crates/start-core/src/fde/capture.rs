@@ -442,6 +442,30 @@ async fn base_image_view(source: &Path) -> Result<MountGuard, Error> {
     capture_view(&IsolatedBind::new(source)).await
 }
 
+async fn readonly_repack_workspace(volume: &Path) -> Result<bool, Error> {
+    let workspace = TmpDir::new().await?;
+    let root = workspace.to_path_buf();
+    let cleanup = workspace.unmount_and_delete();
+    let result = async {
+        let sources = crate::os_overlay::image_store::repack_paths(volume).await?;
+        let targets = crate::os_overlay::image_store::repack_paths(&root).await?;
+        for (source, target) in sources.into_iter().zip(targets) {
+            match tokio::fs::symlink_metadata(&source).await {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+                Ok(metadata) if !metadata.is_dir() => return Err(invalid_source()),
+                Ok(_) => (),
+            }
+            MountGuard::mount(&IsolatedBind::new(source), &target, ReadOnly)
+                .await?
+                .persist();
+        }
+        crate::os_overlay::image_store::has_repack_workspace(&root).await
+    }
+    .await;
+    crate::util::future::finish_with_cleanup(result, cleanup.await)
+}
+
 async fn configuration_backings(
     root: &Path,
     base: &Path,
@@ -490,6 +514,10 @@ async fn configuration_backings(
             return Err(invalid_source());
         }
         retained.extend(mounted_backings(&SquashfsImage::new(&image), &data).await?);
+        retained.extend(super::private_config::runtime_backings(root, &data).await?);
+        if readonly_repack_workspace(images.parent().ok_or_else(invalid_source)?).await? {
+            retained.extend(super::private_config::backing_ids(&data).await?);
+        }
         Ok(retained)
     }
     .await;

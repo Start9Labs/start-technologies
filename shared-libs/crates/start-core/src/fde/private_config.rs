@@ -71,6 +71,32 @@ async fn mount_view(data: &Path, runtime: &Path) -> Result<(), Error> {
     crate::disk::mount::util::bind(source, runtime, false).await
 }
 
+/// The caller preserves the runtime view and backing namespace during collection.
+pub(super) async fn runtime_backings(root: &Path, data: &Path) -> Result<BTreeSet<Guid>, Error> {
+    let runtime = root.join(Path::new(RUNTIME).strip_prefix("/").unwrap());
+    match tokio::fs::symlink_metadata(&runtime).await {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(error) => return Err(error.into()),
+        Ok(metadata) if !metadata.is_dir() => return Err(invalid_layout(&runtime)),
+        Ok(_) => (),
+    }
+    if crate::util::io::same_file(&data.join(DIRECTORY), &runtime).await? {
+        return backing_ids(data).await;
+    }
+    if !crate::disk::mount::util::mountpoints_under(&runtime)
+        .await?
+        .is_empty()
+        || crate::os_overlay::read_generation_directory(&runtime)
+            .await?
+            .next_entry()
+            .await?
+            .is_some()
+    {
+        return Err(invalid_layout(&runtime));
+    }
+    Ok(BTreeSet::new())
+}
+
 pub(crate) async fn unmount_runtime(data: &Path) -> Result<(), Error> {
     unmount_view(data, Path::new(RUNTIME)).await
 }
@@ -176,24 +202,35 @@ async fn reserve_backing_id(data: &Path, id: &Guid) -> Result<FileLock, Error> {
     Ok(reservation)
 }
 
-/// Retains every backing exposed by a whole-data native query, including unreferenced entries.
-/// The caller excludes namespace changes and retains the opening mount through these uses.
-pub(super) async fn reserve_visible_backings(data: &Path) -> Result<Vec<FileLock>, Error> {
+/// The caller retains the data mount and excludes namespace changes during collection.
+pub(super) async fn backing_ids(data: &Path) -> Result<BTreeSet<Guid>, Error> {
     let namespace = data.join(DIRECTORY);
     match tokio::fs::symlink_metadata(&namespace).await {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
         Err(error) => return Err(error.into()),
         Ok(_) => (),
     }
     let mut entries = crate::os_overlay::read_generation_directory(&namespace).await?;
     require_data_filesystem(data, &namespace).await?;
-    let mut uses = Vec::new();
+    let mut ids = BTreeSet::new();
     while let Some(entry) = entries.next_entry().await? {
         let id = entry
             .file_name()
             .to_str()
             .and_then(Guid::from)
             .ok_or_else(|| invalid_layout(&entry.path()))?;
+        drop(crate::os_overlay::read_generation_directory(&entry.path()).await?);
+        require_data_filesystem(data, &entry.path()).await?;
+        ids.insert(id);
+    }
+    Ok(ids)
+}
+
+/// Retains every backing exposed by a whole-data native query, including unreferenced entries.
+/// The caller excludes namespace changes and retains the opening mount through these uses.
+pub(super) async fn reserve_visible_backings(data: &Path) -> Result<Vec<FileLock>, Error> {
+    let mut uses = Vec::new();
+    for id in backing_ids(data).await? {
         uses.push(reserve_backing_id(data, &id).await?);
     }
     Ok(uses)
@@ -521,6 +558,7 @@ impl ProjectedConfig {
     }
 
     /// Retire all candidate references before disposal; reused backings remain untouched.
+    /// The caller excludes runtime-ancestor and independent VFS users through deletion.
     /// The caller retains the data mount and image-store reservation through completion.
     pub(crate) async fn discard(self) -> Result<(), Error> {
         let Self {
